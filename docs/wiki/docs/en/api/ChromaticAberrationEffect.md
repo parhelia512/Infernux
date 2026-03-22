@@ -38,7 +38,8 @@ URP-aligned Chromatic Aberration post-processing effect.
 ## Example
 
 ```python
-# TODO: Add example for ChromaticAberrationEffect
+effect = ChromaticAberrationEffect()
+effect.intensity = 0.1
 ```
 
 <!-- USER CONTENT START --> example

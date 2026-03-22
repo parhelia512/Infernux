@@ -24,4 +24,4 @@ package-dir = {"" = "python"}
 include-package-data = true
 
 [tool.setuptools.package-data]
-InfEngine = ["py.typed", "*.pyi", "**/*.pyi", "*.dll", "*.pyd", "resources/icons/*.png", "resources/fonts/*.otf", "resources/fonts/*.ttf", "resources/pictures/*.png"]
+InfEngine = ["py.typed", "*.pyi", "**/*.pyi", "*.dll", "*.pyd", "resources/icons/*.png", "resources/icons/components/*.png", "resources/fonts/*.otf", "resources/fonts/*.ttf", "resources/pictures/*.png"]

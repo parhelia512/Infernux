@@ -26,7 +26,7 @@
 ## 示例
 
 ```python
-# TODO: Add example for CameraProjection
+camera.projection = CameraProjection.PERSPECTIVE
 ```
 
 <!-- USER CONTENT START --> example

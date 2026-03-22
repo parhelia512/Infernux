@@ -16,6 +16,7 @@ Public API::
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 from dataclasses import dataclass, field
@@ -302,346 +303,150 @@ def _load_material(path: str):
 
 
 def _load_prefab(path: str):
-    """Load a .prefab file and return its root object JSON as the settings."""
+    """Load a .prefab file into a safe data-only representation.
+
+    The previous implementation instantiated a hidden preview scene and then
+    routed the prefab through the full object inspector. That path re-used
+    editor-only object rendering on non-active temporary scene objects and
+    allocated a new native scene for each selection, which is not safe with
+    the current SceneManager API surface.
+    """
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
-    root = data.get("root_object")
-    if root is None:
+
+    root_json = data.get("root_object")
+    if root_json is None:
         return None
-    version = data.get("prefab_version", 0)
-    return root, {
-        "prefab_version": version,
+
+    root_copy = copy.deepcopy(root_json)
+    return root_copy, {
+        "prefab_version": data.get("prefab_version", 0),
         "prefab_path": path,
-        "prefab_dirty": False,
         "prefab_envelope": data,
+        "root_name": root_copy.get("name", "GameObject"),
+        "node_count": _count_prefab_nodes(root_copy),
+        "component_count": _count_prefab_components(root_copy),
     }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Prefab body — full component-level editor (mirrors hierarchy inspector)
+# Prefab body — exact same components rendering as hierarchy instances
 # ═══════════════════════════════════════════════════════════════════════════
 
-_PREFAB_DRAG_SPEED = 0.1
-_PREFAB_DRAG_SPEED_FINE = 0.01
-_PREFAB_SKIP_COMP_KEYS = frozenset({
-    "type", "component_id", "schema_version", "enabled",
-})
-_PREFAB_SKIP_PY_KEYS = frozenset({
-    "py_type_name", "component_id", "schema_version", "enabled", "script_guid",
-})
-
-
 def _render_prefab_body(ctx: InfGUIContext, panel, state: _State):
-    """Render the prefab asset inspector body — full object editor."""
-    from .theme import ImGuiTreeNodeFlags
-    from .inspector_utils import render_component_header, render_info_text
+    """Render a safe prefab summary plus Prefab Mode entry point.
 
-    root = state.settings
-    if not isinstance(root, dict):
+    Inline full-object rendering is intentionally disabled here for stability.
+    Prefab editing remains available through Prefab Mode.
+    """
+    from .inspector_utils import render_info_text, render_compact_section_header
+
+    prefab_root = state.settings
+    if not isinstance(prefab_root, dict):
         ctx.label(t("asset.invalid_prefab"))
         return
 
-    dirty = _render_prefab_object(ctx, root, "root", is_root=True)
-
-    # Recurse children
-    children = root.get("children", [])
-    if children:
-        ctx.dummy(0, 6)
-        ctx.separator()
-        ctx.dummy(0, 4)
-        ctx.push_style_color(ImGuiCol.Text, *Theme.PREFAB_TEXT)
-        ctx.label(t("asset.prefab_children").format(n=len(children)))
-        ctx.pop_style_color(1)
-        ctx.dummy(0, 2)
-        dirty |= _render_prefab_children(ctx, children, "root")
-
-    # Summary
-    ctx.dummy(0, 8)
-    ctx.separator()
-    ctx.dummy(0, 4)
-    total_nodes = _count_descendants(root) + 1
-    total_comps = len(root.get("components", [])) + len(root.get("py_components", []))
-    render_info_text(ctx, t("asset.prefab_summary").format(nodes=total_nodes, comps=total_comps))
-
-    # Save if dirty
-    if dirty:
-        _save_prefab_state(state)
-
-
-def _render_prefab_children(ctx: InfGUIContext, children: list, parent_uid: str) -> bool:
-    """Recursively render child objects as collapsible tree nodes."""
-    from .theme import ImGuiTreeNodeFlags
-    dirty = False
-    flags = (ImGuiTreeNodeFlags.OpenOnArrow
-             | ImGuiTreeNodeFlags.SpanAvailWidth
-             | ImGuiTreeNodeFlags.FramePadding)
-    for i, child in enumerate(children):
-        child_name = child.get("name", f"Child_{i}")
-        child_uid = f"{parent_uid}_ch{i}"
-        ctx.push_id_str(child_uid)
-        ctx.push_style_color(ImGuiCol.Text, *Theme.PREFAB_TEXT)
-        is_open = ctx.tree_node_ex(child_name, flags)
-        ctx.pop_style_color(1)
-        if is_open:
-            dirty |= _render_prefab_object(ctx, child, child_uid)
-            grandchildren = child.get("children", [])
-            if grandchildren:
-                dirty |= _render_prefab_children(ctx, grandchildren, child_uid)
-            ctx.tree_pop()
-        ctx.pop_id()
-    return dirty
-
-
-def _render_prefab_object(ctx: InfGUIContext, obj: dict, uid: str,
-                          is_root: bool = False) -> bool:
-    """Render all properties of a single prefab object node. Returns True if modified."""
-    from .inspector_utils import render_component_header
-
-    dirty = False
-    ctx.push_id_str(f"pobj_{uid}")
-
-    # ── Name ──
-    old_name = obj.get("name", "GameObject")
-    field_label(ctx, t("asset.prefab_name"))
-    new_name = ctx.text_input(f"##name_{uid}", old_name, 256)
-    if new_name != old_name:
-        obj["name"] = new_name
-        dirty = True
-
-    # ── Active ──
-    active = obj.get("active", True)
-    new_active = ctx.checkbox(f"{t('asset.prefab_active')}##{uid}", active)
-    if new_active != active:
-        obj["active"] = new_active
-        dirty = True
-
-    # ── Tag ──
-    tag = obj.get("tag", "Untagged")
-    field_label(ctx, t("asset.prefab_tag"))
-    new_tag = ctx.text_input(f"##tag_{uid}", tag, 128)
-    if new_tag != tag:
-        obj["tag"] = new_tag
-        dirty = True
-
-    # ── Layer ──
-    layer = obj.get("layer", 0)
-    field_label(ctx, t("asset.prefab_layer"))
-    new_layer = ctx.drag_int(f"##layer_{uid}", layer, 0.1, 0, 31)
-    if new_layer != layer:
-        obj["layer"] = new_layer
-        dirty = True
+    def _open_prefab_mode():
+        from InfEngine.engine.scene_manager import SceneFileManager
+        sfm = SceneFileManager.instance()
+        if sfm and hasattr(sfm, "open_prefab_mode"):
+            sfm.open_prefab_mode(state.extra["prefab_path"])
 
     ctx.dummy(0, 4)
-    ctx.separator()
-    ctx.dummy(0, 4)
-
-    # ── Transform ──
-    transform = obj.get("transform")
-    if transform and isinstance(transform, dict):
-        header_open, _ = render_component_header(
-            ctx, t("asset.prefab_transform"), show_enabled=False, default_open=is_root,
-        )
-        if header_open:
-            dirty |= _render_prefab_transform(ctx, transform, uid)
-
-    # ── C++ Components ──
-    components = obj.get("components", [])
-    for ci, comp in enumerate(components):
-        type_name = comp.get("type", "Component")
-        if type_name == "Transform":
-            continue
-        enabled = comp.get("enabled", True)
-        comp_uid = f"{uid}_c{ci}"
-        header_open, new_enabled = render_component_header(
-            ctx, type_name, show_enabled=True, is_enabled=enabled,
-            default_open=is_root,
-        )
-        if new_enabled != enabled:
-            comp["enabled"] = new_enabled
-            dirty = True
-        if header_open:
-            dirty |= _render_prefab_component_fields(ctx, comp, comp_uid, _PREFAB_SKIP_COMP_KEYS)
-
-    # ── Python Components ──
-    py_components = obj.get("py_components", [])
-    for pi, pyc in enumerate(py_components):
-        type_name = pyc.get("py_type_name", "PyComponent")
-        enabled = pyc.get("enabled", True)
-        pyc_uid = f"{uid}_p{pi}"
-        header_open, new_enabled = render_component_header(
-            ctx, type_name, show_enabled=True, is_enabled=enabled,
-            suffix=t("asset.prefab_script"), default_open=is_root,
-        )
-        if new_enabled != enabled:
-            pyc["enabled"] = new_enabled
-            dirty = True
-        if header_open:
-            dirty |= _render_prefab_component_fields(ctx, pyc, pyc_uid, _PREFAB_SKIP_PY_KEYS)
-            # Also render py_fields if present
-            py_fields = pyc.get("py_fields")
-            if isinstance(py_fields, dict):
-                dirty |= _render_prefab_json_dict(ctx, py_fields, f"{pyc_uid}_fields")
-
-    ctx.pop_id()
-    return dirty
-
-
-def _render_prefab_transform(ctx: InfGUIContext, transform: dict, uid: str) -> bool:
-    """Render position/rotation/scale vector3 controls from transform JSON."""
-    dirty = False
-    lw = max_label_w(ctx, [t("asset.prefab_position"), t("asset.prefab_rotation"), t("asset.prefab_scale")])
-
-    # Position — array format: [x, y, z]
-    pos = transform.get("position", [0.0, 0.0, 0.0])
-    if isinstance(pos, list) and len(pos) == 3:
-        px, py_, pz = float(pos[0]), float(pos[1]), float(pos[2])
-        npx, npy, npz = ctx.vector3(f"{t('asset.prefab_position')}##{uid}", px, py_, pz, _PREFAB_DRAG_SPEED, lw)
-        if abs(npx - px) > 1e-6 or abs(npy - py_) > 1e-6 or abs(npz - pz) > 1e-6:
-            transform["position"] = [npx, npy, npz]
-            dirty = True
-
-    # Rotation
-    rot = transform.get("rotation", [0.0, 0.0, 0.0])
-    if isinstance(rot, list) and len(rot) == 3:
-        rx, ry, rz = float(rot[0]), float(rot[1]), float(rot[2])
-        nrx, nry, nrz = ctx.vector3(f"{t('asset.prefab_rotation')}##{uid}", rx, ry, rz, _PREFAB_DRAG_SPEED, lw)
-        if abs(nrx - rx) > 1e-6 or abs(nry - ry) > 1e-6 or abs(nrz - rz) > 1e-6:
-            transform["rotation"] = [nrx, nry, nrz]
-            dirty = True
-
-    # Scale
-    scl = transform.get("scale", [1.0, 1.0, 1.0])
-    if isinstance(scl, list) and len(scl) == 3:
-        sx, sy, sz = float(scl[0]), float(scl[1]), float(scl[2])
-        nsx, nsy, nsz = ctx.vector3(f"{t('asset.prefab_scale')}##{uid}", sx, sy, sz, _PREFAB_DRAG_SPEED_FINE, lw)
-        if abs(nsx - sx) > 1e-6 or abs(nsy - sy) > 1e-6 or abs(nsz - sz) > 1e-6:
-            transform["scale"] = [nsx, nsy, nsz]
-            dirty = True
-
-    return dirty
-
-
-def _render_prefab_component_fields(ctx: InfGUIContext, comp: dict,
-                                     uid: str, skip_keys: frozenset) -> bool:
-    """Render all fields of a serialized component as editable widgets."""
-    dirty = False
-    keys = [k for k in comp.keys() if k not in skip_keys]
-    if not keys:
-        ctx.push_style_color(ImGuiCol.Text, *Theme.TEXT_DIM)
-        ctx.label("  " + t("asset.no_editable_fields"))
-        ctx.pop_style_color(1)
-        return False
-
-    for key in keys:
-        value = comp[key]
-        new_value, changed = _render_prefab_json_value(ctx, key, value, f"{uid}_{key}")
-        if changed:
-            comp[key] = new_value
-            dirty = True
-    return dirty
-
-
-def _render_prefab_json_value(ctx: InfGUIContext, key: str, value, uid: str):
-    """Render a single JSON value with an appropriate widget. Returns (new_value, changed)."""
-    display_key = key.replace("_", " ").title()
-
-    if isinstance(value, bool):
-        field_label(ctx, display_key)
-        new_val = ctx.checkbox(f"##{uid}", value)
-        return new_val, new_val != value
-
-    if isinstance(value, int):
-        field_label(ctx, display_key)
-        new_val = ctx.drag_int(f"##{uid}", value, 0.1, -999999, 999999)
-        return new_val, new_val != value
-
-    if isinstance(value, float):
-        field_label(ctx, display_key)
-        new_val = ctx.drag_float(f"##{uid}", value, 0.01, -999999.0, 999999.0)
-        return new_val, abs(new_val - value) > 1e-7
-
-    if isinstance(value, str):
-        field_label(ctx, display_key)
-        new_val = ctx.text_input(f"##{uid}", value, 512)
-        return new_val, new_val != value
-
-    if isinstance(value, list):
-        # Array of 3 floats → vector3
-        if len(value) == 3 and all(isinstance(v, (int, float)) for v in value):
-            lw = max_label_w(ctx, [display_key])
-            x, y, z = float(value[0]), float(value[1]), float(value[2])
-            nx, ny, nz = ctx.vector3(f"{display_key}##{uid}", x, y, z, 0.01, lw)
-            changed = abs(nx - x) > 1e-7 or abs(ny - y) > 1e-7 or abs(nz - z) > 1e-7
-            return [nx, ny, nz] if changed else value, changed
-
-        # Array of 4 floats → render as 4 drag floats (color-like)
-        if len(value) == 4 and all(isinstance(v, (int, float)) for v in value):
-            ctx.label(f"{display_key}:")
-            changed = False
-            new_arr = list(value)
-            labels_4 = ["X", "Y", "Z", "W"]
-            for i in range(4):
-                field_label(ctx, f"  {labels_4[i]}")
-                nv = ctx.drag_float(f"##{uid}_{i}", float(value[i]), 0.01, -999999.0, 999999.0)
-                if abs(nv - float(value[i])) > 1e-7:
-                    new_arr[i] = nv
-                    changed = True
-            return new_arr if changed else value, changed
-
-        # Other arrays — show as read-only text
-        ctx.label(f"{display_key}: {json.dumps(value, ensure_ascii=False)}")
-        return value, False
-
-    if isinstance(value, dict):
-        # Nested dict — render as collapsible section
-        from .theme import ImGuiTreeNodeFlags
-        flags = ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.SpanAvailWidth
-        if ctx.tree_node_ex(f"{display_key}##{uid}", flags):
-            changed = _render_prefab_json_dict(ctx, value, uid)
-            ctx.tree_pop()
-            return value, changed
-        return value, False
-
-    # Fallback — display as text
-    ctx.label(f"{display_key}: {value}")
-    return value, False
-
-
-def _render_prefab_json_dict(ctx: InfGUIContext, d: dict, uid: str) -> bool:
-    """Render all key-value pairs in a JSON dict. Returns True if modified."""
-    dirty = False
-    for key, value in list(d.items()):
-        new_value, changed = _render_prefab_json_value(ctx, key, value, f"{uid}_{key}")
-        if changed:
-            d[key] = new_value
-            dirty = True
-    return dirty
-
-
-def _save_prefab_state(state: _State):
-    """Write the modified prefab data back to disk."""
-    path = state.extra.get("prefab_path")
-    envelope = state.extra.get("prefab_envelope")
-    if not path or not envelope:
-        return
-    envelope["root_object"] = state.settings
+    ctx.push_style_color(ImGuiCol.Button, *Theme.PREFAB_BTN_NORMAL)
+    ctx.push_style_color(ImGuiCol.ButtonHovered, *Theme.PREFAB_BTN_HOVERED)
+    ctx.push_style_color(ImGuiCol.ButtonActive, *Theme.PREFAB_BTN_ACTIVE)
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(envelope, f, indent=2, ensure_ascii=False)
-    except OSError:
-        pass
+        ctx.button(t("asset.open_prefab_mode"), _open_prefab_mode, -1, 32)
+    finally:
+        ctx.pop_style_color(3)
+
+    ctx.dummy(0, 8)
+    render_info_text(ctx, t("asset.prefab_safe_mode"))
+    ctx.separator()
+    ctx.dummy(0, 4)
+
+    labels = [
+        t("asset.prefab_root"),
+        t("asset.prefab_nodes"),
+        t("asset.prefab_components_count"),
+        t("asset.prefab_scripts_count"),
+        t("asset.prefab_path"),
+    ]
+    lw = max_label_w(ctx, labels)
+
+    root_name = state.extra.get("root_name", prefab_root.get("name", "GameObject"))
+    component_count = state.extra.get("component_count", 0)
+    script_count = _count_prefab_script_components(prefab_root)
+    node_count = state.extra.get("node_count", 1)
+
+    field_label(ctx, t("asset.prefab_root"), lw)
+    ctx.label(str(root_name))
+    field_label(ctx, t("asset.prefab_nodes"), lw)
+    ctx.label(str(node_count))
+    field_label(ctx, t("asset.prefab_components_count"), lw)
+    ctx.label(str(component_count))
+    field_label(ctx, t("asset.prefab_scripts_count"), lw)
+    ctx.label(str(script_count))
+    field_label(ctx, t("asset.prefab_path"), lw)
+    ctx.label(state.extra.get("prefab_path", state.file_path))
+
+    ctx.dummy(0, 6)
+    ctx.separator()
+
+    if render_compact_section_header(ctx, t("asset.prefab_root_object"), level="secondary"):
+        _render_prefab_root_summary(ctx, prefab_root)
+
+    if render_compact_section_header(ctx, t("asset.prefab_raw_json_preview"), default_open=False, level="secondary"):
+        preview = json.dumps(prefab_root, indent=2, ensure_ascii=False)
+        if len(preview) > 8000:
+            preview = preview[:8000] + "\n..."
+        ctx.label(preview)
 
 
-def _count_descendants(node: dict) -> int:
-    """Count total descendant nodes (excluding the node itself)."""
-    children = node.get("children", [])
-    total = len(children)
-    for child in children:
-        total += _count_descendants(child)
+def _count_prefab_nodes(node: dict) -> int:
+    total = 1
+    for child in node.get("children", []):
+        if isinstance(child, dict):
+            total += _count_prefab_nodes(child)
     return total
+
+
+def _count_prefab_components(node: dict) -> int:
+    total = len(node.get("components", []))
+    total += len(node.get("py_components", []))
+    for child in node.get("children", []):
+        if isinstance(child, dict):
+            total += _count_prefab_components(child)
+    return total
+
+
+def _count_prefab_script_components(node: dict) -> int:
+    total = len(node.get("py_components", []))
+    for child in node.get("children", []):
+        if isinstance(child, dict):
+            total += _count_prefab_script_components(child)
+    return total
+
+
+def _render_prefab_root_summary(ctx: InfGUIContext, root: dict):
+    transform = root.get("transform", {}) if isinstance(root.get("transform"), dict) else {}
+    position = transform.get("position", [0.0, 0.0, 0.0])
+    rotation = transform.get("rotation", [0.0, 0.0, 0.0])
+    scale = transform.get("scale", [1.0, 1.0, 1.0])
+    ctx.label(f"{t('asset.prefab_name')}: {root.get('name', 'GameObject')}")
+    ctx.label(f"{t('asset.prefab_active')}: {bool(root.get('active', True))}")
+    ctx.label(f"{t('asset.prefab_tag')}: {root.get('tag', 'Untagged')}")
+    ctx.label(f"{t('asset.prefab_layer')}: {root.get('layer', 0)}")
+    ctx.label(f"{t('asset.prefab_position')}: {position}")
+    ctx.label(f"{t('asset.prefab_rotation')}: {rotation}")
+    ctx.label(f"{t('asset.prefab_scale')}: {scale}")
+    ctx.label(f"{t('asset.prefab_native_components')}: {len(root.get('components', []))}")
+    ctx.label(f"{t('asset.prefab_script_components')}: {len(root.get('py_components', []))}")
+    ctx.label(f"{t('asset.prefab_children_count')}: {len(root.get('children', []))}")
 
 
 def _refresh_material(state: _State):
@@ -947,36 +752,14 @@ _SPLITTER_H = 14.0
 
 
 def _render_texture_preview(ctx: InfGUIContext, panel, state: _State):
-    """Render texture preview image + drag-to-resize splitter."""
-    if not panel or not hasattr(panel, "_InspectorPanel__preview_manager"):
-        return
-    pm = panel._InspectorPanel__preview_manager
-    if not pm or not pm.load_preview(state.file_path):
-        return
+    """Render a safe placeholder instead of the native texture preview.
 
-    settings = state.settings
-    display_mode = 1 if settings.texture_type == TextureType.NORMAL_MAP else 0
-    preview_max = min(settings.max_size, 512)
-    pm.set_preview_settings(display_mode, preview_max, settings.srgb)
-
-    avail_w = ctx.get_content_region_avail_width()
-    preview_h = min(avail_w, state.extra.get("preview_height", 200.0))
-    if avail_w > 0 and preview_h > 0:
-        pm.render_preview(ctx, avail_w, preview_h)
-
-    # ── Drag splitter ──────────────────────────────────────────────────
-    ctx.separator()
-    avail_w = ctx.get_content_region_avail_width()
-    ctx.invisible_button("##TexPreviewSplitter", avail_w, _SPLITTER_H)
-    if ctx.is_item_hovered() or ctx.is_item_active():
-        ctx.set_mouse_cursor(3)  # ResizeNS
-    if ctx.is_item_active():
-        dy = ctx.get_mouse_drag_delta_y(0)
-        if abs(dy) > 1.0:
-            h = state.extra.get("preview_height", 200.0)
-            state.extra["preview_height"] = max(
-                _PREVIEW_MIN_H, min(_PREVIEW_MAX_H, h + dy))
-            ctx.reset_mouse_drag_delta(0)
+    The native preview path is temporarily disabled while investigating asset
+    selection crashes that reproduce reliably on texture clicks.
+    """
+    ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
+    ctx.label("Texture preview temporarily disabled in safe mode.")
+    ctx.pop_style_color(1)
     ctx.separator()
 
 

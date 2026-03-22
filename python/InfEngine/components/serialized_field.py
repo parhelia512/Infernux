@@ -116,6 +116,7 @@ class SerializedFieldDescriptor:
         self._values: Dict[int, Any] = {}  # instance id -> value
         self._weak_refs: Dict[int, weakref.ref] = {}  # instance id -> weak ref
         self._lock = threading.Lock()  # Thread-safe access
+        self._set_count: int = 0  # Counter for periodic dead-ref cleanup
 
     def _make_ref_callback(self, inst_id: int):
         """Create a weak-ref callback that auto-cleans on GC."""
@@ -134,10 +135,11 @@ class SerializedFieldDescriptor:
     
     def _cleanup_dead_refs(self):
         """Remove entries for garbage-collected instances."""
-        dead_ids = [inst_id for inst_id, ref in self._weak_refs.items() if ref() is None]
-        for inst_id in dead_ids:
-            self._values.pop(inst_id, None)
-            self._weak_refs.pop(inst_id, None)
+        with self._lock:
+            dead_ids = [inst_id for inst_id, ref in self._weak_refs.items() if ref() is None]
+            for inst_id in dead_ids:
+                self._values.pop(inst_id, None)
+                self._weak_refs.pop(inst_id, None)
     
     def get_raw(self, instance: 'InfComponent') -> Any:
         """Get the raw stored value without auto-resolution."""
@@ -200,6 +202,12 @@ class SerializedFieldDescriptor:
         if not getattr(instance, '_inf_deserializing', False):
             if old != value and _on_field_did_change is not None:
                 _on_field_did_change(instance, self.metadata.name, old, value)
+
+        # Periodic batch cleanup as a safety net for ref-cycle GC edge cases.
+        self._set_count += 1
+        if self._set_count >= 128:
+            self._set_count = 0
+            self._cleanup_dead_refs()
     
     def __delete__(self, instance: 'InfComponent'):
         inst_id = id(instance)

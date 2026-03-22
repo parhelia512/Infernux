@@ -15,7 +15,8 @@ Suspend a coroutine until the next fixed update.
 ## Example
 
 ```python
-# TODO: Add example for WaitForFixedUpdate
+yield WaitForFixedUpdate()
+Debug.log("Physics step finished")
 ```
 
 <!-- USER CONTENT START --> example

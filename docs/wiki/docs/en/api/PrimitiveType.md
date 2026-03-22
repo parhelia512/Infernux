@@ -29,7 +29,7 @@ Primitive mesh types for Scene.create_primitive().
 ## Example
 
 ```python
-# TODO: Add example for PrimitiveType
+cube = GameObject.create_primitive(PrimitiveType.CUBE)
 ```
 
 <!-- USER CONTENT START --> example

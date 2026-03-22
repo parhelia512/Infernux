@@ -29,7 +29,7 @@
 ## 示例
 
 ```python
-# TODO: Add example for PrimitiveType
+cube = GameObject.create_primitive(PrimitiveType.CUBE)
 ```
 
 <!-- USER CONTENT START --> example

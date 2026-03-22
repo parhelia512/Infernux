@@ -109,6 +109,7 @@ const translations = {
         "footer.community": "Community",
         "footer.issues": "Issues",
         "footer.discussions": "Discussions",
+        "footer.email": "Email",
 
         "roadmap.hero.kicker": "Roadmap",
         "roadmap.hero.title": "What's done, what's next, and what's planned.",
@@ -303,6 +304,7 @@ const translations = {
         "footer.community": "社区",
         "footer.issues": "问题反馈",
         "footer.discussions": "讨论区",
+        "footer.email": "邮箱",
 
         "roadmap.hero.kicker": "路线图",
         "roadmap.hero.title": "已完成、进行中、和计划中的工作。",
@@ -405,6 +407,11 @@ function applyLanguage(lang) {
         } else {
             element.innerHTML = value;
         }
+    });
+    document.querySelectorAll('[data-href-en][data-href-zh]').forEach((element) => {
+        element.setAttribute('href', lang === 'zh'
+            ? element.getAttribute('data-href-zh')
+            : element.getAttribute('data-href-en'));
     });
     const langText = document.getElementById('lang-text');
     if (langText) {

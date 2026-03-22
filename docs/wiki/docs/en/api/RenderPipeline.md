@@ -82,7 +82,8 @@ RenderStack integration:
 ## Example
 
 ```python
-# TODO: Add example for RenderPipeline
+stack = self.game_object.add_component(RenderStack)
+stack.set_pipeline("Default Deferred")
 ```
 
 <!-- USER CONTENT START --> example

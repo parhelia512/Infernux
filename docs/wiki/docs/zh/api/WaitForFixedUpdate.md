@@ -15,7 +15,8 @@
 ## 示例
 
 ```python
-# TODO: Add example for WaitForFixedUpdate
+yield WaitForFixedUpdate()
+Debug.log("Physics step finished")
 ```
 
 <!-- USER CONTENT START --> example

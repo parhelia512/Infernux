@@ -26,7 +26,7 @@ Coordinate space for Transform operations.
 ## Example
 
 ```python
-# TODO: Add example for Space
+self.transform.translate(vector3(0, 0, 1), Space.SELF)
 ```
 
 <!-- USER CONTENT START --> example

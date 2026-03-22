@@ -170,6 +170,16 @@ void Rigidbody::OnDisable()
     if (!pw.IsInitialized())
         return;
 
+    // Rebuild shapes — MeshCollider may switch back to MeshShape now
+    // that there is no dynamic Rigidbody.  Must happen before setting
+    // motionType to Static so the shape matches the new body type.
+    for (auto *col : colliders) {
+        if (col && col->IsEnabled() && col->GetBodyId() != 0xFFFFFFFF) {
+            pw.UpdateBodyShape(col);
+            break; // shared body — one rebuild is enough
+        }
+    }
+
     for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
         pw.SetBodyMotionType(bodyId, 0); // 0 = Static
     }
@@ -207,13 +217,13 @@ void Rigidbody::SetMass(float mass)
 
 void Rigidbody::SetDrag(float drag)
 {
-    DataMut().drag = (drag < 0.0f) ? 0.0f : drag;
+    DataMut().drag = (drag < 0.001f) ? 0.001f : drag;
     ApplyDragSettings();
 }
 
 void Rigidbody::SetAngularDrag(float drag)
 {
-    DataMut().angularDrag = (drag < 0.0f) ? 0.0f : drag;
+    DataMut().angularDrag = (drag < 0.001f) ? 0.001f : drag;
     ApplyDragSettings();
 }
 
@@ -607,7 +617,7 @@ void Rigidbody::SyncPhysicsToTransform()
     uint32_t bid = col->GetBodyId();
 
     glm::vec3 bodyPos = pw.GetBodyPosition(bid);
-    glm::quat bodyRot = pw.GetBodyRotation(bid);
+    glm::quat bodyRot = glm::normalize(pw.GetBodyRotation(bid));
 
     Transform *tf = go->GetTransform();
     if (!tf)
@@ -634,7 +644,10 @@ void Rigidbody::SyncPhysicsToTransform()
             tf->SetWorldRotation(bodyRot);
         }
         d.lastSyncedPosition = bodyPos;
-        d.lastSyncedRotation = rotFrozen ? tf->GetWorldRotation() : bodyRot;
+        // Always read back the reconstructed rotation from the Transform so
+        // that the cached value matches what SyncExternalMovesToPhysics() will
+        // later read via GetWorldRotation() (avoids float round-trip mismatch).
+        d.lastSyncedRotation = tf->GetWorldRotation();
         d.hasSyncedOnce = true;
     }
 
@@ -646,9 +659,8 @@ void Rigidbody::SyncPhysicsToTransform()
             const glm::vec3 cachePos = (d.interpolation == static_cast<int>(RigidbodyInterpolation::None) || firstPose)
                                            ? bodyPos
                                            : d.lastSyncedPosition;
-            const glm::quat cacheRot = (d.interpolation == static_cast<int>(RigidbodyInterpolation::None) || firstPose)
-                                           ? (rotFrozen ? tf->GetWorldRotation() : bodyRot)
-                                           : d.lastSyncedRotation;
+            // Use the same reconstructed rotation we cached above.
+            const glm::quat cacheRot = d.lastSyncedRotation;
             c->SetLastSyncedTransform(cachePos, cacheRot);
         }
     }
@@ -669,12 +681,14 @@ void Rigidbody::ApplyInterpolatedTransform(float alpha)
         return;
 
     glm::vec3 presentedPos = d.currentPhysicsPosition;
-    glm::quat presentedRot = d.currentPhysicsRotation;
+    glm::quat presentedRot = glm::normalize(d.currentPhysicsRotation);
 
     if (d.interpolation == static_cast<int>(RigidbodyInterpolation::Interpolate)) {
         float t = std::clamp(alpha, 0.0f, 1.0f);
         presentedPos = glm::mix(d.previousPhysicsPosition, d.currentPhysicsPosition, t);
-        presentedRot = glm::normalize(glm::slerp(d.previousPhysicsRotation, d.currentPhysicsRotation, t));
+        presentedRot = glm::normalize(glm::slerp(
+            glm::normalize(d.previousPhysicsRotation),
+            glm::normalize(d.currentPhysicsRotation), t));
     }
 
     const bool rotFrozen = (d.constraints & static_cast<int>(RigidbodyConstraints::FreezeRotation)) ==
@@ -686,13 +700,15 @@ void Rigidbody::ApplyInterpolatedTransform(float alpha)
     }
 
     d.lastSyncedPosition = presentedPos;
-    d.lastSyncedRotation = rotFrozen ? tf->GetWorldRotation() : presentedRot;
+    // Read back reconstructed rotation so the cache matches what
+    // SyncExternalMovesToPhysics() will see via GetWorldRotation().
+    d.lastSyncedRotation = tf->GetWorldRotation();
     d.hasSyncedOnce = true;
 
     auto colliders = go->GetComponents<Collider>();
     for (auto *c : colliders) {
         if (c && c->GetBodyId() != 0xFFFFFFFF) {
-            c->SetLastSyncedTransform(presentedPos, rotFrozen ? tf->GetWorldRotation() : presentedRot);
+            c->SetLastSyncedTransform(presentedPos, d.lastSyncedRotation);
         }
     }
 }
@@ -723,12 +739,17 @@ void Rigidbody::SyncExternalMovesToPhysics()
     }
 
     const float posEps = 1e-4f;
-    const float rotEps = 1e-5f;
+    const float rotEps = 1e-4f;
     bool posDiff = glm::length(currentPos - d.lastSyncedPosition) > posEps;
     bool rotDiff = (1.0f - std::abs(glm::dot(currentRot, d.lastSyncedRotation))) > rotEps;
 
     if (!posDiff && !rotDiff)
         return; // Transform unchanged since last physics write — nothing to do
+
+    INFLOG_WARN("Rigidbody::SyncExternalMovesToPhysics TELEPORT — posDiff=",
+                posDiff, " rotDiff=", rotDiff,
+                " posDelta=", glm::length(currentPos - d.lastSyncedPosition),
+                " rotDelta=", (1.0f - std::abs(glm::dot(currentRot, d.lastSyncedRotation))));
 
     // The user (gizmo / inspector) moved the object externally.
     // Teleport ALL sibling collider bodies to the new Transform position.
@@ -785,6 +806,18 @@ void Rigidbody::NotifyCollidersBodyTypeChanged()
         return;
 
     const auto &d = Data();
+
+    // Rebuild shapes first — some colliders (e.g. MeshCollider) produce
+    // different shape types depending on whether a dynamic Rigidbody exists.
+    // This must happen BEFORE SetBodyMotionType so Jolt never sees a
+    // MeshShape on a dynamic body.
+    auto colliders = go->GetComponents<Collider>();
+    for (auto *col : colliders) {
+        if (col && col->IsEnabled() && col->GetBodyId() != 0xFFFFFFFF) {
+            pw.UpdateBodyShape(col);
+            break; // shared body — one rebuild is enough
+        }
+    }
 
     // motionType: 0=Static, 1=Kinematic, 2=Dynamic
     int motionType = d.isKinematic ? 1 : 2;

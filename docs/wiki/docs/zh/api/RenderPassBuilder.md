@@ -64,7 +64,9 @@
 ## 示例
 
 ```python
-# TODO: Add example for RenderPassBuilder
+graph = RenderGraph("Example")
+builder = graph.add_pass("Opaque")
+builder.write("color")
 ```
 
 <!-- USER CONTENT START --> example

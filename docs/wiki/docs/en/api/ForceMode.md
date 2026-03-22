@@ -28,7 +28,7 @@ Force application mode for Rigidbody.
 ## Example
 
 ```python
-# TODO: Add example for ForceMode
+rigidbody.add_force(vector3(0, 10, 0), ForceMode.IMPULSE)
 ```
 
 <!-- USER CONTENT START --> example

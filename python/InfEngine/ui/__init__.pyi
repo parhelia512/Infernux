@@ -1,0 +1,53 @@
+"""Type stubs for InfEngine.ui — screen-space UI components."""
+
+from __future__ import annotations
+
+from .enums import (
+    RenderMode as RenderMode,
+    ScreenAlignH as ScreenAlignH,
+    ScreenAlignV as ScreenAlignV,
+    TextAlignH as TextAlignH,
+    TextAlignV as TextAlignV,
+    TextOverflow as TextOverflow,
+    TextResizeMode as TextResizeMode,
+    UITransitionType as UITransitionType,
+)
+from .inf_ui_component import InfUIComponent as InfUIComponent
+from .inf_ui_screen_component import InfUIScreenComponent as InfUIScreenComponent
+from .ui_canvas import UICanvas as UICanvas
+from .ui_text import UIText as UIText
+from .ui_image import UIImage as UIImage
+from .ui_selectable import UISelectable as UISelectable
+from .ui_button import UIButton as UIButton
+from .ui_event_data import PointerEventData as PointerEventData, PointerButton as PointerButton
+from .ui_event import UIEvent as UIEvent, UIEvent1 as UIEvent1
+from .ui_event_system import UIEventProcessor as UIEventProcessor
+from .ui_texture_cache import UITextureCache as UITextureCache, get_shared_cache as get_shared_cache
+from .ui_render_dispatch import register_ui_renderer as register_ui_renderer, dispatch as ui_dispatch
+
+__all__ = [
+    "RenderMode",
+    "ScreenAlignH",
+    "ScreenAlignV",
+    "TextAlignH",
+    "TextAlignV",
+    "TextOverflow",
+    "TextResizeMode",
+    "UITransitionType",
+    "InfUIComponent",
+    "InfUIScreenComponent",
+    "UICanvas",
+    "UIText",
+    "UIImage",
+    "UISelectable",
+    "UIButton",
+    "PointerEventData",
+    "PointerButton",
+    "UIEvent",
+    "UIEvent1",
+    "UIEventProcessor",
+    "UITextureCache",
+    "get_shared_cache",
+    "register_ui_renderer",
+    "ui_dispatch",
+]

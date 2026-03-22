@@ -17,7 +17,7 @@
 ## 示例
 
 ```python
-# TODO: Add example for RigidbodyConstraints
+rigidbody.constraints = RigidbodyConstraints.FREEZE_ROTATION_X
 ```
 
 <!-- USER CONTENT START --> example

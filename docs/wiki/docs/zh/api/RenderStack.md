@@ -72,7 +72,9 @@
 ## 示例
 
 ```python
-# TODO: Add example for RenderStack
+stack = self.game_object.add_component(RenderStack)
+stack.add_pass(BloomEffect())
+stack.add_pass(ToneMappingEffect())
 ```
 
 <!-- USER CONTENT START --> example

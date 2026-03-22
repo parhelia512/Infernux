@@ -41,7 +41,9 @@
 ## 示例
 
 ```python
-# TODO: Add example for ToneMappingEffect
+effect = ToneMappingEffect()
+effect.exposure = 1.1
+effect.gamma = 2.2
 ```
 
 <!-- USER CONTENT START --> example

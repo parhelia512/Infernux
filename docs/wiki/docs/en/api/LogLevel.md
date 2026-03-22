@@ -29,7 +29,7 @@ Engine log severity levels.
 ## Example
 
 ```python
-# TODO: Add example for LogLevel
+Debug.set_log_level(LogLevel.WARNING)
 ```
 
 <!-- USER CONTENT START --> example

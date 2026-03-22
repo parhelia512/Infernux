@@ -35,7 +35,8 @@ Suspend a coroutine until the predicate returns True.
 ## Example
 
 ```python
-# TODO: Add example for WaitUntil
+yield WaitUntil(lambda: self.is_loaded)
+Debug.log("Loading finished")
 ```
 
 <!-- USER CONTENT START --> example

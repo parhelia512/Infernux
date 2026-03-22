@@ -131,7 +131,7 @@ class RenderStack(InfComponent):
                 f"Removing duplicate from '{go_name}'.",
                 file=sys.stderr,
             )
-            self.game_object.remove_component(self)
+            self.game_object.remove_py_component(self)
             return
         RenderStack._active_instance = self
 

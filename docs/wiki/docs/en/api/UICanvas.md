@@ -54,7 +54,8 @@ Attributes:
 ## Example
 
 ```python
-# TODO: Add example for UICanvas
+canvas = self.game_object.add_component(UICanvas)
+canvas.sorting_order = 10
 ```
 
 <!-- USER CONTENT START --> example

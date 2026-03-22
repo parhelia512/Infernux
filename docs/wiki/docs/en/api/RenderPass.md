@@ -62,7 +62,8 @@ Base class for custom render passes injected into the render stack.
 ## Example
 
 ```python
-# TODO: Add example for RenderPass
+stack = self.game_object.add_component(RenderStack)
+stack.add_pass(VignetteEffect())
 ```
 
 <!-- USER CONTENT START --> example

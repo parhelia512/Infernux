@@ -28,7 +28,7 @@
 ## 示例
 
 ```python
-# TODO: Add example for CollisionDetectionMode
+rigidbody.collision_detection_mode = CollisionDetectionMode.CONTINUOUS
 ```
 
 <!-- USER CONTENT START --> example

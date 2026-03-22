@@ -30,7 +30,9 @@ Base class for all collider components.
 ## Example
 
 ```python
-# TODO: Add example for Collider
+hit = Physics.raycast(self.transform.position, vector3(0, 0, 1))
+if hit:
+	Debug.log("Hit something")
 ```
 
 <!-- USER CONTENT START --> example

@@ -182,6 +182,13 @@ class PlayModeManager:
             Debug.log_warning("Cannot enter play mode: not in edit mode")
             return False
 
+        # Block play mode while editing a prefab
+        from InfEngine.engine.scene_manager import SceneFileManager
+        sfm = SceneFileManager.instance()
+        if sfm and sfm.is_prefab_mode:
+            Debug.log_warning("Cannot enter Play mode while in Prefab Mode. Exit Prefab Mode first.")
+            return False
+
         # Pre-flight check: block play if any script has load errors
         from InfEngine.components.script_loader import has_script_errors, get_script_errors
         if has_script_errors():
@@ -701,6 +708,10 @@ class PlayModeManager:
         
         C++ Scene::Deserialize() stores pending Python component info,
         which we retrieve and use to recreate the actual Python instances.
+
+        Delegates to the shared :func:`component_restore.restore_pending_py_components`
+        with ``batch_on_after_deserialize=True`` so all components are attached
+        before any ``on_after_deserialize`` callback fires.
         """
         scene_manager = self._get_scene_manager()
         if not scene_manager:
@@ -709,122 +720,14 @@ class PlayModeManager:
         if not scene:
             return
 
-        # Check if there are pending Python components to restore
-        if not scene.has_pending_py_components():
-            Debug.log_internal("No pending Python components to restore")
-            return
+        from InfEngine.engine.component_restore import restore_pending_py_components
+        restore_pending_py_components(
+            scene,
+            asset_database=self._asset_database,
+            pre_warm_renderstack=True,
+            batch_on_after_deserialize=True,
+        )
 
-        # Get pending components (this also clears the list in C++)
-        pending_list = scene.take_pending_py_components()
-        Debug.log_internal(f"Restoring {len(pending_list)} Python components...")
-
-        # Pre-warm the discovery cache so that RenderStack.on_after_deserialize()
-        # can call discover_passes() without a full project directory walk.
-        try:
-            from InfEngine.renderstack.discovery import discover_passes, discover_pipelines
-            discover_passes()
-            discover_pipelines()
-        except Exception:
-            pass
-
-        restored_count = 0
-        restored_components = []  # Track for on_after_deserialize callback
-
-        for pending in pending_list:
-            obj = scene.find_by_id(pending.game_object_id)
-            if not obj:
-                Debug.log_warning(f"Cannot restore component: GameObject {pending.game_object_id} not found")
-                continue
-
-            # Create new Python component instance
-            component = self._create_py_component(
-                pending.script_guid,
-                pending.type_name,
-                pending.fields_json,
-                pending.enabled
-            )
-
-            if component:
-                obj.add_py_component(component)
-                restored_count += 1
-                restored_components.append(component)
-
-                # Verify game_object is correctly set
-                if component.game_object is None:
-                    Debug.log_warning(f"Restored component {component.type_name} has no game_object!")
-
-        # Call on_after_deserialize on all restored components after all are attached
-        for comp in restored_components:
-            comp._call_on_after_deserialize()
-
-        Debug.log_internal(f"Restored {restored_count} Python components")
-
-
-    def _create_py_component(self, script_guid: str, type_name: str, 
-                              fields_json: str, enabled: bool) -> Optional['InfComponent']:
-        """
-        Create a Python component instance from serialized data.
-        
-        Args:
-            script_guid: GUID of the script asset
-            type_name: Python class name
-            fields_json: JSON string of field values
-            enabled: Whether the component should be enabled
-            
-        Returns:
-            New component instance, or None if creation failed
-        """
-        component = None
-
-        if not self._asset_database:
-            return None
-        
-        script_path_abs = None
-        if script_guid and self._asset_database:
-            resolved = self._asset_database.get_path_from_guid(script_guid)
-            if resolved:
-                script_path_abs = resolve_script_path(resolved)
-        # In packaged builds the .py originals are compiled to .pyc and
-        # removed.  Fall back to the compiled file when the source is gone.
-        if script_path_abs and not os.path.exists(script_path_abs):
-            pyc_path = script_path_abs + "c"
-            if os.path.exists(pyc_path):
-                script_path_abs = pyc_path
-        # Packaged-build fallback: use build-time GUID manifest
-        if not script_path_abs and script_guid:
-            from InfEngine.engine.project_context import resolve_guid_to_path
-            script_path_abs = resolve_guid_to_path(script_guid)
-        if script_path_abs and os.path.exists(script_path_abs):
-            from InfEngine.components import load_and_create_component
-            component = load_and_create_component(script_path_abs, asset_database=self._asset_database)
-            if component is not None and script_guid:
-                component._script_guid = script_guid
-        
-        # If no script path or failed, try to find by type name in registry
-        if component is None and type_name:
-            from InfEngine.components.registry import get_type
-            cls = get_type(type_name)
-            if cls is not None:
-                component = cls()
-                if script_guid:
-                    component._script_guid = script_guid
-            else:
-                Debug.log_warning(f"Cannot create component '{type_name}': type not found in registry")
-                return None
-        
-        if component is None:
-            return None
-        
-        # Apply serialized field values — suppress on_after_deserialize here;
-        # the caller (_restore_pending_py_components) issues it in a batch
-        # after every component is attached to the scene graph.
-        if fields_json:
-            component._deserialize_fields(fields_json, _skip_on_after_deserialize=True)
-        
-        # Set enabled state
-        component.enabled = enabled
-        
-        return component
 
     # ========================================================================
     # Scene State Management  

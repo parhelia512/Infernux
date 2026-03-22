@@ -3,6 +3,8 @@ from __future__ import annotations
 from InfEngine.renderstack.injection_point import InjectionPoint as InjectionPoint
 from InfEngine.renderstack.resource_bus import ResourceBus as ResourceBus
 from InfEngine.renderstack.render_pass import RenderPass as RenderPass
+from InfEngine.renderstack.render_pipeline import RenderPipeline as RenderPipeline
+from InfEngine.renderstack.render_pipeline import RenderPipelineAsset as RenderPipelineAsset
 from InfEngine.renderstack.geometry_pass import GeometryPass as GeometryPass
 from InfEngine.renderstack.fullscreen_effect import FullScreenEffect as FullScreenEffect
 from InfEngine.renderstack.bloom_effect import BloomEffect as BloomEffect
@@ -28,6 +30,8 @@ __all__ = [
     "InjectionPoint",
     "ResourceBus",
     "RenderPass",
+    "RenderPipeline",
+    "RenderPipelineAsset",
     "GeometryPass",
     "FullScreenEffect",
     "BloomEffect",

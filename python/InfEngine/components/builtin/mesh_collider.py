@@ -26,52 +26,27 @@ class MeshCollider(Collider):
     )
 
     # ------------------------------------------------------------------
-    # Gizmos — green wireframe mesh bounds
+    # Custom inspector: force-check convex when dynamic Rigidbody exists
     # ------------------------------------------------------------------
 
-    def on_draw_gizmos_selected(self):
-        """Draw green wireframe of the mesh collider bounds when selected."""
-        from InfEngine.gizmos import Gizmos
+    def render_inspector(self, ctx) -> None:
+        from InfEngine.engine.ui.inspector_components import render_builtin_via_setters
+        from InfEngine.engine.ui.inspector_utils import render_inspector_checkbox
 
-        transform = self.transform
-        if transform is None:
-            return
+        go = getattr(self, 'game_object', None)
+        forced_convex = False
+        if go is not None:
+            rb = go.get_component('Rigidbody')
+            if rb is not None:
+                try:
+                    forced_convex = not rb.is_kinematic
+                except (RuntimeError, AttributeError):
+                    pass
 
-        # Try to get mesh bounds from sibling MeshRenderer
-        mr = self.get_component("MeshRenderer")
-        if mr is None:
-            return
-
-        cpp_mr = getattr(mr, "_cpp_component", None)
-        if cpp_mr is None:
-            return
-
-        # Compute AABB from mesh positions
-        positions = cpp_mr.get_positions()
-        if not positions:
-            return
-
-        min_x = min_y = min_z = float("inf")
-        max_x = max_y = max_z = float("-inf")
-        for px, py, pz in positions:
-            if px < min_x: min_x = px
-            if py < min_y: min_y = py
-            if pz < min_z: min_z = pz
-            if px > max_x: max_x = px
-            if py > max_y: max_y = py
-            if pz > max_z: max_z = pz
-
-        cx = (min_x + max_x) * 0.5
-        cy = (min_y + max_y) * 0.5
-        cz = (min_z + max_z) * 0.5
-        sx = max_x - min_x
-        sy = max_y - min_y
-        sz = max_z - min_z
-
-        old_matrix = Gizmos.matrix
-        old_color = Gizmos.color
-        Gizmos.matrix = transform.local_to_world_matrix()
-        Gizmos.color = (0.53, 1.0, 0.29)
-        Gizmos.draw_wire_cube((cx, cy, cz), (sx, sy, sz))
-        Gizmos.color = old_color
-        Gizmos.matrix = old_matrix
+        if forced_convex:
+            render_builtin_via_setters(ctx, self, type(self), skip_fields={'convex'})
+            ctx.begin_disabled(True)
+            render_inspector_checkbox(ctx, "Convex", True)
+            ctx.end_disabled()
+        else:
+            render_builtin_via_setters(ctx, self, type(self))

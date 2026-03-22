@@ -1,0 +1,45 @@
+"""NuitkaBuilder — Nuitka-based standalone executable compiler.
+
+Used by :class:`GameBuilder` to compile the player bootstrap script
+into a native executable.
+
+Example::
+
+    builder = NuitkaBuilder(
+        boot_script="boot.py",
+        project_path="/path/to/project",
+        output_dir="/path/to/dist",
+    )
+    builder.build()
+"""
+
+from __future__ import annotations
+
+from typing import Callable, List, Optional
+
+
+class NuitkaBuilder:
+    """Low-level Nuitka compilation wrapper."""
+
+    def __init__(
+        self,
+        boot_script: str,
+        project_path: str,
+        output_dir: str,
+        on_progress: Optional[Callable[[str, float], None]] = None,
+        icon_path: Optional[str] = None,
+        company_name: str = ...,
+        product_name: str = ...,
+        product_version: str = ...,
+    ) -> None: ...
+
+    def build(self) -> str:
+        """Run Nuitka compilation and post-processing.
+
+        Returns:
+            Path to the ``dist`` directory containing the compiled output.
+
+        Raises:
+            RuntimeError: If Nuitka is not installed or compilation fails.
+        """
+        ...

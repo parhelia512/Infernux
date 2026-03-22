@@ -1,0 +1,32 @@
+"""Type stubs for InfEngine.renderstack.chromatic_aberration_effect."""
+
+from __future__ import annotations
+
+from typing import List, TYPE_CHECKING
+
+from InfEngine.renderstack.fullscreen_effect import FullScreenEffect
+
+if TYPE_CHECKING:
+    from InfEngine.rendergraph.graph import RenderGraph
+    from InfEngine.renderstack.resource_bus import ResourceBus
+
+
+class ChromaticAberrationEffect(FullScreenEffect):
+    """URP-aligned Chromatic Aberration post-processing effect.
+
+    Simulates lens imperfection where different wavelengths refract
+    at different angles, producing RGB channel separation from screen center.
+
+    Attributes:
+        intensity: Channel separation strength (0 = off, 1 = strong).
+    """
+
+    name: str
+    injection_point: str
+    default_order: int
+    menu_path: str
+
+    intensity: float
+
+    def get_shader_list(self) -> List[str]: ...
+    def setup_passes(self, graph: RenderGraph, bus: ResourceBus) -> None: ...

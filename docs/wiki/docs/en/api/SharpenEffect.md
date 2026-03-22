@@ -41,7 +41,8 @@ Based on AMD FidelityFX CAS algorithm.
 ## Example
 
 ```python
-# TODO: Add example for SharpenEffect
+effect = SharpenEffect()
+effect.intensity = 0.5
 ```
 
 <!-- USER CONTENT START --> example

@@ -27,7 +27,7 @@ Shadow casting mode.
 ## Example
 
 ```python
-# TODO: Add example for LightShadows
+light.shadows = LightShadows.SOFT
 ```
 
 <!-- USER CONTENT START --> example

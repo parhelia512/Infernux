@@ -39,7 +39,9 @@
 ## 示例
 
 ```python
-# TODO: Add example for FilmGrainEffect
+effect = FilmGrainEffect()
+effect.intensity = 0.2
+effect.response = 0.8
 ```
 
 <!-- USER CONTENT START --> example

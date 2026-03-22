@@ -970,7 +970,7 @@ glm::quat PhysicsWorld::GetBodyRotation(uint32_t bodyId) const
 
     JPH::BodyInterface &bi = m_physicsSystem->GetBodyInterface();
     JPH::Quat q = bi.GetRotation(JPH::BodyID(bodyId));
-    return glm::quat(q.GetW(), q.GetX(), q.GetY(), q.GetZ());
+    return glm::normalize(glm::quat(q.GetW(), q.GetX(), q.GetY(), q.GetZ()));
 }
 
 glm::vec3 PhysicsWorld::GetBodyCenterOfMassPosition(uint32_t bodyId) const

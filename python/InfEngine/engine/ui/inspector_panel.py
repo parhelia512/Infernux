@@ -387,7 +387,14 @@ class InspectorPanel(EditorPanel):
         fp = self.__selected_file
         cat = self.__asset_category
         if cat:
-            render_asset_inspector(ctx, self, fp, cat)
+            try:
+                render_asset_inspector(ctx, self, fp, cat)
+            except Exception as exc:
+                from InfEngine.debug import Debug
+                Debug.log_error(f"Asset inspector render failed for '{fp}': {exc}")
+                ctx.label("Asset inspector failed. Falling back to safe preview.")
+                if fp:
+                    ctx.label(fp)
         else:
             self._render_file_preview(ctx)
     
@@ -544,23 +551,28 @@ class InspectorPanel(EditorPanel):
         """Render the prefab instance header bar with Select/Open/Apply/Revert buttons."""
         ctx.dummy(0, 4)
 
-        # Blue-tinted background bar
-        ctx.push_style_color(ImGuiCol.ChildBg, 0.10, 0.16, 0.24, 1.0)
-        ctx.begin_child("##prefab_header_bar", 0, 28, True)
+        ctx.push_style_color(ImGuiCol.ChildBg, *Theme.PREFAB_HEADER_BG)
+        ctx.begin_child("##prefab_header_bar", 0, Theme.PREFAB_HEADER_H, True)
 
         ctx.push_style_color(ImGuiCol.Text, *Theme.PREFAB_TEXT)
         ctx.label(t("inspector.prefab_label"))
         ctx.pop_style_color(1)
 
-        ctx.same_line(0, 8)
-        if ctx.small_button(t("inspector.prefab_select") + "##prefab_select"):
-            self._prefab_select_asset(obj)
+        gap = Theme.PREFAB_HEADER_BTN_GAP
 
-        ctx.same_line(0, 4)
-        if ctx.small_button(t("inspector.prefab_open") + "##prefab_open"):
-            self._prefab_open_asset(obj)
+        ctx.same_line(0, gap * 2)
+        colors = Theme.push_inline_button_style(ctx)
+        ctx.button(t("inspector.prefab_select") + "##prefab_select",
+                   lambda: self._prefab_select_asset(obj))
+        ctx.pop_style_color(colors)
 
-        ctx.same_line(0, 12)
+        ctx.same_line(0, gap)
+        colors = Theme.push_inline_button_style(ctx)
+        ctx.button(t("inspector.prefab_open") + "##prefab_open",
+                   lambda: self._prefab_open_asset(obj))
+        ctx.pop_style_color(colors)
+
+        ctx.same_line(0, gap * 3)
 
         # Override count badge
         overrides = self._get_prefab_overrides(obj)
@@ -570,12 +582,16 @@ class InspectorPanel(EditorPanel):
             ctx.push_style_color(ImGuiCol.Text, *Theme.WARNING_TEXT)
             ctx.label(f"{override_count} " + t("inspector.overrides"))
             ctx.pop_style_color(1)
-            ctx.same_line(0, 8)
-            if ctx.small_button(t("inspector.prefab_apply") + "##prefab_apply"):
-                self._prefab_apply(obj)
-            ctx.same_line(0, 4)
-            if ctx.small_button(t("inspector.prefab_revert") + "##prefab_revert"):
-                self._prefab_revert(obj)
+            ctx.same_line(0, gap * 2)
+            colors = Theme.push_inline_button_style(ctx)
+            ctx.button(t("inspector.prefab_apply") + "##prefab_apply",
+                       lambda: self._prefab_apply(obj))
+            ctx.pop_style_color(colors)
+            ctx.same_line(0, gap)
+            colors = Theme.push_inline_button_style(ctx)
+            ctx.button(t("inspector.prefab_revert") + "##prefab_revert",
+                       lambda: self._prefab_revert(obj))
+            ctx.pop_style_color(colors)
         else:
             ctx.push_style_color(ImGuiCol.Text, *Theme.TEXT_DIM)
             ctx.label(t("inspector.no_overrides"))
@@ -613,21 +629,37 @@ class InspectorPanel(EditorPanel):
             pass
         return None
 
+    def _is_scene_prefab_instance_readonly(self, obj) -> bool:
+        """Return True when a scene prefab instance should be locked in Inspector."""
+        guid = getattr(obj, 'prefab_guid', '')
+        if not guid:
+            return False
+        try:
+            from InfEngine.engine.scene_manager import SceneFileManager
+            sfm = SceneFileManager.instance()
+            return not (sfm and sfm.is_prefab_mode)
+        except Exception:
+            return True
+
+    def _is_scene_prefab_transform_readonly(self, obj) -> bool:
+        """Only prefab roots may edit Transform while working in a scene."""
+        return self._is_scene_prefab_instance_readonly(obj) and not bool(getattr(obj, 'prefab_root', False))
+
     def _prefab_select_asset(self, obj):
         """Select the .prefab asset in the Project panel."""
         guid = getattr(obj, 'prefab_guid', '')
         path = self._resolve_prefab_path(guid)
         if path:
-            from InfEngine.engine.ui.editor_event_bus import EditorEventBus
-            EditorEventBus.publish("select_asset", path)
+            from InfEngine.engine.ui.event_bus import EditorEventBus
+            EditorEventBus.instance().emit("select_asset", path)
 
     def _prefab_open_asset(self, obj):
         """Open the .prefab file in the asset inspector."""
         guid = getattr(obj, 'prefab_guid', '')
         path = self._resolve_prefab_path(guid)
         if path:
-            from InfEngine.engine.ui.editor_event_bus import EditorEventBus
-            EditorEventBus.publish("open_asset", path)
+            from InfEngine.engine.ui.event_bus import EditorEventBus
+            EditorEventBus.instance().emit("open_asset", path)
 
     def _prefab_apply(self, obj):
         """Apply all overrides back to the .prefab file."""
@@ -867,7 +899,9 @@ class InspectorPanel(EditorPanel):
         if not mat_data:
             return
 
-        is_builtin = mat_data.get("builtin", False)
+        is_builtin = bool(getattr(native_mat, "is_builtin", False) or mat_data.get("builtin", False))
+        if is_builtin:
+            mat_data["builtin"] = True
         changed = False
         requires_deserialize = False
         requires_pipeline_refresh = False
@@ -1157,6 +1191,8 @@ class InspectorPanel(EditorPanel):
         ctx.separator()
 
         # ── Properties ─────────────────────────────────────────────────
+        if is_builtin:
+            ctx.begin_disabled(True)
         if render_compact_section_header(ctx, "Properties##inline_mat", level="secondary"):
             props = mat_data.get("properties", {})
             if not props:
@@ -1177,6 +1213,8 @@ class InspectorPanel(EditorPanel):
                         else:
                             self._apply_inline_native_prop(native_mat, prop_name, prop["value"], ptype)
                         changed = True
+        if is_builtin:
+            ctx.end_disabled()
 
         # ── Apply changes ──────────────────────────────────────────────
         if changed:
@@ -1313,9 +1351,10 @@ class InspectorPanel(EditorPanel):
             return results
 
         for dirpath, _dirnames, filenames in os.walk(project_root):
-            # Skip hidden dirs, __pycache__, etc.
+            # Skip hidden dirs, __pycache__, build outputs, etc.
             rel = os.path.relpath(dirpath, project_root)
-            if any(part.startswith('.') or part == '__pycache__' for part in rel.split(os.sep)):
+            if any(part.startswith('.') or part in ('__pycache__', 'build', 'Library', 'ProjectSettings', 'Logs', 'Temp')
+                   for part in rel.split(os.sep)):
                 continue
             for fn in filenames:
                 if not fn.endswith('.py') or fn.startswith('_'):
@@ -1369,26 +1408,34 @@ class InspectorPanel(EditorPanel):
             self.__add_component_search = new_text
         
         ctx.separator()
+
+        # Scrollable region with fixed max height
+        child_visible = ctx.begin_child("##comp_list", 0, 350, False)
+        if not child_visible:
+            ctx.end_child()
+            ctx.pop_style_var(2)
+            return
         
         search = self.__add_component_search.lower().strip()
         found_any = False
+        uid = 0  # unique counter to avoid ImGui ID conflicts
         
         # --- Native (C++) components grouped by category ---
         # Dynamically read _component_category_ from each wrapper class
         from InfEngine.components.builtin_component import BuiltinComponent
         native_types = getattr(self, '_InspectorPanel__add_component_native_types', [])
-        native_matched = [t for t in native_types if not search or search in t.lower()]
+        native_matched = [nt for nt in native_types if not search or search in nt.lower()]
         if native_matched:
             # Bucket matched types into categories via _component_category_
             cat_items: dict[str, list[str]] = {}
             uncategorized_native: list[str] = []
-            for t in native_matched:
-                wrapper_cls = BuiltinComponent._builtin_registry.get(t)
+            for nt in native_matched:
+                wrapper_cls = BuiltinComponent._builtin_registry.get(nt)
                 cat = getattr(wrapper_cls, '_component_category_', '') if wrapper_cls else ''
                 if cat:
-                    cat_items.setdefault(cat, []).append(t)
+                    cat_items.setdefault(cat, []).append(nt)
                 else:
-                    uncategorized_native.append(t)
+                    uncategorized_native.append(nt)
 
             # Render each category in stable sorted order
             for cat in sorted(cat_items.keys()):
@@ -1397,7 +1444,8 @@ class InspectorPanel(EditorPanel):
                 ctx.separator()
                 for type_name in items:
                     found_any = True
-                    if ctx.selectable(f"  {type_name}"):
+                    uid += 1
+                    if ctx.selectable(f"  {type_name}##n{uid}"):
                         self._add_native_component(type_name)
                         ctx.close_current_popup()
                 ctx.dummy(0, 4)
@@ -1408,7 +1456,8 @@ class InspectorPanel(EditorPanel):
                 ctx.separator()
                 for type_name in uncategorized_native:
                     found_any = True
-                    if ctx.selectable(f"  {type_name}"):
+                    uid += 1
+                    if ctx.selectable(f"  {type_name}##n{uid}"):
                         self._add_native_component(type_name)
                         ctx.close_current_popup()
                 ctx.dummy(0, 4)
@@ -1430,7 +1479,8 @@ class InspectorPanel(EditorPanel):
                 ctx.separator()
                 for comp_name, comp_cls in engine_cats[cat]:
                     found_any = True
-                    if ctx.selectable(f"  {comp_name}"):
+                    uid += 1
+                    if ctx.selectable(f"  {comp_name}##e{uid}"):
                         self._add_engine_py_component(comp_cls)
                         ctx.close_current_popup()
                 ctx.dummy(0, 4)
@@ -1459,7 +1509,8 @@ class InspectorPanel(EditorPanel):
                 ctx.separator()
                 for leaf_name, spath in categorized[cat]:
                     found_any = True
-                    if ctx.selectable(f"  {leaf_name}"):
+                    uid += 1
+                    if ctx.selectable(f"  {leaf_name}##s{uid}"):
                         self._handle_script_drop(spath)
                         ctx.close_current_popup()
                 ctx.dummy(0, 4)
@@ -1470,13 +1521,15 @@ class InspectorPanel(EditorPanel):
                 ctx.separator()
                 for display_name, spath in uncategorized:
                     found_any = True
-                    if ctx.selectable(f"  {display_name}"):
+                    uid += 1
+                    if ctx.selectable(f"  {display_name}##s{uid}"):
                         self._handle_script_drop(spath)
                         ctx.close_current_popup()
         
         if not found_any:
             ctx.label(t("inspector.no_components_found"))
-        
+
+        ctx.end_child()
         ctx.pop_style_var(2)
 
     def _add_native_component(self, type_name: str):
@@ -1869,6 +1922,21 @@ class InspectorPanel(EditorPanel):
                 )
 
         ctx.push_id_str(f"selected_obj_{selected_object.id}")
+
+        # Detect prefab instance — read-only except Transform
+        _prefab_instance_readonly = False
+        _prefab_transform_readonly = False
+        _obj_prefab_guid = getattr(selected_object, 'prefab_guid', '')
+        if _obj_prefab_guid:
+            from InfEngine.engine.scene_manager import SceneFileManager
+            _sfm = SceneFileManager.instance()
+            if not (_sfm and _sfm.is_prefab_mode):
+                _prefab_instance_readonly = self._is_scene_prefab_instance_readonly(selected_object)
+                _prefab_transform_readonly = self._is_scene_prefab_transform_readonly(selected_object)
+
+        if _prefab_instance_readonly:
+            ctx.begin_disabled(True)
+
         # Active checkbox (no label — matches Unity's checkbox-only style)
         is_active = selected_object.active
         new_active = render_inspector_checkbox(ctx, "##obj_active", is_active)
@@ -1886,9 +1954,8 @@ class InspectorPanel(EditorPanel):
         # --- Tag & Layer dropdowns ---
         self._render_tag_layer_row(ctx, selected_object)
 
-        # --- Prefab instance header ---
-        if getattr(selected_object, 'is_prefab_instance', False):
-            self._render_prefab_header(ctx, selected_object)
+        if _prefab_instance_readonly:
+            ctx.end_disabled()
 
         ctx.dummy(0, Theme.INSPECTOR_TITLE_GAP)
         ctx.separator()
@@ -1906,7 +1973,15 @@ class InspectorPanel(EditorPanel):
             trans = selected_object.get_transform()
             transform_icon = self._get_component_icon_id("Transform")
             if render_component_header(ctx, "Transform", icon_id=transform_icon, show_enabled=False):
+                if _prefab_transform_readonly:
+                    ctx.begin_disabled(True)
                 self._render_transform_component(ctx, trans)
+                if _prefab_transform_readonly:
+                    ctx.end_disabled()
+
+        # --- Prefab instance: disable everything below Transform ---
+        if _prefab_instance_readonly:
+            ctx.begin_disabled(True)
 
         # C++ components (MeshRenderer, etc.)
         mesh_renderers = []
@@ -1995,6 +2070,7 @@ class InspectorPanel(EditorPanel):
                                     f"Cannot remove '{type_name}' — "
                                     f"{suffix}")
                         ctx.end_popup()
+                        ctx.pop_id()
                         continue
                     ctx.end_popup()
 
@@ -2080,6 +2156,7 @@ class InspectorPanel(EditorPanel):
                             else:
                                 _notify_scene_modified()
                         ctx.end_popup()
+                        ctx.pop_id()
                         continue
                     ctx.end_popup()
 
@@ -2125,6 +2202,10 @@ class InspectorPanel(EditorPanel):
             ctx.end_popup()
 
         self._render_object_material_sections(ctx, mesh_renderers)
+
+        if _prefab_instance_readonly:
+            ctx.end_disabled()
+
         ctx.pop_id()
 
     # ------------------------------------------------------------------
@@ -2146,6 +2227,8 @@ class InspectorPanel(EditorPanel):
         if not transforms:
             return
 
+        transform_readonly = any(self._is_scene_prefab_transform_readonly(o) for o in objects)
+
         lw = self._max_label_w(ctx, ["Position", "Rotation", "Scale"])
         primary = transforms[0]
 
@@ -2156,10 +2239,14 @@ class InspectorPanel(EditorPanel):
         scl = primary.local_scale
         sx, sy, sz = scl[0], scl[1], scl[2]
 
+        if transform_readonly:
+            ctx.begin_disabled(True)
         r = ctx.render_transform_fields(
             px, py_, pz, rx, ry, rz, sx, sy, sz,
             DRAG_SPEED_DEFAULT, DRAG_SPEED_DEFAULT, DRAG_SPEED_FINE, lw,
         )
+        if transform_readonly:
+            ctx.end_disabled()
 
         npx, npy, npz = r[0], r[1], r[2]
         dx, dy, dz = npx - px, npy - py_, npz - pz

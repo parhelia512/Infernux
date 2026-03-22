@@ -245,7 +245,9 @@ def render_material_body(ctx: InfGUIContext, panel, state):
         old_json = ""
 
     mat_data = _cached_data
-    is_builtin = mat_data.get("builtin", False)
+    is_builtin = bool(getattr(_native_mat, "is_builtin", False) or mat_data.get("builtin", False))
+    if is_builtin:
+        mat_data["builtin"] = True
 
     if is_builtin:
         ctx.label(t("material.builtin_locked"))
@@ -525,6 +527,8 @@ def render_material_body(ctx: InfGUIContext, panel, state):
     ctx.separator()
 
     # ── Properties ─────────────────────────────────────────────────────
+    if is_builtin:
+        ctx.begin_disabled(True)
     if render_compact_section_header(ctx, t("material.properties_section"), level="secondary"):
         props = mat_data.get("properties", {})
         if not props:
@@ -547,6 +551,8 @@ def render_material_body(ctx: InfGUIContext, panel, state):
                     changed = True
                     if ptype == 6:  # Texture needs full deserialize
                         requires_deserialize = True
+    if is_builtin:
+        ctx.end_disabled()
 
     ctx.separator()
 

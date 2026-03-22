@@ -182,6 +182,11 @@ def release_engine(project_path: str, engine_log_level=LogLevel.Info):
     finally:
         _remove_project_lock(lock_path, lock_token)
 
+    # Force-terminate: this is a standalone engine child process.
+    # Non-daemon native threads (C++ / watchdog emitters) may otherwise
+    # keep the process alive forever, leaking thousands of zombie procs.
+    os._exit(0)
+
 
 def run_player(project_path: str, engine_log_level=LogLevel.Info):
     """Launch InfEngine in standalone player mode (no editor chrome).
@@ -238,6 +243,8 @@ def run_player(project_path: str, engine_log_level=LogLevel.Info):
         bootstrap.engine.run()
     finally:
         _remove_project_lock(lock_path, lock_token)
+
+    os._exit(0)
 
 __all__ = [
     "Engine",

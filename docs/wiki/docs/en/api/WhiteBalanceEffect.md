@@ -39,7 +39,9 @@ URP-aligned White Balance post-processing effect.
 ## Example
 
 ```python
-# TODO: Add example for WhiteBalanceEffect
+effect = WhiteBalanceEffect()
+effect.temperature = 10.0
+effect.tint = -5.0
 ```
 
 <!-- USER CONTENT START --> example

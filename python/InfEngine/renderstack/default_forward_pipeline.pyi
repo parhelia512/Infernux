@@ -1,0 +1,51 @@
+"""Type stubs for InfEngine.renderstack.default_forward_pipeline."""
+
+from __future__ import annotations
+
+from enum import IntEnum
+from typing import TYPE_CHECKING
+
+from InfEngine.renderstack.render_pipeline import RenderPipeline
+
+if TYPE_CHECKING:
+    from InfEngine.rendergraph.graph import RenderGraph
+
+
+class MSAASamples(IntEnum):
+    """Anti-aliasing sample count."""
+    OFF = 1
+    X2 = 2
+    X4 = 4
+    X8 = 8
+
+
+class DefaultForwardPipeline(RenderPipeline):
+    """Standard forward rendering pipeline (default pipeline).
+
+    Defines a standard forward rendering topology::
+
+        ShadowCasterPass -> OpaquePass -> after_opaque -> SkyboxPass -> after_sky
+        -> TransparentPass -> after_transparent
+
+    Injection points:
+
+    =============================  ==================================
+    Injection Point                 Timing
+    =============================  ==================================
+    ``after_opaque``               After opaque objects, before skybox
+    ``after_sky``                  After skybox, before transparent
+    ``after_transparent``          After transparent objects
+    =============================  ==================================
+
+    Attributes:
+        shadow_resolution: Shadow map resolution (default 4096).
+        msaa_samples: Anti-aliasing sample count (default X4).
+        enable_screen_ui: Enable screen-space UI rendering.
+    """
+
+    name: str
+    shadow_resolution: int
+    msaa_samples: MSAASamples
+    enable_screen_ui: bool
+
+    def define_topology(self, graph: RenderGraph) -> None: ...

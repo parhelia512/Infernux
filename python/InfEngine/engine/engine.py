@@ -272,6 +272,14 @@ class Engine():
           2. C++ Cleanup (the heavy part — GPU drain + resource destruction)
           3. Join ResourcesManager thread (should already have exited by now)
         """
+        # Safety net: if cleanup hangs (C++ deadlock, thread stuck), force-kill
+        # the process after a generous timeout so we never leave zombie procs.
+        import threading as _th
+        def _force_exit():
+            import time; time.sleep(15)
+            os._exit(1)
+        _th.Thread(target=_force_exit, daemon=True, name="ShutdownWatchdog").start()
+
         # 0. If still in play mode, tear down Python components before C++
         #    objects are destroyed.  Without this, the C++ renderer
         #    destruction can trigger PyComponentProxy::OnDestroy callbacks
@@ -291,7 +299,7 @@ class Engine():
         # 3. Join the ResourcesManager thread.  It had the entire C++ cleanup
         #    duration to shut itself down, so the join should be near-instant.
         if self._resources_manager:
-            self._resources_manager.stop()
+            self._resources_manager.cleanup()
         
         # Clear all references
         self._gui_objects.clear()

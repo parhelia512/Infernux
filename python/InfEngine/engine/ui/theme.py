@@ -345,7 +345,13 @@ class Theme:
     SUCCESS_TEXT      : RGBA = (0.70,  0.80,  0.70,  1.0)   # 成功文本 / Success text (green)
     WARNING_TEXT      : RGBA = (0.90,  0.60,  0.20,  1.0)   # 警告文本 / Warning text (orange)
     ERROR_TEXT        : RGBA = (0.90,  0.30,  0.30,  1.0)   # 错误文本 / Error text (red)
-    PREFAB_TEXT       : RGBA = (0.42,  0.65,  0.95,  1.0)   # 预制体文本 / Prefab instance text (blue)
+    PREFAB_TEXT       : RGBA = (235.0 / 255.0, 87.0 / 255.0, 87.0 / 255.0, 1.0) # 预制体文本 / Prefab instance text (theme red)
+    PREFAB_HEADER_BG  : RGBA = srgb3(0.12, 0.12, 0.16)             # 预制体头部背景 / Prefab header bg (matches HEADER)
+    PREFAB_HEADER_H   : float = 28.0                                # 预制体头部高度 / Prefab header row height
+    PREFAB_HEADER_BTN_GAP : float = 4.0                             # 预制体按钮间距 / Prefab header button gap
+    PREFAB_BTN_NORMAL : RGBA = (235.0 / 255.0, 87.0 / 255.0, 87.0 / 255.0, 0.95) # 预制体按钮默认 / Prefab button normal (theme red)
+    PREFAB_BTN_HOVERED: RGBA = (1.0, 107.0 / 255.0, 107.0 / 255.0, 1.0)            # 预制体按钮悬停 / Prefab button hovered (lighter red)
+    PREFAB_BTN_ACTIVE : RGBA = (220.0 / 255.0, 67.0 / 255.0, 67.0 / 255.0, 1.0)    # 预制体按钮按下 / Prefab button active (deeper red)
 
     # -- 控制台交替行背景 / Console Alternating Row Background
     ROW_ALT           : RGBA = (0.06, 0.06, 0.09, 0.40)     # 交替行 / Alternate row bg (blue tint)

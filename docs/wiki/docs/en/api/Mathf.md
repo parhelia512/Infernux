@@ -79,7 +79,8 @@ A collection of common math functions and constants.
 ## Example
 
 ```python
-# TODO: Add example for Mathf
+value = Mathf.lerp(0.0, 10.0, 0.5)
+print(value)
 ```
 
 <!-- USER CONTENT START --> example

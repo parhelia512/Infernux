@@ -47,7 +47,8 @@ Texture format for render targets.
 ## Example
 
 ```python
-# TODO: Add example for Format
+graph = RenderGraph("Example")
+graph.create_texture("color", Format.R8G8B8A8_UNORM, camera_target=True)
 ```
 
 <!-- USER CONTENT START --> example

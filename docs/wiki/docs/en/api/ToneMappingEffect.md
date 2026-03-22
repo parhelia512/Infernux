@@ -44,7 +44,9 @@ and other HDR effects can operate on the full dynamic range.
 ## Example
 
 ```python
-# TODO: Add example for ToneMappingEffect
+effect = ToneMappingEffect()
+effect.exposure = 1.1
+effect.gamma = 2.2
 ```
 
 <!-- USER CONTENT START --> example

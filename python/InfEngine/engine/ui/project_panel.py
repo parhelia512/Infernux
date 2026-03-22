@@ -909,6 +909,9 @@ class ProjectPanel(EditorPanel):
                         self.__expanded_models.add(item['path'])
                 elif ext == '.scene':
                     self._open_scene_file(item['path'])
+                elif ext == '.prefab':
+                    from InfEngine.engine.scene_manager import SceneFileManager
+                    SceneFileManager.instance().open_prefab_mode(item['path'])
                 else:
                     self._open_file_with_system(item['path'])
 
@@ -1145,6 +1148,8 @@ class ProjectPanel(EditorPanel):
                             item_name = item['name']
                             ext = item.get('ext', '')
                             is_selected = item_path in _sel_set
+                            cell_start_x = ctx.get_cursor_pos_x()
+                            text_region_w = icon_size
 
                             # Check if this is an image file that can have a thumbnail
                             thumbnail_id = 0
@@ -1230,7 +1235,8 @@ class ProjectPanel(EditorPanel):
                                     ctx.set_keyboard_focus_here()
                                     self.__rename_focus_requested = False
 
-                                ctx.set_next_item_width(cell_width - 8)
+                                ctx.set_cursor_pos_x(cell_start_x)
+                                ctx.set_next_item_width(text_region_w)
                                 new_name = ctx.text_input(f"##rename_{item_path}", self.__renaming_name, 256)
                                 self.__renaming_name = new_name
 
@@ -1251,6 +1257,23 @@ class ProjectPanel(EditorPanel):
                                         name_display += '  \u25BC' if _is_exp else '  \u25B6'
                                 elif item_type in ('sub_mesh', 'sub_material'):
                                     name_display = f'\u21B3 {item_name}'
+
+                                # Truncate and center the name under the icon
+                                max_text_w = text_region_w - 4
+                                tw, _ = ctx.calc_text_size(name_display)
+                                if tw > max_text_w:
+                                    # Truncate with ellipsis
+                                    truncated = name_display
+                                    while len(truncated) > 1:
+                                        truncated = truncated[:-1]
+                                        tw2, _ = ctx.calc_text_size(truncated + '\u2026')
+                                        if tw2 <= max_text_w:
+                                            break
+                                    name_display = truncated + '\u2026'
+                                    tw = max_text_w
+                                # Center text
+                                offset_x = max((text_region_w - tw) * 0.5, 0.0)
+                                ctx.set_cursor_pos_x(cell_start_x + offset_x)
                                 ctx.label(name_display)
 
                             ctx.end_group()
@@ -1260,6 +1283,7 @@ class ProjectPanel(EditorPanel):
                     ctx.label(t("project.invalid_path"))
 
                 # Drop target: accept hierarchy GameObjects to create prefab files
+                # (bottom fill area catches drops not on specific items)
                 remaining_h = ctx.get_content_region_avail_height()
                 if remaining_h > 10:
                     ctx.invisible_button("##drop_prefab_area",
@@ -1269,5 +1293,9 @@ class ProjectPanel(EditorPanel):
                                      self._create_prefab_from_hierarchy)
 
             ctx.end_child()
+            # Also accept drops on the entire FileGrid child window
+            from .igui import IGUI
+            IGUI.drop_target(ctx, "HIERARCHY_GAMEOBJECT",
+                             self._create_prefab_from_hierarchy)
             ctx.pop_style_color(1)   # Border (from push_transparent_border)
             ctx.pop_style_var(1)     # WindowPadding

@@ -44,7 +44,8 @@ UI 画布组件。所有 UI 元素的根容器——UI 的舞台。
 ## 示例
 
 ```python
-# TODO: Add example for UICanvas
+canvas = self.game_object.add_component(UICanvas)
+canvas.sorting_order = 10
 ```
 
 <!-- USER CONTENT START --> example

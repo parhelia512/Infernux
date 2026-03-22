@@ -29,7 +29,7 @@
 ## 示例
 
 ```python
-# TODO: Add example for LogLevel
+Debug.set_log_level(LogLevel.WARNING)
 ```
 
 <!-- USER CONTENT START --> example

@@ -15,7 +15,8 @@ Suspend a coroutine until the end of the current frame.
 ## Example
 
 ```python
-# TODO: Add example for WaitForEndOfFrame
+yield WaitForEndOfFrame()
+Debug.log("Rendered one full frame")
 ```
 
 <!-- USER CONTENT START --> example

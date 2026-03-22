@@ -32,11 +32,34 @@ from InfEngine.engine.path_utils import safe_path as _safe_path
 SCENE_EXTENSION = ".scene"
 EDITOR_SETTINGS_FILE = "EditorSettings.json"
 DEFAULT_SCENE_NAME = "Untitled Scene"
+PREFAB_MODE_SCENE_NAME = "__PrefabMode__"
+PREFAB_RESTORE_SCENE_NAME = "__PrefabRestore__"
 
 # ImGuiKey enum values (matches imgui.h)
 KEY_S = 564          # S
 KEY_LEFT_CTRL = 527  # Left Ctrl
 KEY_RIGHT_CTRL = 531 # Right Ctrl
+
+
+def _empty_scene_json(name: str) -> str:
+    return json.dumps({
+        "schema_version": 1,
+        "name": name,
+        "isPlaying": False,
+        "objects": [],
+    })
+
+
+def _get_scene_root_objects(scene):
+    if scene is None:
+        return []
+    if hasattr(scene, "get_root_objects"):
+        roots = scene.get_root_objects()
+        return roots if roots is not None else []
+    if hasattr(scene, "get_root_game_objects"):
+        roots = scene.get_root_game_objects()
+        return roots if roots is not None else []
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +201,7 @@ class SceneFileManager:
         # preventing in-flight GPU resources from being destroyed mid-use.
         self._deferred_load_path: Optional[str] = None   # non-None → load pending
         self._deferred_new_scene: bool = False            # True → new scene pending
+        self._deferred_exit_prefab: bool = False           # True → exit prefab mode next frame
 
         # Guard against repeated request_close() calls while a close
         # confirmation dialog is already visible.  Without this,
@@ -185,6 +209,14 @@ class SceneFileManager:
         # _request_save_confirmation() and re-open the ImGui popup every
         # frame, making the buttons unclickable.
         self._close_in_progress: bool = False
+
+        # Prefab Mode state
+        self.is_prefab_mode = False
+        self.prefab_mode_path = None
+        self.prefab_envelope = {}
+        self._previous_scene_path = None
+        self._previous_scene_dirty = False
+        self._previous_scene_json = ""
 
     @classmethod
     def instance(cls) -> Optional["SceneFileManager"]:
@@ -213,7 +245,7 @@ class SceneFileManager:
     @property
     def is_loading(self) -> bool:
         """True while a deferred scene load is pending."""
-        return self._deferred_load_path is not None or self._deferred_new_scene
+        return self._deferred_load_path is not None or self._deferred_new_scene or self._deferred_exit_prefab
 
     def mark_dirty(self):
         if self._is_play_mode():
@@ -250,12 +282,55 @@ class SceneFileManager:
             Debug.log_warning("Cannot save scene while in Play mode.")
             return False
 
+        # In Prefab Mode, Ctrl+S is ignored — prefab auto-saves on exit.
+        if self.is_prefab_mode:
+            return False
+
         if self._current_scene_path:
             return self._do_save(self._current_scene_path)
 
         # No file yet — show a Save As dialog
         self._show_save_as_dialog()
         return False
+
+    def _save_prefab(self) -> bool:
+        """Save the currently-edited prefab in Prefab Mode."""
+        if not self.prefab_mode_path:
+            Debug.log_warning("No prefab path in Prefab Mode.")
+            return False
+
+        from InfEngine.lib import SceneManager
+        from InfEngine.engine.prefab_manager import _strip_prefab_fields, _strip_prefab_runtime_fields
+
+        scene = SceneManager.instance().get_active_scene()
+        roots = _get_scene_root_objects(scene)
+        if not roots:
+            Debug.log_warning("No root objects in Prefab Mode scene.")
+            return False
+
+        prefab_root = roots[0]
+        try:
+            root_data = json.loads(prefab_root.serialize())
+        except Exception as exc:
+            Debug.log_error(f"Failed to serialize prefab root: {exc}")
+            return False
+
+        _strip_prefab_fields(root_data)
+        _strip_prefab_runtime_fields(root_data)
+
+        envelope = dict(self.prefab_envelope) if isinstance(self.prefab_envelope, dict) else {}
+        envelope["root_object"] = root_data
+
+        try:
+            with open(self.prefab_mode_path, 'w', encoding='utf-8') as f:
+                json.dump(envelope, f, indent=2, ensure_ascii=False)
+        except OSError as exc:
+            Debug.log_error(f"Failed to save prefab: {exc}")
+            return False
+
+        self._dirty = False
+        Debug.log_internal(f"Prefab saved: {self.prefab_mode_path}")
+        return True
 
     def save_scene_as(self):
         """Force a Save-As dialog regardless of whether a path exists."""
@@ -264,6 +339,293 @@ class SceneFileManager:
             return
         self._show_save_as_dialog()
 
+
+    def open_prefab_mode(self, prefab_path: str):
+        """Enter Prefab Mode, pushing the current scene to memory."""
+        if self.is_prefab_mode or not prefab_path or not os.path.isfile(prefab_path):
+            return False
+
+        if self._is_play_mode():
+            Debug.log_warning("Cannot enter Prefab Mode while in Play mode.")
+            return False
+
+        from InfEngine.lib import SceneManager
+        from InfEngine.engine.prefab_manager import _restore_pending_py_components, _strip_prefab_runtime_fields
+        from InfEngine.engine.ui.selection_manager import SelectionManager
+
+        active_scene = SceneManager.instance().get_active_scene()
+        if active_scene is None:
+            Debug.log_warning("No active scene available for Prefab Mode.")
+            return False
+
+        try:
+            with open(prefab_path, "r", encoding="utf-8") as f:
+                prefab_data = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            Debug.log_error(f"Failed to open prefab for Prefab Mode: {exc}")
+            return False
+
+        root_obj_data = prefab_data.get("root_object")
+        if root_obj_data is None:
+            Debug.log_error("Invalid prefab file: missing 'root_object'.")
+            return False
+
+        # Validate prefab version
+        from InfEngine.engine.prefab_manager import PREFAB_VERSION
+        file_version = prefab_data.get("prefab_version", 0)
+        if file_version > PREFAB_VERSION:
+            Debug.log_error(
+                f"Prefab '{prefab_path}' uses version {file_version} but this "
+                f"engine only supports up to version {PREFAB_VERSION}."
+            )
+            return False
+
+        root_obj_data = json.loads(json.dumps(root_obj_data))
+        _strip_prefab_runtime_fields(root_obj_data)
+
+        self._previous_scene_json = active_scene.serialize()
+        self._previous_scene_path = self._current_scene_path
+        self._previous_scene_dirty = self._dirty
+        self.prefab_envelope = prefab_data
+
+        self._prepare_native_scene_swap()
+
+        # Destroy ALL objects in the original scene so their physics bodies
+        # are removed from the global PhysicsWorld.  Without this, invisible
+        # colliders from the main scene interfere with the prefab scene.
+        active_scene.deserialize(_empty_scene_json(active_scene.name))
+
+        sm = SceneManager.instance()
+        new_scene = sm.get_scene(PREFAB_MODE_SCENE_NAME)
+        if new_scene is None:
+            new_scene = sm.create_scene(PREFAB_MODE_SCENE_NAME)
+        # Always deserialize empty JSON to clear old objects and component
+        # registries (MeshRenderer, physics, etc.) — prevents the previous
+        # scene's renderers from leaking into Prefab Mode.
+        new_scene.deserialize(_empty_scene_json(PREFAB_MODE_SCENE_NAME))
+        sm.set_active_scene(new_scene)
+
+        root_json = json.dumps(root_obj_data)
+        root_obj = new_scene.instantiate_from_json(root_json)
+        if root_obj is None:
+            Debug.log_error("Failed to instantiate prefab in Prefab Mode.")
+            return False
+
+        if new_scene.has_pending_py_components():
+            try:
+                _restore_pending_py_components(new_scene, self._asset_database)
+            except Exception as exc:
+                Debug.log_error(f"Failed to restore prefab Python components: {exc}")
+
+        roots = _get_scene_root_objects(new_scene)
+        if roots:
+            SelectionManager.instance().select(roots[0].id)
+
+        self.is_prefab_mode = True
+        self.prefab_mode_path = os.path.abspath(prefab_path)
+        self._current_scene_path = prefab_path
+        self._dirty = False
+        self._reset_undo_history(scene_is_dirty=False)
+
+        if self._on_scene_changed:
+            self._on_scene_changed()
+        return True
+
+    def exit_prefab_mode(self):
+        """Schedule exit from Prefab Mode on the next frame.
+
+        The actual work is deferred to ``poll_deferred_load`` so that graphic
+        resources referenced by the current frame's command buffers are not
+        destroyed mid-render.  This matches the deferred pattern used by
+        ``open_scene`` / ``new_scene``.
+        """
+        if not self.is_prefab_mode:
+            return False
+        self._deferred_exit_prefab = True
+        return True
+
+    def _do_exit_prefab_mode(self):
+        """Internal: perform the actual Prefab Mode exit (called by poll_deferred_load)."""
+        if not self.is_prefab_mode:
+            return False
+
+        from InfEngine.lib import SceneManager
+        from InfEngine.engine.prefab_manager import _restore_pending_py_components
+
+        # Always save the prefab on exit
+        if self.prefab_mode_path:
+            self._save_prefab()
+
+        # Always resolve the prefab GUID so instances can be refreshed,
+        # regardless of whether the save happened now or earlier via Ctrl+S.
+        saved_prefab_guid = None
+        if self.prefab_mode_path and self._asset_database:
+            try:
+                saved_prefab_guid = self._asset_database.get_guid_from_path(
+                    self.prefab_mode_path
+                ) or None
+            except Exception:
+                pass
+
+        self._prepare_native_scene_swap()
+
+        sm = SceneManager.instance()
+
+        # Destroy all objects in the prefab scene FIRST so their physics
+        # bodies (Colliders, Rigidbodies) are removed from the global
+        # PhysicsWorld before we restore the main scene.
+        prefab_scene = sm.get_scene(PREFAB_MODE_SCENE_NAME)
+        if prefab_scene is not None:
+            prefab_scene.deserialize(_empty_scene_json(PREFAB_MODE_SCENE_NAME))
+
+        scene = sm.get_scene(PREFAB_RESTORE_SCENE_NAME)
+        if scene is None:
+            scene = sm.create_scene(PREFAB_RESTORE_SCENE_NAME)
+        # Always deserialize empty first so ClearComponentRegistries runs,
+        # preventing prefab scene renderers from leaking into the restored scene.
+        scene.deserialize(_empty_scene_json(PREFAB_RESTORE_SCENE_NAME))
+        sm.set_active_scene(scene)
+
+        if self._previous_scene_json:
+            scene.deserialize(self._previous_scene_json)
+            if scene.has_pending_py_components():
+                try:
+                    _restore_pending_py_components(scene, self._asset_database)
+                except Exception as exc:
+                    Debug.log_error(f"Failed to restore scene Python components: {exc}")
+
+        # Refresh instances of the edited prefab so changes propagate
+        if saved_prefab_guid:
+            self._refresh_prefab_instances(
+                scene, saved_prefab_guid, self.prefab_mode_path,
+                self._asset_database
+            )
+
+        self.is_prefab_mode = False
+        self.prefab_mode_path = None
+        self._current_scene_path = self._previous_scene_path
+        self._dirty = self._previous_scene_dirty
+        self.prefab_envelope = {}
+        self._previous_scene_json = ""
+        self._previous_scene_dirty = False
+        self._previous_scene_path = None
+        self._reset_undo_history(scene_is_dirty=self._dirty)
+
+        if self._on_scene_changed:
+            self._on_scene_changed()
+        return True
+
+    # ------------------------------------------------------------------
+    # Prefab instance refresh
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _refresh_prefab_instances(scene, prefab_guid: str, prefab_path: str,
+                                  asset_database=None):
+        """Re-instantiate all instances of a prefab to pick up updated data.
+
+        Iterates root objects, finds those whose *prefab_guid* matches,
+        then replaces them in-place (preserving only the root's local position).
+        """
+        from InfEngine.engine.prefab_manager import instantiate_prefab
+
+        if not prefab_guid or not prefab_path:
+            return
+
+        roots = _get_scene_root_objects(scene)
+        if not roots:
+            return
+
+        def _collect_instances(objects):
+            found = []
+            for obj in objects:
+                guid = getattr(obj, 'prefab_guid', '')
+                is_root = getattr(obj, 'prefab_root', False)
+                if guid == prefab_guid and is_root:
+                    found.append(obj)
+                else:
+                    children = list(obj.get_children()) if hasattr(obj, 'get_children') else []
+                    found.extend(_collect_instances(children))
+            return found
+
+        instances = _collect_instances(roots)
+        if not instances:
+            return
+
+        Debug.log_internal(
+            f"Refreshing {len(instances)} prefab instance(s) for GUID={prefab_guid}"
+        )
+
+        for old_obj in instances:
+            try:
+                parent = old_obj.get_parent() if hasattr(old_obj, 'get_parent') else None
+                # Preserve the instance's full local transform (position,
+                # rotation, scale) — each instance keeps its own placement.
+                tf = old_obj.transform
+                local_pos = tf.local_position if tf else None
+                local_rot = tf.local_rotation if tf else None
+                local_scl = tf.local_scale if tf else None
+
+                new_obj = instantiate_prefab(
+                    file_path=prefab_path,
+                    scene=scene,
+                    parent=parent,
+                    asset_database=asset_database,
+                )
+                if new_obj:
+                    new_tf = new_obj.transform
+                    if new_tf:
+                        if local_pos is not None:
+                            new_tf.local_position = local_pos
+                        if local_rot is not None:
+                            new_tf.local_rotation = local_rot
+                        if local_scl is not None:
+                            new_tf.local_scale = local_scl
+
+                scene.destroy_game_object(old_obj)
+            except Exception as exc:
+                Debug.log_warning(f"Failed to refresh prefab instance: {exc}")
+
+    def sync_all_prefab_instances(self, scene=None):
+        """Sync every prefab instance in *scene* to its latest on-disk data.
+
+        Called after scene load and after exiting Prefab Mode so that all
+        prefab instances reflect the most recent prefab files.
+        """
+        if scene is None:
+            from InfEngine.lib import SceneManager
+            scene = SceneManager.instance().get_active_scene()
+        if scene is None or not self._asset_database:
+            return
+
+        roots = _get_scene_root_objects(scene)
+        if not roots:
+            return
+
+        # Collect unique (prefab_guid → prefab_path) pairs
+        guid_to_path: dict[str, str] = {}
+
+        def _walk(objects):
+            for obj in objects:
+                guid = getattr(obj, 'prefab_guid', '')
+                is_root = getattr(obj, 'prefab_root', False)
+                if guid and is_root and guid not in guid_to_path:
+                    try:
+                        p = self._asset_database.get_path_from_guid(guid)
+                        if p and os.path.isfile(p):
+                            guid_to_path[guid] = p
+                    except Exception:
+                        pass
+                children = list(obj.get_children()) if hasattr(obj, 'get_children') else []
+                _walk(children)
+
+        _walk(roots)
+
+        for guid, path in guid_to_path.items():
+            self._refresh_prefab_instances(
+                scene, guid, path, self._asset_database
+            )
+
     def open_scene(self, path: str) -> bool:
         """Load a .scene file, replacing the current scene.
 
@@ -271,6 +633,21 @@ class SceneFileManager:
         The actual load is deferred to the next frame so the scene view can
         stop rendering old 3D content first.
         """
+        if self.is_prefab_mode:
+            # Auto-save prefab and schedule exit.  The deferred exit runs
+            # before the deferred open in poll_deferred_load, so the
+            # original scene is restored first.
+            if self.prefab_mode_path:
+                self._save_prefab()
+            self.exit_prefab_mode()
+            if self._previous_scene_path:
+                self._save_camera_state(self._previous_scene_path)
+            if self._previous_scene_dirty:
+                self._request_save_confirmation('open', path)
+                return False
+            self._begin_deferred_open(path)
+            return True
+
         # Save current camera state before switching
         if self._current_scene_path:
             self._save_camera_state(self._current_scene_path)
@@ -286,6 +663,18 @@ class SceneFileManager:
         If the current scene is dirty, shows a save-confirmation popup first.
         The actual creation is deferred to the next frame.
         """
+        if self.is_prefab_mode:
+            if self.prefab_mode_path:
+                self._save_prefab()
+            self.exit_prefab_mode()
+            if self._previous_scene_path:
+                self._save_camera_state(self._previous_scene_path)
+            if self._previous_scene_dirty:
+                self._request_save_confirmation('new')
+                return
+            self._begin_deferred_new()
+            return
+
         # Persist camera state before switching away
         if self._current_scene_path:
             self._save_camera_state(self._current_scene_path)
@@ -313,16 +702,33 @@ class SceneFileManager:
             return
         self._close_in_progress = True
 
-        # Always persist camera state before closing
-        if self._current_scene_path:
-            self._save_camera_state(self._current_scene_path)
-
         # During play mode, close immediately — the save dialog's "Save"
         # button cannot save the pre-play state properly.
         if self._is_play_mode():
             if self._engine:
                 self._engine.confirm_close()
             return
+
+        # In Prefab Mode: auto-save the prefab, schedule the deferred exit
+        # back to the original scene, then decide based on the *original*
+        # scene's dirty state.  By the time the user interacts with the
+        # save dialog (next frame), _do_exit_prefab_mode has already
+        # restored the original scene so _do_save operates on it.
+        if self.is_prefab_mode:
+            if self.prefab_mode_path:
+                self._save_prefab()
+            if self._previous_scene_path:
+                self._save_camera_state(self._previous_scene_path)
+            self.exit_prefab_mode()  # deferred
+            if self._previous_scene_dirty:
+                self._request_save_confirmation('close')
+            elif self._engine:
+                self._engine.confirm_close()
+            return
+
+        # Always persist camera state before closing
+        if self._current_scene_path:
+            self._save_camera_state(self._current_scene_path)
 
         if self._dirty:
             self._request_save_confirmation('close')
@@ -388,7 +794,7 @@ class SceneFileManager:
         self._deferred_new_scene = True
 
     def poll_deferred_load(self):
-        """Execute a pending deferred scene load/new.
+        """Execute a pending deferred scene load/new/prefab-exit.
 
         Must be called every frame (from menu_bar).  The one-frame delay
         between _begin_deferred_open/new and this method gives the
@@ -400,6 +806,15 @@ class SceneFileManager:
         until the new scene's first Execute() overwrites it, so no
         placeholder or extra-frame delay is needed.
         """
+        # Process prefab-mode exit FIRST — it restores the previous scene
+        # so that a subsequent deferred open/new operates on it.
+        if self._deferred_exit_prefab:
+            self._deferred_exit_prefab = False
+            try:
+                self._do_exit_prefab_mode()
+            except Exception as exc:
+                Debug.log_error(f"Prefab Mode exit failed: {exc}")
+
         if self._deferred_load_path is not None:
             path = self._deferred_load_path
             self._deferred_load_path = None
@@ -528,18 +943,18 @@ class SceneFileManager:
         # reference stale scene objects through outline/gizmo paths.
         try:
             self._engine.clear_selection_outline()
-        except Exception:
-            pass
+        except Exception as exc:
+            Debug.log_warning(f"Failed to clear selection outline: {exc}")
 
         try:
             self._engine.clear_component_gizmos()
-        except Exception:
-            pass
+        except Exception as exc:
+            Debug.log_warning(f"Failed to clear component gizmos: {exc}")
 
         try:
             self._engine.clear_component_gizmo_icons()
-        except Exception:
-            pass
+        except Exception as exc:
+            Debug.log_warning(f"Failed to clear gizmo icons: {exc}")
 
         try:
             self._engine.wait_for_gpu_idle()
@@ -590,6 +1005,9 @@ class SceneFileManager:
 
         self._restore_camera_state(self._current_scene_path)
         self._remember_last_scene(self._current_scene_path)
+
+        # Sync all prefab instances to the latest on-disk prefab data
+        self.sync_all_prefab_instances(scene)
 
         Debug.log_internal(f"Scene loaded: {os.path.basename(path)}")
         if self._on_scene_changed:
@@ -863,132 +1281,10 @@ class SceneFileManager:
 
     def _restore_py_components(self, scene):
         """After loading, recreate Python component instances from pending data."""
-
-        # Always clear registries — the old scene's objects are gone regardless
-        # of whether the new scene has Python components.
-        from InfEngine.components.component import InfComponent
-        InfComponent._clear_all_instances()
-        from InfEngine.components.builtin_component import BuiltinComponent
-        BuiltinComponent._clear_cache()
-
-        # Notify GizmosCollector that the scene has changed (icon cache stale).
-        from InfEngine.gizmos.collector import notify_scene_changed
-        notify_scene_changed()
-
-        has_pending = scene.has_pending_py_components()
-        if not has_pending:
-            return
-
-        pending = scene.take_pending_py_components()
-        if not pending:
-            return
-
-        restored = 0
-        for pc in pending:
-            try:
-                self._restore_single_py_component(scene, pc)
-                restored += 1
-            except Exception as exc:
-                Debug.log_error(
-                    f"Failed to restore component '{pc.type_name}' on "
-                    f"GameObject {pc.game_object_id}: {exc}"
-                )
-                # Create BrokenComponent so the data is preserved on save
-                try:
-                    go = scene.find_by_id(pc.game_object_id)
-                    if go:
-                        from InfEngine.components.component import BrokenComponent
-                        broken = BrokenComponent()
-                        broken._broken_type_name = pc.type_name
-                        broken._script_guid = pc.script_guid
-                        broken._broken_fields_json = pc.fields_json or "{}"
-                        broken._broken_error = f"Restore failed: {exc}"
-                        broken.enabled = pc.enabled
-                        go.add_py_component(broken)
-                except Exception:
-                    pass
-
-        Debug.log_internal(f"Restored {restored}/{len(pending)} Python component(s) from scene file")
-
-    def _restore_single_py_component(self, scene, pc):
-        """Restore one pending Python component. May raise on failure."""
-        go = scene.find_by_id(pc.game_object_id)
-        if not go:
-            Debug.log_warning(
-                f"Cannot restore component '{pc.type_name}': "
-                f"GameObject {pc.game_object_id} not found"
-            )
-            return
-
-        # Resolve script path from GUID
-        script_path = None
-        if pc.script_guid and self._asset_database:
-            script_path = self._asset_database.get_path_from_guid(pc.script_guid)
-
-        # In packaged builds .py sources are compiled to .pyc and removed.
-        if script_path and not os.path.exists(script_path) and script_path.endswith('.py'):
-            pyc_path = script_path + 'c'
-            if os.path.exists(pyc_path):
-                script_path = pyc_path
-
-        # Packaged-build fallback: use build-time GUID manifest
-        if not script_path and pc.script_guid:
-            from InfEngine.engine.project_context import resolve_guid_to_path
-            script_path = resolve_guid_to_path(pc.script_guid)
-
-        instance = None
-        if not script_path:
-            # Fallback: try to find by type name in registry
-            from InfEngine.components.registry import get_type
-            comp_class = get_type(pc.type_name)
-            if comp_class:
-                instance = comp_class()
-            # else: instance stays None → will become BrokenComponent below
-        else:
-            from InfEngine.components.script_loader import load_and_create_component
-            instance = load_and_create_component(
-                script_path, asset_database=self._asset_database
-            )
-
-        if instance is None:
-            # Script failed to load — create a BrokenComponent placeholder
-            # that preserves the serialized data.
-            from InfEngine.components.component import BrokenComponent
-            from InfEngine.components.script_loader import get_script_error_by_path
-            broken = BrokenComponent()
-            broken._broken_type_name = pc.type_name
-            broken._script_guid = pc.script_guid
-            broken._broken_fields_json = pc.fields_json or "{}"
-            error_msg = None
-            if script_path:
-                error_msg = get_script_error_by_path(script_path)
-            if not error_msg:
-                error_msg = (
-                    f"Cannot find script for component '{pc.type_name}' "
-                    f"(guid={pc.script_guid})"
-                    if not script_path
-                    else f"Script '{script_path}' contains no InfComponent subclass "
-                         f"for '{pc.type_name}'"
-                )
-            broken._broken_error = error_msg
-            broken.enabled = pc.enabled
-            go.add_py_component(broken)
-            Debug.log_warning(
-                f"Component '{pc.type_name}' on '{go.name}' loaded as broken "
-                f"placeholder — fix the script to restore functionality."
-            )
-            return
-
-        # Apply serialized fields
-        if pc.fields_json:
-            instance._deserialize_fields(pc.fields_json)
-
-        # Set enabled state
-        instance.enabled = pc.enabled
-
-        # Attach to GameObject
-        go.add_py_component(instance)
-
-        # Call lifecycle hook
-        instance._call_on_after_deserialize()
+        from InfEngine.engine.component_restore import restore_pending_py_components
+        restore_pending_py_components(
+            scene,
+            asset_database=self._asset_database,
+            clear_registries=True,
+        )
 

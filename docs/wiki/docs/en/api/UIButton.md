@@ -64,7 +64,8 @@ Combines **Image** (background) and **Text** (label) capabilities:
 ## Example
 
 ```python
-# TODO: Add example for UIButton
+button = self.game_object.add_component(UIButton)
+button.on_click.add_listener(lambda: Debug.log("Clicked"))
 ```
 
 <!-- USER CONTENT START --> example

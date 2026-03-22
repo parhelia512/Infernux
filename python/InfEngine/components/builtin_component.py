@@ -88,6 +88,7 @@ class CppProperty:
         get_converter=None,
         set_converter=None,
         hdr: bool = False,
+        slider: bool = False,
     ):
         self.cpp_attr = cpp_attr
         self.get_converter = get_converter
@@ -104,6 +105,7 @@ class CppProperty:
             enum_labels=enum_labels,
             visible_when=visible_when,
             hdr=hdr,
+            slider=slider,
         )
 
     # Called by Python when the class body is processed.
@@ -271,6 +273,27 @@ class BuiltinComponent(InfComponent):
                 from InfEngine.debug import Debug
                 Debug.log_warning(f"[BuiltinComponent] cache clear failed: {exc}")
         BuiltinComponent._wrapper_cache.clear()
+
+    # ------------------------------------------------------------------
+    # Property overrides (delegate to C++)
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Inspector rendering (override in subclasses for custom layout)
+    # ------------------------------------------------------------------
+
+    def render_inspector(self, ctx) -> None:
+        """Render this component's inspector UI.
+
+        Override in subclasses to customise the layout.  The default
+        implementation renders all :class:`CppProperty` descriptors
+        using the standard inspector field widgets.
+
+        Args:
+            ctx: The ImGui context (:class:`InfGUIContext`).
+        """
+        from InfEngine.engine.ui.inspector_components import render_builtin_via_setters
+        render_builtin_via_setters(ctx, self, type(self))
 
     # ------------------------------------------------------------------
     # Property overrides (delegate to C++)

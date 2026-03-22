@@ -28,7 +28,8 @@ UI 图片组件。在屏幕上显示图片或色块。
 ## 示例
 
 ```python
-# TODO: Add example for UIImage
+image = self.game_object.add_component(UIImage)
+image.texture_path = "Assets/UI/icon.png"
 ```
 
 <!-- USER CONTENT START --> example

@@ -310,6 +310,31 @@ class ResourcesManager:
         self._script_reload_callbacks = {}  # file_path -> [callbacks]
         self._script_catalog_callbacks = []  # [callback(file_path, event_type)]
 
+    def _shutdown_observer(self, *, join_timeout: float = 5.0) -> None:
+        """Stop watchdog threads aggressively so the Python process can exit."""
+        observer = self._observer
+        self._observer = None
+        if observer is None:
+            return
+
+        try:
+            observer.stop()
+        except Exception:
+            pass
+
+        try:
+            observer.unschedule_all()
+        except Exception:
+            pass
+
+        try:
+            observer.join(timeout=join_timeout)
+        except Exception:
+            pass
+
+        if getattr(observer, "is_alive", lambda: False)():
+            Debug.log_warning("ResourcesManager observer did not stop cleanly before timeout")
+
     def start(self):
         """
         Start to scan the project directory for resources in a sub-thread.
@@ -334,14 +359,21 @@ class ResourcesManager:
 
         self._event_handler = ResourceChangeHandler(self._engine)
         self._observer = Observer()
-        self._observer.schedule(self._event_handler, self._assets_path, recursive=True)
-        self._observer.start()
+        try:
+            # If watchdog fails to shut down for any reason, do not let its
+            # worker thread keep the entire engine process alive forever.
+            self._observer.daemon = True
+        except Exception:
+            pass
 
-        while not self._stop_event.is_set():
-            self._stop_event.wait(timeout=0.25)  # wake quickly on shutdown
-        if self._observer:
-            self._observer.stop()
-            self._observer.join(timeout=0.5)
+        try:
+            self._observer.schedule(self._event_handler, self._assets_path, recursive=True)
+            self._observer.start()
+
+            while not self._stop_event.is_set():
+                self._stop_event.wait(timeout=0.25)  # wake quickly on shutdown
+        finally:
+            self._shutdown_observer(join_timeout=5.0)
 
     def process_pending_reloads(self):
         """Process pending script reloads in main thread. Call this from update loop."""
@@ -399,9 +431,15 @@ class ResourcesManager:
         """
         self._stop_event.set()
 
+        # Stop watchdog immediately from the calling thread as well. This makes
+        # shutdown robust even if the worker thread is blocked or delayed.
+        self._shutdown_observer(join_timeout=5.0)
+
         # Join the scanning thread (its finally block handles observer teardown).
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=1.0)
+            self._thread.join(timeout=5.0)
+            if self._thread.is_alive():
+                Debug.log_warning("ResourcesManager thread did not stop cleanly before timeout")
 
     def is_running(self):
         """
@@ -419,13 +457,17 @@ class ResourcesManager:
         Clean up all resources and stop monitoring.
         This method ensures complete cleanup of the ResourcesManager.
         """
-        if self.is_running():
-            self.stop()
+        self.stop()
             
         # Reset internal state
         self._observer = None
         self._thread = None
         self._stop_event.clear()
         self._engine = None
+        self._event_handler = None
+        self._script_reload_callbacks.clear()
+        self._script_catalog_callbacks.clear()
+        if ResourcesManager._instance is self:
+            ResourcesManager._instance = None
         
         Debug.log_internal("ResourcesManager cleanup completed")

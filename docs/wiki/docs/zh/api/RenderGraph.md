@@ -61,7 +61,10 @@
 ## 示例
 
 ```python
-# TODO: Add example for RenderGraph
+graph = RenderGraph("Example")
+color = graph.create_texture("color", Format.R8G8B8A8_UNORM, camera_target=True)
+graph.add_pass("Opaque")
+graph.set_output(color)
 ```
 
 <!-- USER CONTENT START --> example

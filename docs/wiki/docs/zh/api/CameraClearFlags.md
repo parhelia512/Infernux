@@ -28,7 +28,7 @@
 ## 示例
 
 ```python
-# TODO: Add example for CameraClearFlags
+camera.clear_flags = CameraClearFlags.SKYBOX
 ```
 
 <!-- USER CONTENT START --> example

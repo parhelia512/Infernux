@@ -35,7 +35,8 @@
 ## 示例
 
 ```python
-# TODO: Add example for WaitWhile
+yield WaitWhile(lambda: self.is_loading)
+Debug.log("Loading loop ended")
 ```
 
 <!-- USER CONTENT START --> example

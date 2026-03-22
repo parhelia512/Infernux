@@ -45,7 +45,8 @@ Attributes:
 ## Example
 
 ```python
-# TODO: Add example for PointerEventData
+def on_click(self, event_data: PointerEventData):
+    Debug.log(f"Pointer: {event_data.position}")
 ```
 
 <!-- USER CONTENT START --> example

@@ -44,7 +44,9 @@
 ## 示例
 
 ```python
-# TODO: Add example for Physics
+hit = Physics.raycast(self.transform.position, vector3(0, 0, 1), 10.0)
+if hit:
+	Debug.log("Raycast hit")
 ```
 
 <!-- USER CONTENT START --> example

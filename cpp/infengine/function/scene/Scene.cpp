@@ -560,7 +560,7 @@ GameObject *Scene::InstantiateGameObject(GameObject *source, GameObject *parent)
             obj->m_transform.Deserialize(tJson.dump());
         }
 
-        // C++ components via factory (fresh component IDs)
+        // C++ components via factory (fresh component IDs / instance GUIDs)
         if (objJson.contains("components") && objJson["components"].is_array()) {
             for (const auto &compJson : objJson["components"]) {
                 std::string typeName = compJson.value("type", std::string());
@@ -573,6 +573,7 @@ GameObject *Scene::InstantiateGameObject(GameObject *source, GameObject *parent)
 
                 json cJson = compJson;
                 cJson.erase("component_id");
+                cJson.erase("instance_guid");
                 comp->SetGameObject(obj.get());
                 comp->Deserialize(cJson.dump());
                 obj->m_components.push_back(std::move(comp));
@@ -693,6 +694,7 @@ GameObject *Scene::InstantiateFromJson(const std::string &jsonStr, GameObject *p
                     continue;
                 json cJson = compJson;
                 cJson.erase("component_id");
+                cJson.erase("instance_guid");
                 comp->SetGameObject(obj.get());
                 comp->Deserialize(cJson.dump());
                 obj->m_components.push_back(std::move(comp));
@@ -840,6 +842,11 @@ bool Scene::Deserialize(const std::string &jsonStr)
                 int layer = objJson["layer"].get<int>();
                 obj->m_layer = (layer >= 0 && layer < 32) ? layer : 0;
             }
+
+            // Prefab instance tracking
+            if (objJson.contains("prefab_guid"))
+                obj->m_prefabGuid = objJson["prefab_guid"].get<std::string>();
+            obj->m_prefabRoot = objJson.value("prefab_root", false);
 
             if (objJson.contains("transform")) {
                 std::string transformJson = objJson["transform"].dump();

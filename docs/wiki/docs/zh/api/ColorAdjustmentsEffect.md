@@ -41,7 +41,9 @@
 ## 示例
 
 ```python
-# TODO: Add example for ColorAdjustmentsEffect
+effect = ColorAdjustmentsEffect()
+effect.post_exposure = 0.5
+effect.saturation = -10.0
 ```
 
 <!-- USER CONTENT START --> example

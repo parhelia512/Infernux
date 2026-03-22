@@ -58,7 +58,8 @@ UI 按钮组件。用户点击的地方——程序员 Debug 的地方。
 ## 示例
 
 ```python
-# TODO: Add example for UIButton
+button = self.game_object.add_component(UIButton)
+button.on_click.add_listener(lambda: Debug.log("Clicked"))
 ```
 
 <!-- USER CONTENT START --> example

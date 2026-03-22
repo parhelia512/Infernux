@@ -728,4 +728,4 @@ def render_apply_revert(
         ctx.same_line()
         ctx.button("Revert", None)
         ctx.end_disabled()
-    return changed
+    return None

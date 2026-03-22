@@ -3,7 +3,6 @@ Unity-style Hierarchy panel showing scene objects tree.
 """
 
 import os
-from dataclasses import dataclass
 
 from InfEngine.lib import InfGUIContext
 from InfEngine.engine.i18n import t
@@ -12,16 +11,6 @@ from .panel_registry import editor_panel
 from .selection_manager import SelectionManager
 from .theme import Theme, ImGuiCol, ImGuiStyleVar, ImGuiTreeNodeFlags
 from .imgui_keys import KEY_LEFT_CTRL, KEY_RIGHT_CTRL, KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT
-
-
-@dataclass(slots=True)
-class _HierarchyNode:
-    obj: object
-    obj_id: int
-    name: str
-    is_prefab: bool
-    children: tuple
-    has_canvas_descendant: bool = False
 
 
 @editor_panel("Hierarchy", type_id="hierarchy", title_key="panel.hierarchy")
@@ -60,14 +49,12 @@ class HierarchyPanel(EditorPanel):
         self._item_height_measured: bool = False
         # Root objects cache — avoids re-creating 1024 pybind11 wrappers every frame.
         self._cached_root_objects = None
-        self._cached_root_nodes = None
         self._cached_structure_version: int = -1
         # UI Mode: when True, only show Canvas GameObjects & their children
         self._ui_mode: bool = False
         self._on_selection_changed_ui_editor = None  # Extra callback for UI editor sync
         self._cached_ordered_ids = None
         self._cached_canvas_roots = None
-        self._selected_ids_frame = set()
     
     def set_on_selection_changed(self, callback):
         """Set callback to be called when selection changes. Callback receives the selected GameObject or None."""
@@ -108,53 +95,27 @@ class HierarchyPanel(EditorPanel):
         return ctx.is_key_down(KEY_LEFT_SHIFT) or ctx.is_key_down(KEY_RIGHT_SHIFT)
 
     @staticmethod
-    def _collect_ordered_ids(root_nodes) -> list:
+    def _collect_ordered_ids(root_objects) -> list:
         """Build a flat depth-first list of all object IDs for shift-range selection."""
         result = []
-        stack = list(reversed(root_nodes))
+        stack = list(reversed(root_objects))
         while stack:
-            node = stack.pop()
-            result.append(node.obj.id)
-            children = node.children
+            obj = stack.pop()
+            result.append(obj.id)
+            children = obj.get_children()
             if children:
                 stack.extend(reversed(children))
         return result
-
-    @classmethod
-    def _build_tree_node(cls, obj):
-        children = tuple(cls._build_tree_node(child) for child in obj.get_children())
-        node = _HierarchyNode(
-            obj=obj,
-            obj_id=obj.id,
-            name=obj.name,
-            is_prefab=bool(getattr(obj, 'is_prefab_instance', False)),
-            children=children,
-        )
-        node.has_canvas_descendant = cls._node_has_canvas_descendant(node)
-        return node
-
-    @staticmethod
-    def _node_has_canvas_descendant(node: _HierarchyNode) -> bool:
-        from InfEngine.ui import UICanvas
-
-        for comp in node.obj.get_py_components():
-            if isinstance(comp, UICanvas):
-                return True
-        for child in node.children:
-            if child.has_canvas_descendant:
-                return True
-        return False
 
     def _get_root_objects_cached(self, scene):
         """Return root objects, reusing a cached list when the scene structure hasn't changed."""
         ver = scene.structure_version
         if ver != self._cached_structure_version:
             self._cached_root_objects = scene.get_root_objects()
-            self._cached_root_nodes = tuple(self._build_tree_node(obj) for obj in self._cached_root_objects)
             self._cached_ordered_ids = None  # invalidate ordered IDs cache
             self._cached_canvas_roots = None  # invalidate canvas roots cache
             self._cached_structure_version = ver
-        return self._cached_root_nodes
+        return self._cached_root_objects
 
     def _get_ordered_ids_cached(self, root_objects) -> list:
         """Return ordered IDs, reusing cache when structure hasn't changed."""
@@ -162,10 +123,10 @@ class HierarchyPanel(EditorPanel):
             self._cached_ordered_ids = self._collect_ordered_ids(root_objects)
         return self._cached_ordered_ids
 
-    def _get_canvas_roots_cached(self, root_nodes) -> list:
+    def _get_canvas_roots_cached(self, root_objects) -> list:
         """Return canvas-filtered roots, reusing cache when structure hasn't changed."""
         if self._cached_canvas_roots is None:
-            self._cached_canvas_roots = self._filter_canvas_roots(root_nodes)
+            self._cached_canvas_roots = self._filter_canvas_roots(root_objects)
         return self._cached_canvas_roots
 
     def _record_create(self, object_id: int, description: str = "Create GameObject"):
@@ -228,7 +189,7 @@ class HierarchyPanel(EditorPanel):
     # Height of the invisible separator drop zone (pixels)
     _SEPARATOR_H = 6.0
 
-    def _render_game_object_tree(self, ctx: InfGUIContext, node: _HierarchyNode) -> None:
+    def _render_game_object_tree(self, ctx: InfGUIContext, obj) -> None:
         """Recursively render a GameObject and its children as tree nodes.
 
         Drop behaviour
@@ -241,15 +202,13 @@ class HierarchyPanel(EditorPanel):
         A white horizontal line is drawn on the separator while dragging
         to clearly indicate the insertion point (via ``IGUI.reorder_separator``).
         """
-        if node is None:
+        if obj is None:
             return
-        obj = node.obj
-        obj_id = node.obj_id
 
         from .igui import IGUI
 
         # Use unique ID to avoid ImGui ID conflicts
-        ctx.push_id(obj_id)
+        ctx.push_id(obj.id)
 
         # Tree node flags for hierarchy items
         node_flags = (ImGuiTreeNodeFlags.OpenOnArrow
@@ -257,27 +216,27 @@ class HierarchyPanel(EditorPanel):
                       | ImGuiTreeNodeFlags.FramePadding)
 
         # Check if this object is selected
-        if obj_id in self._selected_ids_frame:
+        if self._sel.is_selected(obj.id):
             node_flags |= ImGuiTreeNodeFlags.Selected
 
         # Check if has children - if not, use leaf flag (no arrow)
-        children = node.children
+        children = obj.get_children()
         if len(children) == 0:
             node_flags |= ImGuiTreeNodeFlags.Leaf
 
         # Handle auto-expansion (single id — legacy; also check multi-id set)
-        if self._pending_expand_id == obj_id:
+        if self._pending_expand_id == obj.id:
             ctx.set_next_item_open(True)
             self._pending_expand_id = 0
-        if obj_id in self._pending_expand_ids:
+        if obj.id in self._pending_expand_ids:
             ctx.set_next_item_open(True)
-            self._pending_expand_ids.discard(obj_id)
+            self._pending_expand_ids.discard(obj.id)
 
         # Create tree node - display name can be duplicated, ID is unique via PushID
-        is_prefab = node.is_prefab
+        is_prefab = getattr(obj, 'is_prefab_instance', False)
         if is_prefab:
             ctx.push_style_color(ImGuiCol.Text, *Theme.PREFAB_TEXT)
-        is_open = ctx.tree_node_ex(node.name, node_flags)
+        is_open = ctx.tree_node_ex(obj.name, node_flags)
         if is_prefab:
             ctx.pop_style_color(1)
 
@@ -285,14 +244,13 @@ class HierarchyPanel(EditorPanel):
         # does not immediately change the Inspector.
         if ctx.is_item_clicked(0):
             # Record candidate; will be committed in on_render when button released
-            self._pending_select_id = obj_id
+            self._pending_select_id = obj.id
             self._pending_ctrl = self._is_ctrl(ctx)
             self._pending_shift = self._is_shift(ctx)
         if ctx.is_item_clicked(1):
             # Right-click selects immediately (needed for context menu)
-            if obj_id not in self._selected_ids_frame:
-                self._sel.select(obj_id)
-                self._selected_ids_frame = set(self._sel.get_ids())
+            if not self._sel.is_selected(obj.id):
+                self._sel.select(obj.id)
                 self._notify_selection_changed()
 
         # Double-click → focus editor camera on this object
@@ -301,19 +259,19 @@ class HierarchyPanel(EditorPanel):
                 self._on_double_click_focus(obj)
 
         # Right-click context menu for this specific object
-        if ctx.begin_popup_context_item(f"ctx_menu_{obj_id}", 1):
-            self._right_clicked_object_id = obj_id
+        if ctx.begin_popup_context_item(f"ctx_menu_{obj.id}", 1):
+            self._right_clicked_object_id = obj.id
             if ctx.begin_menu(t("hierarchy.create_child")):
-                self._show_create_primitive_menu(ctx, parent_id=obj_id)
+                self._show_create_primitive_menu(ctx, parent_id=obj.id)
                 if ctx.selectable(t("hierarchy.empty_object"), False, 0, 0, 0):
-                    self._create_empty_object(parent_id=obj_id)
+                    self._create_empty_object(parent_id=obj.id)
                 ctx.end_menu()
             ctx.separator()
             if ctx.selectable(t("hierarchy.save_as_prefab"), False, 0, 0, 0):
                 self._save_as_prefab(obj)
 
             # Prefab instance actions
-            _is_prefab = is_prefab
+            _is_prefab = getattr(obj, 'is_prefab_instance', False)
             if _is_prefab:
                 ctx.separator()
                 ctx.push_style_color(ImGuiCol.Text, *Theme.PREFAB_TEXT)
@@ -338,19 +296,17 @@ class HierarchyPanel(EditorPanel):
 
         # Drag source - start dragging this object
         if ctx.begin_drag_drop_source(0):
-            ctx.set_drag_drop_payload(self.DRAG_DROP_TYPE, obj_id)
-            ctx.label(node.name)
+            ctx.set_drag_drop_payload(self.DRAG_DROP_TYPE, obj.id)
+            ctx.label(f"{obj.name}")
             ctx.end_drag_drop_source()
 
         # ── Drop target on the tree node body → reparent as child, create model child, or instantiate prefab ──
-        IGUI.multi_drop_target(ctx, [self.DRAG_DROP_TYPE, "MODEL_GUID", "MODEL_FILE", "PREFAB_GUID", "PREFAB_FILE"],
-                               lambda dt, payload, _oid=obj_id: (
-                                   self._reparent_object(payload, _oid)
-                                   if dt == self.DRAG_DROP_TYPE
-                                   else (self._instantiate_prefab(payload, parent_id=_oid, is_guid=(dt == "PREFAB_GUID"))
-                                         if dt in ("PREFAB_GUID", "PREFAB_FILE")
-                                         else self._create_model_object(payload, parent_id=_oid, is_guid=(dt == "MODEL_GUID")))
-                               ))
+        obj_id = obj.id
+        IGUI.multi_drop_target(
+            ctx,
+            [self.DRAG_DROP_TYPE, "MODEL_GUID", "MODEL_FILE", "PREFAB_GUID", "PREFAB_FILE"],
+            lambda dt, payload, _oid=obj_id: self._handle_external_drop(dt, payload, parent_id=_oid),
+        )
 
         if is_open:
             # ── Separator BEFORE first child → allows drop as first child ──
@@ -498,6 +454,12 @@ class HierarchyPanel(EditorPanel):
         sfm = SceneFileManager.instance()
         if self._ui_mode:
             ctx.label(t("hierarchy.ui_mode"))
+        elif sfm and sfm.is_prefab_mode:
+            # Prefab Mode header — show prefab name in accent color
+            prefab_name = sfm.get_display_name()
+            ctx.push_style_color(ImGuiCol.Text, *Theme.PREFAB_TEXT)
+            ctx.label(t("hierarchy.prefab_mode_header").format(name=prefab_name))
+            ctx.pop_style_color(1)
         elif sfm:
             ctx.label(sfm.get_display_name())
         else:
@@ -514,7 +476,6 @@ class HierarchyPanel(EditorPanel):
         from InfEngine.lib import SceneManager
         scene = SceneManager.instance().get_active_scene()
         if scene:
-            self._selected_ids_frame = set(self._sel.get_ids())
             # Small gap between objects
             ctx.push_style_var_vec2(ImGuiStyleVar.ItemSpacing, *Theme.TREE_ITEM_SPC)
             # Make tree nodes taller (~+10px top/bottom, easier to click)
@@ -570,20 +531,24 @@ class HierarchyPanel(EditorPanel):
                     self.clear_selection()
 
                 from .igui import IGUI
-                IGUI.multi_drop_target(ctx, [self.DRAG_DROP_TYPE, "MODEL_GUID", "MODEL_FILE", "PREFAB_GUID", "PREFAB_FILE"],
-                                       lambda dt, payload: (
-                                           self._reparent_to_root(payload)
-                                           if dt == self.DRAG_DROP_TYPE
-                                           else (self._instantiate_prefab(payload, is_guid=(dt == "PREFAB_GUID"))
-                                                 if dt in ("PREFAB_GUID", "PREFAB_FILE")
-                                                 else self._create_model_object(payload, is_guid=(dt == "MODEL_GUID")))
-                                       ))
+                IGUI.multi_drop_target(
+                    ctx,
+                    [self.DRAG_DROP_TYPE, "MODEL_GUID", "MODEL_FILE", "PREFAB_GUID", "PREFAB_FILE"],
+                    self._handle_external_drop,
+                )
 
             ctx.pop_style_var(2)  # FramePadding + ItemSpacing
         
-        # Parent for new objects: if something is selected, use it as parent
+        # Parent for new objects: if something is selected, use it as parent.
+        # In prefab mode, all new objects MUST be children of the prefab root.
         parent_id_for_new = None
-        if not self._sel.is_empty():
+        if sfm and sfm.is_prefab_mode:
+            from InfEngine.lib import SceneManager as _SM
+            _pscene = _SM.instance().get_active_scene()
+            _proots = _pscene.get_root_objects() if _pscene else []
+            if _proots:
+                parent_id_for_new = _proots[0].id
+        elif not self._sel.is_empty():
             parent_id_for_new = self._sel.get_primary()
         
         # Right-click menu for window background
@@ -770,6 +735,7 @@ class HierarchyPanel(EditorPanel):
 
     def _instantiate_prefab(self, prefab_ref: str, parent_id: int = None, is_guid: bool = False) -> None:
         """Instantiate a prefab dropped from the Project panel into the scene."""
+        from InfEngine.debug import Debug
         from InfEngine.lib import SceneManager, AssetRegistry
         from InfEngine.engine.prefab_manager import instantiate_prefab
         scene = SceneManager.instance().get_active_scene()
@@ -785,12 +751,16 @@ class HierarchyPanel(EditorPanel):
         if parent_id is not None:
             parent = scene.find_by_id(parent_id)
 
-        if is_guid:
-            new_obj = instantiate_prefab(guid=prefab_ref, scene=scene,
-                                         parent=parent, asset_database=adb)
-        else:
-            new_obj = instantiate_prefab(file_path=prefab_ref, scene=scene,
-                                         parent=parent, asset_database=adb)
+        try:
+            if is_guid:
+                new_obj = instantiate_prefab(guid=prefab_ref, scene=scene,
+                                             parent=parent, asset_database=adb)
+            else:
+                new_obj = instantiate_prefab(file_path=prefab_ref, scene=scene,
+                                             parent=parent, asset_database=adb)
+        except Exception as exc:
+            Debug.log_error(f"Prefab instantiation failed: {exc}")
+            return
 
         if new_obj:
             if parent_id is not None and parent:
@@ -798,6 +768,36 @@ class HierarchyPanel(EditorPanel):
             self._sel.select(new_obj.id)
             self._record_create(new_obj.id, "Instantiate Prefab")
             self._notify_selection_changed()
+
+    def _handle_external_drop(self, drop_type: str, payload, parent_id: int = None) -> None:
+        from InfEngine.debug import Debug
+
+        # In Prefab Mode, force all new objects under the prefab root.
+        from InfEngine.engine.scene_manager import SceneFileManager
+        sfm = SceneFileManager.instance()
+        if sfm and sfm.is_prefab_mode and parent_id is None:
+            from InfEngine.lib import SceneManager as _SM
+            _pscene = _SM.instance().get_active_scene()
+            _proots = _pscene.get_root_objects() if _pscene else []
+            if _proots:
+                parent_id = _proots[0].id
+
+        try:
+            if drop_type == self.DRAG_DROP_TYPE:
+                if parent_id is None:
+                    self._reparent_to_root(payload)
+                else:
+                    self._reparent_object(payload, parent_id)
+                return
+
+            if drop_type in ("PREFAB_GUID", "PREFAB_FILE"):
+                self._instantiate_prefab(payload, parent_id=parent_id, is_guid=(drop_type == "PREFAB_GUID"))
+                return
+
+            if drop_type in ("MODEL_GUID", "MODEL_FILE"):
+                self._create_model_object(payload, parent_id=parent_id, is_guid=(drop_type == "MODEL_GUID"))
+        except Exception as exc:
+            Debug.log_error(f"Hierarchy drop failed ({drop_type}): {exc}")
 
     def _save_as_prefab(self, game_object) -> None:
         """Save a GameObject as a .prefab file in the project's Assets folder."""
@@ -846,16 +846,16 @@ class HierarchyPanel(EditorPanel):
         guid = getattr(obj, 'prefab_guid', '')
         path = self._resolve_prefab_path(guid)
         if path:
-            from InfEngine.engine.ui.editor_event_bus import EditorEventBus
-            EditorEventBus.publish("select_asset", path)
+            from InfEngine.engine.ui.event_bus import EditorEventBus
+            EditorEventBus.instance().emit("select_asset", path)
 
     def _prefab_open_asset(self, obj):
         """Open the prefab file in the asset inspector."""
         guid = getattr(obj, 'prefab_guid', '')
         path = self._resolve_prefab_path(guid)
         if path:
-            from InfEngine.engine.ui.editor_event_bus import EditorEventBus
-            EditorEventBus.publish("open_asset", path)
+            from InfEngine.engine.ui.event_bus import EditorEventBus
+            EditorEventBus.instance().emit("open_asset", path)
 
     def _prefab_apply_overrides(self, obj):
         """Apply all overrides back to the .prefab file."""
@@ -925,7 +925,19 @@ class HierarchyPanel(EditorPanel):
 
     def _filter_canvas_roots(self, root_objects):
         """Return only root GameObjects that have a UICanvas component (or ancestor of one)."""
-        return [node for node in root_objects if node.has_canvas_descendant]
+        return [go for go in root_objects if self._has_canvas_descendant(go)]
+
+    @staticmethod
+    def _has_canvas_descendant(go) -> bool:
+        from InfEngine.ui import UICanvas
+        stack = [go]
+        while stack:
+            cur = stack.pop()
+            for comp in cur.get_py_components():
+                if isinstance(comp, UICanvas):
+                    return True
+            stack.extend(cur.get_children())
+        return False
 
     @staticmethod
     def _go_has_canvas(go) -> bool:

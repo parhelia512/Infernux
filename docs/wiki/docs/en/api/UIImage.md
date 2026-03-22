@@ -31,7 +31,8 @@ mirror_x, mirror_y from InfUIScreenComponent.
 ## Example
 
 ```python
-# TODO: Add example for UIImage
+image = self.game_object.add_component(UIImage)
+image.texture_path = "Assets/UI/icon.png"
 ```
 
 <!-- USER CONTENT START --> example

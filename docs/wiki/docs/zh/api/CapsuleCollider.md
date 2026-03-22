@@ -39,7 +39,9 @@
 ## 示例
 
 ```python
-# TODO: Add example for CapsuleCollider
+collider = self.game_object.add_component(CapsuleCollider)
+collider.radius = 0.5
+collider.height = 2.0
 ```
 
 <!-- USER CONTENT START --> example

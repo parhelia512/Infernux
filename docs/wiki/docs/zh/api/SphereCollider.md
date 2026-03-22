@@ -37,7 +37,8 @@
 ## 示例
 
 ```python
-# TODO: Add example for SphereCollider
+collider = self.game_object.add_component(SphereCollider)
+collider.radius = 0.75
 ```
 
 <!-- USER CONTENT START --> example

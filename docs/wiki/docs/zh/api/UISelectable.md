@@ -57,7 +57,8 @@
 ## 示例
 
 ```python
-# TODO: Add example for UISelectable
+selectable = self.game_object.get_py_component(UISelectable)
+selectable.interactable = True
 ```
 
 <!-- USER CONTENT START --> example

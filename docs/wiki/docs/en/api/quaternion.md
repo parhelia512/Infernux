@@ -43,7 +43,8 @@ A representation of rotations using a quaternion.
 ## Example
 
 ```python
-# TODO: Add example for quaternion
+rotation = quaternion(0.0, 0.0, 0.0, 1.0)
+self.transform.rotation = rotation
 ```
 
 <!-- USER CONTENT START --> example

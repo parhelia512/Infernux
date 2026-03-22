@@ -151,19 +151,17 @@ def render_component(ctx: InfGUIContext, comp):
     BuiltinComponent subclasses into their Python wrapper and renders via
     the same ``render_py_component`` path that user scripts use, and
     finally falls back to the generic serialize-based renderer."""
+    # 1. Central full-replacement renderers (e.g. Transform)
     renderer = _COMPONENT_RENDERERS.get(comp.type_name)
     if renderer:
         renderer(ctx, comp)
         return
 
-    # If a BuiltinComponent wrapper class exists for this C++ component,
-    # wrap it and render through the unified render_py_component path.
-    # CppProperty descriptors already populate _serialized_fields_ via
-    # __init_subclass__, so the same field iteration logic applies.
+    # 2. BuiltinComponent wrapper — delegate to render_inspector()
     from InfEngine.components.builtin_component import BuiltinComponent
     wrapper_cls = BuiltinComponent._builtin_registry.get(comp.type_name)
     if wrapper_cls:
-        raw_cpp = comp  # preserve original C++ component for fallback
+        raw_cpp = comp
         try:
             if not isinstance(comp, BuiltinComponent):
                 go = getattr(comp, 'game_object', None)
@@ -172,7 +170,7 @@ def render_component(ctx: InfGUIContext, comp):
                 else:
                     render_cpp_component_generic(ctx, raw_cpp)
                     return
-            render_py_component(ctx, comp)
+            comp.render_inspector(ctx)
         except Exception as exc:
             import traceback
             from InfEngine.debug import Debug
@@ -188,11 +186,9 @@ def render_component(ctx: InfGUIContext, comp):
                     f"[Inspector] fallback also failed for "
                     f"{getattr(raw_cpp, 'type_name', '?')}: {fallback_exc}"
                 )
-        extra = _COMPONENT_EXTRA_RENDERERS.get(getattr(comp, 'type_name', ''))
-        if extra:
-            extra(ctx, comp)
         return
 
+    # 3. Fallback — generic property table
     render_cpp_component_generic(ctx, comp)
 
 
@@ -266,11 +262,14 @@ def _collect_cpp_properties(wrapper_cls):
     return result
 
 
-def render_builtin_via_setters(ctx: InfGUIContext, comp, wrapper_cls):
+def render_builtin_via_setters(ctx: InfGUIContext, comp, wrapper_cls, *, skip_fields=None):
     """Render a C++ component by iterating CppProperty descriptors.
 
     If *comp* is a raw C++ component, it is wrapped in a BuiltinComponent
     wrapper so that CppProperty converters (e.g. COLOR get/set) are applied.
+
+    Args:
+        skip_fields: Optional set of Python attribute names to skip.
     """
     from InfEngine.components.serialized_field import FieldType
     from InfEngine.components.builtin_component import BuiltinComponent
@@ -287,10 +286,13 @@ def render_builtin_via_setters(ctx: InfGUIContext, comp, wrapper_cls):
         render_cpp_component_generic(ctx, comp)
         return
 
-    labels = [name for name, _ in props]
+    labels = [pretty_field_name(name) for name, _ in props]
     lw = max_label_w(ctx, labels)
 
     for py_name, cpp_prop in props:
+        if skip_fields and py_name in skip_fields:
+            continue
+
         meta = cpp_prop.metadata  # FieldMetadata
         cpp_attr = cpp_prop.cpp_attr
 
@@ -326,7 +328,7 @@ def render_builtin_via_setters(ctx: InfGUIContext, comp, wrapper_cls):
                 except (RuntimeError, AttributeError):
                     display_name = "None"
 
-            field_label(ctx, py_name, lw)
+            field_label(ctx, pretty_field_name(py_name), lw)
             render_object_field(
                 ctx,
                 f"audio_clip_{py_name}",
@@ -339,7 +341,7 @@ def render_builtin_via_setters(ctx: InfGUIContext, comp, wrapper_cls):
 
         # ----- All scalar types via unified renderer -----
         new_value = render_serialized_field(
-            ctx, f"##{py_name}", py_name, meta, current, lw,
+            ctx, f"##{py_name}", pretty_field_name(py_name), meta, current, lw,
         )
 
         if has_field_changed(meta.field_type, current, new_value):
@@ -713,7 +715,7 @@ def _render_list_field(ctx: InfGUIContext, comp, field_name: str, metadata, curr
 
     # ── Unified list header: [label [N] ........... [-][+]] ──
     header_open = IGUI.list_header(
-        ctx, field_name, len(items),
+        ctx, pretty_field_name(field_name), len(items),
         on_add=_on_add,
         on_remove=_on_remove_last if items else None,
         accept_drop=_hdr_drag_type,
@@ -881,7 +883,7 @@ def render_cpp_component_generic(ctx: InfGUIContext, comp):
     changed = False
 
     visible_keys = [k for k in data if k not in ignore_keys]
-    lw = max_label_w(ctx, visible_keys) if visible_keys else 0.0
+    lw = max_label_w(ctx, [pretty_field_name(k) for k in visible_keys]) if visible_keys else 0.0
 
     for key, value in data.items():
         if key in ignore_keys:
@@ -889,28 +891,28 @@ def render_cpp_component_generic(ctx: InfGUIContext, comp):
 
         new_value = value
         if isinstance(value, bool):
-            new_value = render_inspector_checkbox(ctx, key, bool(value))
+            new_value = render_inspector_checkbox(ctx, pretty_field_name(key), bool(value))
         elif isinstance(value, int):
-            field_label(ctx, key, lw)
+            field_label(ctx, pretty_field_name(key), lw)
             new_value = int(ctx.drag_int(f"##{key}", int(value), DRAG_SPEED_INT, -1000000, 1000000))
         elif isinstance(value, float):
-            field_label(ctx, key, lw)
+            field_label(ctx, pretty_field_name(key), lw)
             new_value = float(ctx.drag_float(f"##{key}", float(value), DRAG_SPEED_DEFAULT, -1e6, 1e6))
         elif isinstance(value, str):
-            field_label(ctx, key, lw)
+            field_label(ctx, pretty_field_name(key), lw)
             new_value = ctx.text_input(f"##{key}", value, 256)
         elif isinstance(value, list):
             if len(value) == 2 and all(isinstance(v, (int, float)) for v in value):
-                nx, ny = ctx.vector2(key, float(value[0]), float(value[1]), DRAG_SPEED_DEFAULT, lw)
+                nx, ny = ctx.vector2(pretty_field_name(key), float(value[0]), float(value[1]), DRAG_SPEED_DEFAULT, lw)
                 new_value = [nx, ny]
             elif len(value) == 3 and all(isinstance(v, (int, float)) for v in value):
-                nx, ny, nz = ctx.vector3(key, float(value[0]), float(value[1]), float(value[2]), DRAG_SPEED_DEFAULT, lw)
+                nx, ny, nz = ctx.vector3(pretty_field_name(key), float(value[0]), float(value[1]), float(value[2]), DRAG_SPEED_DEFAULT, lw)
                 new_value = [nx, ny, nz]
             elif len(value) == 4 and all(isinstance(v, (int, float)) for v in value):
-                nx, ny, nz, nw = ctx.vector4(key, float(value[0]), float(value[1]), float(value[2]), float(value[3]), DRAG_SPEED_DEFAULT, lw)
+                nx, ny, nz, nw = ctx.vector4(pretty_field_name(key), float(value[0]), float(value[1]), float(value[2]), float(value[3]), DRAG_SPEED_DEFAULT, lw)
                 new_value = [nx, ny, nz, nw]
             else:
-                ctx.label(f"{key}: {value}")
+                ctx.label(f"{pretty_field_name(key)}: {value}")
         else:
             ctx.label(f"{key}: {value}")
 
@@ -952,16 +954,16 @@ def _render_serializable_object_field(
 
     so_class = type(current_value) if current_value is not None else getattr(metadata, 'serializable_class', None)
     if so_class is None:
-        field_label(ctx, field_name, lw)
+        field_label(ctx, pretty_field_name(field_name), lw)
         ctx.label(t("inspector.unknown_type"))
         return
 
-    header = f"{field_name} ({so_class.__name__})"
+    header = f"{pretty_field_name(field_name)} ({so_class.__name__})"
     if not render_compact_section_header(ctx, header, level="secondary"):
         return
 
     so_fields = get_serialized_fields(so_class)
-    so_lw = max_label_w(ctx, list(so_fields.keys())) if so_fields else 0.0
+    so_lw = max_label_w(ctx, [pretty_field_name(k) for k in so_fields]) if so_fields else 0.0
 
     if current_value is None:
         current_value = so_class()
@@ -977,7 +979,7 @@ def _render_serializable_object_field(
             _render_nested_so(ctx, field_name, so_fn, so_meta, so_val, so_lw, changes)
         else:
             new_val = render_serialized_field(
-                ctx, f"##{field_name}_{so_fn}", so_fn, so_meta, so_val, so_lw,
+                ctx, f"##{field_name}_{so_fn}", pretty_field_name(so_fn), so_meta, so_val, so_lw,
             )
             if has_field_changed(so_meta.field_type, so_val, new_val):
                 changes[so_fn] = new_val
@@ -1004,12 +1006,12 @@ def _render_nested_so(
         ctx.label(f"{so_fn}: " + t("inspector.unknown_type"))
         return
 
-    header = f"{so_fn} ({so_class.__name__})"
+    header = f"{pretty_field_name(so_fn)} ({so_class.__name__})"
     if not render_compact_section_header(ctx, header, level="tertiary"):
         return
 
     inner_fields = get_serialized_fields(so_class)
-    inner_lw = max_label_w(ctx, list(inner_fields.keys())) if inner_fields else 0.0
+    inner_lw = max_label_w(ctx, [pretty_field_name(k) for k in inner_fields]) if inner_fields else 0.0
 
     if so_val is None:
         so_val = so_class()
@@ -1020,7 +1022,7 @@ def _render_nested_so(
     for ifn, imeta in inner_fields.items():
         ival = getattr(so_val, ifn, imeta.default)
         new_val = render_serialized_field(
-            ctx, f"##{parent_id}_{so_fn}_{ifn}", ifn, imeta, ival, inner_lw,
+            ctx, f"##{parent_id}_{so_fn}_{ifn}", pretty_field_name(ifn), imeta, ival, inner_lw,
         )
         if has_field_changed(imeta.field_type, ival, new_val):
             inner_changes[ifn] = new_val
@@ -1050,7 +1052,7 @@ def render_py_component(ctx: InfGUIContext, py_comp):
     from InfEngine.components.serialized_field import get_serialized_fields, FieldType
 
     fields = get_serialized_fields(py_comp.__class__)
-    lw = max_label_w(ctx, list(fields.keys())) if fields else 0.0
+    lw = max_label_w(ctx, [pretty_field_name(k) for k in fields]) if fields else 0.0
 
     # Track which collapsible group is currently open so we can close it
     _current_group: str = ""
@@ -1106,7 +1108,7 @@ def render_py_component(ctx: InfGUIContext, py_comp):
 
         # Readonly scalar fields: render as label, skip interactive widgets
         if metadata.readonly and metadata.field_type in (FieldType.INT, FieldType.FLOAT, FieldType.STRING, FieldType.BOOL):
-            field_label(ctx, field_name, lw)
+            field_label(ctx, pretty_field_name(field_name), lw)
             ctx.label(f"{current_value}")
             if metadata.tooltip and ctx.is_item_hovered():
                 ctx.set_tooltip(metadata.tooltip)
@@ -1155,7 +1157,7 @@ def render_py_component(ctx: InfGUIContext, py_comp):
                 old = get_raw_field_value(_comp, _fn)
                 _record_property(_comp, _fn, old, ComponentRef(), f"Clear {_fn}")
 
-            field_label(ctx, field_name, lw)
+            field_label(ctx, pretty_field_name(field_name), lw)
             render_object_field(
                 ctx, f"comp_ref_{field_name}", _display, _type_hint,
                 accept_drag_type=["HIERARCHY_GAMEOBJECT", "PREFAB_GUID", "PREFAB_FILE"],
@@ -1194,7 +1196,7 @@ def render_py_component(ctx: InfGUIContext, py_comp):
                 old = getattr(_comp, _fn, None)
                 _record_property(_comp, _fn, old, None, f"Clear {_fn}")
 
-            field_label(ctx, field_name, lw)
+            field_label(ctx, pretty_field_name(field_name), lw)
             render_object_field(
                 ctx, f"go_ref_{field_name}", display, _type_hint,
                 accept_drag_type=["HIERARCHY_GAMEOBJECT", "PREFAB_GUID", "PREFAB_FILE"],
@@ -1220,7 +1222,7 @@ def render_py_component(ctx: InfGUIContext, py_comp):
                 old = getattr(_comp, _fn, None)
                 _record_property(_comp, _fn, old, None, f"Clear {_fn}")
 
-            field_label(ctx, field_name, lw)
+            field_label(ctx, pretty_field_name(field_name), lw)
             render_object_field(
                 ctx, f"mat_ref_{field_name}", display, "Material",
                 accept_drag_type="MATERIAL_FILE",
@@ -1247,7 +1249,7 @@ def render_py_component(ctx: InfGUIContext, py_comp):
                 old = getattr(_comp, _fn, None)
                 _record_property(_comp, _fn, old, None, f"Clear {_fn}")
 
-            field_label(ctx, field_name, lw)
+            field_label(ctx, pretty_field_name(field_name), lw)
             render_object_field(
                 ctx, f"tex_ref_{field_name}", _display_name, "Texture",
                 accept_drag_type="TEXTURE_FILE",
@@ -1274,7 +1276,7 @@ def render_py_component(ctx: InfGUIContext, py_comp):
                 old = getattr(_comp, _fn, None)
                 _record_property(_comp, _fn, old, None, f"Clear {_fn}")
 
-            field_label(ctx, field_name, lw)
+            field_label(ctx, pretty_field_name(field_name), lw)
             render_object_field(
                 ctx, f"shd_ref_{field_name}", _display_name, "Shader",
                 accept_drag_type="SHADER_FILE",
@@ -1304,7 +1306,7 @@ def render_py_component(ctx: InfGUIContext, py_comp):
                 old = getattr(_comp, _fn, None)
                 _record_property(_comp, _fn, old, None, f"Clear {_fn}")
 
-            field_label(ctx, field_name, lw)
+            field_label(ctx, pretty_field_name(field_name), lw)
             render_object_field(
                 ctx, f"aud_ref_{field_name}", _display_name, "AudioClip",
                 accept_drag_type="AUDIO_FILE",
@@ -1317,7 +1319,7 @@ def render_py_component(ctx: InfGUIContext, py_comp):
         else:
             # ── All scalar types via unified renderer ──
             new_value = render_serialized_field(
-                ctx, f"##{field_name}", field_name, metadata, current_value, lw,
+                ctx, f"##{field_name}", pretty_field_name(field_name), metadata, current_value, lw,
             )
 
             if has_field_changed(metadata.field_type, current_value, new_value) and not metadata.readonly:

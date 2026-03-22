@@ -73,7 +73,9 @@
 ## 示例
 
 ```python
-# TODO: Add example for AudioClip
+clip = AudioClip.load("Assets/Audio/ui_click.wav")
+if clip is not None:
+	print(clip.duration)
 ```
 
 <!-- USER CONTENT START --> example

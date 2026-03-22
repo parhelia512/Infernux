@@ -1,0 +1,55 @@
+"""Type stubs for InfEngine.renderstack.default_deferred_pipeline."""
+
+from __future__ import annotations
+
+from enum import IntEnum
+from typing import TYPE_CHECKING
+
+from InfEngine.renderstack.render_pipeline import RenderPipeline
+
+if TYPE_CHECKING:
+    from InfEngine.rendergraph.graph import RenderGraph
+
+
+class DeferredMSAA(IntEnum):
+    """Deferred pipeline only supports OFF."""
+    OFF = 1
+
+
+class DefaultDeferredPipeline(RenderPipeline):
+    """Standard deferred rendering pipeline.
+
+    Uses GBuffer multi-target rendering to separate geometry and lighting,
+    suitable for scenes with many light sources.
+
+    GBuffer layout::
+
+        Slot 0 — Lit Scene Color    (RGBA8_UNORM)
+        Slot 1 — World Normals      (RGBA16_SFLOAT)
+        Slot 2 — Material Params    (RGBA8_UNORM)
+        Slot 3 — Emission           (RGBA16_SFLOAT)
+        Depth  — Scene depth        (D32_SFLOAT)
+
+    Injection points:
+
+    =============================  ==================================
+    Injection Point                 Timing
+    =============================  ==================================
+    ``after_gbuffer``              After GBuffer, before lighting
+    ``after_opaque``               After deferred lighting, before skybox
+    ``after_sky``                  After skybox, before transparent
+    ``after_transparent``          After transparent objects
+    =============================  ==================================
+
+    Attributes:
+        shadow_resolution: Shadow map resolution (default 4096).
+        msaa_samples: Always OFF for deferred.
+        enable_screen_ui: Enable screen-space UI rendering.
+    """
+
+    name: str
+    shadow_resolution: int
+    msaa_samples: DeferredMSAA
+    enable_screen_ui: bool
+
+    def define_topology(self, graph: RenderGraph) -> None: ...

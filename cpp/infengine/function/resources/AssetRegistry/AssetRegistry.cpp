@@ -261,6 +261,7 @@ bool AssetRegistry::LoadBuiltinMaterialFromFile(const std::string &key, const st
     }
 
     material->SetFilePath(matFilePath);
+    material->SetBuiltin(true);
     RegisterBuiltinMaterial(key, material);
 
     INFLOG_INFO("AssetRegistry: loaded builtin material '", key, "' from: ", matFilePath);

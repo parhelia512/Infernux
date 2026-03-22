@@ -1,5 +1,6 @@
 """Unity-style splash screen shown while the engine is loading."""
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -11,6 +12,50 @@ from PySide6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPixmap, QFont, QPainter, QColor, QPen, QBrush
 
 from hub_utils import get_project_lock_path, remove_project_lock, write_project_lock
+
+
+_WIN_CRASH_CODES = {
+    -1073741819: "Access violation (0xC0000005)",
+    -1073740791: "Stack buffer overrun (0xC0000409)",
+    -1073741571: "Stack overflow (0xC00000FD)",
+    -1073741676: "Integer divide by zero (0xC0000094)",
+    -1073741685: "Illegal instruction (0xC000001D)",
+}
+
+
+@contextlib.contextmanager
+def _suppress_windows_error_dialogs():
+    """Temporarily suppress Windows crash dialog boxes for child processes."""
+    if sys.platform != "win32":
+        yield
+        return
+
+    try:
+        import ctypes
+
+        SEM_FAILCRITICALERRORS = 0x0001
+        SEM_NOGPFAULTERRORBOX = 0x0002
+        previous_mode = ctypes.windll.kernel32.SetErrorMode(
+            SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX
+        )
+    except Exception:
+        yield
+        return
+
+    try:
+        yield
+    finally:
+        try:
+            ctypes.windll.kernel32.SetErrorMode(previous_mode)
+        except Exception:
+            pass
+
+
+def _format_exit_code(returncode: int) -> str:
+    """Return a user-facing explanation for process exit codes."""
+    if returncode in _WIN_CRASH_CODES:
+        return f"{_WIN_CRASH_CODES[returncode]}\nRaw exit code: {returncode}"
+    return f"Raw exit code: {returncode}"
 
 
 class EngineSplashScreen(QWidget):
@@ -208,10 +253,11 @@ class EngineSplashScreen(QWidget):
                 popen_kwargs["start_new_session"] = True
 
         try:
-            self._process = subprocess.Popen(
-                [python_exe, "-u", "-c", script, project_path],
-                **popen_kwargs,
-            )
+            with _suppress_windows_error_dialogs():
+                self._process = subprocess.Popen(
+                    [python_exe, "-u", "-c", script, project_path],
+                    **popen_kwargs,
+                )
         except OSError:
             remove_project_lock(project_path, self._lock_token)
             self._status.setText("Launch failed")
@@ -274,7 +320,8 @@ class EngineSplashScreen(QWidget):
                     None,
                     "Engine Launch Failed",
                     f"The engine process exited unexpectedly "
-                    f"(code {self._process.returncode}).\n\n"
+                    f"before the editor finished loading.\n\n"
+                    f"{_format_exit_code(self._process.returncode)}\n\n"
                     "Check the project's Logs/ folder for details.",
                 )
 

@@ -28,7 +28,7 @@
 ## 示例
 
 ```python
-# TODO: Add example for LightType
+light.light_type = LightType.DIRECTIONAL
 ```
 
 <!-- USER CONTENT START --> example

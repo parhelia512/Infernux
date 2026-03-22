@@ -439,6 +439,7 @@ std::string InfMaterial::Serialize() const
     json j;
     j["material_version"] = 3;
     j["name"] = m_name;
+    j["builtin"] = m_builtin;
 
     // Shader identity — separate vertex/fragment keys.
     j["shaders"]["vertex"] = m_vertShaderName;

@@ -35,7 +35,8 @@
 ## 示例
 
 ```python
-# TODO: Add example for WaitForSeconds
+yield WaitForSeconds(1.0)
+Debug.log("One second later")
 ```
 
 <!-- USER CONTENT START --> example

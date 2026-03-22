@@ -35,7 +35,10 @@ Provides access to time information for the current frame.
 ## Example
 
 ```python
-# TODO: Add example for Time
+self.elapsed += Time.delta_time
+if self.elapsed >= 1.0:
+	Debug.log(f"Frames: {Time.frame_count}")
+	self.elapsed = 0.0
 ```
 
 <!-- USER CONTENT START --> example

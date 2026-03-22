@@ -37,7 +37,8 @@
 ## 示例
 
 ```python
-# TODO: Add example for MeshCollider
+collider = self.game_object.add_component(MeshCollider)
+collider.convex = True
 ```
 
 <!-- USER CONTENT START --> example

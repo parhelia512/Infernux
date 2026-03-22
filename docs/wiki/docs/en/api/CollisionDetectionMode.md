@@ -28,7 +28,7 @@ Collision detection algorithm used by the rigidbody.
 ## Example
 
 ```python
-# TODO: Add example for CollisionDetectionMode
+rigidbody.collision_detection_mode = CollisionDetectionMode.CONTINUOUS
 ```
 
 <!-- USER CONTENT START --> example

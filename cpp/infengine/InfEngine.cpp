@@ -131,7 +131,13 @@ void InfEngine::Run()
 
     INFLOG_DEBUG("Run InfEngine.");
     while (m_renderer && m_renderer->GetUserEvent()) {
-        m_renderer->DrawFrame();
+        try {
+            m_renderer->DrawFrame();
+        } catch (const std::exception &ex) {
+            INFLOG_ERROR("Exception in DrawFrame: {}", ex.what());
+        } catch (...) {
+            INFLOG_ERROR("Unknown exception in DrawFrame!");
+        }
 
         // Periodically save layout when ImGui marks it dirty
         ImGuiIO &io = ImGui::GetIO();

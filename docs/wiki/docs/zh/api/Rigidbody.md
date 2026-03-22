@@ -63,7 +63,9 @@
 ## 示例
 
 ```python
-# TODO: Add example for Rigidbody
+rigidbody = self.game_object.add_component(Rigidbody)
+rigidbody.mass = 2.0
+rigidbody.add_force(vector3(0, 5, 0))
 ```
 
 <!-- USER CONTENT START --> example

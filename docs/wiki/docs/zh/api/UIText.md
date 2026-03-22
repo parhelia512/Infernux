@@ -54,7 +54,9 @@ UI 文本组件。在屏幕上显示文字。
 ## 示例
 
 ```python
-# TODO: Add example for UIText
+text = self.game_object.add_component(UIText)
+text.text = "Hello, InfEngine"
+text.font_size = 24
 ```
 
 <!-- USER CONTENT START --> example

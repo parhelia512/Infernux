@@ -35,7 +35,12 @@ A handle to a running coroutine.
 ## Example
 
 ```python
-# TODO: Add example for Coroutine
+def blink(self):
+	while True:
+		Debug.log("blink")
+		yield WaitForSeconds(0.25)
+
+self.start_coroutine(self.blink())
 ```
 
 <!-- USER CONTENT START --> example

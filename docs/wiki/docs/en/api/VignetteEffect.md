@@ -41,7 +41,9 @@ URP-aligned Vignette post-processing effect.
 ## Example
 
 ```python
-# TODO: Add example for VignetteEffect
+effect = VignetteEffect()
+effect.intensity = 0.35
+effect.smoothness = 0.3
 ```
 
 <!-- USER CONTENT START --> example

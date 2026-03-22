@@ -309,6 +309,25 @@ class SceneViewPanel(EditorPanel):
             ctx.set_cursor_pos_y(cursor_start_y + 8)
             overlay_hovered = self._draw_gizmo_overlay(ctx)
 
+            # Prefab mode overlay banner
+            from InfEngine.engine.scene_manager import SceneFileManager
+            scene_file_manager = SceneFileManager.instance()
+            if scene_file_manager and scene_file_manager.is_prefab_mode:
+                ctx.set_cursor_pos_x(cursor_start_x + scene_width / 2.0 - 60.0)
+                ctx.set_cursor_pos_y(cursor_start_y + 8.0)
+                
+                # Use a prominent color for the exit button
+                ctx.push_style_color(ImGuiCol.Button, *Theme.PREFAB_BTN_NORMAL)
+                ctx.push_style_color(ImGuiCol.ButtonHovered, *Theme.PREFAB_BTN_HOVERED)
+                ctx.push_style_color(ImGuiCol.ButtonActive, *Theme.PREFAB_BTN_ACTIVE)
+                
+                if ctx.button(t("scene_view.exit_prefab_mode")):
+                    scene_file_manager.exit_prefab_mode()
+                if ctx.is_item_hovered() and ctx.is_mouse_button_down(0):
+                    overlay_hovered = True
+                    
+                ctx.pop_style_color(3)
+
             self._draw_pos_overlay(ctx, vp)
 
             # Unity-style tool switching shortcuts (Q/W/E/R)

@@ -37,7 +37,8 @@ A box-shaped collider primitive.
 ## Example
 
 ```python
-# TODO: Add example for BoxCollider
+collider = self.game_object.add_component(BoxCollider)
+collider.size = vector3(1.0, 2.0, 1.0)
 ```
 
 <!-- USER CONTENT START --> example

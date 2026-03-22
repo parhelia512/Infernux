@@ -1,0 +1,33 @@
+"""PlayerBootstrap — standalone player initialization.
+
+Handles engine init, scene loading, camera setup, and play-mode entry
+for headless (no-editor) player builds.
+
+Invoked via :func:`InfEngine.engine.run_player`.
+"""
+
+from __future__ import annotations
+
+from typing import Dict, List, Optional
+
+from InfEngine.engine.engine import Engine, LogLevel
+
+
+class PlayerBootstrap:
+    """Orchestrates the standalone player startup sequence."""
+
+    engine: Optional[Engine]
+
+    def __init__(
+        self,
+        project_path: str,
+        engine_log_level: LogLevel = ...,
+        display_mode: str = "fullscreen_borderless",
+        window_width: int = 1920,
+        window_height: int = 1080,
+        splash_items: Optional[List[Dict]] = None,
+    ) -> None: ...
+
+    def run(self) -> None:
+        """Execute all player bootstrap phases."""
+        ...

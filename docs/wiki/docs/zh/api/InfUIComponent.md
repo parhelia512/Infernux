@@ -17,7 +17,8 @@
 ## 示例
 
 ```python
-# TODO: Add example for InfUIComponent
+ui = self.game_object.get_py_component(InfUIComponent)
+print(ui.game_object_id)
 ```
 
 <!-- USER CONTENT START --> example

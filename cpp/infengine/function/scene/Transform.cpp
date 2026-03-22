@@ -119,15 +119,16 @@ glm::quat Transform::GetWorldRotation() const
 
 void Transform::SetWorldRotation(const glm::quat &worldRot)
 {
+    glm::quat safeRot = glm::normalize(worldRot);
     glm::quat newLocalRot;
     if (!m_gameObject || !m_gameObject->GetParent()) {
-        newLocalRot = worldRot;
+        newLocalRot = safeRot;
     } else {
         Transform *parentTransform = m_gameObject->GetParent()->GetTransform();
         if (!parentTransform) {
-            newLocalRot = worldRot;
+            newLocalRot = safeRot;
         } else {
-            newLocalRot = glm::inverse(parentTransform->GetWorldRotation()) * worldRot;
+            newLocalRot = glm::inverse(parentTransform->GetWorldRotation()) * safeRot;
         }
     }
 

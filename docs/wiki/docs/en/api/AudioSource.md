@@ -65,7 +65,9 @@ Plays audio clips in the scene.
 ## Example
 
 ```python
-# TODO: Add example for AudioSource
+source = self.game_object.add_component(AudioSource)
+source.play_on_awake = False
+source.play_one_shot(AudioClip.load("Assets/Audio/ui_click.wav"))
 ```
 
 <!-- USER CONTENT START --> example

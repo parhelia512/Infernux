@@ -64,7 +64,8 @@ Base class for fullscreen post-processing effects.
 ## Example
 
 ```python
-# TODO: Add example for FullScreenEffect
+stack = self.game_object.add_component(RenderStack)
+stack.add_pass(VignetteEffect())
 ```
 
 <!-- USER CONTENT START --> example

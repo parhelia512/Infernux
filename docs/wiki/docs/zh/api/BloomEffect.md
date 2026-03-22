@@ -45,7 +45,9 @@
 ## 示例
 
 ```python
-# TODO: Add example for BloomEffect
+bloom = BloomEffect()
+bloom.threshold = 1.0
+bloom.intensity = 0.8
 ```
 
 <!-- USER CONTENT START --> example

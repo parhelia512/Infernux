@@ -38,7 +38,8 @@ Represents the listener for 3D audio in the scene.
 ## Example
 
 ```python
-# TODO: Add example for AudioListener
+listener = self.game_object.add_component(AudioListener)
+print(listener.game_object_id)
 ```
 
 <!-- USER CONTENT START --> example

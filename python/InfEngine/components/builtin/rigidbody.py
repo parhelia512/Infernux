@@ -85,14 +85,16 @@ class Rigidbody(BuiltinComponent):
         default=1.0,
         tooltip="Mass in kilograms",
         range=(0.001, 1000.0),
+        slider=False,
     )
 
     drag = CppProperty(
         "drag",
         FieldType.FLOAT,
-        default=0.0,
+        default=0.001,
         tooltip="Linear drag coefficient",
-        range=(0.0, 100.0),
+        range=(0.001, 100.0),
+        slider=False,
     )
 
     angular_drag = CppProperty(
@@ -100,7 +102,8 @@ class Rigidbody(BuiltinComponent):
         FieldType.FLOAT,
         default=0.05,
         tooltip="Angular drag coefficient",
-        range=(0.0, 100.0),
+        range=(0.001, 100.0),
+        slider=False,
     )
 
     use_gravity = CppProperty(
@@ -136,6 +139,74 @@ class Rigidbody(BuiltinComponent):
         tooltip="Smooths presentation between fixed physics steps.",
         range=(0, 1),
     )
+
+    # ---- Per-axis freeze constraints (displayed as checkboxes) ----
+
+    freeze_position_x = CppProperty(
+        "freeze_position_x", FieldType.BOOL, default=False,
+        tooltip="Freeze movement on the X axis",
+    )
+    freeze_position_y = CppProperty(
+        "freeze_position_y", FieldType.BOOL, default=False,
+        tooltip="Freeze movement on the Y axis",
+    )
+    freeze_position_z = CppProperty(
+        "freeze_position_z", FieldType.BOOL, default=False,
+        tooltip="Freeze movement on the Z axis",
+    )
+    freeze_rotation_x = CppProperty(
+        "freeze_rotation_x", FieldType.BOOL, default=False,
+        tooltip="Freeze rotation on the X axis",
+    )
+    freeze_rotation_y = CppProperty(
+        "freeze_rotation_y", FieldType.BOOL, default=False,
+        tooltip="Freeze rotation on the Y axis",
+    )
+    freeze_rotation_z = CppProperty(
+        "freeze_rotation_z", FieldType.BOOL, default=False,
+        tooltip="Freeze rotation on the Z axis",
+    )
+
+    _FREEZE_FIELDS = frozenset({
+        'freeze_position_x', 'freeze_position_y', 'freeze_position_z',
+        'freeze_rotation_x', 'freeze_rotation_y', 'freeze_rotation_z',
+    })
+
+    # ------------------------------------------------------------------
+    # Custom inspector: freeze checkboxes in compact two-row layout
+    # ------------------------------------------------------------------
+
+    def render_inspector(self, ctx) -> None:
+        from InfEngine.engine.ui.inspector_components import (
+            render_builtin_via_setters, _record_builtin_property,
+        )
+
+        # Standard properties (skip freeze fields — rendered below)
+        render_builtin_via_setters(ctx, self, type(self),
+                                   skip_fields=self._FREEZE_FIELDS)
+
+        # Freeze Transform section
+        ctx.separator()
+        ctx.label("Freeze Transform")
+        self._render_freeze_row(ctx, "Position", "freeze_position")
+        self._render_freeze_row(ctx, "Rotation", "freeze_rotation")
+
+    def _render_freeze_row(self, ctx, label: str, prefix: str) -> None:
+        from InfEngine.engine.ui.inspector_components import _record_builtin_property
+
+        ctx.align_text_to_frame_padding()
+        ctx.label(label)
+        for i, axis in enumerate('xyz'):
+            if i == 0:
+                ctx.same_line(90)
+            else:
+                ctx.same_line(0, 8)
+            attr = f"{prefix}_{axis}"
+            current = getattr(self, attr)
+            new_val = ctx.checkbox(f"{axis.upper()}##{attr}", current)
+            if new_val != current:
+                _record_builtin_property(self, attr, current, new_val,
+                                         f"Set {attr}")
 
     # ---- Convenience property: freeze_rotation ----
 

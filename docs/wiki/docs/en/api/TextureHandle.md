@@ -52,7 +52,9 @@ A handle to a transient texture resource in the render graph.
 ## Example
 
 ```python
-# TODO: Add example for TextureHandle
+graph = RenderGraph("Example")
+handle = graph.create_texture("color", Format.R8G8B8A8_UNORM)
+print(handle)
 ```
 
 <!-- USER CONTENT START --> example
