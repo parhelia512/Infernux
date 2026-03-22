@@ -602,6 +602,17 @@ class RenderGraph
                                        uint32_t height);
 
     /**
+     * @brief Override the initial tracked state of an imported/external resource.
+     *
+     * External resources can be transitioned outside RenderGraph::Execute()
+     * (for example by post-scene callbacks or explicit resolve barriers).
+     * Call this before Execute() to keep the tracked oldLayout aligned with
+     * the real Vulkan image layout at frame start.
+     */
+    void SetResourceInitialState(ResourceHandle handle, VkImageLayout layout, VkAccessFlags accessMask,
+                                 VkPipelineStageFlags stages);
+
+    /**
      * @brief Mark a resource as the final output
      */
     void SetOutput(ResourceHandle handle);

@@ -469,12 +469,8 @@ def _create_reference_value_from_payload(element_type, payload, required_compone
         game_object = scene.find_by_id(obj_id)
         if game_object is None:
             return None
-        if required_component and game_object.get_cpp_component(required_component) is None:
-            # Also check Python type map
-            from InfEngine.components.component import InfComponent
-            tmap = InfComponent._type_map.get(game_object.id, {})
-            if required_component not in tmap:
-                return None
+        if required_component and not _game_object_has_required_component(game_object, required_component):
+            return None
         return GameObjectRef(game_object)
 
     file_path = str(payload) if not isinstance(payload, str) else payload
@@ -514,10 +510,7 @@ def _create_reference_value_from_payload(element_type, payload, required_compone
 
         comp_type = required_component or ''
         if comp_type:
-            # Validate the GO actually has this component via type map
-            from InfEngine.components.component import InfComponent
-            tmap = InfComponent._type_map.get(obj_id, {})
-            if comp_type not in tmap:
+            if not _game_object_has_required_component(game_object, comp_type):
                 from InfEngine.debug import Debug
                 Debug.log_warning(
                     f"GameObject '{game_object.name}' has no '{comp_type}' component."
@@ -1471,6 +1464,22 @@ def _apply_component_ref_drop(comp, field_name: str, payload, component_type: st
 # Picker item providers for object fields
 # ============================================================================
 
+def _game_object_has_required_component(game_object, required_component: str) -> bool:
+    if game_object is None or not required_component:
+        return False
+
+    from InfEngine.components.component import InfComponent
+    from InfEngine.components.builtin_component import BuiltinComponent
+
+    tmap = InfComponent._type_map.get(game_object.id, {})
+    found = tmap.get(required_component)
+    if found is not None and not getattr(found, '_is_destroyed', False):
+        return True
+
+    builtin_cls = BuiltinComponent._builtin_registry.get(required_component)
+    cpp_type = getattr(builtin_cls, '_cpp_type_name', required_component) if builtin_cls is not None else required_component
+    return game_object.get_cpp_component(cpp_type) is not None
+
 def _create_component_ref_from_go(game_object, component_type: str = ""):
     """Create a ComponentRef from a picked GameObject (for picker popup)."""
     from InfEngine.components.ref_wrappers import ComponentRef
@@ -1479,10 +1488,7 @@ def _create_component_ref_from_go(game_object, component_type: str = ""):
     go_id = game_object.id
     ct = component_type or ''
     if ct:
-        # Verify the GO has this component via type map
-        from InfEngine.components.component import InfComponent
-        tmap = InfComponent._type_map.get(go_id, {})
-        if ct not in tmap:
+        if not _game_object_has_required_component(game_object, ct):
             return None
     else:
         from InfEngine.components.component import InfComponent
@@ -1506,12 +1512,8 @@ def _picker_scene_gameobjects(filter_text: str, required_component: str = None):
     for go in scene.get_all_objects():
         if filt and filt not in go.name.lower():
             continue
-        if required_component:
-            # Check type map for the required component
-            from InfEngine.components.component import InfComponent
-            tmap = InfComponent._type_map.get(go.id, {})
-            if required_component not in tmap:
-                continue
+        if required_component and not _game_object_has_required_component(go, required_component):
+            continue
         items.append((go.name, go))
     return items
 

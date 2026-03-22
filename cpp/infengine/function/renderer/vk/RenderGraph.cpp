@@ -683,6 +683,27 @@ ResourceHandle RenderGraph::ImportResolveTarget(VkImage image, VkImageView view,
     return handle;
 }
 
+void RenderGraph::SetResourceInitialState(ResourceHandle handle, VkImageLayout layout, VkAccessFlags accessMask,
+                                          VkPipelineStageFlags stages)
+{
+    if (!handle.IsValid()) {
+        return;
+    }
+
+    if (handle.id >= m_initialResourceStates.size() || handle.id >= m_resourceStates.size()) {
+        return;
+    }
+
+    ResourceState state{};
+    state.layout = layout;
+    state.accessMask = accessMask;
+    state.stages = stages;
+    state.writerPassId = UINT32_MAX;
+
+    m_initialResourceStates[handle.id] = state;
+    m_resourceStates[handle.id] = state;
+}
+
 void RenderGraph::SetOutput(ResourceHandle handle)
 {
     m_output = handle;

@@ -541,11 +541,12 @@ class SceneViewPanel(EditorPanel):
         'Z': (0.3, 0.4, 0.95),     # blue
     }
     _GIZMO_AXIS_VIEWS = {
-        # axis_label: (yaw, pitch) — camera looks FROM the positive axis direction
+        # axis_label: (yaw, pitch) — camera looks FROM that axis direction
+        # pitch convention: forward.y = -sin(pitch), so +pitch = look down
         '+X': (-90.0, 0.0),
         '-X': (90.0, 0.0),
-        '+Y': (0.0, -89.9),   # avoid exact 90 to prevent gimbal lock
-        '-Y': (0.0, 89.9),
+        '+Y': (0.0, 89.9),    # look straight down (avoid exact 90 for gimbal lock)
+        '-Y': (0.0, -89.9),   # look straight up
         '+Z': (180.0, 0.0),
         '-Z': (0.0, 0.0),
     }
@@ -563,7 +564,8 @@ class SceneViewPanel(EditorPanel):
         cos_p, sin_p = math.cos(pitch_rad), math.sin(pitch_rad)
 
         # Reconstruct the actual camera basis used by the Scene camera.
-        forward = (sin_y * cos_p, sin_p, cos_y * cos_p)
+        # C++ SetEulerAngles(pitch, yaw, 0) yields forward.y = -sin(pitch).
+        forward = (sin_y * cos_p, -sin_p, cos_y * cos_p)
         right = (cos_y, 0.0, -sin_y)
         up = (
             forward[1] * right[2] - forward[2] * right[1],
@@ -585,22 +587,26 @@ class SceneViewPanel(EditorPanel):
             ('Z', (0, 0, 1)),
         ]
 
-        # Collect all endpoints for depth sorting (draw far ones first)
+        # Collect endpoints and promote the front-facing side per axis so the
+        # visible large labeled circles match Unity's scene gizmo behavior.
         endpoints = []
+        axis_lines = []
         for label, (ax, ay, az) in axes:
             sx = ax * right[0] + ay * right[1] + az * right[2]
             sy = ax * up[0] + ay * up[1] + az * up[2]
             depth = ax * forward[0] + ay * forward[1] + az * forward[2]
-            endpoints.append((label, sx, sy, depth, True))    # positive
-            endpoints.append((label, -sx, -sy, -depth, False)) # negative
+            pos = ('+' + label, label, sx, sy, depth)
+            neg = ('-' + label, label, -sx, -sy, -depth)
+            front, back = (pos, neg) if depth <= -depth else (neg, pos)
+            axis_lines.append(front)
+            endpoints.append((front[0], front[1], front[2], front[3], front[4], True))
+            endpoints.append((back[0], back[1], back[2], back[3], back[4], False))
 
-        # Sort by depth (farthest first → painter's order)
-        endpoints.sort(key=lambda e: e[3])
+        # Sort by depth (farther first; front-facing endpoints have smaller depth).
+        endpoints.sort(key=lambda e: e[4], reverse=True)
 
-        # Draw axis lines first (below circles)
-        for label, sx, sy, depth, positive in endpoints:
-            if not positive:
-                continue
+        # Draw axis lines first (below circles), using the front-facing endpoint.
+        for axis_key, label, sx, sy, depth in sorted(axis_lines, key=lambda e: e[4], reverse=True):
             clr = self._GIZMO_AXIS_COLORS[label]
             ex = cx + sx * axis_len
             ey = cy - sy * axis_len
@@ -611,26 +617,18 @@ class SceneViewPanel(EditorPanel):
         mouse_y = ctx.get_mouse_pos_y()
         clicked_axis = None
 
-        for label, sx, sy, depth, positive in endpoints:
+        for axis_key, label, sx, sy, depth, front_facing in endpoints:
             clr = self._GIZMO_AXIS_COLORS[label]
-            if positive:
-                ex = cx + sx * axis_len
-                ey = cy - sy * axis_len
-                er = Theme.SCENE_ORIENT_END_RADIUS
-                a = 1.0
-                axis_key = '+' + label
-            else:
-                ex = cx + sx * axis_len
-                ey = cy - sy * axis_len
-                er = Theme.SCENE_ORIENT_NEG_RADIUS
-                a = 0.5
-                axis_key = '-' + label
+            ex = cx + sx * axis_len
+            ey = cy - sy * axis_len
+            er = Theme.SCENE_ORIENT_END_RADIUS if front_facing else Theme.SCENE_ORIENT_NEG_RADIUS
+            a = 1.0 if front_facing else 0.5
 
             # Draw filled circle
             ctx.draw_filled_circle(ex, ey, er, clr[0], clr[1], clr[2], a, 16)
 
-            # Draw label on positive endpoints
-            if positive:
+            # Unity-style: label the endpoint that currently faces the camera.
+            if front_facing:
                 ctx.draw_text(ex - 3, ey - 5, label, 1.0, 1.0, 1.0, 1.0)
 
             # Hit test
@@ -661,7 +659,7 @@ class SceneViewPanel(EditorPanel):
         yr = math.radians(cur_yaw)
         pr = math.radians(cur_pitch)
         cp = math.cos(pr)
-        fwd = (math.sin(yr) * cp, math.sin(pr), math.cos(yr) * cp)
+        fwd = (math.sin(yr) * cp, -math.sin(pr), math.cos(yr) * cp)
         focus = (cur_pos.x + fwd[0] * cur_dist,
                  cur_pos.y + fwd[1] * cur_dist,
                  cur_pos.z + fwd[2] * cur_dist)
@@ -1300,14 +1298,21 @@ class SceneViewPanel(EditorPanel):
         yr = math.radians(cur_yaw)
         pr = math.radians(cur_pitch)
         cp = math.cos(pr)
-        fwd = (math.sin(yr) * cp, math.sin(pr), math.cos(yr) * cp)
+        fwd = (math.sin(yr) * cp, -math.sin(pr), math.cos(yr) * cp)
         actual_focus = (cur_pos.x + fwd[0] * cur_dist,
                         cur_pos.y + fwd[1] * cur_dist,
                         cur_pos.z + fwd[2] * cur_dist)
 
         # Target yaw/pitch: keep current viewing direction
-        target_yaw = cur_yaw
-        target_pitch = cur_pitch
+        # Keep the current viewing direction for volumetric objects, but for
+        # flat one-sided meshes (e.g. old quads) prefer the visible face so
+        # framing does not fly to the culled side.
+        target_orientation = self._preferred_focus_angles(game_object)
+        if target_orientation is not None:
+            target_yaw, target_pitch = target_orientation
+        else:
+            target_yaw = cur_yaw
+            target_pitch = cur_pitch
 
         # Store animation state
         self._fly_to_start_focus = actual_focus
@@ -1349,7 +1354,7 @@ class SceneViewPanel(EditorPanel):
         pitch_rad = math.radians(pitch)
         cos_pitch = math.cos(pitch_rad)
         forward_x = math.sin(yaw_rad) * cos_pitch
-        forward_y = math.sin(pitch_rad)
+        forward_y = -math.sin(pitch_rad)
         forward_z = math.cos(yaw_rad) * cos_pitch
         px = fx - forward_x * dist
         py = fy - forward_y * dist
@@ -1413,6 +1418,134 @@ class SceneViewPanel(EditorPanel):
         # Fallback: use transform position with a default radius
         pos = game_object.transform.position
         return (pos.x, pos.y, pos.z), 1.0
+
+    @staticmethod
+    def _vector3_to_tuple(vec) -> tuple[float, float, float]:
+        return (float(vec.x), float(vec.y), float(vec.z))
+
+    @staticmethod
+    def _normalize3(vec):
+        x, y, z = vec
+        length = math.sqrt(x * x + y * y + z * z)
+        if length < 1e-6:
+            return None
+        return (x / length, y / length, z / length)
+
+    @classmethod
+    def _planar_visible_side(cls, obj, mr):
+        """Return a preferred world-space viewing side for flat one-sided meshes."""
+        try:
+            positions = mr.get_positions()
+            indices = mr.get_indices()
+        except Exception:
+            return None
+
+        if not positions or len(indices) < 3:
+            return None
+
+        sum_x = 0.0
+        sum_y = 0.0
+        sum_z = 0.0
+        total_area2 = 0.0
+        tri_count = len(indices) // 3
+        for tri in range(tri_count):
+            i0 = indices[tri * 3]
+            i1 = indices[tri * 3 + 1]
+            i2 = indices[tri * 3 + 2]
+            if i0 >= len(positions) or i1 >= len(positions) or i2 >= len(positions):
+                continue
+            p0 = positions[i0]
+            p1 = positions[i1]
+            p2 = positions[i2]
+            ax = p1[0] - p0[0]
+            ay = p1[1] - p0[1]
+            az = p1[2] - p0[2]
+            bx = p2[0] - p0[0]
+            by = p2[1] - p0[1]
+            bz = p2[2] - p0[2]
+            nx = ay * bz - az * by
+            ny = az * bx - ax * bz
+            nz = ax * by - ay * bx
+            area2 = math.sqrt(nx * nx + ny * ny + nz * nz)
+            if area2 < 1e-8:
+                continue
+            sum_x += nx
+            sum_y += ny
+            sum_z += nz
+            total_area2 += area2
+
+        if total_area2 < 1e-6:
+            return None
+
+        normal = cls._normalize3((sum_x, sum_y, sum_z))
+        if normal is None:
+            return None
+
+        coherence = math.sqrt(sum_x * sum_x + sum_y * sum_y + sum_z * sum_z) / total_area2
+        if coherence < 0.98:
+            return None
+
+        try:
+            material = mr.get_effective_material(0)
+            render_state = material.get_render_state() if material is not None else None
+        except Exception:
+            render_state = None
+
+        if render_state is None:
+            return None
+
+        cull_mode = int(getattr(render_state, 'cull_mode', 0))
+        if cull_mode == 0:
+            return None
+
+        front_face = int(getattr(render_state, 'front_face', 1))
+        front_sign = -1.0 if front_face == 1 else 1.0
+        visible_sign = front_sign if cull_mode == 2 else -front_sign
+        local_side = (
+            normal[0] * visible_sign,
+            normal[1] * visible_sign,
+            normal[2] * visible_sign,
+        )
+
+        try:
+            from InfEngine.math import Vector3
+            world_side_vec = obj.transform.transform_direction(Vector3(*local_side))
+            world_side = cls._vector3_to_tuple(world_side_vec)
+        except Exception:
+            return None
+
+        return cls._normalize3(world_side)
+
+    @classmethod
+    def _preferred_focus_angles(cls, game_object):
+        """Return yaw/pitch override for flat one-sided meshes when possible."""
+        world_sides = []
+
+        def _collect(obj):
+            mr = obj.get_cpp_component("MeshRenderer")
+            if mr is not None:
+                side = cls._planar_visible_side(obj, mr)
+                if side is not None:
+                    world_sides.append(side)
+            for child in obj.get_children():
+                _collect(child)
+
+        _collect(game_object)
+        if not world_sides:
+            return None
+
+        sx = sum(side[0] for side in world_sides)
+        sy = sum(side[1] for side in world_sides)
+        sz = sum(side[2] for side in world_sides)
+        visible_side = cls._normalize3((sx, sy, sz))
+        if visible_side is None:
+            return None
+
+        forward = (-visible_side[0], -visible_side[1], -visible_side[2])
+        yaw = math.degrees(math.atan2(forward[0], forward[2]))
+        # C++ convention: forward.y = -sin(pitch), so pitch = asin(-forward.y)
+        pitch = math.degrees(math.asin(max(-1.0, min(1.0, -forward[1]))))
+        return yaw, pitch
 
     def _align_object_to_camera(self):
         """Align the selected object's world transform to the editor camera."""

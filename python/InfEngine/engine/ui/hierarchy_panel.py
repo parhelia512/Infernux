@@ -207,8 +207,9 @@ class HierarchyPanel(EditorPanel):
 
         from .igui import IGUI
 
-        # Use unique ID to avoid ImGui ID conflicts
-        ctx.push_id(obj.id)
+        # Use string-based push_id — obj.id is uint64_t which can exceed
+        # the 32-bit int limit of push_id().
+        ctx.push_id_str(str(obj.id))
 
         # Tree node flags for hierarchy items
         node_flags = (ImGuiTreeNodeFlags.OpenOnArrow

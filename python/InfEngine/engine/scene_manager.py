@@ -201,7 +201,7 @@ class SceneFileManager:
         # preventing in-flight GPU resources from being destroyed mid-use.
         self._deferred_load_path: Optional[str] = None   # non-None → load pending
         self._deferred_new_scene: bool = False            # True → new scene pending
-        self._deferred_exit_prefab: bool = False           # True → exit prefab mode next frame
+        self._deferred_exit_prefab: bool = False           # True → exit prefab mode task pending
 
         # Guard against repeated request_close() calls while a close
         # confirmation dialog is already visible.  Without this,
@@ -388,6 +388,11 @@ class SceneFileManager:
         self._previous_scene_dirty = self._dirty
         self.prefab_envelope = prefab_data
 
+        # Clear the RenderStack singleton before the swap — matches the
+        # pattern in _do_open_scene / _do_new_scene to avoid stale refs.
+        from InfEngine.renderstack.render_stack import RenderStack
+        RenderStack._active_instance = None
+
         self._prepare_native_scene_swap()
 
         # Destroy ALL objects in the original scene so their physics bodies
@@ -432,17 +437,36 @@ class SceneFileManager:
         return True
 
     def exit_prefab_mode(self):
-        """Schedule exit from Prefab Mode on the next frame.
+        """Schedule exit from Prefab Mode on a later frame.
 
-        The actual work is deferred to ``poll_deferred_load`` so that graphic
-        resources referenced by the current frame's command buffers are not
-        destroyed mid-render.  This matches the deferred pattern used by
-        ``open_scene`` / ``new_scene``.
+        Uses ``DeferredTaskRunner`` instead of ``poll_deferred_load`` so the
+        exit cannot be consumed again later in the same GUI frame. This avoids
+        tearing down the prefab scene while its resources may still be in use
+        by the just-submitted frame.
         """
         if not self.is_prefab_mode:
             return False
+        if self._deferred_exit_prefab:
+            return True
+
+        from InfEngine.engine.deferred_task import DeferredTaskRunner
+
+        runner = DeferredTaskRunner.instance()
+        if runner.is_busy:
+            Debug.log_warning("Cannot exit Prefab Mode: a deferred task is already running")
+            return False
+
         self._deferred_exit_prefab = True
+        runner.submit(
+            "Exit Prefab Mode",
+            [("Exiting Prefab Mode...", 0.6, self._run_deferred_exit_prefab_task)],
+        )
         return True
+
+    def _run_deferred_exit_prefab_task(self):
+        """DeferredTaskRunner step wrapper for prefab-mode exit."""
+        self._deferred_exit_prefab = False
+        return self._do_exit_prefab_mode()
 
     def _do_exit_prefab_mode(self):
         """Internal: perform the actual Prefab Mode exit (called by poll_deferred_load)."""
@@ -466,6 +490,11 @@ class SceneFileManager:
                 ) or None
             except Exception:
                 pass
+
+        # Clear the RenderStack singleton before the swap — matches the
+        # pattern in _do_open_scene / _do_new_scene to avoid stale refs.
+        from InfEngine.renderstack.render_stack import RenderStack
+        RenderStack._active_instance = None
 
         self._prepare_native_scene_swap()
 
@@ -806,15 +835,6 @@ class SceneFileManager:
         until the new scene's first Execute() overwrites it, so no
         placeholder or extra-frame delay is needed.
         """
-        # Process prefab-mode exit FIRST — it restores the previous scene
-        # so that a subsequent deferred open/new operates on it.
-        if self._deferred_exit_prefab:
-            self._deferred_exit_prefab = False
-            try:
-                self._do_exit_prefab_mode()
-            except Exception as exc:
-                Debug.log_error(f"Prefab Mode exit failed: {exc}")
-
         if self._deferred_load_path is not None:
             path = self._deferred_load_path
             self._deferred_load_path = None
