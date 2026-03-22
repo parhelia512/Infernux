@@ -161,6 +161,7 @@ class InfGUIContext
     /* invisible button (for splitter) */
     bool InvisibleButton(const std::string &id, float width, float height);
     bool IsItemActive();
+    bool IsAnyItemActive();
     bool IsItemHovered();
 
     /* focus & activation */

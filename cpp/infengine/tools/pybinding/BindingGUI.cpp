@@ -271,6 +271,7 @@ void RegisterGUIBindings(py::module_ &m)
         // Splitter helper methods
         .def("invisible_button", &InfGUIContext::InvisibleButton)
         .def("is_item_active", &InfGUIContext::IsItemActive)
+        .def("is_any_item_active", &InfGUIContext::IsAnyItemActive)
         .def("is_item_hovered", &InfGUIContext::IsItemHovered)
         .def("set_keyboard_focus_here", &InfGUIContext::SetKeyboardFocusHere, py::arg("offset") = 0,
              "Set keyboard focus to the next item (or previous with negative offset)")

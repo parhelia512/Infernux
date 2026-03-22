@@ -32,7 +32,6 @@ void RegisterResourceBindings(py::module_ &m)
         .def(py::init<>())
         .def("get_resource_name", &InfResourceMeta::GetResourceName,
              "Get the resource name (filename without extension)")
-        .def("get_hash_code", &InfResourceMeta::GetHashCode, "Get the hash code used internally")
         .def("get_guid", &InfResourceMeta::GetGuid, "Get the stable GUID for this resource")
         .def("get_resource_type", &InfResourceMeta::GetResourceType, "Get the resource type")
         .def("has_key", &InfResourceMeta::HasKey, py::arg("key"), "Check if metadata has a specific key")
@@ -591,12 +590,6 @@ void RegisterResourceBindings(py::module_ &m)
         .def_readwrite("alpha_clip_enabled", &RenderState::alphaClipEnabled, "Whether alpha clipping is enabled")
         .def_readwrite("alpha_clip_threshold", &RenderState::alphaClipThreshold, "Alpha clip threshold (0.0-1.0)");
 
-    // MaterialManager — backward-compatible shim that delegates to AssetRegistry.
-    // Python callers can still use MaterialManager.instance().load_default_material_from_file(...)
-    // via a lightweight Python-side wrapper.
-    //
-    // NOTE: The C++ MaterialManager singleton is deprecated.  New code should use
-    // AssetRegistry.instance().load_builtin_material_from_file() directly.
 }
 
 } // namespace infengine

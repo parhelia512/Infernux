@@ -64,8 +64,6 @@ void InfResourceMeta::Init(const char *content, size_t contentSize, const std::s
     std::string guid = guidSs.str();
 
     AddMetadata("guid", guid);
-    // NOTE: "hash" field is deprecated; kept only for backward compatibility with old .meta files.
-    // New code should use GetGuid() instead of GetHashCode().
 
     // Add importer version for future migration support
     AddMetadata("importer_version", 1);
@@ -125,7 +123,7 @@ const std::string &InfResourceMeta::GetGuid() const
     if (it != m_metadata.end()) {
         return std::any_cast<const std::string &>(it->second.second);
     }
-    // Fallback to hash for backward compatibility
+    // Fallback for old .meta files that only have "hash"
     return GetHashCode();
 }
 

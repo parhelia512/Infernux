@@ -6,7 +6,7 @@ import subprocess
 import shutil
 import glob
 
-from hub_utils import is_frozen
+from hub_utils import is_frozen, is_project_open
 from python_runtime import PythonRuntimeError, PythonRuntimeManager
 
 # Suppress console windows for all child processes on Windows
@@ -83,6 +83,22 @@ class ProjectModel:
         return self.db.add_project(name, path)
 
     def delete_project(self, name):
+        base_path = self.db.get_project_path(name)
+        project_dir = os.path.join(base_path, name) if base_path else ""
+
+        if project_dir and is_project_open(project_dir):
+            raise RuntimeError(
+                f"The project is currently open in InfEngine and cannot be deleted:\n{project_dir}"
+            )
+
+        if project_dir and os.path.exists(project_dir):
+            try:
+                shutil.rmtree(project_dir)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Failed to remove the project folder:\n{project_dir}\n{exc}"
+                ) from exc
+
         self.db.delete_project(name)
 
     

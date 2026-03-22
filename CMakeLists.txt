@@ -95,6 +95,7 @@ target_compile_definitions(_InfEngine PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE GLM_FO
 # at CMake configure time if you need per-window dumps in the console.
 target_compile_definitions(_InfEngine PRIVATE
     $<$<CONFIG:RelWithDebInfo>:INFENGINE_FRAME_PROFILE=1>
+    $<$<CONFIG:RelWithDebInfo>:INFENGINE_FILE_LOGGING=1>
 )
 
 target_link_libraries(_InfEngine PRIVATE

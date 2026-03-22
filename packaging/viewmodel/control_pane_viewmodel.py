@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QThread, Signal, QObject, QTimer, Qt
 from model.project_model import ProjectModel
-from hub_utils import is_frozen
+from hub_utils import is_frozen, is_project_open
 import random
 
 
@@ -83,6 +83,14 @@ class ControlPaneViewModel:
         
         project_path = os.path.join(self.project_list.get_selected_project_path(), project_name)
 
+        if is_project_open(project_path):
+            QMessageBox.warning(
+                parent,
+                "Project Already Open",
+                f"The project is already open in InfEngine and cannot be opened again:\n{project_path}",
+            )
+            return
+
         # Determine Python interpreter based on mode
         if is_frozen():
             # Packaged Hub → always use the project's .venv
@@ -121,15 +129,31 @@ class ControlPaneViewModel:
             QMessageBox.warning(parent, "No Selection", "Please select a project to delete.")
             return
 
+        project_root = self.project_list.get_selected_project_path()
+        project_dir = os.path.join(project_root, project_name) if project_root else project_name
+
+        if project_root and is_project_open(project_dir):
+            QMessageBox.warning(
+                parent,
+                "Project Is Open",
+                f"The project is currently open in InfEngine and cannot be deleted:\n{project_dir}",
+            )
+            return
+
         confirm = QMessageBox.question(
             parent,
             "Confirm Deletion",
-            f"Are you sure you want to delete the project '{project_name}'?",
+            f"Delete project '{project_name}' and remove its folder from disk?\n\n{project_dir}",
         )
         if confirm != QMessageBox.Yes:
             return
 
-        self.model.delete_project(project_name)
+        try:
+            self.model.delete_project(project_name)
+        except Exception as exc:
+            QMessageBox.critical(parent, "Project Deletion Failed", str(exc))
+            return
+
         self.project_list.refresh()
 
     def create_project(self, parent):

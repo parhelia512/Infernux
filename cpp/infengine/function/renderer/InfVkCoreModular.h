@@ -711,7 +711,7 @@ class InfVkCoreModular
     uint32_t m_windowHeight = 0;
 
     // ========================================================================
-    // Legacy Resources (for API compatibility)
+    // Vulkan handles (accessed by InfRenderer for surface creation)
     // ========================================================================
 
   public:

@@ -1521,7 +1521,8 @@ class InspectorSnapshotCommand(UndoCommand):
 
 class _TrackedEntry:
     """Internal bookkeeping for a single tracked target within a frame."""
-    __slots__ = ('pre_snapshot', 'snapshot_fn', 'restore_fn', 'description')
+    __slots__ = ('pre_snapshot', 'snapshot_fn', 'restore_fn', 'description',
+                 'active')
 
     def __init__(self, pre_snapshot: str,
                  snapshot_fn: Callable[[], str],
@@ -1531,6 +1532,7 @@ class _TrackedEntry:
         self.snapshot_fn = snapshot_fn
         self.restore_fn = restore_fn
         self.description = description
+        self.active = True
 
 
 class InspectorUndoTracker:
@@ -1539,15 +1541,17 @@ class InspectorUndoTracker:
     Replaces scattered per-widget undo recording with a unified
     panel-level snapshot approach:
 
-    1. ``begin_frame()`` — clear previous entries.
+    1. ``begin_frame()`` — mark previous entries as stale.
     2. ``track(key, snapshot_fn, restore_fn, desc)`` — register each
        inspectable target (component, material, RenderStack, …).
-       A pre-edit snapshot is captured immediately.
+       A pre-edit snapshot is captured only for NEW keys;
+       existing keys are re-activated without re-serialization.
     3. Inspector widgets render and mutate state as usual (old undo calls
        are suppressed via ``UndoManager.suppress_property_recording``).
-    4. ``end_frame()`` — re-capture each target's state, compare with
-       pre-snapshot, and record :class:`InspectorSnapshotCommand` for
-       any detected changes.
+    4. ``end_frame()`` — if an ImGui item was active this frame or last,
+       re-capture each target's state, compare with pre-snapshot, and
+       record :class:`InspectorSnapshotCommand` for any detected changes.
+       When idle, the expensive serialisation is skipped entirely.
 
     Benefits:
     - **No forgotten undo**: every property visible in the Inspector is
@@ -1559,10 +1563,26 @@ class InspectorUndoTracker:
 
     def __init__(self):
         self._entries: dict[str, _TrackedEntry] = {}
+        self._was_active: bool = False  # any item active last frame
+        self._is_active: bool = False   # any item active this frame
 
     def begin_frame(self) -> None:
-        """Start tracking for a new render frame."""
-        self._entries.clear()
+        """Start tracking for a new render frame.
+
+        Mark all entries as stale.  Entries that are re-tracked this frame
+        will be marked active; stale entries are pruned in end_frame().
+        """
+        for entry in self._entries.values():
+            entry.active = False
+
+    def mark_all_active(self) -> None:
+        """Re-activate all existing entries without re-registration.
+
+        Used when the selection hasn't changed to skip the expensive
+        per-object iteration in ``_render_multi_edit``.
+        """
+        for entry in self._entries.values():
+            entry.active = True
 
     def track(self, key: str, snapshot_fn: Callable[[], str],
               restore_fn: Callable[[str], None],
@@ -1575,7 +1595,14 @@ class InspectorUndoTracker:
             restore_fn: Restores the target from a serialized state.
             description: Human-readable label for the undo menu entry.
         """
-        if key in self._entries:
+        existing = self._entries.get(key)
+        if existing is not None:
+            # Re-activate without re-serialization; update callables in
+            # case the underlying object reference changed (e.g. after
+            # undo/redo the Python wrapper may be a new object).
+            existing.active = True
+            existing.snapshot_fn = snapshot_fn
+            existing.restore_fn = restore_fn
             return
         try:
             pre = snapshot_fn()
@@ -1584,11 +1611,37 @@ class InspectorUndoTracker:
         self._entries[key] = _TrackedEntry(
             pre, snapshot_fn, restore_fn, description)
 
-    def end_frame(self) -> None:
-        """Compare pre/post snapshots and record undo for any changes."""
+    def end_frame(self, any_item_active: bool | None = None) -> None:
+        """Compare pre/post snapshots and record undo for any changes.
+
+        Args:
+            any_item_active: ``True`` when an ImGui item was active this
+                frame (e.g. slider being dragged, text field focused).
+                When neither this frame nor the previous frame had an
+                active item, the expensive serialisation comparison is
+                skipped — nothing could have changed.  Pass ``None``
+                (the default) to always perform the comparison.
+        """
+        do_compare = True
+        if any_item_active is not None:
+            self._was_active, self._is_active = self._is_active, any_item_active
+            do_compare = any_item_active or self._was_active
+
         mgr = UndoManager.instance()
         if not mgr or not mgr.enabled:
             self._entries.clear()
+            return
+
+        # Prune stale entries (objects that left the selection).
+        stale_keys: list[str] = []
+        for key, entry in self._entries.items():
+            if not entry.active:
+                stale_keys.append(key)
+        for key in stale_keys:
+            del self._entries[key]
+
+        # Skip expensive serialisation when no widget was interacted with.
+        if not do_compare:
             return
 
         for key, entry in self._entries.items():
@@ -1602,8 +1655,9 @@ class InspectorUndoTracker:
                     entry.restore_fn, entry.description,
                 )
                 mgr.record(cmd)
-
-        self._entries.clear()
+                # Update pre-snapshot so next frame compares against
+                # the new state, not the original.
+                entry.pre_snapshot = post
 
 
 # ---------------------------------------------------------------------------

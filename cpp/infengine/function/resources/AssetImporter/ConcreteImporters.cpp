@@ -71,26 +71,11 @@ void MaterialImporter::ScanDependencies(const ImportContext &ctx)
             int ptype = typeIt->get<int>();
             if (ptype != 6) // 6 == Texture2D
                 continue;
-            // v2: texture GUID stored under "guid" key
-            // v1 (legacy): texture path stored under "value" key, needs path→GUID
             auto guidIt = propVal.find("guid");
             if (guidIt != propVal.end() && guidIt->is_string()) {
                 std::string texGuid = guidIt->get<std::string>();
                 if (!texGuid.empty())
                     deps.insert(texGuid);
-            } else {
-                // Legacy v1 fallback: resolve path → GUID
-                auto valIt = propVal.find("value");
-                if (valIt == propVal.end() || !valIt->is_string())
-                    continue;
-                std::string texPath = valIt->get<std::string>();
-                if (texPath.empty() || texPath == "white" || texPath == "black" || texPath == "normal")
-                    continue;
-                std::string depGuid;
-                if (m_assetDb)
-                    depGuid = m_assetDb->GetGuidFromPath(texPath);
-                if (!depGuid.empty())
-                    deps.insert(depGuid);
             }
         }
     }

@@ -107,6 +107,7 @@ class InspectorPanel(EditorPanel):
         self._multi_cache_py: set = set()
         self._multi_cache_per_cpp: dict = {}
         self._multi_cache_per_py: dict = {}
+        self._multi_cache_has_transform: bool = True
 
         # Register MeshRenderer into the component renderer registry so
         # dispatch is fully unified (uses bound method for panel-level state).
@@ -2134,18 +2135,9 @@ class InspectorPanel(EditorPanel):
 
         transforms = []
         for o in objects:
-            hide = False
-            try:
-                for _pc in o.get_py_components():
-                    if getattr(type(_pc), '_hide_transform_', False):
-                        hide = True
-                        break
-            except RuntimeError:
-                pass
-            if not hide:
-                t = o.get_transform()
-                if t is not None:
-                    transforms.append(t)
+            t = o.get_transform()
+            if t is not None:
+                transforms.append(t)
         if not transforms:
             return
 
@@ -2266,75 +2258,84 @@ class InspectorPanel(EditorPanel):
         from InfEngine.engine.undo import snapshot_renderstack, restore_renderstack
         from InfEngine.renderstack.render_stack import RenderStack
 
-        # --- Register undo tracking for all selected objects ---
+        # --- Undo tracking registration ---
+        # Only re-iterate objects when the selection set changed;
+        # otherwise just mark existing entries as active.
+        obj_ids = tuple(o.id for o in objects)
         tracker = self._undo_tracker
-        for obj in objects:
-            oid = obj.id
-            _o = obj  # capture
-            # Track GameObject name / active
-            def _go_snap(_oo=_o):
-                return _json.dumps({"name": _oo.name, "active": _oo.active})
-            def _go_rest(s, _oo=_o):
-                d = _json.loads(s)
-                _oo.name = d["name"]
-                _oo.active = d["active"]
-            tracker.track(f"go:{oid}", _go_snap, _go_rest, "Edit Objects (Multi)")
 
-            # Track Transform
-            trans = obj.get_transform()
-            if trans:
-                _t = trans
-                tracker.track(
-                    f"transform:{oid}",
-                    lambda _tt=_t: _tt.serialize(),
-                    lambda s, _tt=_t: _tt.deserialize(s),
-                    "Edit Transform (Multi)",
-                )
+        if obj_ids != self._multi_cache_ids:
+            # Selection changed — full registration
+            for obj in objects:
+                oid = obj.id
+                _o = obj  # capture
+                # Track GameObject name / active
+                def _go_snap(_oo=_o):
+                    return _json.dumps({"name": _oo.name, "active": _oo.active})
+                def _go_rest(s, _oo=_o):
+                    d = _json.loads(s)
+                    _oo.name = d["name"]
+                    _oo.active = d["active"]
+                tracker.track(f"go:{oid}", _go_snap, _go_rest, "Edit Objects (Multi)")
 
-            # Track C++ components
-            try:
-                comps = list(obj.get_components()) if hasattr(obj, 'get_components') else []
-            except RuntimeError:
-                comps = []
-            for comp in comps:
+                # Track Transform
+                trans = obj.get_transform()
+                if trans:
+                    _t = trans
+                    tracker.track(
+                        f"transform:{oid}",
+                        lambda _tt=_t: _tt.serialize(),
+                        lambda s, _tt=_t: _tt.deserialize(s),
+                        "Edit Transform (Multi)",
+                    )
+
+                # Track C++ components
                 try:
-                    tn = comp.type_name
-                    if tn == "Transform" or hasattr(comp, 'get_py_component'):
-                        continue
-                    cid = getattr(comp, "component_id", None) or id(comp)
-                    _c = comp
-                    tracker.track(
-                        f"native:{cid}",
-                        lambda _cc=_c: _cc.serialize(),
-                        lambda s, _cc=_c: _cc.deserialize(s),
-                        f"Edit {tn} (Multi)",
-                    )
-                except (RuntimeError, AttributeError):
-                    pass
+                    comps = list(obj.get_components()) if hasattr(obj, 'get_components') else []
+                except RuntimeError:
+                    comps = []
+                for comp in comps:
+                    try:
+                        tn = comp.type_name
+                        if tn == "Transform" or hasattr(comp, 'get_py_component'):
+                            continue
+                        cid = getattr(comp, "component_id", None) or id(comp)
+                        _c = comp
+                        tracker.track(
+                            f"native:{cid}",
+                            lambda _cc=_c: _cc.serialize(),
+                            lambda s, _cc=_c: _cc.deserialize(s),
+                            f"Edit {tn} (Multi)",
+                        )
+                    except (RuntimeError, AttributeError):
+                        pass
 
-            # Track Python components
-            try:
-                pcs = list(obj.get_py_components()) if hasattr(obj, 'get_py_components') else []
-            except RuntimeError:
-                pcs = []
-            for pc in pcs:
-                pc_id = getattr(pc, "component_id", None) or id(pc)
-                if isinstance(pc, RenderStack):
-                    _rs = pc
-                    tracker.track(
-                        f"renderstack:{pc_id}",
-                        lambda _s=_rs: snapshot_renderstack(_s),
-                        lambda s, _s=_rs: restore_renderstack(_s, s),
-                        "Edit RenderStack (Multi)",
-                    )
-                else:
-                    _pc = pc
-                    tracker.track(
-                        f"pycomp:{pc_id}",
-                        lambda _p=_pc: _p._serialize_fields(),
-                        lambda s, _p=_pc: _p._deserialize_fields(s),
-                        f"Edit {pc.type_name} (Multi)",
-                    )
+                # Track Python components
+                try:
+                    pcs = list(obj.get_py_components()) if hasattr(obj, 'get_py_components') else []
+                except RuntimeError:
+                    pcs = []
+                for pc in pcs:
+                    pc_id = getattr(pc, "component_id", None) or id(pc)
+                    if isinstance(pc, RenderStack):
+                        _rs = pc
+                        tracker.track(
+                            f"renderstack:{pc_id}",
+                            lambda _s=_rs: snapshot_renderstack(_s),
+                            lambda s, _s=_rs: restore_renderstack(_s, s),
+                            "Edit RenderStack (Multi)",
+                        )
+                    else:
+                        _pc = pc
+                        tracker.track(
+                            f"pycomp:{pc_id}",
+                            lambda _p=_pc: _p._serialize_fields(),
+                            lambda s, _p=_pc: _p._deserialize_fields(s),
+                            f"Edit {pc.type_name} (Multi)",
+                        )
+        else:
+            # Selection unchanged — bulk re-activate, no C++ calls
+            tracker.mark_all_active()
 
         n = len(objects)
         ctx.push_id_str("multi_edit")
@@ -2359,28 +2360,13 @@ class InspectorPanel(EditorPanel):
         ctx.dummy(0, Theme.INSPECTOR_SECTION_GAP)
 
         # Transform — show if at least one object has transform visible
-        _any_has_transform = False
-        for o in objects:
-            hide = False
-            try:
-                for _pc in o.get_py_components():
-                    if getattr(type(_pc), '_hide_transform_', False):
-                        hide = True
-                        break
-            except RuntimeError:
-                pass
-            if not hide:
-                _any_has_transform = True
-                break
-        if _any_has_transform:
-            transform_icon = self._get_component_icon_id("Transform")
-            if render_component_header(ctx, "Transform", icon_id=transform_icon, show_enabled=False, force_open=True)[0]:
-                self._render_multi_transform(ctx, objects)
+        # (cached along with component discovery below)
 
         # Find common component types — cached across frames, invalidated
         # when the set of selected object IDs changes.
-        obj_ids = tuple(o.id for o in objects)
         if obj_ids != self._multi_cache_ids:
+            # --- Transform visibility check ---
+            _any_has_transform = False
             common_cpp_types = None
             per_obj_comps: dict[str, list] = {}
             for o in objects:
@@ -2410,10 +2396,15 @@ class InspectorPanel(EditorPanel):
                 except RuntimeError:
                     pcs = []
                 type_set = set()
+                hide = False
                 for pc in pcs:
                     tn = pc.type_name
                     type_set.add(tn)
                     per_obj_py.setdefault(tn, []).append(pc)
+                    if getattr(type(pc), '_hide_transform_', False):
+                        hide = True
+                if not hide:
+                    _any_has_transform = True
                 if common_py_types is None:
                     common_py_types = type_set
                 else:
@@ -2426,11 +2417,18 @@ class InspectorPanel(EditorPanel):
             self._multi_cache_py = common_py_types
             self._multi_cache_per_cpp = per_obj_comps
             self._multi_cache_per_py = per_obj_py
+            self._multi_cache_has_transform = _any_has_transform
         else:
             common_cpp_types = self._multi_cache_cpp
             common_py_types = self._multi_cache_py
             per_obj_comps = self._multi_cache_per_cpp
             per_obj_py = self._multi_cache_per_py
+            _any_has_transform = self._multi_cache_has_transform
+
+        if _any_has_transform:
+            transform_icon = self._get_component_icon_id("Transform")
+            if render_component_header(ctx, "Transform", icon_id=transform_icon, show_enabled=False, force_open=True)[0]:
+                self._render_multi_transform(ctx, objects)
 
         # Render common C++ components — force open in multi-select,
         # with special handling for MeshRenderer (show "-" for different values).
@@ -2556,7 +2554,7 @@ class InspectorPanel(EditorPanel):
         ctx.end_child()
 
         # End undo tracking frame — compare and record changes
-        self._undo_tracker.end_frame()
+        self._undo_tracker.end_frame(ctx.is_any_item_active())
 
         # Drag-drop target on the entire PropertiesModule child window.
         # Must be called AFTER end_child() — EndChild() submits the child as an item,

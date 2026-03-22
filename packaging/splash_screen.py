@@ -10,6 +10,8 @@ from PySide6.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout, QGraph
 from PySide6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPixmap, QFont, QPainter, QColor, QPen, QBrush
 
+from hub_utils import get_project_lock_path, remove_project_lock, write_project_lock
+
 
 class EngineSplashScreen(QWidget):
     """Borderless square overlay shown while the engine process starts up.
@@ -35,6 +37,8 @@ class EngineSplashScreen(QWidget):
 
         self._process: subprocess.Popen | None = None
         self._ready_file: str = ""
+        self._project_path: str = ""
+        self._lock_token: str = ""
         self._angle = 0  # spinner angle
         self._closing = False
 
@@ -178,8 +182,13 @@ class EngineSplashScreen(QWidget):
         self._ready_file = os.path.join(
             tempfile.gettempdir(), f"infengine_ready_{uuid.uuid4().hex}.flag"
         )
+        self._project_path = project_path
+        self._lock_token = uuid.uuid4().hex
         env = os.environ.copy()
         env["_INFENGINE_READY_FILE"] = self._ready_file
+        env["_INFENGINE_PROJECT_LOCK_PATH"] = get_project_lock_path(project_path)
+        env["_INFENGINE_PROJECT_LOCK_TOKEN"] = self._lock_token
+        write_project_lock(project_path, os.getpid(), self._lock_token, "editor", "launching")
 
         popen_kwargs: dict = {"cwd": project_path, "env": env}
 
@@ -204,6 +213,7 @@ class EngineSplashScreen(QWidget):
                 **popen_kwargs,
             )
         except OSError:
+            remove_project_lock(project_path, self._lock_token)
             self._status.setText("Launch failed")
             QTimer.singleShot(250, self._fade_out_and_close)
             return
@@ -272,6 +282,8 @@ class EngineSplashScreen(QWidget):
         self._fade_out_and_close()
 
     def _finish_close(self):
+        if self._process is not None and self._process.poll() is not None and self._project_path:
+            remove_project_lock(self._project_path, self._lock_token or None)
         if self._ready_file:
             try:
                 os.remove(self._ready_file)

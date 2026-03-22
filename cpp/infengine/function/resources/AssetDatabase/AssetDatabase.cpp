@@ -699,9 +699,6 @@ void AssetDatabase::ModifyResource(const std::string &path)
 
     if (fs::exists(fsMetaPath) && meta.LoadFromFile(metaPath)) {
         existingGuid = meta.GetGuid();
-        if (existingGuid.empty()) {
-            existingGuid = meta.GetHashCode();
-        }
     }
 
     auto loaderIt = m_loaders.find(type);

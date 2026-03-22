@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -25,6 +26,16 @@ class InfLog
         return instance;
     }
 
+    /// Open a log file under the given path.  When a file is open, all log
+    /// output goes to the file instead of the console.
+    void SetLogFile(const std::string &path)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (logFile_.is_open())
+            logFile_.close();
+        logFile_.open(path, std::ios::out | std::ios::trunc);
+    }
+
     template <typename... Args> void Log(LogLevel level, const char *file, int line, Args &&...args)
     {
         if (logLevel.load(std::memory_order_relaxed) > level)
@@ -36,15 +47,26 @@ class InfLog
         // this prevents deadlocks / severe contention when multiple
         // threads (main loop, Vulkan validation callback, file watcher)
         // log concurrently.
-        std::ostringstream oss;
-        oss << LogLevelToColor(level) << '[' << LogLevelToString(level) << "] "
-            << '(' << file << ':' << line << ") ";
-        (oss << ... << args);
-        oss << "\033[0m\n";
-        std::string msg = oss.str();
+
+        // Plain message for file output (no ANSI color codes)
+        std::ostringstream plain;
+        plain << '[' << LogLevelToString(level) << "] "
+              << '(' << file << ':' << line << ") ";
+        (plain << ... << args);
+        plain << '\n';
 
         std::lock_guard<std::mutex> lock(mutex_);
-        std::cout.write(msg.data(), static_cast<std::streamsize>(msg.size()));
+        if (logFile_.is_open()) {
+            std::string msg = plain.str();
+            logFile_.write(msg.data(), static_cast<std::streamsize>(msg.size()));
+            logFile_.flush();
+        } else {
+            // Console output with ANSI colors
+            std::string msg = LogLevelToColor(level) + plain.str();
+            // Insert reset code before the trailing newline
+            msg.insert(msg.size() - 1, "\033[0m");
+            std::cout.write(msg.data(), static_cast<std::streamsize>(msg.size()));
+        }
     }
 
     void SetLogLevel(int level)
@@ -65,6 +87,7 @@ class InfLog
     InfLog &operator=(const InfLog &) = delete;
 
     std::mutex mutex_;
+    std::ofstream logFile_;
 
     std::atomic<int> logLevel;
 
@@ -125,3 +148,5 @@ class InfLog
 #define INFLOG_SET_LEVEL(level) InfLog::GetInstance().SetLogLevel(level)
 
 #define INFLOG_GET_LEVEL() InfLog::GetInstance().GetLogLevel()
+
+#define INFLOG_SET_FILE(path) InfLog::GetInstance().SetLogFile(path)

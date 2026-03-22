@@ -36,7 +36,7 @@ using AssetEventCallback =
  * @brief Central, type-agnostic asset dependency graph.
  *
  * Replaces the scattered dependency maps that were previously maintained
- * independently by MaterialManager (material ↔ MeshRenderer),
+ * independently by AssetRegistry (material ↔ MeshRenderer),
  * MaterialPipelineManager (texture ↔ material), and ad-hoc Python code.
  *
  * Two kinds of relationships are tracked:

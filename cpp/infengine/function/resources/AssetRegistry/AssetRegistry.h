@@ -111,7 +111,7 @@ class AssetRegistry
     // ── Built-in material helpers (named, no GUID) ───────────────────────────
 
     /// Create and register all engine built-in materials (DefaultLit, Error, Gizmo, etc.).
-    /// Replaces the former MaterialManager::Initialize() responsibility.
+    /// Populates builtin material pointers from registered loaders.
     void InitializeBuiltinMaterials();
 
     void RegisterBuiltinMaterial(const std::string &key, std::shared_ptr<InfMaterial> mat);

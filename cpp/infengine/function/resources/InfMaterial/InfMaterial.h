@@ -508,7 +508,6 @@ class InfMaterial
     static std::shared_ptr<InfMaterial> CreateErrorMaterial();
 
   private:
-    friend class MaterialManager;
     friend class MaterialLoader;
     friend class InfMaterialLoader;
 
@@ -637,74 +636,6 @@ class InfMaterial
     {
         return m_version;
     }
-};
-
-/**
- * @brief MaterialManager — thin cache of built-in material pointers.
- *
- * Real ownership is in AssetRegistry.  MaterialManager only caches
- * the 8 engine built-in materials (DefaultLit, Gizmo, Grid, etc.)
- * so they can be retrieved without a map lookup every frame.
- *
- * All asset loading, GUID-based lookup, hot-reload, invalidation,
- * and lifecycle management lives in AssetRegistry.
- */
-class MaterialManager
-{
-  public:
-    static MaterialManager &Instance();
-
-    // Non-copyable
-    MaterialManager(const MaterialManager &) = delete;
-    MaterialManager &operator=(const MaterialManager &) = delete;
-
-    /// @brief Initialize — populate builtin pointers from AssetRegistry.
-    void Initialize();
-
-    /// @brief Release all cached pointers.
-    void Shutdown();
-
-    /// @brief Get the default material (unlit opaque)
-    [[nodiscard]] std::shared_ptr<InfMaterial> GetDefaultMaterial();
-
-    /// @brief Get the gizmo material (for grid and other gizmos)
-    [[nodiscard]] std::shared_ptr<InfMaterial> GetGizmoMaterial();
-
-    /// @brief Get the grid material (distance-fading grid)
-    [[nodiscard]] std::shared_ptr<InfMaterial> GetGridMaterial();
-
-    /// @brief Get the editor tools material (translate/rotate/scale handles)
-    [[nodiscard]] std::shared_ptr<InfMaterial> GetEditorToolsMaterial();
-
-    /// @brief Get the component gizmos material (Python-driven, depth-tested)
-    [[nodiscard]] std::shared_ptr<InfMaterial> GetComponentGizmosMaterial();
-
-    /// @brief Get the component gizmo icon material (TRIANGLE_LIST billboards)
-    [[nodiscard]] std::shared_ptr<InfMaterial> GetComponentGizmoIconMaterial();
-
-    /// @brief Get the skybox material
-    [[nodiscard]] std::shared_ptr<InfMaterial> GetSkyboxMaterial();
-
-    /// @brief Get the error material (purple-black checkerboard for shader mismatch)
-    [[nodiscard]] std::shared_ptr<InfMaterial> GetErrorMaterial();
-
-    /// @brief Load default material from a .mat file in project directory.
-    /// Replaces the DefaultLit builtin in both this cache and AssetRegistry.
-    bool LoadDefaultMaterialFromFile(const std::string &matFilePath);
-
-  private:
-    MaterialManager() = default;
-    ~MaterialManager() = default;
-
-    std::shared_ptr<InfMaterial> m_defaultMaterial;
-    std::shared_ptr<InfMaterial> m_gizmoMaterial;
-    std::shared_ptr<InfMaterial> m_gridMaterial;
-    std::shared_ptr<InfMaterial> m_editorToolsMaterial;
-    std::shared_ptr<InfMaterial> m_componentGizmosMaterial;
-    std::shared_ptr<InfMaterial> m_componentGizmoIconMaterial;
-    std::shared_ptr<InfMaterial> m_skyboxMaterial;
-    std::shared_ptr<InfMaterial> m_errorMaterial;
-    bool m_initialized = false;
 };
 
 } // namespace infengine

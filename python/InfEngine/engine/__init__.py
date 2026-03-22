@@ -1,4 +1,7 @@
+import atexit
+import json
 import os
+import uuid
 
 # ── Player mode detection ───────────────────────────────────────────
 # Set by the Nuitka boot script BEFORE any InfEngine imports.
@@ -58,6 +61,97 @@ def _signal_engine_loaded() -> None:
     print("ENGINE_LOADED", flush=True)
 
 
+def _is_pid_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            handle = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION,
+                False,
+                pid,
+            )
+            if not handle:
+                return False
+            try:
+                exit_code = ctypes.c_ulong()
+                if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    return False
+                return exit_code.value == STILL_ACTIVE
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception:
+            return False
+
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _default_lock_path(project_path: str) -> str:
+    return os.path.join(project_path, "ProjectSettings", ".infengine-engine-lock.json")
+
+
+def _remove_project_lock(lock_path: str, token: str) -> None:
+    if not lock_path or not os.path.isfile(lock_path):
+        return
+    try:
+        with open(lock_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        data = None
+    if data and data.get("token") != token:
+        return
+    try:
+        os.remove(lock_path)
+    except OSError:
+        pass
+
+
+def _acquire_project_lock(project_path: str, mode: str) -> tuple[str, str]:
+    lock_path = os.environ.get("_INFENGINE_PROJECT_LOCK_PATH", "").strip() or _default_lock_path(project_path)
+    token = os.environ.get("_INFENGINE_PROJECT_LOCK_TOKEN", "").strip() or uuid.uuid4().hex
+
+    if os.path.isfile(lock_path):
+        try:
+            with open(lock_path, "r", encoding="utf-8") as f:
+                current = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            current = None
+
+        if current:
+            current_pid = int(current.get("pid", 0) or 0)
+            current_token = str(current.get("token", ""))
+            if current_pid > 0 and _is_pid_running(current_pid):
+                if current_token != token:
+                    raise RuntimeError(
+                        f"Project is already open in another InfEngine process:\n{project_path}"
+                    )
+            else:
+                _remove_project_lock(lock_path, current_token or token)
+
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    payload = {
+        "pid": os.getpid(),
+        "token": token,
+        "mode": mode,
+        "state": "running",
+        "project_path": os.path.abspath(project_path),
+    }
+    with open(lock_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+
+    atexit.register(_remove_project_lock, lock_path, token)
+    return lock_path, token
+
+
 def release_engine(project_path: str, engine_log_level=LogLevel.Info):
     """Launch InfEngine with Unity-style editor layout.
 
@@ -65,23 +159,28 @@ def release_engine(project_path: str, engine_log_level=LogLevel.Info):
     """
     import time
     from .bootstrap import EditorBootstrap
-    bootstrap = EditorBootstrap(project_path, engine_log_level)
-    bootstrap.run()
 
-    bootstrap.engine.set_window_icon(icon_path)
+    lock_path, lock_token = _acquire_project_lock(project_path, "editor")
+    try:
+        bootstrap = EditorBootstrap(project_path, engine_log_level)
+        bootstrap.run()
 
-    # Signal the launcher splash to begin its fade-out, then wait for it
-    # to finish before revealing the engine window.
-    _signal_engine_loaded()
-    time.sleep(0.6)
+        bootstrap.engine.set_window_icon(icon_path)
 
-    bootstrap.engine.show()
-    bootstrap.engine.run()
+        # Signal the launcher splash to begin its fade-out, then wait for it
+        # to finish before revealing the engine window.
+        _signal_engine_loaded()
+        time.sleep(0.6)
 
-    # ── Save panel states on exit ──
-    _panel_state.put("console", bootstrap.console.save_state())
-    _panel_state.put("project", bootstrap.project_panel.save_state())
-    _panel_state.save()
+        bootstrap.engine.show()
+        bootstrap.engine.run()
+
+        # ── Save panel states on exit ──
+        _panel_state.put("console", bootstrap.console.save_state())
+        _panel_state.put("project", bootstrap.project_panel.save_state())
+        _panel_state.save()
+    finally:
+        _remove_project_lock(lock_path, lock_token)
 
 
 def run_player(project_path: str, engine_log_level=LogLevel.Info):
@@ -96,44 +195,49 @@ def run_player(project_path: str, engine_log_level=LogLevel.Info):
     import time
     from .player_bootstrap import PlayerBootstrap
 
-    # Read optional BuildManifest for display & splash settings
-    manifest_path = os.path.join(project_path, "BuildManifest.json")
-    manifest = {}
-    if os.path.isfile(manifest_path):
-        try:
-            with open(manifest_path, "r", encoding="utf-8", errors="replace") as _f:
-                manifest = json.load(_f)
-        except Exception:
-            pass
+    lock_path, lock_token = _acquire_project_lock(project_path, "player")
 
-    display_mode = manifest.get("display_mode", "fullscreen_borderless")
-    window_width = manifest.get("window_width", 1920)
-    window_height = manifest.get("window_height", 1080)
-    splash_items = manifest.get("splash_items", [])
+    try:
+        # Read optional BuildManifest for display & splash settings
+        manifest_path = os.path.join(project_path, "BuildManifest.json")
+        manifest = {}
+        if os.path.isfile(manifest_path):
+            try:
+                with open(manifest_path, "r", encoding="utf-8", errors="replace") as _f:
+                    manifest = json.load(_f)
+            except Exception:
+                pass
 
-    bootstrap = PlayerBootstrap(
-        project_path, engine_log_level,
-        display_mode=display_mode,
-        window_width=window_width,
-        window_height=window_height,
-        splash_items=splash_items,
-    )
-    bootstrap.run()
+        display_mode = manifest.get("display_mode", "fullscreen_borderless")
+        window_width = manifest.get("window_width", 1920)
+        window_height = manifest.get("window_height", 1080)
+        splash_items = manifest.get("splash_items", [])
 
-    # Set window title to project name
-    project_name = os.path.basename(os.path.normpath(project_path))
-    bootstrap.engine.set_window_title(project_name)
+        bootstrap = PlayerBootstrap(
+            project_path, engine_log_level,
+            display_mode=display_mode,
+            window_width=window_width,
+            window_height=window_height,
+            splash_items=splash_items,
+        )
+        bootstrap.run()
 
-    if display_mode == "fullscreen_borderless":
-        bootstrap.engine.set_fullscreen(True)
+        # Set window title to project name
+        project_name = os.path.basename(os.path.normpath(project_path))
+        bootstrap.engine.set_window_title(project_name)
 
-    bootstrap.engine.set_window_icon(icon_path)
+        if display_mode == "fullscreen_borderless":
+            bootstrap.engine.set_fullscreen(True)
 
-    _signal_engine_loaded()
-    time.sleep(0.3)
+        bootstrap.engine.set_window_icon(icon_path)
 
-    bootstrap.engine.show()
-    bootstrap.engine.run()
+        _signal_engine_loaded()
+        time.sleep(0.3)
+
+        bootstrap.engine.show()
+        bootstrap.engine.run()
+    finally:
+        _remove_project_lock(lock_path, lock_token)
 
 __all__ = [
     "Engine",

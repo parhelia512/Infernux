@@ -6,7 +6,7 @@
  * Contains: UpdateMaterialUBO, EnsureMaterialUBO, CreateBuffer,
  *           InitializeMaterialSystem, RefreshMaterialPipeline,
  *           SetAmbientColor, UpdateLightingUBO,
- *           GetObject*Buffer, GetLegacy*Buffer, GetUniformBuffer, GetShaderModule.
+ *           GetObjectBuffer, GetUniformBuffer, GetShaderModule.
  */
 
 #include "InfError.h"
@@ -51,29 +51,16 @@ static bool IsLinearMaterialTextureBinding(const std::string &bindingName)
 std::pair<VkImageView, VkSampler> InfVkCoreModular::ResolveTextureForMaterial(const std::string &textureRef,
                                                                               const std::string &bindingName)
 {
-    // textureRef may be a GUID (v2) or a file path (v1 legacy).
-    // Resolve GUID → file path via AssetDatabase if available.
+    // Resolve texture GUID → file path via AssetDatabase.
     std::string textureGuid = textureRef;
-    std::string texturePath; // empty until resolved
+    std::string texturePath;
     auto &registry = AssetRegistry::Instance();
     auto *adb = registry.GetAssetDatabase();
     if (adb) {
         std::string resolved = adb->GetPathFromGuid(textureRef);
         if (!resolved.empty()) {
-            // textureRef was a GUID — resolved to file path
             texturePath = resolved;
-        } else {
-            // textureRef might be a file path — look up its GUID for cache key
-            std::string guid = adb->GetGuidFromPath(textureRef);
-            if (!guid.empty()) {
-                textureGuid = guid;
-                texturePath = textureRef; // textureRef is a valid path
-            }
-            // else: textureRef is neither a resolvable GUID nor a known path
         }
-    } else {
-        // No AssetDatabase — treat textureRef as a raw file path
-        texturePath = textureRef;
     }
 
     if (texturePath.empty()) {

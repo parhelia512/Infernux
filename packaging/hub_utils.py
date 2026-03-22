@@ -1,5 +1,6 @@
 """Utility helpers shared across the Hub codebase."""
 
+import json
 import os
 import sys
 
@@ -35,3 +36,112 @@ def get_inner_dir() -> str:
 def get_hub_data_dir() -> str:
     """Return the Hub application data directory next to the executable."""
     return os.path.join(get_app_dir(), "InfEngineHubData")
+
+
+def get_project_lock_path(project_path: str) -> str:
+    """Return the lock-file path that marks a project as opened by the engine."""
+    return os.path.join(project_path, "ProjectSettings", ".infengine-engine-lock.json")
+
+
+def is_pid_running(pid: int) -> bool:
+    """Return True if *pid* currently exists."""
+    if pid <= 0:
+        return False
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            handle = ctypes.windll.kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION,
+                False,
+                pid,
+            )
+            if not handle:
+                return False
+            try:
+                exit_code = ctypes.c_ulong()
+                if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    return False
+                return exit_code.value == STILL_ACTIVE
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception:
+            return False
+
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def read_project_lock(project_path: str) -> dict | None:
+    """Return active lock metadata for *project_path*, removing stale locks automatically."""
+    lock_path = get_project_lock_path(project_path)
+    if not os.path.isfile(lock_path):
+        return None
+
+    try:
+        with open(lock_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        try:
+            os.remove(lock_path)
+        except OSError:
+            pass
+        return None
+
+    pid = int(data.get("pid", 0) or 0)
+    if not is_pid_running(pid):
+        try:
+            os.remove(lock_path)
+        except OSError:
+            pass
+        return None
+
+    return data
+
+
+def is_project_open(project_path: str) -> bool:
+    """Return True if the project currently has a live engine process."""
+    return read_project_lock(project_path) is not None
+
+
+def write_project_lock(project_path: str, pid: int, token: str, mode: str, state: str) -> str:
+    """Write/update the project lock file and return its path."""
+    lock_path = get_project_lock_path(project_path)
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    payload = {
+        "pid": pid,
+        "token": token,
+        "mode": mode,
+        "state": state,
+        "project_path": os.path.abspath(project_path),
+    }
+    with open(lock_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+    return lock_path
+
+
+def remove_project_lock(project_path: str, token: str | None = None) -> None:
+    """Remove the project lock if it exists and the token matches when provided."""
+    lock_path = get_project_lock_path(project_path)
+    if not os.path.isfile(lock_path):
+        return
+
+    if token is not None:
+        try:
+            with open(lock_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            data = None
+        if data and data.get("token") != token:
+            return
+
+    try:
+        os.remove(lock_path)
+    except OSError:
+        pass

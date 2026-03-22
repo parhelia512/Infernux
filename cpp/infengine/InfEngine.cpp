@@ -193,11 +193,18 @@ void InfEngine::InitRenderer(int width, int height, const std::string &projectPa
 
     m_renderer->Init(width, height, m_metadata);
 
+    // In debug builds, redirect log output to Logs/engine.log
+#if INFENGINE_FILE_LOGGING
+    {
+        auto logsDir = ToFsPath(JoinPath({projectPath, "Logs"}));
+        std::filesystem::create_directories(logsDir);
+        auto logFile = logsDir / "engine.log";
+        INFLOG_SET_FILE(FromFsPath(logFile));
+    }
+#endif
+
     INFLOG_DEBUG("Load shaders.");
-    // If Python supplied the package resource path, use it directly;
-    // otherwise fall back to the legacy Basics/shaders location.
-    std::string defaultShaderPath = builtinResourcePath.empty() ? JoinPath({projectPath, "Basics", "shaders"})
-                                                                : JoinPath({builtinResourcePath, "shaders"});
+    std::string defaultShaderPath = JoinPath({builtinResourcePath, "shaders"});
     std::string assetsPath = JoinPath({projectPath, "Assets"});
     if (m_assetDatabase) {
         // Register the builtin shader search path for @import resolution

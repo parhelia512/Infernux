@@ -569,6 +569,11 @@ bool InfGUIContext::IsItemActive()
     return ImGui::IsItemActive();
 }
 
+bool InfGUIContext::IsAnyItemActive()
+{
+    return ImGui::IsAnyItemActive();
+}
+
 bool InfGUIContext::IsItemHovered()
 {
     return ImGui::IsItemHovered();
