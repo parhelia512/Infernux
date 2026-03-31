@@ -405,7 +405,11 @@ const char *InputManager::ScancodeToName(int scancode)
 
 void InputManager::SetWindow(SDL_Window *window)
 {
+    if (m_window == window)
+        return;
+
     m_window = window;
+    ApplyRelativeMouseMode();
 }
 
 void InputManager::SetCursorLocked(bool locked)
@@ -413,13 +417,31 @@ void InputManager::SetCursorLocked(bool locked)
     if (locked == m_cursorLocked)
         return;
 
+    m_cursorLocked = locked;
+    ApplyRelativeMouseMode();
+}
+
+void InputManager::SetEditorMouseCapture(bool captured)
+{
+    if (captured == m_editorMouseCaptured)
+        return;
+
+    m_editorMouseCaptured = captured;
+    ApplyRelativeMouseMode();
+}
+
+void InputManager::ApplyRelativeMouseMode()
+{
+    const bool relativeMouseEnabled = m_cursorLocked || m_editorMouseCaptured;
+
     if (!m_window) {
-        INXLOG_WARN("InputManager::SetCursorLocked — no window set, ignoring");
+        if (relativeMouseEnabled) {
+            INXLOG_WARN("InputManager::ApplyRelativeMouseMode — no window set, ignoring");
+        }
         return;
     }
 
-    m_cursorLocked = locked;
-    SDL_SetWindowRelativeMouseMode(m_window, locked);
+    SDL_SetWindowRelativeMouseMode(m_window, relativeMouseEnabled);
 }
 
 } // namespace infernux

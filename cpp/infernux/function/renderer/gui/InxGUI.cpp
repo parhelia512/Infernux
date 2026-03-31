@@ -10,7 +10,7 @@
 #include <cmath>
 #include <core/log/InxLog.h>
 #include <imgui.h>
-#include <imgui_internal.h> // For DockBuilder API
+#include <imgui_internal.h>
 #include <memory>
 #include <platform/input/InputManager.h>
 
