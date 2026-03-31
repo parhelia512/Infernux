@@ -63,9 +63,47 @@ class _BuildCancelled(Exception):
     """Raised when the user cancels the build."""
 
 
+class BuildOutputDirectoryError(ValueError):
+    """Raised when the chosen build output directory is unsafe to reuse."""
+
+    def __init__(
+        self,
+        reason: str,
+        path: str,
+        *,
+        marker_filename: str,
+        entries: Optional[list[str]] = None,
+    ):
+        self.reason = reason
+        self.path = path
+        self.marker_filename = marker_filename
+        self.entries = list(entries or [])
+
+        if reason == "required":
+            message = "Output directory is required."
+        elif reason == "path-is-file":
+            message = f"Output path is a file, not a directory: {path}"
+        elif reason == "path-not-directory":
+            message = f"Output path is not a directory: {path}"
+        else:
+            preview = ", ".join(self.entries[:5])
+            if len(self.entries) > 5:
+                preview += ", ..."
+            message = (
+                "Output directory must be empty before building, unless it already contains "
+                f"{marker_filename} from a previous Infernux build.\n"
+                f"Directory: {path}"
+            )
+            if preview:
+                message += f"\nFound: {preview}"
+
+        super().__init__(message)
+
+
 class GameBuilder:
     """Build a standalone native game distribution using Nuitka."""
 
+    OUTPUT_MARKER_FILENAME = ".infernux-build-output"
     _GAME_DATA_DIRS = ["Assets", "ProjectSettings", "materials"]
     _EXCLUDE_PATTERNS = {"__pycache__", ".git", ".gitignore", ".infernux-engine-lock.json"}
     _ICON_EXTS = {".png", ".jpg", ".jpeg", ".ico"}
@@ -149,6 +187,9 @@ class GameBuilder:
         _p("清理冗余资源 Cleaning redundant resources...", 0.98)
         self._cleanup_dist(final_dir)
 
+        _p("写入构建标记 Writing build marker...", 0.985)
+        self._write_output_marker(final_dir)
+
         _p("清理临时文件 Cleaning temp files...", 0.99)
         self._cleanup_temp(boot_script)
 
@@ -196,20 +237,85 @@ class GameBuilder:
                     "Build icon must be a .png, .jpg, .jpeg, or .ico file."
                 )
 
+        self._validate_output_directory()
+
+    def _output_marker_path(self, directory: Optional[str] = None) -> str:
+        target_dir = os.path.abspath(directory or self.output_dir)
+        return os.path.join(target_dir, self.OUTPUT_MARKER_FILENAME)
+
+    def _validate_output_directory(self) -> None:
+        if not self.output_dir:
+            raise BuildOutputDirectoryError(
+                "required",
+                self.output_dir,
+                marker_filename=self.OUTPUT_MARKER_FILENAME,
+            )
+
+        if os.path.isfile(self.output_dir):
+            raise BuildOutputDirectoryError(
+                "path-is-file",
+                self.output_dir,
+                marker_filename=self.OUTPUT_MARKER_FILENAME,
+            )
+
+        if not os.path.exists(self.output_dir):
+            return
+
+        if not os.path.isdir(self.output_dir):
+            raise BuildOutputDirectoryError(
+                "path-not-directory",
+                self.output_dir,
+                marker_filename=self.OUTPUT_MARKER_FILENAME,
+            )
+
+        entries = [entry.name for entry in os.scandir(self.output_dir)]
+        if not entries:
+            return
+
+        marker_path = self._output_marker_path(self.output_dir)
+        if os.path.isfile(marker_path):
+            return
+
+        raise BuildOutputDirectoryError(
+            "not-empty-unmarked",
+            self.output_dir,
+            marker_filename=self.OUTPUT_MARKER_FILENAME,
+            entries=sorted(entries),
+        )
+
     # ------------------------------------------------------------------
     # Clean output
     # ------------------------------------------------------------------
 
     def _clean_output(self):
-        if os.path.exists(self.output_dir):
-            shutil.rmtree(self.output_dir, ignore_errors=True)
-            if os.path.exists(self.output_dir):
-                try:
-                    os.rename(self.output_dir, self.output_dir + "_old")
-                    shutil.rmtree(self.output_dir + "_old", ignore_errors=True)
-                except OSError:
-                    pass
         os.makedirs(self.output_dir, exist_ok=True)
+        self._validate_output_directory()
+
+        for name in os.listdir(self.output_dir):
+            path = os.path.join(self.output_dir, name)
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    continue
+
+            if os.path.exists(path):
+                raise OSError(f"Failed to clean output path: {path}")
+
+    def _write_output_marker(self, final_dir: str) -> None:
+        marker_path = self._output_marker_path(final_dir)
+        marker_payload = {
+            "tool": "Infernux",
+            "kind": "build-output",
+            "project_name": self.project_name,
+            "project_path": self.project_path,
+            "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        with open(marker_path, "w", encoding="utf-8") as f:
+            json.dump(marker_payload, f, indent=2, ensure_ascii=False)
+            f.write("\n")
 
     # ------------------------------------------------------------------
     # Generate boot script (temporary, fed to Nuitka)

@@ -16,6 +16,7 @@ import os
 import json
 import sys
 import threading
+import ctypes
 from typing import Dict, List, Optional
 
 
@@ -25,7 +26,11 @@ class _BuildCancelled(Exception):
 
 from Infernux.debug import Debug
 from Infernux.engine.project_context import get_project_root
-from Infernux.engine.game_builder import _BuildCancelled as _GameBuilderCancelled
+from Infernux.engine.game_builder import (
+    BuildOutputDirectoryError,
+    GameBuilder,
+    _BuildCancelled as _GameBuilderCancelled,
+)
 from Infernux.engine.nuitka_builder import _BuildCancelled as _NuitkaCancelled
 from Infernux.engine.i18n import t
 from .theme import Theme, ImGuiCol, ImGuiStyleVar
@@ -286,6 +291,23 @@ def _pick_icon_file_dialog(title: str) -> Optional[str]:
         root.destroy()
 
 
+def _show_system_error_dialog(title: str, message: str) -> None:
+    if sys.platform == "win32":
+        ctypes.windll.user32.MessageBoxW(0, message, title, 0x10 | 0x0)
+        return
+
+    import tkinter as tk
+    from tkinter import messagebox
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        messagebox.showerror(title, message, parent=root)
+    finally:
+        root.destroy()
+
+
 # ---------------------------------------------------------------------------
 # Drag-drop type & style constants
 # ---------------------------------------------------------------------------
@@ -471,6 +493,9 @@ class BuildSettingsPanel:
             self._save()
         ctx.same_line()
         ctx.button(t("build.browse") + "##browse_out", self._browse_output_dir, width=80)
+        ctx.push_style_color(ImGuiCol.Text, 0.5, 0.5, 0.5, 1.0)
+        ctx.label(t("build.output_directory_hint").format(marker=GameBuilder.OUTPUT_MARKER_FILENAME))
+        ctx.pop_style_color(1)
 
         ctx.label(t("build.icon"))
         clear_btn_w = 80 if self._icon_path else 0
@@ -862,6 +887,30 @@ class BuildSettingsPanel:
     def _cancel_build(self):
         self._cancel_event.set()
 
+    def _format_output_directory_error(self, exc: BuildOutputDirectoryError) -> str:
+        if exc.reason == "required":
+            return t("build.output_directory_error_required")
+        if exc.reason == "path-is-file":
+            return t("build.output_directory_error_path_is_file").format(path=exc.path)
+        if exc.reason == "path-not-directory":
+            return t("build.output_directory_error_not_directory").format(path=exc.path)
+
+        found_line = ""
+        if exc.entries:
+            found_line = "\n\n" + t("build.output_directory_error_found").format(
+                entries=", ".join(exc.entries[:5]) + (", ..." if len(exc.entries) > 5 else "")
+            )
+
+        return t("build.output_directory_error_not_empty").format(
+            path=exc.path,
+            marker=exc.marker_filename,
+        ) + found_line
+
+    def _show_output_directory_error(self, exc: BuildOutputDirectoryError) -> None:
+        message = self._format_output_directory_error(exc)
+        self._build_error = message
+        _show_system_error_dialog(t("build.output_directory_error_title"), message)
+
     def _on_build_progress(self, message: str, fraction: float):
         self._build_message = message
         self._build_progress = fraction
@@ -889,9 +938,16 @@ class BuildSettingsPanel:
             self._build_error = "No project root found"
             return
 
+        try:
+            builder = self._make_builder()
+            builder._validate_output_directory()
+        except BuildOutputDirectoryError as exc:
+            self._building = False
+            self._show_output_directory_error(exc)
+            return
+
         def _run():
             try:
-                builder = self._make_builder()
                 result = builder.build(
                     on_progress=self._on_build_progress,
                     cancel_event=self._cancel_event,
@@ -906,6 +962,8 @@ class BuildSettingsPanel:
                         subprocess.Popen([launcher], cwd=result)
             except (_BuildCancelled, _GameBuilderCancelled, _NuitkaCancelled):
                 self._build_error = t("build.cancelled")
+            except BuildOutputDirectoryError as exc:
+                self._show_output_directory_error(exc)
             except Exception as exc:
                 self._build_error = str(exc)
             finally:
