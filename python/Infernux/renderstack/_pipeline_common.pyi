@@ -8,6 +8,8 @@ if TYPE_CHECKING:
 COLOR_TEXTURE: str
 DEPTH_TEXTURE: str
 SHADOW_MAP_TEXTURE: str
+BEFORE_POST_PROCESS_POINT: str
+AFTER_POST_PROCESS_POINT: str
 
 GBUFFER_ALBEDO_TEXTURE: str
 GBUFFER_NORMAL_TEXTURE: str
@@ -52,3 +54,4 @@ def add_transparent_pass(
     queue_range: tuple[int, int] | None = ...,
 ) -> None: ...
 def add_standard_post_process_section(graph: RenderGraph, *, enable_screen_ui: bool) -> None: ...
+def ensure_standard_post_process_points(graph: RenderGraph) -> None: ...

@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 COLOR_TEXTURE = "color"
 DEPTH_TEXTURE = "depth"
 SHADOW_MAP_TEXTURE = "shadow_map"
+BEFORE_POST_PROCESS_POINT = "before_post_process"
+AFTER_POST_PROCESS_POINT = "after_post_process"
 
 GBUFFER_ALBEDO_TEXTURE = "gbuffer_albedo"
 GBUFFER_NORMAL_TEXTURE = "gbuffer_normal"
@@ -153,5 +155,11 @@ def add_standard_post_process_section(
         graph.screen_ui_section(resources=POST_PROCESS_RESOURCES)
         return
 
-    graph.injection_point("before_post_process", resources=POST_PROCESS_RESOURCES)
-    graph.injection_point("after_post_process", resources=POST_PROCESS_RESOURCES)
+    ensure_standard_post_process_points(graph)
+
+
+def ensure_standard_post_process_points(graph: "RenderGraph") -> None:
+    if not graph.has_injection_point(BEFORE_POST_PROCESS_POINT):
+        graph.injection_point(BEFORE_POST_PROCESS_POINT, resources=POST_PROCESS_RESOURCES)
+    if not graph.has_injection_point(AFTER_POST_PROCESS_POINT):
+        graph.injection_point(AFTER_POST_PROCESS_POINT, resources=POST_PROCESS_RESOURCES)
