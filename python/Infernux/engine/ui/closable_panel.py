@@ -10,6 +10,8 @@ if TYPE_CHECKING:
 
 
 _HOVERED_CHILD_WINDOWS = 1  # ImGuiHoveredFlags_ChildWindows
+_HOVERED_NO_POPUP_HIERARCHY = 8  # ImGuiHoveredFlags_NoPopupHierarchy
+_PANEL_ACTIVATION_HOVER_FLAGS = _HOVERED_CHILD_WINDOWS | _HOVERED_NO_POPUP_HIERARCHY
 
 
 class ClosablePanel(InxGUIRenderable):
@@ -113,7 +115,7 @@ class ClosablePanel(InxGUIRenderable):
 
         # ── Focus tracking ──
         if visible and self._is_open:
-            pointer_activated = ctx.is_window_hovered(_HOVERED_CHILD_WINDOWS) and any(
+            pointer_activated = ctx.is_window_hovered(_PANEL_ACTIVATION_HOVER_FLAGS) and any(
                 ctx.is_mouse_button_clicked(button) for button in (0, 1, 2)
             )
             if pointer_activated:
