@@ -87,8 +87,10 @@ class DuplicateGroup:
 
 @dataclass
 class AuditConfig:
+    report_title: str
     roots: list[str]
     extensions: set[str]
+    include_globs: list[str]
     exclude_globs: list[str]
     duplicate_exclude_globs: list[str]
     owned_string_literal_paths: set[str]
@@ -147,8 +149,10 @@ def parse_args() -> argparse.Namespace:
 def load_config(path: Path, args: argparse.Namespace) -> AuditConfig:
     payload = json.loads(path.read_text(encoding="utf-8"))
     return AuditConfig(
+        report_title=payload.get("report_title", "Render Audit Report"),
         roots=payload["roots"],
         extensions=set(payload["extensions"]),
+        include_globs=payload.get("include_globs", []),
         exclude_globs=payload.get("exclude_globs", []),
         duplicate_exclude_globs=payload.get("duplicate_exclude_globs", []),
         owned_string_literal_paths=set(payload.get("owned_string_literal_paths", [])),
@@ -181,6 +185,8 @@ def iter_source_files(config: AuditConfig) -> list[tuple[str, Path]]:
             if not path.is_file() or path.suffix not in config.extensions:
                 continue
             rel_path = path.relative_to(REPO_ROOT).as_posix()
+            if config.include_globs and not matches_any(rel_path, config.include_globs):
+                continue
             if matches_any(rel_path, config.exclude_globs):
                 continue
             files.append((rel_path, path))
@@ -337,7 +343,7 @@ def render_markdown_report(
     )[: config.top_hotspots]
 
     lines: list[str] = []
-    lines.append("# Render Audit Report")
+    lines.append(f"# {config.report_title}")
     lines.append("")
     lines.append(f"Scanned {len(file_metrics)} files under the configured renderer roots.")
     lines.append("")
