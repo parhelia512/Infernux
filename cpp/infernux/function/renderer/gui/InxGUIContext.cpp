@@ -482,6 +482,11 @@ void InxGUIContext::SetNextWindowFocus()
     ImGui::SetNextWindowFocus();
 }
 
+void InxGUIContext::SetWindowFocus()
+{
+    ImGui::SetWindowFocus();
+}
+
 bool InxGUIContext::BeginWindow(const std::string &name, bool *open, int flags)
 {
     return ImGui::Begin(name.c_str(), open, flags);

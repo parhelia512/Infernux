@@ -274,6 +274,10 @@ class EditorBootstrap:
         engine.register_gui("toolbar", self.toolbar)
         wm.register_existing_window("toolbar", self.toolbar, "toolbar")
 
+        ts = _panel_state.get("toolbar")
+        if ts:
+            self.toolbar.load_state(ts)
+
         # Hierarchy
         self.hierarchy = HierarchyPanel()
         self.hierarchy.set_window_manager(wm)
@@ -675,6 +679,8 @@ class EditorBootstrap:
     def _persist_editor_state(self):
         if self.console is None or self.project_panel is None or self.window_manager is None:
             return
+        if self.toolbar is not None:
+            _panel_state.put("toolbar", self.toolbar.save_state())
         _panel_state.put("console", self.console.save_state())
         _panel_state.put("project", self.project_panel.save_state())
         _panel_state.put("window_manager", self.window_manager.save_state())

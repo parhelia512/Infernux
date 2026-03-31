@@ -4,9 +4,10 @@ Unity-style Scene View panel with 3D viewport and camera controls.
 
 import math
 import os
-from Infernux.lib import InxGUIContext, TextureLoader
+from Infernux.lib import InxGUIContext, TextureLoader, InputManager
 from Infernux.engine.i18n import t
 from .editor_panel import EditorPanel
+from .closable_panel import ClosablePanel
 from .panel_registry import editor_panel
 from .theme import Theme, ImGuiCol, ImGuiStyleVar
 from .viewport_utils import ViewportInfo, capture_viewport_info
@@ -157,16 +158,15 @@ class SceneViewPanel(EditorPanel):
         self._was_right_down = False
         self._was_middle_down = False
         
-        # Mouse position tracking for delta calculation
+        # Mouse position tracking for non-captured viewport interactions.
         self._last_mouse_x = 0.0
         self._last_mouse_y = 0.0
 
-        # Drag-outside-panel state (Unity-style: keep controlling camera
-        # even when cursor leaves the panel, wrap at screen edges)
+        # Unity-style camera capture: lock the cursor during scene-camera drag
+        # and restore it to the press position on release.
         self._is_camera_dragging = False
-        self._last_global_x = 0.0
-        self._last_global_y = 0.0
-        self._screen_bounds = None  # (x, y, w, h)  cached display bounds
+        self._camera_capture_active = False
+        self._camera_capture_restore_pos: tuple[float, float] | None = None
 
         # Editor gizmo drag state (shared across translate/rotate/scale)
         self._is_gizmo_dragging = False
@@ -230,6 +230,9 @@ class SceneViewPanel(EditorPanel):
     
     def set_engine(self, engine):
         """Set the engine reference for camera control."""
+        if engine is None:
+            self._end_camera_capture(restore_cursor=False)
+            self._force_camera_input_release()
         self._engine = engine
 
     def set_play_mode_manager(self, manager):
@@ -243,6 +246,48 @@ class SceneViewPanel(EditorPanel):
     def set_on_box_select(self, callback):
         """Set callback after box-select completes (receives primary obj or None)."""
         self._on_box_select = callback
+
+    def _begin_camera_capture(self, ctx: InxGUIContext):
+        if self._camera_capture_active:
+            return
+        self._camera_capture_restore_pos = (
+            ctx.get_global_mouse_pos_x(),
+            ctx.get_global_mouse_pos_y(),
+        )
+        InputManager.instance().set_editor_mouse_capture(True)
+        self._camera_capture_active = True
+
+    def _end_camera_capture(self, ctx: InxGUIContext | None = None, *, restore_cursor: bool = True):
+        mgr = InputManager.instance()
+        if self._camera_capture_active or mgr.is_editor_mouse_capture_active:
+            mgr.set_editor_mouse_capture(False)
+
+        restore_pos = self._camera_capture_restore_pos
+        self._camera_capture_active = False
+        self._camera_capture_restore_pos = None
+
+        if restore_cursor and ctx is not None and restore_pos is not None:
+            ctx.warp_mouse_global(restore_pos[0], restore_pos[1])
+
+    def _force_camera_input_release(self):
+        if self._engine:
+            self._engine.process_scene_view_input(
+                0.0,
+                False,
+                False,
+                0.0,
+                0.0,
+                0.0,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+            )
+        self._was_right_down = False
+        self._was_middle_down = False
     
     # ------------------------------------------------------------------
     # EditorPanel hooks
@@ -256,6 +301,8 @@ class SceneViewPanel(EditorPanel):
 
     def on_disable(self):
         """Panel closed — shrink render target to save GPU memory."""
+        self._end_camera_capture(restore_cursor=False)
+        self._force_camera_input_release()
         if self._engine:
             self._engine.set_scene_view_visible(False)
             if self._last_scene_width != 1 or self._last_scene_height != 1:
@@ -293,7 +340,11 @@ class SceneViewPanel(EditorPanel):
 
     def _on_visible_pre(self, ctx):
         # Track focus to auto-exit UI Mode
-        focused = ctx.is_window_focused(0)
+        focused = (ClosablePanel.get_active_panel_id() == self.window_id) or ctx.is_window_focused(0)
+        if not focused and self._camera_capture_active:
+            self._is_camera_dragging = False
+            self._end_camera_capture(restore_cursor=False)
+            self._force_camera_input_release()
         if focused and not self._was_focused:
             if self._on_focus_gained:
                 self._on_focus_gained()
@@ -383,32 +434,32 @@ class SceneViewPanel(EditorPanel):
                     left_down, left_clicked, is_scene_hovered)
             
             # Camera drag
-            right_down = ctx.is_mouse_button_down(1)
-            middle_down = ctx.is_mouse_button_down(2)
-            if is_scene_hovered and (right_down or middle_down) and not self._is_camera_dragging:
+            mgr = InputManager.instance()
+            right_down = mgr.get_mouse_button(1)
+            middle_down = mgr.get_mouse_button(2)
+            if is_scene_hovered and not overlay_hovered and (right_down or middle_down) and not self._is_camera_dragging:
                 self._is_camera_dragging = True
                 self._fly_to_active = False
-                self._screen_bounds = ctx.get_display_bounds()
-                self._last_global_x = ctx.get_global_mouse_pos_x()
-                self._last_global_y = ctx.get_global_mouse_pos_y()
-            
-            if self._is_camera_dragging and not right_down and not middle_down:
-                self._is_camera_dragging = False
+                self._begin_camera_capture(ctx)
             
             if is_scene_hovered or self._is_camera_dragging:
                 self._process_camera_input(ctx, delta_time)
 
-                if (is_scene_hovered and not gizmo_consumed
-                        and not overlay_hovered
-                        and ctx.is_mouse_button_clicked(0)
-                        and not self._box_select_active):
-                    picked_id = self._pick_scene_object(ctx, vp)
-                    if picked_id:
-                        if self._on_object_picked:
-                            self._on_object_picked(picked_id, False)
-                    else:
-                        if self._on_object_picked:
-                            self._on_object_picked(0, False)
+            if self._is_camera_dragging and not right_down and not middle_down:
+                self._is_camera_dragging = False
+                self._end_camera_capture(ctx)
+
+            if (is_scene_hovered and not gizmo_consumed
+                    and not overlay_hovered
+                    and ctx.is_mouse_button_clicked(0)
+                    and not self._box_select_active):
+                picked_id = self._pick_scene_object(ctx, vp)
+                if picked_id:
+                    if self._on_object_picked:
+                        self._on_object_picked(picked_id, False)
+                else:
+                    if self._on_object_picked:
+                        self._on_object_picked(0, False)
 
             # Box-select
             if self._box_select_active:
@@ -817,78 +868,39 @@ class SceneViewPanel(EditorPanel):
         return ids[index]
     
     def _process_camera_input(self, ctx: InxGUIContext, delta_time: float):
-        """Process Unity-style camera input using mouse position delta.
-        
-        When the mouse is being dragged (right/middle button held), we track
-        global screen coordinates so the camera keeps moving even when the
-        cursor leaves the panel.  When the cursor reaches a screen edge it
-        wraps to the opposite side, just like Unity.
+        """Process Unity-style scene camera input.
+
+        Right/middle drag uses SDL relative mouse mode so the cursor stays
+        locked during navigation and returns to its press position on release.
         """
         if not self._engine:
             return
+        mgr = InputManager.instance()
         
         # Mouse button states
-        right_down = ctx.is_mouse_button_down(1)
-        middle_down = ctx.is_mouse_button_down(2)
+        right_down = mgr.get_mouse_button(1)
+        middle_down = mgr.get_mouse_button(2)
         
         # Detect button just pressed
         right_just_pressed = right_down and not self._was_right_down
         middle_just_pressed = middle_down and not self._was_middle_down
         
-        # ------------------------------------------------------------------
-        # Use GLOBAL mouse position when dragging so that leaving the panel
-        # doesn't interrupt camera control.
-        # ------------------------------------------------------------------
-        if self._is_camera_dragging:
-            gx = ctx.get_global_mouse_pos_x()
-            gy = ctx.get_global_mouse_pos_y()
-        else:
-            gx = ctx.get_mouse_pos_x()
-            gy = ctx.get_mouse_pos_y()
-        
         mouse_delta_x = 0.0
         mouse_delta_y = 0.0
         
         if (right_down or middle_down) and not right_just_pressed and not middle_just_pressed:
-            raw_dx = gx - self._last_global_x
-            raw_dy = gy - self._last_global_y
-            
-            # Ignore very large jumps caused by screen-edge warp
-            if abs(raw_dx) < 400 and abs(raw_dy) < 400:
+            if self._camera_capture_active:
+                mouse_delta_x = mgr.mouse_delta_x
+                mouse_delta_y = mgr.mouse_delta_y
+            else:
+                raw_dx = ctx.get_mouse_pos_x() - self._last_mouse_x
+                raw_dy = ctx.get_mouse_pos_y() - self._last_mouse_y
                 if abs(raw_dx) > 0.1:
                     mouse_delta_x = raw_dx
                 if abs(raw_dy) > 0.1:
                     mouse_delta_y = raw_dy
-            
-            # --- Screen-edge wrapping (Unity-style) ---
-            if self._is_camera_dragging and self._screen_bounds:
-                sx, sy, sw, sh = self._screen_bounds
-                margin = 2.0
-                warped = False
-                new_gx, new_gy = gx, gy
-                
-                if gx <= sx + margin:
-                    new_gx = sx + sw - margin - 1
-                    warped = True
-                elif gx >= sx + sw - margin:
-                    new_gx = sx + margin + 1
-                    warped = True
-                
-                if gy <= sy + margin:
-                    new_gy = sy + sh - margin - 1
-                    warped = True
-                elif gy >= sy + sh - margin:
-                    new_gy = sy + margin + 1
-                    warped = True
-                
-                if warped:
-                    ctx.warp_mouse_global(new_gx, new_gy)
-                    gx, gy = new_gx, new_gy
-        
-        # Update tracking state
-        self._last_global_x = gx
-        self._last_global_y = gy
-        # Also keep local tracking in sync for picking etc.
+
+        # Keep local tracking in sync for picking and non-captured deltas.
         self._last_mouse_x = ctx.get_mouse_pos_x()
         self._last_mouse_y = ctx.get_mouse_pos_y()
         self._was_right_down = right_down

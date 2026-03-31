@@ -265,6 +265,7 @@ void RegisterGUIBindings(py::module_ &m)
         .def("set_next_window_size", &InxGUIContext::SetNextWindowSize)
         .def("set_next_window_pos", &InxGUIContext::SetNextWindowPos)
         .def("set_next_window_focus", &InxGUIContext::SetNextWindowFocus)
+     .def("set_window_focus", &InxGUIContext::SetWindowFocus, "Focus the current window immediately")
         .def("begin_window", &InxGUIContext::BeginWindow)
         // begin_window_closable returns tuple (is_visible, is_open) for closable windows
         .def(

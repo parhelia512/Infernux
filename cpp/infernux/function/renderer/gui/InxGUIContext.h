@@ -137,6 +137,7 @@ class InxGUIContext
     void SetNextWindowSize(float width, float height, int cond = 0);
     void SetNextWindowPos(float x, float y, int cond = 0, float pivot_x = 0.0f, float pivot_y = 0.0f);
     void SetNextWindowFocus();
+    void SetWindowFocus();
     void GetMainViewportBounds(float *x, float *y, float *w, float *h);
     bool BeginWindow(const std::string &name, bool *open = nullptr, int flags = 0);
     void EndWindow();

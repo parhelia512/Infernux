@@ -5,8 +5,19 @@ from Infernux.lib import InxGUIRenderable, InxGUIContext
 from Infernux.engine.play_mode import PlayModeManager, PlayModeState
 from Infernux.engine.i18n import t
 from .editor_panel import EditorPanel
+from .closable_panel import ClosablePanel
 from .panel_registry import editor_panel
 from .theme import Theme, ImGuiCol, ImGuiStyleVar
+
+
+_CAMERA_DEFAULTS = {
+    "fov": 60.0,
+    "rotation_speed": 0.05,
+    "pan_speed": 1.0,
+    "zoom_speed": 1.0,
+    "move_speed": 5.0,
+    "move_speed_boost": 3.0,
+}
 
 
 def _noop():
@@ -23,13 +34,16 @@ class ToolbarPanel(EditorPanel):
         super().__init__(title, window_id="toolbar")
         self._engine = engine
         self._play_mode_manager = play_mode_manager
+        self._camera_settings = dict(_CAMERA_DEFAULTS)
         if self._engine and self._play_mode_manager is None:
             self._play_mode_manager = self._engine.get_play_mode_manager()
+        self._sync_camera_settings_from_engine()
 
     def set_engine(self, engine):
         self._engine = engine
         if engine:
             self._play_mode_manager = engine.get_play_mode_manager()
+        self._apply_camera_settings()
 
     def set_play_mode_manager(self, manager: PlayModeManager):
         self._play_mode_manager = manager
@@ -155,18 +169,176 @@ class ToolbarPanel(EditorPanel):
         if not cam:
             ctx.label(t("toolbar.camera_not_available"))
             return
-        ctx.dummy(240, 0)  # force minimum popup width
+        self._sync_camera_settings_from_engine()
+        ctx.dummy(360, 0)  # force minimum popup width
         ctx.label(t("toolbar.scene_camera"))
         ctx.separator()
         ctx.dummy(0, 4)
-        fov = cam.fov
-        ctx.label(t("toolbar.field_of_view"))
-        ctx.same_line(120)
-        ctx.set_next_item_width(120)
-        nf = ctx.float_slider("##fov", fov, 10.0, 120.0)
-        if abs(nf - fov) > 0.1:
-            cam.fov = nf
+        self._set_camera_setting(
+            "fov",
+            self._render_camera_float_setting(
+                ctx,
+                t("toolbar.field_of_view"),
+                "fov",
+                self._camera_settings["fov"],
+                10.0,
+                120.0,
+                step=1.0,
+                step_fast=10.0,
+            ),
+        )
         ctx.dummy(0, 4)
+        ctx.label(t("toolbar.navigation_header"))
+        ctx.separator()
+        ctx.dummy(0, 4)
+        self._set_camera_setting(
+            "rotation_speed",
+            self._render_camera_float_setting(
+                ctx,
+                t("toolbar.rotation_sensitivity"),
+                "rotation_speed",
+                self._camera_settings["rotation_speed"],
+                0.005,
+                1.0,
+                step=0.005,
+                step_fast=0.05,
+            ),
+        )
+        ctx.dummy(0, 4)
+        self._set_camera_setting(
+            "pan_speed",
+            self._render_camera_float_setting(
+                ctx,
+                t("toolbar.pan_speed"),
+                "pan_speed",
+                self._camera_settings["pan_speed"],
+                0.1,
+                10.0,
+                step=0.1,
+                step_fast=1.0,
+            ),
+        )
+        ctx.dummy(0, 4)
+        self._set_camera_setting(
+            "zoom_speed",
+            self._render_camera_float_setting(
+                ctx,
+                t("toolbar.zoom_speed"),
+                "zoom_speed",
+                self._camera_settings["zoom_speed"],
+                0.1,
+                10.0,
+                step=0.1,
+                step_fast=1.0,
+            ),
+        )
+        ctx.dummy(0, 4)
+        self._set_camera_setting(
+            "move_speed",
+            self._render_camera_float_setting(
+                ctx,
+                t("toolbar.move_speed"),
+                "move_speed",
+                self._camera_settings["move_speed"],
+                0.1,
+                50.0,
+                step=0.1,
+                step_fast=1.0,
+            ),
+        )
+        ctx.dummy(0, 4)
+        self._set_camera_setting(
+            "move_speed_boost",
+            self._render_camera_float_setting(
+                ctx,
+                t("toolbar.speed_boost"),
+                "move_speed_boost",
+                self._camera_settings["move_speed_boost"],
+                1.0,
+                20.0,
+                step=0.1,
+                step_fast=1.0,
+            ),
+        )
+        ctx.dummy(0, 6)
+        ctx.button(t("toolbar.reset_camera_settings"), self._reset_camera_settings, width=-1.0)
+        ctx.dummy(0, 4)
+
+    def save_state(self) -> dict:
+        self._sync_camera_settings_from_engine()
+        return {
+            "camera_settings": dict(self._camera_settings),
+        }
+
+    def load_state(self, data: dict) -> None:
+        settings = data.get("camera_settings", {}) if isinstance(data, dict) else {}
+        for key, default in _CAMERA_DEFAULTS.items():
+            value = settings.get(key)
+            if isinstance(value, (int, float)):
+                self._camera_settings[key] = float(value)
+            else:
+                self._camera_settings[key] = float(default)
+        self._apply_camera_settings()
+
+    def _sync_camera_settings_from_engine(self):
+        cam = self._engine.editor_camera if self._engine else None
+        if not cam:
+            return
+        self._camera_settings.update({
+            "fov": float(cam.fov),
+            "rotation_speed": float(cam.rotation_speed),
+            "pan_speed": float(cam.pan_speed),
+            "zoom_speed": float(cam.zoom_speed),
+            "move_speed": float(cam.move_speed),
+            "move_speed_boost": float(cam.move_speed_boost),
+        })
+
+    def _apply_camera_settings(self):
+        cam = self._engine.editor_camera if self._engine else None
+        if not cam:
+            return
+        cam.fov = self._camera_settings["fov"]
+        cam.rotation_speed = self._camera_settings["rotation_speed"]
+        cam.pan_speed = self._camera_settings["pan_speed"]
+        cam.zoom_speed = self._camera_settings["zoom_speed"]
+        cam.move_speed = self._camera_settings["move_speed"]
+        cam.move_speed_boost = self._camera_settings["move_speed_boost"]
+
+    def _set_camera_setting(self, key: str, value: float, tolerance: float = 1e-4):
+        clamped = float(value)
+        if abs(clamped - self._camera_settings.get(key, clamped)) <= tolerance:
+            return
+        self._camera_settings[key] = clamped
+        self._apply_camera_settings()
+
+    def _reset_camera_settings(self):
+        self._camera_settings = dict(_CAMERA_DEFAULTS)
+        self._apply_camera_settings()
+
+    @staticmethod
+    def _render_camera_float_setting(
+        ctx: InxGUIContext,
+        label: str,
+        key: str,
+        value: float,
+        min_value: float,
+        max_value: float,
+        *,
+        step: float,
+        step_fast: float,
+    ) -> float:
+        ctx.label(label)
+        ctx.same_line(145)
+        ctx.set_next_item_width(120)
+        updated = ctx.float_slider(f"##{key}_slider", float(value), float(min_value), float(max_value))
+        ctx.same_line(0, 6)
+        ctx.set_next_item_width(72)
+        updated = ctx.input_float(f"##{key}_input", float(updated), step, step_fast, 0)
+        if updated < min_value:
+            return float(min_value)
+        if updated > max_value:
+            return float(max_value)
+        return float(updated)
 
     # ---------- state helpers ----
     def _get_state(self) -> PlayModeState:
@@ -184,7 +356,10 @@ class ToolbarPanel(EditorPanel):
         if self._play_mode_manager.is_playing:
             self._play_mode_manager.exit_play_mode()
         else:
-            self._play_mode_manager.enter_play_mode()
+            if self._play_mode_manager.enter_play_mode():
+                ClosablePanel.focus_panel_by_id("game_view")
+                if self._engine:
+                    self._engine.select_docked_window("game_view")
 
     def _on_pause(self):
         if not self._play_mode_manager:

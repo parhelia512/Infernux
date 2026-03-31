@@ -9,6 +9,9 @@ if TYPE_CHECKING:
     from .window_manager import WindowManager
 
 
+_HOVERED_CHILD_WINDOWS = 1  # ImGuiHoveredFlags_ChildWindows
+
+
 class ClosablePanel(InxGUIRenderable):
     """
     Base class for panels that can be closed via the window close button.
@@ -51,6 +54,19 @@ class ClosablePanel(InxGUIRenderable):
     def request_focus(self, ctx: InxGUIContext):
         """Programmatically focus this panel on the next frame."""
         ctx.set_next_window_focus()
+
+    def _activate_panel(self, ctx: InxGUIContext, *, focus_window: bool = False):
+        if focus_window:
+            ctx.set_window_focus()
+
+        old_id = ClosablePanel._active_panel_id or ""
+        if old_id == self._window_id:
+            return
+
+        ClosablePanel._active_panel_id = self._window_id
+        cb = ClosablePanel._on_panel_focus_changed
+        if cb is not None:
+            cb(old_id, self._window_id)
 
     @classmethod
     def set_on_panel_focus_changed(cls, callback: Optional[Callable[[str, str], None]]):
@@ -97,14 +113,15 @@ class ClosablePanel(InxGUIRenderable):
 
         # ── Focus tracking ──
         if visible and self._is_open:
+            pointer_activated = ctx.is_window_hovered(_HOVERED_CHILD_WINDOWS) and any(
+                ctx.is_mouse_button_clicked(button) for button in (0, 1, 2)
+            )
+            if pointer_activated:
+                self._activate_panel(ctx, focus_window=True)
+
             focused = ctx.is_window_focused(0)
             if focused and not self._panel_was_focused:
-                old_id = ClosablePanel._active_panel_id or ""
-                if old_id != self._window_id:
-                    ClosablePanel._active_panel_id = self._window_id
-                    cb = ClosablePanel._on_panel_focus_changed
-                    if cb is not None:
-                        cb(old_id, self._window_id)
+                self._activate_panel(ctx)
             self._panel_was_focused = focused
         
         return visible and self._is_open

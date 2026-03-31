@@ -171,10 +171,21 @@ class InputManager
     ///        When locked the cursor is hidden and mouse deltas are captured.
     void SetCursorLocked(bool locked);
 
+    /// @brief Enable/disable editor-only mouse capture for Scene view camera drag.
+    ///        Uses the same SDL relative mouse mode backend but does not report
+    ///        as gameplay cursor lock to Python game scripts or ImGui suppression.
+    void SetEditorMouseCapture(bool captured);
+
     /// @brief Returns true when cursor lock is active.
     [[nodiscard]] bool IsCursorLocked() const
     {
         return m_cursorLocked;
+    }
+
+    /// @brief Returns true when editor Scene view mouse capture is active.
+    [[nodiscard]] bool IsEditorMouseCaptureActive() const
+    {
+        return m_editorMouseCaptured;
     }
 
     // ---- Utility ----
@@ -214,11 +225,14 @@ class InputManager
 
     SDL_Window *m_window = nullptr;
     bool m_cursorLocked = false;
+    bool m_editorMouseCaptured = false;
 
     // ---- Name → scancode lookup ----
     static std::unordered_map<std::string, int> s_nameToScancode;
     static bool s_nameTableBuilt;
     static void BuildNameTable();
+
+    void ApplyRelativeMouseMode();
 };
 
 } // namespace infernux

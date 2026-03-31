@@ -79,6 +79,13 @@ _STRINGS: dict[str, dict[str, str]] = {
     "toolbar.camera_not_available":     {"en": "Camera not available",      "zh": "摄像机不可用"},
     "toolbar.scene_camera":             {"en": "Scene Camera",              "zh": "场景摄像机"},
     "toolbar.field_of_view":            {"en": "Field of View",             "zh": "视野角度"},
+    "toolbar.navigation_header":        {"en": "Navigation",                "zh": "导航"},
+    "toolbar.rotation_sensitivity":     {"en": "Rotation Sensitivity",      "zh": "旋转灵敏度"},
+    "toolbar.pan_speed":                {"en": "Pan Speed",                 "zh": "平移速度"},
+    "toolbar.zoom_speed":               {"en": "Zoom Speed",                "zh": "缩放速度"},
+    "toolbar.move_speed":               {"en": "Move Speed",                "zh": "移动速度"},
+    "toolbar.speed_boost":              {"en": "Speed Boost",               "zh": "加速倍率"},
+    "toolbar.reset_camera_settings":    {"en": "Reset Camera Settings",     "zh": "重置摄像机设置"},
 
     # ── Hierarchy ─────────────────────────────────────────────────────
     "hierarchy.create_child":           {"en": "Create Child",              "zh": "创建子对象"},
