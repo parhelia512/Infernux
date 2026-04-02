@@ -584,9 +584,23 @@ bool GPUMaterialPreview::EnsureResources(int size)
 {
     // Cache format info from MaterialPipelineManager
     auto &mpm = m_vkCore->GetMaterialPipelineManager();
-    m_colorFormat = mpm.GetColorFormat();
-    m_depthFormat = mpm.GetDepthFormat();
-    m_sampleCount = mpm.GetSampleCount();
+    VkFormat colorFormat = mpm.GetColorFormat();
+    VkFormat depthFormat = mpm.GetDepthFormat();
+    VkSampleCountFlagBits sampleCount = mpm.GetSampleCount();
+
+    const bool renderConfigChanged =
+        (m_renderPass != VK_NULL_HANDLE) &&
+        (colorFormat != m_colorFormat || depthFormat != m_depthFormat || sampleCount != m_sampleCount);
+
+    if (renderConfigChanged) {
+        DestroyFramebuffer();
+        vkDestroyRenderPass(m_vkCore->GetDevice(), m_renderPass, nullptr);
+        m_renderPass = VK_NULL_HANDLE;
+    }
+
+    m_colorFormat = colorFormat;
+    m_depthFormat = depthFormat;
+    m_sampleCount = sampleCount;
 
     if (m_renderPass == VK_NULL_HANDLE)
         CreateRenderPass();

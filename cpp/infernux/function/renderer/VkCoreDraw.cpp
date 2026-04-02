@@ -228,6 +228,9 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
                                          int queueMax, const std::string &sortMode, const std::string &overrideMaterial,
                                          const std::string &passTag)
 {
+    // One-shot diagnostic: log queue-range filtering for first N frames
+    static int s_filterDiagFrames = 0;
+
 #if INFERNUX_FRAME_PROFILE
     using Clock = std::chrono::high_resolution_clock;
     const auto totalStart = Clock::now();
@@ -308,6 +311,21 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
             vb = bufIt->second.vertexBuffer->GetBuffer();
 
         m_eligibleScratch.push_back({&dc, sortKey, matHash, vb, std::move(material), bufIt});
+    }
+
+    // Diagnostic: log per-call eligible count with queue range
+    if (s_filterDiagFrames < 3) {
+        INXLOG_DEBUG("[DrawSceneFiltered] queue=[", queueMin, ",", queueMax,
+                     "] totalDC=", drawCalls().size(),
+                     " eligible=", m_eligibleScratch.size());
+        if (!m_eligibleScratch.empty()) {
+            for (const auto &entry : m_eligibleScratch) {
+                INXLOG_DEBUG("  -> objId=", entry.dc->objectId,
+                             " mat='", entry.material->GetName(),
+                             "' queue=", entry.material->GetRenderQueue());
+            }
+        }
+        ++s_filterDiagFrames;
     }
 
 #if INFERNUX_FRAME_PROFILE

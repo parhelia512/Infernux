@@ -588,8 +588,12 @@ class RenderStack(InxComponent):
             graph.set_output(original_color)
         elif final_color is not None:
             graph.set_output(final_color)
-        else:
+        elif graph._output is None:
+            # Only override if the pipeline didn't call set_output() itself.
+            # Pipelines that use non-standard output names (e.g. "final")
+            # will have already set _output inside define_topology().
             graph.set_output(COLOR_TEXTURE)
+        # else: pipeline already called graph.set_output() — respect it.
 
         return graph.build()
 
@@ -611,14 +615,44 @@ class RenderStack(InxComponent):
         if self._graph_desc is None and not self._build_failed:
             context.setup_camera_properties(camera)
             culling = context.cull(camera)
-            self._graph_desc = self.build_graph()
+            try:
+                self._graph_desc = self.build_graph()
+            except Exception as exc:
+                self._graph_desc = self._fallback_on_build_failure(exc)
 
             if self._graph_desc is None:
-                # Build previously failed; skip rendering until hot-reload fixes it
+                # Build failed and fallback also failed; skip rendering
+                # until hot-reload fixes it.
+                self._build_failed = True
                 context.submit_culling(culling)
                 return
 
-            context.apply_graph(self._graph_desc)
+            try:
+                context.apply_graph(self._graph_desc)
+            except Exception as exc:
+                from Infernux.debug import Debug
+                Debug.log_error(
+                    f"[RenderStack] apply_graph failed: {exc}. "
+                    f"Attempting fallback pipeline."
+                )
+                self._graph_desc = self._fallback_on_build_failure(exc)
+                if self._graph_desc is None:
+                    self._build_failed = True
+                    context.submit_culling(culling)
+                    return
+                try:
+                    context.apply_graph(self._graph_desc)
+                except Exception as exc2:
+                    from Infernux.debug import Debug
+                    Debug.log_error(
+                        f"[RenderStack] Fallback apply_graph also failed: "
+                        f"{exc2}. Rendering disabled until hot-reload."
+                    )
+                    self._graph_desc = None
+                    self._build_failed = True
+                    context.submit_culling(culling)
+                    return
+
             context.submit_culling(culling)
         elif self._graph_desc is not None:
             # Fast path: single C++ call avoids 3 extra Python→C++ round-trips
@@ -627,6 +661,43 @@ class RenderStack(InxComponent):
     # ==================================================================
     # Private helpers
     # ==================================================================
+
+    def _fallback_on_build_failure(self, exc: Exception):
+        """Log the error and attempt to fall back to DefaultForwardPipeline.
+
+        Returns:
+            A ``RenderGraphDescription`` built from the default pipeline,
+            or ``None`` if the fallback also fails.
+        """
+        from Infernux.debug import Debug
+        pipeline_name = getattr(self._pipeline, 'name', '?')
+        Debug.log_error(
+            f"[RenderStack] Pipeline '{pipeline_name}' build failed: {exc}. "
+            f"Falling back to DefaultForwardPipeline."
+        )
+
+        # If already on the default pipeline, nothing left to try.
+        from Infernux.renderstack.default_forward_pipeline import (
+            DefaultForwardPipeline,
+        )
+        if isinstance(self._pipeline, DefaultForwardPipeline):
+            Debug.log_error(
+                "[RenderStack] DefaultForwardPipeline itself failed — "
+                "cannot recover."
+            )
+            return None
+
+        # Switch to default pipeline and retry once.
+        self._pipeline = DefaultForwardPipeline()
+        self._pipeline._render_stack = self
+        self._cached_ips = None
+        try:
+            return self.build_graph()
+        except Exception as fallback_exc:
+            Debug.log_error(
+                f"[RenderStack] Fallback pipeline also failed: {fallback_exc}"
+            )
+            return None
 
     def _create_pipeline(self):  # -> RenderPipeline
         """Instantiate the pipeline selected by ``pipeline_class_name``.

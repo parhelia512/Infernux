@@ -22,6 +22,7 @@ Design: Builder pattern with fluent API for clean, LLM-friendly usage.
 
 from __future__ import annotations
 
+import warnings
 from enum import IntEnum
 from typing import Mapping, Optional, Tuple, List, Dict
 
@@ -702,6 +703,18 @@ class RenderGraph:
         texture_map = {tex.name: tex for tex in self._textures}
         pass_names = set()
 
+        # Warn if multiple textures claim camera_target — they alias to the
+        # same physical swapchain image, which is almost never intended.
+        camera_targets = [t.name for t in self._textures if t.is_camera_target]
+        if len(camera_targets) > 1:
+            warnings.warn(
+                f"[RenderGraph '{self._name}'] Multiple camera_target textures "
+                f"({', '.join(camera_targets)}). All camera_target textures "
+                f"alias to the same swapchain image — only one should be "
+                f"camera_target=True.",
+                stacklevel=3,
+            )
+
         for tex in self._textures:
             if tex.size is not None and tex.size_divisor > 0:
                 raise ValueError(
@@ -753,6 +766,34 @@ class RenderGraph:
         if p._action == "compute" and p._clear_depth is not None:
             raise ValueError(
                 f"Pass '{p._name}' is compute and cannot clear depth attachments"
+            )
+
+        # draw_renderers must write to a camera_target (backbuffer) texture.
+        # Material VkPipelines are compiled against backbuffer VkRenderPass;
+        # writing to a non-backbuffer texture causes format incompatibility.
+        if p._action == "draw_renderers":
+            for slot, tex_name in p._write_colors.items():
+                tex = texture_map.get(tex_name)
+                if tex is not None and not tex.is_camera_target:
+                    warnings.warn(
+                        f"[RenderGraph] Pass '{p._name}' uses draw_renderers "
+                        f"but writes to non-backbuffer texture '{tex_name}'. "
+                        f"Material VkPipelines are compiled against the "
+                        f"backbuffer RenderPass — this will likely cause "
+                        f"VK_ERROR_DEVICE_LOST. Use a camera_target texture "
+                        f"or blit to the target via fullscreen_quad.",
+                        stacklevel=4,
+                    )
+
+        # Warn about unknown action strings (would silently map to NONE).
+        _known_actions = {
+            "none", "draw_renderers", "draw_skybox", "custom",
+            "draw_shadow_casters", "draw_screen_ui", "fullscreen_quad",
+        }
+        if p._action not in _known_actions:
+            raise ValueError(
+                f"Pass '{p._name}' has unknown action '{p._action}'. "
+                f"Known actions: {sorted(_known_actions)}"
             )
 
         for read_name in p._reads:

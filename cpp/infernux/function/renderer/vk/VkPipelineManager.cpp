@@ -195,8 +195,11 @@ VkRenderPass VkPipelineManager::CreateRenderPass(const RenderPassConfig &config)
                 (config.hasResolve && i == 0) ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
             colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
             colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-            colorAttachment.initialLayout =
-                config.clearColor ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            // RenderGraph inserts explicit barriers before each pass and keeps
+            // tracked color attachments in COLOR_ATTACHMENT_OPTIMAL between
+            // passes. Keep the render pass initialLayout aligned with that
+            // tracked state even when the loadOp is CLEAR.
+            colorAttachment.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             colorAttachment.finalLayout =
                 (config.hasResolve && i == 0) ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : config.colorFinalLayout;
             attachments.push_back(colorAttachment);
@@ -224,9 +227,9 @@ VkRenderPass VkPipelineManager::CreateRenderPass(const RenderPassConfig &config)
             depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
             depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
         } else {
-            // Same rationale as color: preserve depth from prior passes when not clearing.
-            depthAttachment.initialLayout =
-                config.clearDepth ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            // Match the explicit RenderGraph barriers. CLEAR decides whether
+            // previous contents matter; it does not require UNDEFINED here.
+            depthAttachment.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
             depthAttachment.finalLayout = config.storeDepth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
                                                             : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
         }

@@ -528,6 +528,10 @@ void InxVkCoreModular::ReinitializeMaterialPipelines(VkSampleCountFlagBits newSa
             return ResolveTextureForMaterial(textureRef, bindingName);
         });
 
+    // Preview render targets cache a render pass / framebuffer that must stay
+    // compatible with the material pipelines' MSAA sample count.
+    m_gpuMaterialPreview.reset();
+
     INXLOG_INFO("ReinitializeMaterialPipelines: complete — pipelines will be lazily rebuilt on next draw");
 }
 

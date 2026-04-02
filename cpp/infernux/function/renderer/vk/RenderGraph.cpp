@@ -790,6 +790,17 @@ bool RenderGraph::Compile()
     // Step 3: Topological sort (Phase 1 â€” Kahn's algorithm)
     TopologicalSort();
 
+    // Debug: Log execution order after topological sort
+    {
+        std::string orderStr;
+        for (uint32_t idx : m_executionOrder) {
+            if (!orderStr.empty())
+                orderStr += " -> ";
+            orderStr += m_passes[idx].name;
+        }
+        INXLOG_DEBUG("RenderGraph::Compile - Execution order (", m_executionOrder.size(), " passes): ", orderStr);
+    }
+
     // Step 4: Allocate transient resources
     if (!AllocateResources()) {
         return false;
@@ -817,6 +828,13 @@ void RenderGraph::Execute(VkCommandBuffer commandBuffer)
     if (!m_compiled) {
         INXLOG_ERROR("RenderGraph::Execute - Graph not compiled");
         return;
+    }
+
+    // One-shot diagnostic: log detailed per-pass info for first N executions
+    static int s_execDiagCount = 0;
+    const bool diagEnabled = (s_execDiagCount < 2);
+    if (diagEnabled) {
+        ++s_execDiagCount;
     }
 
 #if INFERNUX_FRAME_PROFILE
@@ -852,6 +870,32 @@ void RenderGraph::Execute(VkCommandBuffer commandBuffer)
         auto stageStart = Clock::now();
 #endif
         InsertBarriers(commandBuffer, passIndex);
+
+        // Per-pass diagnostic
+        if (diagEnabled) {
+            std::string clearInfo = "no-clear";
+            if (pass.clearColorEnabled) {
+                auto &cv = pass.clearColor;
+                clearInfo = "clear=(" + std::to_string(cv.float32[0]) + "," + std::to_string(cv.float32[1]) +
+                            "," + std::to_string(cv.float32[2]) + "," + std::to_string(cv.float32[3]) + ")";
+            }
+            std::string writeInfo;
+            for (const auto &w : pass.writes) {
+                if (!writeInfo.empty()) writeInfo += ",";
+                if (w.handle.id < m_resources.size()) {
+                    writeInfo += m_resources[w.handle.id].name + "(id=" + std::to_string(w.handle.id) + ")";
+                }
+            }
+            std::string readInfo;
+            for (const auto &r : pass.reads) {
+                if (!readInfo.empty()) readInfo += ",";
+                if (r.handle.id < m_resources.size()) {
+                    readInfo += m_resources[r.handle.id].name + "(id=" + std::to_string(r.handle.id) + ")";
+                }
+            }
+            INXLOG_DEBUG("RenderGraph::Execute pass[", passIndex, "] '", pass.name,
+                         "' writes=[", writeInfo, "] reads=[", readInfo, "] ", clearInfo);
+        }
 #if INFERNUX_FRAME_PROFILE
         auto stageNow = Clock::now();
         s_executeProfile.barrierMs += std::chrono::duration<double, std::milli>(stageNow - stageStart).count();
@@ -878,7 +922,15 @@ void RenderGraph::Execute(VkCommandBuffer commandBuffer)
 #if INFERNUX_FRAME_PROFILE
             stageStart = Clock::now();
 #endif
-            pass.executeCallback(context);
+            try {
+                pass.executeCallback(context);
+            } catch (const std::exception &e) {
+                INXLOG_ERROR("RenderGraph::Execute - Pass '", pass.name,
+                             "' callback threw exception: ", e.what());
+            } catch (...) {
+                INXLOG_ERROR("RenderGraph::Execute - Pass '", pass.name,
+                             "' callback threw unknown exception");
+            }
 #if INFERNUX_FRAME_PROFILE
             stageNow = Clock::now();
             const double callbackMs = std::chrono::duration<double, std::milli>(stageNow - stageStart).count();

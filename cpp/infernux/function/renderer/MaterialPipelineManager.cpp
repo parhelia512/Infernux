@@ -402,18 +402,12 @@ VkPipeline MaterialPipelineManager::CreatePipelineWithProgram(ShaderProgram *pro
     multisampling.sampleShadingEnable = VK_FALSE;
     multisampling.rasterizationSamples = m_sampleCount;
 
-    // Color blending — create one blend attachment per color output for MRT
+    // Color blending — create one blend attachment per color output for MRT.
+    // Opaque forward passes also need alpha writes so intermediate scene
+    // layers can preserve coverage for later fullscreen composites.
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    if (!renderState.blendEnable && m_activeColorAttachmentCount == 1) {
-        // Forward opaque: exclude alpha write so the framebuffer retains alpha=1.0
-        // from the clear color.  The scene texture is displayed via ImGui which
-        // alpha-blends; writing alpha<1 would make opaque pixels appear transparent.
-        colorBlendAttachment.colorWriteMask =
-            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
-    } else {
-        colorBlendAttachment.colorWriteMask =
-            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    }
+    colorBlendAttachment.colorWriteMask =
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     colorBlendAttachment.blendEnable = renderState.blendEnable ? VK_TRUE : VK_FALSE;
     colorBlendAttachment.srcColorBlendFactor = renderState.srcColorBlendFactor;
     colorBlendAttachment.dstColorBlendFactor = renderState.dstColorBlendFactor;

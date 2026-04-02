@@ -581,6 +581,24 @@ void InxRenderer::DrawFrame()
         INXLOG_ERROR("No render pipeline set — scene will not be rendered. "
                      "Call engine.set_render_pipeline(DefaultRenderPipelineAsset()) to activate rendering.");
     }
+
+    // RenderPipeline::Render() applies the current Python graph. Re-check the
+    // requested MSAA here so a newly selected pipeline can switch sample count
+    // before any stale render graph executes this frame.
+    if (m_sceneRenderGraph) {
+        int requested = m_sceneRenderGraph->GetRequestedMsaaSamples();
+        if (requested > 0 && requested != GetMsaaSamples()) {
+            SetMsaaSamples(requested);
+            return;
+        }
+    }
+    if (m_gameRenderGraph) {
+        int requested = m_gameRenderGraph->GetRequestedMsaaSamples();
+        if (requested > 0 && requested != GetMsaaSamples()) {
+            SetMsaaSamples(requested);
+            return;
+        }
+    }
 #if INFERNUX_FRAME_PROFILE
     _fp.stamp(); // [6] after RenderPipeline::Render (Python SRP)
 #endif
