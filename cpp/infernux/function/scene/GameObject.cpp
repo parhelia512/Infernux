@@ -324,6 +324,11 @@ void GameObject::PostAddComponent(Component *component)
 
     m_scene->BumpStructureVersion();
 
+    // Track whether this object has a PyComponentProxy for LateUpdate fast-path.
+    if (dynamic_cast<PyComponentProxy *>(component)) {
+        m_hasPyProxy = true;
+    }
+
     // Auto-add a BoxCollider when Rigidbody is added to an object without
     // any Collider.  Physics engines require at least one shape for a body.
     if (dynamic_cast<Rigidbody *>(component) && !HasComponent<Collider>()) {
@@ -382,6 +387,18 @@ bool GameObject::RemoveComponent(Component *component)
 
     for (auto it = m_components.begin(); it != m_components.end(); ++it) {
         if (it->get() == component) {
+            // Clear PyProxy flag if removing the last PyComponentProxy.
+            if (dynamic_cast<PyComponentProxy *>(component)) {
+                bool otherProxy = false;
+                for (const auto &c : m_components) {
+                    if (c.get() != component && dynamic_cast<PyComponentProxy *>(c.get())) {
+                        otherProxy = true;
+                        break;
+                    }
+                }
+                if (!otherProxy)
+                    m_hasPyProxy = false;
+            }
             (*it)->CallOnDestroy();
             m_components.erase(it);
             if (m_scene) {
@@ -554,6 +571,12 @@ void GameObject::FixedUpdate(float fixedDeltaTime)
 void GameObject::LateUpdate(float deltaTime)
 {
     if (!m_active)
+        return;
+
+    // Fast path: only PyComponentProxy overrides LateUpdate / TickWhileDisabledLateUpdate.
+    // Skip the expensive GetComponentsInExecutionOrder() allocation + sort
+    // for objects that have no Python proxy.
+    if (!m_hasPyProxy)
         return;
 
     // LateUpdate all components
