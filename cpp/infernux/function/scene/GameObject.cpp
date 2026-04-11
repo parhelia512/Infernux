@@ -6,6 +6,7 @@
 #include "PyComponentProxy.h"
 #include "Rigidbody.h"
 #include "Scene.h"
+#include "function/audio/AudioSource.h"
 #include "physics/PhysicsWorld.h"
 #include <InxLog.h>
 #include <algorithm>
@@ -19,6 +20,16 @@ using json = nlohmann::json;
 
 namespace infernux
 {
+
+void InvalidateGameObjectLifecycleCaches(GameObject *gameObject)
+{
+    if (!gameObject) {
+        return;
+    }
+
+    gameObject->InvalidateComponentExecutionCache();
+    gameObject->RefreshLifecycleDispatchFlags();
+}
 
 // Static ID generator
 static std::atomic<uint64_t> s_nextID{1};
@@ -132,7 +143,7 @@ void GameObject::HandleActiveStateChanged(bool wasActiveInHierarchy, bool isActi
     }
 
     if (isActiveInHierarchy) {
-        std::vector<Component *> components = GetComponentsInExecutionOrder();
+        const auto &components = GetComponentsInExecutionOrderCached();
         for (Component *comp : components) {
             if (!comp)
                 continue;
@@ -149,7 +160,7 @@ void GameObject::HandleActiveStateChanged(bool wasActiveInHierarchy, bool isActi
             }
         }
     } else {
-        std::vector<Component *> components = GetComponentsInExecutionOrder();
+        const auto &components = GetComponentsInExecutionOrderCached();
         for (Component *comp : components) {
             if (!comp)
                 continue;
@@ -174,23 +185,65 @@ void GameObject::HandleActiveStateChanged(bool wasActiveInHierarchy, bool isActi
 
 std::vector<Component *> GameObject::GetComponentsInExecutionOrder() const
 {
-    std::vector<Component *> result;
-    result.reserve(m_components.size());
+    return GetComponentsInExecutionOrderCached();
+}
+
+const std::vector<Component *> &GameObject::GetComponentsInExecutionOrderCached() const
+{
+    if (!m_executionOrderCacheDirty) {
+        return m_executionOrderCache;
+    }
+
+    m_executionOrderCache.clear();
+    m_executionOrderCache.reserve(m_components.size());
 
     for (const auto &comp : m_components) {
         if (comp) {
-            result.push_back(comp.get());
+            m_executionOrderCache.push_back(comp.get());
         }
     }
 
-    std::stable_sort(result.begin(), result.end(), [](const Component *a, const Component *b) {
-        if (a->GetExecutionOrder() != b->GetExecutionOrder()) {
-            return a->GetExecutionOrder() < b->GetExecutionOrder();
-        }
-        return a->GetComponentID() < b->GetComponentID();
-    });
+    std::stable_sort(m_executionOrderCache.begin(), m_executionOrderCache.end(),
+                     [](const Component *a, const Component *b) {
+                         if (a->GetExecutionOrder() != b->GetExecutionOrder()) {
+                             return a->GetExecutionOrder() < b->GetExecutionOrder();
+                         }
+                         return a->GetComponentID() < b->GetComponentID();
+                     });
 
-    return result;
+    m_executionOrderCacheDirty = false;
+    return m_executionOrderCache;
+}
+
+void GameObject::InvalidateComponentExecutionCache()
+{
+    m_executionOrderCacheDirty = true;
+}
+
+void GameObject::RefreshLifecycleDispatchFlags()
+{
+    m_hasPyProxy = false;
+    m_hasUpdateReceivers = false;
+    m_hasFixedUpdateReceivers = false;
+    m_hasLateUpdateReceivers = false;
+
+    for (const auto &component : m_components) {
+        if (!component) {
+            continue;
+        }
+
+        if (dynamic_cast<PyComponentProxy *>(component.get())) {
+            m_hasPyProxy = true;
+            m_hasUpdateReceivers = true;
+            m_hasFixedUpdateReceivers = true;
+            m_hasLateUpdateReceivers = true;
+            continue;
+        }
+
+        if (dynamic_cast<AudioSource *>(component.get())) {
+            m_hasUpdateReceivers = true;
+        }
+    }
 }
 
 void GameObject::SetActive(bool active)
@@ -323,6 +376,8 @@ void GameObject::PostAddComponent(Component *component)
     }
 
     m_scene->BumpStructureVersion();
+    InvalidateComponentExecutionCache();
+    RefreshLifecycleDispatchFlags();
 
     // Auto-add a BoxCollider when Rigidbody is added to an object without
     // any Collider.  Physics engines require at least one shape for a body.
@@ -387,6 +442,8 @@ bool GameObject::RemoveComponent(Component *component)
             if (m_scene) {
                 m_scene->BumpStructureVersion();
             }
+            InvalidateComponentExecutionCache();
+            RefreshLifecycleDispatchFlags();
             return true;
         }
     }
@@ -518,11 +575,10 @@ GameObject *GameObject::FindDescendant(const std::string &name) const
 
 void GameObject::Update(float deltaTime)
 {
-    if (!m_active)
+    if (!m_active || !m_hasUpdateReceivers)
         return;
 
-    // Update all components
-    std::vector<Component *> components = GetComponentsInExecutionOrder();
+    const auto &components = GetComponentsInExecutionOrderCached();
     for (Component *comp : components) {
         if (!comp)
             continue;
@@ -536,10 +592,10 @@ void GameObject::Update(float deltaTime)
 
 void GameObject::FixedUpdate(float fixedDeltaTime)
 {
-    if (!m_active)
+    if (!m_active || !m_hasFixedUpdateReceivers)
         return;
 
-    std::vector<Component *> components = GetComponentsInExecutionOrder();
+    const auto &components = GetComponentsInExecutionOrderCached();
     for (Component *comp : components) {
         if (!comp)
             continue;
@@ -553,11 +609,10 @@ void GameObject::FixedUpdate(float fixedDeltaTime)
 
 void GameObject::LateUpdate(float deltaTime)
 {
-    if (!m_active)
+    if (!m_active || !m_hasLateUpdateReceivers)
         return;
 
-    // LateUpdate all components
-    std::vector<Component *> components = GetComponentsInExecutionOrder();
+    const auto &components = GetComponentsInExecutionOrderCached();
     for (Component *comp : components) {
         if (!comp)
             continue;
@@ -574,7 +629,7 @@ void GameObject::EditorUpdate(float deltaTime)
     if (!m_active)
         return;
 
-    std::vector<Component *> components = GetComponentsInExecutionOrder();
+    const auto &components = GetComponentsInExecutionOrderCached();
     for (Component *comp : components) {
         if (!comp || !comp->IsEnabled())
             continue;

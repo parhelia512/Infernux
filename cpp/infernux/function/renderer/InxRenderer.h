@@ -98,6 +98,7 @@ class InxRenderer
     void RegisterGUIRenderable(const char *name, std::shared_ptr<InxGUIRenderable> renderable);
     void UnregisterGUIRenderable(const char *name);
     void QueueDockTabSelection(const char *windowId);
+    void SetGUIPlayerMode(bool enabled);
 
     // ImGui texture management
     uint64_t UploadTextureForImGui(const std::string &name, const unsigned char *pixels, int width, int height);
