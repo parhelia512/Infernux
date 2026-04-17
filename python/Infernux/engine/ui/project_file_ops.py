@@ -84,6 +84,16 @@ MATERIAL_TEMPLATE = '''{{
 }}
 '''
 
+ANIMCLIP_TEMPLATE = '''{
+  "name": "{clip_name}",
+  "sprite_texture_guid": "",
+  "frame_indices": [],
+  "fps": 12.0,
+  "loop": true,
+  "events": []
+}
+'''
+
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -427,6 +437,41 @@ def create_prefab_from_gameobject(game_object, current_path: str,
                    source_canvas_name=source_canvas_name):
         return True, file_path
     return False, "Failed to save prefab"
+
+
+def create_animclip(current_path: str, clip_name: str, asset_database=None):
+    """Create a ``.animclip`` file from template. Returns ``(True, "")`` or ``(False, error_msg)``."""
+    if not clip_name or not current_path:
+        return False, "Invalid animation clip name"
+
+    clip_name = clip_name.strip()
+    if not clip_name:
+        return False, "Animation clip name cannot be empty"
+
+    if clip_name.endswith('.animclip'):
+        clip_name = clip_name[:-9]
+
+    file_name = clip_name + '.animclip'
+    file_path = os.path.join(current_path, file_name)
+
+    if os.path.exists(file_path):
+        return False, f"'{file_name}' already exists"
+
+    content = ANIMCLIP_TEMPLATE.format(clip_name=clip_name)
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+    except OSError as exc:
+        return False, str(exc)
+
+    if asset_database:
+        try:
+            guid = asset_database.import_asset(file_path)
+            print(f"[ProjectPanel] Registered animclip: {file_name} -> {guid}")
+        except Exception as exc:
+            return False, str(exc)
+
+    return True, ""
 
 
 # ---------------------------------------------------------------------------

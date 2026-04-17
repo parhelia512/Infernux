@@ -481,6 +481,9 @@ MESH_EXTENSIONS = frozenset({
 # Prefab extension
 PREFAB_EXTENSIONS = frozenset({".prefab"})
 
+# Animation clip extension
+ANIMCLIP_EXTENSIONS = frozenset({".animclip"})
+
 
 def asset_category_from_extension(ext: str) -> Optional[str]:
     """Return 'material' | 'texture' | 'shader' | 'audio' | 'font' | 'mesh' | 'prefab' | None for a file extension."""
@@ -499,4 +502,6 @@ def asset_category_from_extension(ext: str) -> Optional[str]:
         return "mesh"
     if ext in PREFAB_EXTENSIONS:
         return "prefab"
+    if ext in ANIMCLIP_EXTENSIONS:
+        return "animclip"
     return None

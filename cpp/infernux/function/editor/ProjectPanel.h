@@ -78,6 +78,8 @@ class ProjectPanel : public EditorPanel
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createMaterial;
     /// Create scene: (currentPath, name) → (ok, errorMsg)
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createScene;
+    /// Create animation clip: (currentPath, name) → (ok, errorMsg)
+    std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimClip;
     /// Create prefab from hierarchy gameobject: (objId, currentPath)
     std::function<void(uint64_t, const std::string &)> createPrefabFromHierarchy;
 
@@ -98,6 +100,8 @@ class ProjectPanel : public EditorPanel
     std::function<void(const std::string &)> openScene;
     /// Open prefab mode: (filePath)
     std::function<void(const std::string &)> openPrefabMode;
+    /// Open animation clip: (filePath)
+    std::function<void(const std::string &)> openAnimClip;
     /// Reveal in file explorer: (path)
     std::function<void(const std::string &)> revealInExplorer;
 

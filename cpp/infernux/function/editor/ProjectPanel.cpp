@@ -1065,6 +1065,9 @@ void ProjectPanel::HandleItemClick(const FileItem &item, InxGUIContext *ctx)
         } else if (item.ext == ".prefab") {
             if (openPrefabMode)
                 openPrefabMode(item.path);
+        } else if (item.ext == ".animclip") {
+            if (openAnimClip)
+                openAnimClip(item.path);
         } else {
             if (openFile)
                 openFile(item.path);
@@ -1907,6 +1910,14 @@ void ProjectPanel::RenderContextMenu(InxGUIContext *ctx)
             CreateAndRename("NewScene", ".scene", [this](const std::string &name) {
                 if (createScene)
                     return createScene(m_currentPath, name);
+                return std::make_pair(false, std::string("No callback"));
+            });
+        }
+        ctx->Separator();
+        if (ctx->Selectable(Tr("project.create_animclip"), false)) {
+            CreateAndRename("NewAnimClip", ".animclip", [this](const std::string &name) {
+                if (createAnimClip)
+                    return createAnimClip(m_currentPath, name);
                 return std::make_pair(false, std::string("No callback"));
             });
         }

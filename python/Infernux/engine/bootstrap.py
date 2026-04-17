@@ -400,6 +400,17 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             })
         _panel_state.put("project", {"current_path": self.project_panel.get_current_path()})
         _panel_state.put("window_manager", self.window_manager.save_state())
+
+        # Persist individual panel states for all registered windows
+        for wid, inst in self.window_manager._default_instances.items():
+            if hasattr(inst, "save_state") and callable(inst.save_state):
+                try:
+                    data = inst.save_state()
+                    if data:
+                        _panel_state.put(f"panel:{wid}", data)
+                except Exception:
+                    pass
+
         _panel_state.save()
 
     def _load_initial_scene(self):

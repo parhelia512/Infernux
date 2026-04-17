@@ -48,6 +48,7 @@ class WindowManager:
         self._open_windows: Dict[str, bool] = {}  # window_id -> is_open
         self._window_instances: Dict[str, InxGUIRenderable] = {}  # window_id -> instance
         self._default_instances: Dict[str, InxGUIRenderable] = {}  # window_id -> original instance
+        self._builtin_defaults: set = set()  # window_ids that should reopen on reset
         self._project_console_front_id = "project"
         self._on_state_changed: Optional[Callable[[], None]] = None
         self._imgui_ini_path: Optional[str] = None
@@ -139,6 +140,9 @@ class WindowManager:
             instance.open()
         self._window_instances[window_id] = instance
         self._open_windows[window_id] = True
+        # Ensure singleton panels participate in save/load persistence
+        if info.singleton and window_id not in self._default_instances:
+            self._default_instances[window_id] = instance
         self._notify_state_changed()
 
         def _register_instance(target_id=window_id, target_instance=instance):
@@ -206,7 +210,10 @@ class WindowManager:
 
         open_windows = data.get('open_windows', {}) or {}
         for window_id, is_open in open_windows.items():
+            # Lazily create registered-type windows not yet in _default_instances
             if window_id not in self._default_instances:
+                if is_open and window_id in self._registered_types:
+                    self.open_window(window_id)
                 continue
 
             instance = self._default_instances[window_id]
@@ -249,6 +256,7 @@ class WindowManager:
         self._window_instances[window_id] = instance
         self._open_windows[window_id] = True
         self._default_instances[window_id] = instance
+        self._builtin_defaults.add(window_id)
         if window_id in {"project", "console"} and self._project_console_front_id not in {"project", "console"}:
             self._project_console_front_id = window_id
         
@@ -281,15 +289,18 @@ class WindowManager:
         self._pending_actions.append(action)
 
     def _apply_reset_layout(self):
-        # 1. Close any dynamically-opened windows (not part of default set)
-        dynamic_ids = [wid for wid in list(self._open_windows) if wid not in self._default_instances]
+        # 1. Close any dynamically-opened windows (not part of builtin default set)
+        dynamic_ids = [wid for wid in list(self._open_windows) if wid not in self._builtin_defaults]
         for wid in dynamic_ids:
             self._open_windows[wid] = False
             self._engine.unregister_gui(wid)
             self._window_instances.pop(wid, None)
 
-        # 2. Force ALL default panels to be open and registered
-        for window_id, instance in self._default_instances.items():
+        # 2. Force ALL builtin default panels to be open and registered
+        for window_id in self._builtin_defaults:
+            instance = self._default_instances.get(window_id)
+            if instance is None:
+                continue
             if hasattr(instance, '_is_open'):
                 instance._is_open = True
 
