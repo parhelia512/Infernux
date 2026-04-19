@@ -712,26 +712,14 @@ def render_material_body(ctx: InxGUIContext, panel, state):
         if not preview_path and _native_mat is not None:
             preview_path = _ensure_material_file_path(panel, _native_mat)
 
-        card_h = preview_size + 34.0
+        card_h = preview_size + 8.0
         if ctx.begin_child("##material_preview_card", avail_w, card_h, True):
-            ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
-            ctx.label("Preview")
-            ctx.pop_style_color(1)
-
-            if preview_path and render_resource_preview_rect(ctx, panel, preview_path,
+            if not (preview_path and render_resource_preview_rect(ctx, panel, preview_path,
                                                 avail_w - 8.0, preview_size,
                                                 preview_size=int(preview_size),
                                                 preserve_aspect=True,
                                                 center=True,
-                                                cache_tag=cache_tag):
-                # Bright accent border so the sphere preview is visually separated
-                # from nearby inspector sections.
-                x0 = ctx.get_item_rect_min_x()
-                y0 = ctx.get_item_rect_min_y()
-                x1 = ctx.get_item_rect_max_x()
-                y1 = ctx.get_item_rect_max_y()
-                ctx.draw_rect(x0, y0, x1, y1, 0.96, 0.90, 0.52, 1.0, 1.8, 5.0)
-            else:
+                                                cache_tag=cache_tag)):
                 ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
                 ctx.label("Material preview unavailable.")
                 ctx.pop_style_color(1)
