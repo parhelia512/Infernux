@@ -495,6 +495,35 @@ PYBIND11_MODULE(_Infernux, m)
             py::arg("mat_file_path"), py::arg("size") = 128,
             "Render a PBR sphere preview for a .mat file (GPU with CPU fallback). Returns list[int] of RGBA pixels, or "
             "None on failure.")
+           .def("init_preview_task_system", &Infernux::InitPreviewTaskSystem, py::arg("worker_count") = 1,
+               "Initialize C++ preview task worker threads")
+           .def("shutdown_preview_task_system", &Infernux::ShutdownPreviewTaskSystem,
+               "Shutdown C++ preview task worker threads")
+           .def("schedule_material_preview_task", &Infernux::ScheduleMaterialPreviewTask,
+               py::arg("resource_key"), py::arg("mat_file_path"), py::arg("stamp"), py::arg("size") = 256,
+               "Schedule material preview generation task")
+           .def("schedule_texture_preview_task", &Infernux::ScheduleTexturePreviewTask,
+               py::arg("resource_key"), py::arg("texture_file_path"), py::arg("stamp"), py::arg("max_size") = 256,
+               py::arg("nearest") = false, py::arg("srgb") = false,
+               "Schedule texture preview generation task")
+           .def("pump_preview_tasks", &Infernux::PumpPreviewTasks,
+               "Pump completed preview tasks and upload textures on main thread")
+           .def("get_material_preview_texture_id", &Infernux::GetMaterialPreviewTextureId,
+               py::arg("resource_key"), py::arg("expected_stamp"),
+               "Get texture id when material preview for resource_key is ready at expected stamp")
+           .def("get_texture_preview_texture_id", &Infernux::GetTexturePreviewTextureId,
+               py::arg("resource_key"), py::arg("expected_stamp"),
+               "Get texture id when texture preview for resource_key is ready at expected stamp")
+           .def("get_texture_preview_size", &Infernux::GetTexturePreviewSize,
+               py::arg("resource_key"), py::arg("expected_stamp"),
+               "Get texture preview dimensions when resource_key is ready at expected stamp")
+           .def("invalidate_material_preview_task", &Infernux::InvalidateMaterialPreviewTask, py::arg("resource_key"),
+               "Invalidate one material preview task/cache entry")
+           .def("invalidate_texture_preview_task", &Infernux::InvalidateTexturePreviewTask, py::arg("resource_key"),
+               "Invalidate one texture preview task/cache entry")
+           .def("schedule_material_save_snapshot_task", &Infernux::ScheduleMaterialSaveSnapshotTask,
+               py::arg("key"), py::arg("file_path"), py::arg("json_snapshot"),
+               "Schedule async material save task from JSON snapshot")
         // ========================================================================
         // Editor Camera (property-based object access — preferred API)
         // ========================================================================

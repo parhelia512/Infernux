@@ -18,6 +18,8 @@
 namespace infernux
 {
 
+class Infernux;
+
 /// C++ native Project panel — Unity-style asset browser with folder tree,
 /// file grid, thumbnails, drag-drop, inline rename, and virtual scrolling.
 ///
@@ -33,6 +35,7 @@ class ProjectPanel : public EditorPanel
     // ── Public API (called from Python bootstrap / other panels) ─────
 
     void SetRootPath(const std::string &path);
+    void SetEngine(Infernux *engine);
     void SetRenderer(InxRenderer *renderer);
     void SetAssetDatabase(AssetDatabase *adb);
     void SetIconsDirectory(const std::string &dir);
@@ -41,6 +44,7 @@ class ProjectPanel : public EditorPanel
     void SetSelectedFile(const std::string &path);
 
     void InvalidateMaterialThumbnail(const std::string &filePath);
+    void InvalidateTextureThumbnail(const std::string &filePath);
 
     /// Invalidate the directory cache so listing refreshes next frame.
     void InvalidateDirCache();
@@ -252,6 +256,7 @@ class ProjectPanel : public EditorPanel
     std::unordered_map<std::string, double> m_thumbRetryAfter; // key = "kind|path" → monotonic deadline
     std::string m_thumbQueuePath;
     std::unordered_map<std::string, std::pair<int64_t, double>> m_materialMtimeCache;
+    std::unordered_map<std::string, std::pair<int64_t, double>> m_textureMtimeCache;
     int m_thumbsLoadedThisFrame = 0;
 
     void QueueThumbnailRequest(const std::string &kind, const std::string &filePath);
@@ -260,6 +265,7 @@ class ProjectPanel : public EditorPanel
     uint64_t GetThumbnail(const std::string &filePath, int64_t cachedMtimeNs);
     uint64_t GetMaterialThumbnail(const std::string &filePath);
     int64_t GetMaterialMtimeNs(const std::string &filePath);
+    int64_t GetTextureMtimeNs(const std::string &filePath);
 
     // Static helper: downsample texture to max_px
     static bool DownsampleTexture(const std::string &filePath, int maxPx, std::vector<unsigned char> &outPixels,
@@ -341,6 +347,7 @@ class ProjectPanel : public EditorPanel
     std::vector<FileItem> *m_visibleItems = nullptr;
 
     // External refs
+    Infernux *m_engine = nullptr;
     InxRenderer *m_renderer = nullptr;
     AssetDatabase *m_assetDatabase = nullptr;
 
@@ -396,7 +403,7 @@ class ProjectPanel : public EditorPanel
     static constexpr int GRID_PADDING = 10;
     static constexpr int CELL_WIDTH = ICON_SIZE + GRID_PADDING;
     static constexpr int THUMBNAIL_MAX_PX = 128;
-    static constexpr int THUMBS_PER_FRAME = 1;
+    static constexpr int THUMBS_PER_FRAME = 8;
     static constexpr double THUMB_RETRY_DELAY = 1.0;
     static constexpr double DIR_CACHE_TTL = 0.5; // seconds before re-checking mtime
 

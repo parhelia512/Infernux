@@ -1,5 +1,7 @@
 #include "ProjectPanel.h"
 
+#include "Infernux.h"
+
 #include <function/renderer/gui/InxResourcePreviewer.h>
 
 #include <algorithm>
@@ -11,6 +13,7 @@
 
 #ifdef INX_PLATFORM_WINDOWS
 #include <ShlObj.h> // CF_HDROP, DragQueryFileW
+#include <shellapi.h>
 #include <strsafe.h>
 #endif
 
@@ -56,6 +59,33 @@ static constexpr const char *kEllipsis = "\xe2\x80\xa6";        // …
 
 namespace infernux
 {
+
+namespace
+{
+inline ImU32 ProjectSelectionOutlineColor()
+{
+    return IM_COL32(static_cast<int>(EditorTheme::ACCENT_R * 255.0f),
+                    static_cast<int>(EditorTheme::ACCENT_G * 255.0f),
+                    static_cast<int>(EditorTheme::ACCENT_B * 255.0f),
+                    255);
+}
+
+constexpr float kProjectSelectionOutlineThickness = 2.0f;
+
+inline std::string BuildSharedMaterialPreviewTextureName(const std::string &filePath)
+{
+    const std::string resourceKey = std::string("mat|") + filePath;
+    const auto hv = std::hash<std::string>{}(resourceKey);
+    return std::string("__cpp_preview_mat__") + std::to_string(static_cast<unsigned long long>(hv));
+}
+
+inline std::string BuildSharedTexturePreviewTextureName(const std::string &filePath)
+{
+    const std::string resourceKey = std::string("tex|") + filePath;
+    const auto hv = std::hash<std::string>{}(resourceKey);
+    return std::string("__cpp_preview_tex__") + std::to_string(static_cast<unsigned long long>(hv));
+}
+} // namespace
 
 // ════════════════════════════════════════════════════════════════════
 // Static extension sets
@@ -311,6 +341,11 @@ void ProjectPanel::SetRootPath(const std::string &path)
         m_currentPath = path;
 }
 
+void ProjectPanel::SetEngine(Infernux *engine)
+{
+    m_engine = engine;
+}
+
 void ProjectPanel::SetRenderer(InxRenderer *renderer)
 {
     if (m_renderer == renderer)
@@ -375,18 +410,6 @@ void ProjectPanel::InvalidateMaterialThumbnail(const std::string &filePath)
         return;
     auto normTarget = NormalizePath(filePath);
 
-    std::vector<std::string> toRemove;
-    for (auto &[path, _] : m_thumbnailCache) {
-        if (NormalizePath(path) == normTarget)
-            toRemove.push_back(path);
-    }
-    for (auto &path : toRemove) {
-        std::string thumbName = "__mat_thumb__" + path;
-        if (m_renderer->HasImGuiTexture(thumbName))
-            m_renderer->RemoveImGuiTexture(thumbName);
-        m_thumbnailCache.erase(path);
-    }
-
     std::vector<std::string> mtimeToRemove;
     for (auto &[path, _] : m_materialMtimeCache) {
         if (NormalizePath(path) == normTarget)
@@ -394,6 +417,40 @@ void ProjectPanel::InvalidateMaterialThumbnail(const std::string &filePath)
     }
     for (auto &path : mtimeToRemove)
         m_materialMtimeCache.erase(path);
+
+    for (auto &[path, entry] : m_thumbnailCache) {
+        if (NormalizePath(path) == normTarget) {
+            entry.mtimeNs = 0;
+            QueueThumbnailRequest("material", path);
+        }
+    }
+}
+
+void ProjectPanel::InvalidateTextureThumbnail(const std::string &filePath)
+{
+    if (filePath.empty() || !m_renderer)
+        return;
+    auto normTarget = NormalizePath(filePath);
+
+    std::vector<std::string> mtimeToRemove;
+    for (auto &[path, _] : m_textureMtimeCache) {
+        if (NormalizePath(path) == normTarget)
+            mtimeToRemove.push_back(path);
+    }
+    for (auto &path : mtimeToRemove)
+        m_textureMtimeCache.erase(path);
+
+    for (auto &[path, entry] : m_thumbnailCache) {
+        if (NormalizePath(path) == normTarget) {
+            entry.mtimeNs = 0;
+            QueueThumbnailRequest("image", path);
+        }
+    }
+
+    if (m_engine) {
+        const std::string resourceKey = std::string("tex|") + filePath;
+        m_engine->InvalidateTexturePreviewTask(resourceKey);
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -684,29 +741,74 @@ int64_t ProjectPanel::GetMaterialMtimeNs(const std::string &filePath)
     return mtimeNs;
 }
 
+int64_t ProjectPanel::GetTextureMtimeNs(const std::string &filePath)
+{
+    if (filePath.empty())
+        return 0;
+
+    double now = m_frameTimeNow;
+
+    auto it = m_textureMtimeCache.find(filePath);
+    if (it != m_textureMtimeCache.end() && (now - it->second.second) < 1.0)
+        return it->second.first;
+
+    std::error_code ec;
+    if (!fs::exists(fs::u8path(filePath), ec))
+        return 0;
+
+    int64_t imageMtime = GetMtimeNs(filePath);
+
+    // Also watch the .meta file so that import setting changes (filter_mode, max_size, srgb…)
+    // invalidate the cached thumbnail.
+    int64_t metaMtime = 0;
+    std::string metaPath = InxResourceMeta::GetMetaFilePath(filePath);
+    if (!metaPath.empty() && fs::exists(fs::u8path(metaPath), ec))
+        metaMtime = GetMtimeNs(metaPath);
+
+    // Combine both mtimes into a single fingerprint that changes when either changes.
+    int64_t combined = imageMtime ^ (metaMtime * INT64_C(2654435761));
+    m_textureMtimeCache[filePath] = {combined, now};
+    return combined;
+}
+
 uint64_t ProjectPanel::GetThumbnail(const std::string &filePath, int64_t cachedMtimeNs)
 {
     if (filePath.empty() || !m_renderer)
         return 0;
 
-    if (cachedMtimeNs == 0) {
-        std::error_code ec;
-        if (!fs::exists(fs::u8path(filePath), ec))
-            return 0;
-        cachedMtimeNs = GetMtimeNs(filePath);
-    }
+    // Always derive the combined fingerprint (image mtime + .meta mtime), cached for 1s.
+    int64_t texMtime = GetTextureMtimeNs(filePath);
+    if (texMtime == 0)
+        return 0;
 
     // Fast path: C++ cache hit — no string allocation needed
     auto it = m_thumbnailCache.find(filePath);
-    if (it != m_thumbnailCache.end() && it->second.mtimeNs == cachedMtimeNs && it->second.texId != 0)
+    if (it != m_thumbnailCache.end() && it->second.mtimeNs == texMtime && it->second.texId != 0)
         return it->second.texId;
 
-    // Slow path: check renderer GPU cache (string allocation only on miss)
-    std::string thumbName = "__thumb__" + filePath;
-    if (m_renderer->HasImGuiTexture(thumbName)) {
-        auto texId = m_renderer->GetImGuiTextureId(thumbName);
+    // Stale cache: return old texId while re-queuing a fresh upload.
+    if (it != m_thumbnailCache.end() && it->second.texId != 0) {
+        QueueThumbnailRequest("image", filePath);
+        return it->second.texId;
+    }
+
+    const std::string resourceKey = std::string("tex|") + filePath;
+
+    // Shared-path hit: C++ preview task path produced this exact texture.
+    if (m_engine) {
+        const uint64_t texId = m_engine->GetTexturePreviewTextureId(resourceKey, static_cast<uint64_t>(texMtime));
         if (texId != 0) {
-            m_thumbnailCache[filePath] = {texId, cachedMtimeNs};
+            m_thumbnailCache[filePath] = {texId, texMtime};
+            return texId;
+        }
+    }
+
+    // Fallback hit: direct renderer lookup by shared texture name.
+    std::string sharedTexName = BuildSharedTexturePreviewTextureName(filePath);
+    if (m_renderer->HasImGuiTexture(sharedTexName)) {
+        auto texId = m_renderer->GetImGuiTextureId(sharedTexName);
+        if (texId != 0) {
+            m_thumbnailCache[filePath] = {texId, texMtime};
             return texId;
         }
     }
@@ -729,11 +831,20 @@ uint64_t ProjectPanel::GetMaterialThumbnail(const std::string &filePath)
     if (it != m_thumbnailCache.end()) {
         if (it->second.mtimeNs == mtimeNs && it->second.texId != 0)
             return it->second.texId;
-        if (it->second.mtimeNs != mtimeNs) {
-            std::string thumbName = "__mat_thumb__" + filePath;
-            if (m_renderer->HasImGuiTexture(thumbName))
-                m_renderer->RemoveImGuiTexture(thumbName);
-            m_thumbnailCache.erase(it);
+        if (it->second.texId != 0) {
+            QueueThumbnailRequest("material", filePath);
+            return it->second.texId;
+        }
+    }
+
+    // Shared-path fast hit: Inspector/engine preview task may have already
+    // produced this exact material preview texture.
+    const std::string sharedTexName = BuildSharedMaterialPreviewTextureName(filePath);
+    if (m_renderer->HasImGuiTexture(sharedTexName)) {
+        auto texId = m_renderer->GetImGuiTextureId(sharedTexName);
+        if (texId != 0) {
+            m_thumbnailCache[filePath] = {texId, mtimeNs};
+            return texId;
         }
     }
 
@@ -745,6 +856,9 @@ void ProjectPanel::ProcessPendingThumbnails()
 {
     if (!m_renderer)
         return;
+
+    if (m_engine)
+        m_engine->PumpPreviewTasks();
 
     if (m_thumbQueuePath != m_currentPath) {
         m_thumbQueuePath = m_currentPath;
@@ -773,43 +887,78 @@ void ProjectPanel::ProcessPendingThumbnails()
             continue;
 
         if (req.kind == "image") {
-            int64_t mtimeNs = GetMtimeNs(req.filePath);
+            int64_t mtimeNs = GetTextureMtimeNs(req.filePath);
             if (mtimeNs == 0)
                 continue;
 
-            std::string thumbName = "__thumb__" + req.filePath;
             auto cIt = m_thumbnailCache.find(req.filePath);
             if (cIt != m_thumbnailCache.end() && cIt->second.mtimeNs == mtimeNs && cIt->second.texId != 0)
                 continue;
 
-            if (m_renderer->HasImGuiTexture(thumbName)) {
-                auto texId = m_renderer->GetImGuiTextureId(thumbName);
+            // Read import settings from .meta (filter mode, max size).
+            const InxResourceMeta *meta = m_assetDatabase ? m_assetDatabase->GetMetaByPath(req.filePath) : nullptr;
+
+            VkFilter filter = VK_FILTER_LINEAR;
+            if (meta && meta->HasKey("filter_mode")) {
+                std::string fm = meta->GetDataAs<std::string>("filter_mode");
+                if (fm == "point" || fm == "nearest")
+                    filter = VK_FILTER_NEAREST;
+            }
+
+            int maxSize = 2048;
+            if (meta && meta->HasKey("max_size"))
+                maxSize = meta->GetDataAs<int>("max_size");
+
+            bool srgb = false;
+            if (meta && meta->HasKey("srgb"))
+                srgb = meta->GetDataAs<bool>("srgb");
+
+            // Keep image previews stable and shared across Inspector/ProjectPanel.
+            int thumbLimit = std::min(maxSize, THUMBNAIL_MAX_PX);
+            const bool nearest = (filter == VK_FILTER_NEAREST);
+            const std::string resourceKey = std::string("tex|") + req.filePath;
+
+            if (m_engine) {
+                m_engine->ScheduleTexturePreviewTask(resourceKey,
+                                                     req.filePath,
+                                                     static_cast<uint64_t>(mtimeNs),
+                                                     thumbLimit,
+                                                     nearest,
+                                                     srgb);
+
+                const uint64_t texId = m_engine->GetTexturePreviewTextureId(resourceKey,
+                                                                             static_cast<uint64_t>(mtimeNs));
                 if (texId != 0) {
                     m_thumbnailCache[req.filePath] = {texId, mtimeNs};
+                } else {
+                    m_thumbRetryAfter[retryKey] = now + THUMB_RETRY_DELAY;
                     continue;
                 }
-            }
+            } else {
+                std::string thumbName = "__thumb__" + req.filePath;
+                std::vector<unsigned char> pixels;
+                int uploadW = 0, uploadH = 0;
+                if (!DownsampleTexture(req.filePath, thumbLimit, pixels, uploadW, uploadH)) {
+                    m_thumbRetryAfter[retryKey] = now + THUMB_RETRY_DELAY;
+                    continue;
+                }
 
-            std::vector<unsigned char> pixels;
-            int w = 0, h = 0;
-            if (!DownsampleTexture(req.filePath, THUMBNAIL_MAX_PX, pixels, w, h)) {
-                m_thumbRetryAfter[retryKey] = now + THUMB_RETRY_DELAY;
-                continue;
-            }
+                auto texId = m_renderer->UploadTextureForImGui(thumbName, pixels.data(), uploadW, uploadH, filter);
+                if (texId == 0) {
+                    m_thumbRetryAfter[retryKey] = now + THUMB_RETRY_DELAY;
+                    continue;
+                }
 
-            auto texId = m_renderer->UploadTextureForImGui(thumbName, pixels.data(), w, h);
-            if (texId == 0) {
-                m_thumbRetryAfter[retryKey] = now + THUMB_RETRY_DELAY;
-                continue;
+                m_thumbnailCache[req.filePath] = {texId, mtimeNs};
             }
-
-            m_thumbnailCache[req.filePath] = {texId, mtimeNs};
         } else if (req.kind == "material") {
             int64_t mtimeNs = GetMaterialMtimeNs(req.filePath);
             if (mtimeNs == 0)
                 continue;
 
-            std::string thumbName = "__mat_thumb__" + req.filePath;
+            // Use the same texture name contract as inspector C++ preview tasks
+            // so both panels always reference one shared preview resource.
+            std::string thumbName = BuildSharedMaterialPreviewTextureName(req.filePath);
             auto cIt = m_thumbnailCache.find(req.filePath);
             if (cIt != m_thumbnailCache.end()) {
                 if (cIt->second.mtimeNs == mtimeNs && cIt->second.texId != 0)
@@ -1821,10 +1970,13 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                     NotifySelectionChanged();
                 }
                 if (isSelected)
-                    drawList->AddRectFilled(rMin, rMax, IM_COL32(235, 87, 87, 140));
+                    drawList->AddRect(rMin, rMax, ProjectSelectionOutlineColor(), 0.0f, 0,
+                                      kProjectSelectionOutlineThickness);
             } else {
                 const char *tag = (item.type != FileItem::Dir) ? GetFileTypeTag(item.name) : "[DIR]";
                 ctx->Selectable(tag, isSelected, 0, iconSize, iconSize);
+                ImVec2 rMin = ImGui::GetItemRectMin();
+                ImVec2 rMax = ImGui::GetItemRectMax();
                 if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && !hasDragPayload)
                     HandleItemClick(item, ctx);
                 if (ctx->IsItemClicked(1)) {
@@ -1835,6 +1987,9 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                     }
                     NotifySelectionChanged();
                 }
+                if (isSelected)
+                    drawList->AddRect(rMin, rMax, ProjectSelectionOutlineColor(), 0.0f, 0,
+                                      kProjectSelectionOutlineThickness);
             }
 
             // ── Drag-drop source (must always run to detect drag start) ──

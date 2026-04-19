@@ -752,7 +752,7 @@ def _wire_asset_preview(ctx):
     _t = ctx._t
 
     def _render_asset_inspector(ctx_arg, file_path, category):
-        from Infernux.engine.ui.asset_inspector import render_asset_inspector
+        from Infernux.engine.ui.asset_details_renderer import render_asset_inspector
         try:
             render_asset_inspector(ctx_arg, ip, file_path, category)
         except Exception as exc:

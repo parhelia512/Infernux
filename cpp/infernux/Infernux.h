@@ -1,9 +1,16 @@
 #pragma once
 #include <core/types/InxFwdType.h>
+#include <atomic>
+#include <condition_variable>
 #include <filesystem>
+#include <functional>
 #include <iostream>
+#include <mutex>
+#include <queue>
 #include <memory>
+#include <thread>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include <function/renderer/InxRenderer.h>
@@ -173,6 +180,66 @@ class Infernux
     /// @param audioPath The audio file path to reload
     void ReloadAudio(const std::string &audioPath);
 
+    // ========================================================================
+    // Preview Task System API (C++ thread pool, Python-scheduled)
+    // ========================================================================
+
+    /// @brief Initialize preview task worker threads.
+    /// @param workerCount Number of workers; 0 means default(1).
+    void InitPreviewTaskSystem(uint32_t workerCount = 1);
+
+    /// @brief Shutdown preview task workers and clear pending/completed tasks.
+    void ShutdownPreviewTaskSystem();
+
+    /// @brief Schedule a material preview generation task.
+    /// @param resourceKey Stable cache key (e.g. "mat|<norm_path>")
+    /// @param matFilePath Material file path
+    /// @param stamp Revision stamp from caller
+    /// @param size Preview size (square)
+    /// @return true if task accepted or already in-flight/ready for same/newer stamp.
+    bool ScheduleMaterialPreviewTask(const std::string &resourceKey, const std::string &matFilePath, uint64_t stamp,
+                                     int size = 256);
+
+    /// @brief Schedule a texture preview generation task.
+    /// @param resourceKey Stable cache key (e.g. "tex|<norm_path>")
+    /// @param textureFilePath Texture file path
+    /// @param stamp Revision stamp from caller
+    /// @param maxSize Max preview side length in pixels
+    /// @param nearest Use point filter for uploaded ImGui texture
+    /// @param srgb Apply gamma visualization conversion on preview pixels
+    /// @return true if task accepted or already in-flight/ready for same/newer stamp.
+    bool ScheduleTexturePreviewTask(const std::string &resourceKey, const std::string &textureFilePath,
+                                    uint64_t stamp, int maxSize = 256, bool nearest = false, bool srgb = false);
+
+    /// @brief Pump completed preview tasks on main thread and upload textures.
+    void PumpPreviewTasks();
+
+    /// @brief Get uploaded texture id for a material preview key at expected stamp.
+    /// @return Non-zero ImGui texture id when ready and stamp matches.
+    uint64_t GetMaterialPreviewTextureId(const std::string &resourceKey, uint64_t expectedStamp) const;
+
+    /// @brief Get uploaded texture id for a texture preview key at expected stamp.
+    /// @return Non-zero ImGui texture id when ready and stamp matches.
+    uint64_t GetTexturePreviewTextureId(const std::string &resourceKey, uint64_t expectedStamp) const;
+
+    /// @brief Get uploaded texture preview dimensions when ready at expected stamp.
+    /// @return (width,height); (0,0) when not ready.
+    std::pair<int, int> GetTexturePreviewSize(const std::string &resourceKey, uint64_t expectedStamp) const;
+
+    /// @brief Invalidate one material preview task/cache entry.
+    void InvalidateMaterialPreviewTask(const std::string &resourceKey);
+
+    /// @brief Invalidate one texture preview task/cache entry.
+    void InvalidateTexturePreviewTask(const std::string &resourceKey);
+
+    /// @brief Schedule async material save from JSON snapshot.
+    /// @param key Coalescing key (usually file path)
+    /// @param filePath Target .mat path
+    /// @param jsonSnapshot Serialized material JSON snapshot
+    /// @return true if task accepted
+    bool ScheduleMaterialSaveSnapshotTask(const std::string &key, const std::string &filePath,
+                                          const std::string &jsonSnapshot);
+
     // debug
     void SetLogLevel(LogLevel engineLevel);
 
@@ -215,6 +282,74 @@ class Infernux
     /// @brief Push a compiled ShaderAsset into the renderer (SPIR-V + variants + render meta).
     void RegisterShaderToRenderer(const struct ShaderAsset &asset);
 
+    struct PreviewTaskItem
+    {
+        std::function<void()> fn;
+    };
+
+    struct MaterialPreviewCompleted
+    {
+        std::string resourceKey;
+        uint64_t stamp = 0;
+        int size = 0;
+        bool success = false;
+        std::vector<unsigned char> pixels;
+    };
+
+    struct TexturePreviewCompleted
+    {
+        std::string resourceKey;
+        uint64_t stamp = 0;
+        int width = 0;
+        int height = 0;
+        bool nearest = false;
+        bool success = false;
+        std::vector<unsigned char> pixels;
+    };
+
+    struct MaterialPreviewRequest
+    {
+        std::string resourceKey;
+        std::string matFilePath;
+        uint64_t stamp = 0;
+        int size = 0;
+    };
+
+    struct TexturePreviewRequest
+    {
+        std::string resourceKey;
+        std::string textureFilePath;
+        uint64_t stamp = 0;
+        int maxSize = 0;
+        bool nearest = false;
+        bool srgb = false;
+    };
+
+    struct MaterialPreviewState
+    {
+        bool inFlight = false;
+        uint64_t inFlightStamp = 0;
+        uint64_t readyStamp = 0;
+        int readySize = 0;
+        std::string textureName;
+        uint64_t textureId = 0;
+    };
+
+    struct TexturePreviewState
+    {
+        bool inFlight = false;
+        uint64_t inFlightStamp = 0;
+        uint64_t readyStamp = 0;
+        int readyWidth = 0;
+        int readyHeight = 0;
+        std::string textureName;
+        uint64_t textureId = 0;
+    };
+
+    void EnqueuePreviewTask(std::function<void()> fn);
+    static std::string BuildPreviewTextureName(const std::string &resourceKey);
+    static std::string BuildTexturePreviewTextureName(const std::string &resourceKey);
+
     InxAppMetadata m_metadata{"Infernux", 0, 1, 0, "com.infrenderer.Infernux"};
 
     std::unique_ptr<InxExtLoad> m_extLoader;
@@ -232,6 +367,21 @@ class Infernux
     // ImGui ini file path — stored as std::filesystem::path so that
     // wide-char paths (e.g. Chinese usernames) work correctly on Windows.
     std::filesystem::path m_imguiIniPath;
+
+    // Preview task system
+    std::vector<std::thread> m_previewWorkers;
+    std::queue<PreviewTaskItem> m_previewTaskQueue;
+    mutable std::mutex m_previewTaskMutex;
+    std::condition_variable m_previewTaskCv;
+    bool m_previewStopRequested = false;
+    bool m_previewTaskSystemInitialized = false;
+
+    mutable std::mutex m_previewResultMutex;
+    std::queue<MaterialPreviewCompleted> m_previewCompletedQueue;
+    std::queue<TexturePreviewCompleted> m_texturePreviewCompletedQueue;
+    std::queue<MaterialPreviewRequest> m_previewRequestQueue;
+    std::unordered_map<std::string, MaterialPreviewState> m_materialPreviewStates;
+    std::unordered_map<std::string, TexturePreviewState> m_texturePreviewStates;
 
     void LoadImGuiLayout();
     void SaveImGuiLayout();

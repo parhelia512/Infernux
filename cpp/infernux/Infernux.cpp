@@ -19,10 +19,12 @@
 #include <function/renderer/SceneRenderGraph.h>
 #include <function/renderer/ScriptableRenderContext.h>
 #include <function/renderer/gui/InxGUIContext.h>
+#include <function/renderer/gui/InxResourcePreviewer.h>
 #include <function/renderer/gui/InxScreenUIRenderer.h>
 #include <function/resources/AssetDependencyGraph.h>
 #include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <function/resources/InxFileLoader/InxDefaultLoader.hpp>
+#include <function/resources/InxFileLoader/InxTextureLoader.hpp>
 #include <function/resources/InxFileLoader/InxPythonScriptLoader.hpp>
 #include <function/resources/InxFileLoader/InxShaderLoader.hpp>
 #include <function/resources/InxMaterial/MaterialLoader.h>
@@ -114,6 +116,8 @@ Infernux::Infernux(std::string dllPath) : m_isCleanedUp(false)
 
     INXLOG_DEBUG("Create Infernux Renderer.");
     m_renderer = std::make_unique<InxRenderer>();
+
+    InitPreviewTaskSystem(1);
 }
 
 Infernux::~Infernux()
@@ -169,6 +173,8 @@ void Infernux::Cleanup()
 
     m_isCleaningUp = true;
 
+    ShutdownPreviewTaskSystem();
+
     SaveImGuiLayout();
     AudioEngine::Instance().Shutdown();
     PhysicsWorld::Instance().Shutdown();
@@ -188,6 +194,502 @@ void Infernux::Cleanup()
 
     m_isCleanedUp = true;
     m_isCleaningUp = false;
+}
+
+void Infernux::InitPreviewTaskSystem(uint32_t workerCount)
+{
+    if (m_previewTaskSystemInitialized)
+        return;
+
+    const uint32_t count = (workerCount == 0) ? 1u : workerCount;
+    m_previewStopRequested = false;
+    m_previewWorkers.reserve(count);
+
+    for (uint32_t i = 0; i < count; ++i) {
+        m_previewWorkers.emplace_back([this]() {
+            for (;;) {
+                PreviewTaskItem item;
+                {
+                    std::unique_lock<std::mutex> lock(m_previewTaskMutex);
+                    m_previewTaskCv.wait(lock, [this]() {
+                        return m_previewStopRequested || !m_previewTaskQueue.empty();
+                    });
+
+                    if (m_previewStopRequested && m_previewTaskQueue.empty())
+                        return;
+
+                    item = std::move(m_previewTaskQueue.front());
+                    m_previewTaskQueue.pop();
+                }
+
+                if (item.fn)
+                    item.fn();
+            }
+        });
+    }
+
+    m_previewTaskSystemInitialized = true;
+}
+
+void Infernux::ShutdownPreviewTaskSystem()
+{
+    if (!m_previewTaskSystemInitialized)
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(m_previewTaskMutex);
+        m_previewStopRequested = true;
+    }
+    m_previewTaskCv.notify_all();
+
+    for (auto &worker : m_previewWorkers) {
+        if (worker.joinable())
+            worker.join();
+    }
+    m_previewWorkers.clear();
+
+    {
+        std::lock_guard<std::mutex> lock(m_previewTaskMutex);
+        std::queue<PreviewTaskItem> empty;
+        m_previewTaskQueue.swap(empty);
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_previewResultMutex);
+        std::queue<MaterialPreviewCompleted> empty;
+        m_previewCompletedQueue.swap(empty);
+        std::queue<TexturePreviewCompleted> emptyTex;
+        m_texturePreviewCompletedQueue.swap(emptyTex);
+        std::queue<MaterialPreviewRequest> emptyReq;
+        m_previewRequestQueue.swap(emptyReq);
+        m_materialPreviewStates.clear();
+        m_texturePreviewStates.clear();
+    }
+
+    m_previewTaskSystemInitialized = false;
+}
+
+void Infernux::EnqueuePreviewTask(std::function<void()> fn)
+{
+    if (!fn)
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(m_previewTaskMutex);
+        m_previewTaskQueue.push(PreviewTaskItem{std::move(fn)});
+    }
+    m_previewTaskCv.notify_one();
+}
+
+std::string Infernux::BuildPreviewTextureName(const std::string &resourceKey)
+{
+    const auto hv = std::hash<std::string>{}(resourceKey);
+    return std::string("__cpp_preview_mat__") + std::to_string(static_cast<unsigned long long>(hv));
+}
+
+std::string Infernux::BuildTexturePreviewTextureName(const std::string &resourceKey)
+{
+    const auto hv = std::hash<std::string>{}(resourceKey);
+    return std::string("__cpp_preview_tex__") + std::to_string(static_cast<unsigned long long>(hv));
+}
+
+static void DownsampleNearestRgba(const std::vector<unsigned char> &src, int srcW, int srcH, int maxPx,
+                                  std::vector<unsigned char> &dst, int &dstW, int &dstH)
+{
+    if (srcW <= 0 || srcH <= 0 || src.empty()) {
+        dst.clear();
+        dstW = 0;
+        dstH = 0;
+        return;
+    }
+
+    if (maxPx <= 0 || (srcW <= maxPx && srcH <= maxPx)) {
+        dst = src;
+        dstW = srcW;
+        dstH = srcH;
+        return;
+    }
+
+    const float scale = static_cast<float>(maxPx) / static_cast<float>(std::max(srcW, srcH));
+    dstW = std::max(1, static_cast<int>(srcW * scale));
+    dstH = std::max(1, static_cast<int>(srcH * scale));
+    dst.resize(static_cast<size_t>(dstW) * static_cast<size_t>(dstH) * 4u);
+
+    const int rowStride = srcW * 4;
+    for (int dy = 0; dy < dstH; ++dy) {
+        const int sy = std::min(static_cast<int>((dy + 0.5f) * srcH / dstH), srcH - 1);
+        const int rowOff = sy * rowStride;
+        for (int dx = 0; dx < dstW; ++dx) {
+            const int sx = std::min(static_cast<int>((dx + 0.5f) * srcW / dstW), srcW - 1);
+            const int srcIdx = rowOff + sx * 4;
+            const int dstIdx = (dy * dstW + dx) * 4;
+            dst[dstIdx + 0] = src[srcIdx + 0];
+            dst[dstIdx + 1] = src[srcIdx + 1];
+            dst[dstIdx + 2] = src[srcIdx + 2];
+            dst[dstIdx + 3] = src[srcIdx + 3];
+        }
+    }
+}
+
+static void ApplySrgbPreviewInPlace(std::vector<unsigned char> &pixels)
+{
+    if (pixels.empty())
+        return;
+
+    uint8_t lut[256];
+    for (int i = 0; i < 256; ++i) {
+        const float v = std::pow(static_cast<float>(i) / 255.0f, 1.0f / 2.2f);
+        lut[i] = static_cast<uint8_t>(std::clamp(static_cast<int>(v * 255.0f + 0.5f), 0, 255));
+    }
+
+    for (size_t i = 0; i + 3 < pixels.size(); i += 4) {
+        pixels[i + 0] = lut[pixels[i + 0]];
+        pixels[i + 1] = lut[pixels[i + 1]];
+        pixels[i + 2] = lut[pixels[i + 2]];
+    }
+}
+
+bool Infernux::ScheduleMaterialPreviewTask(const std::string &resourceKey, const std::string &matFilePath, uint64_t stamp,
+                                          int size)
+{
+    if (resourceKey.empty() || matFilePath.empty() || size <= 0)
+        return false;
+
+    if (!m_previewTaskSystemInitialized)
+        InitPreviewTaskSystem(1);
+
+    {
+        std::lock_guard<std::mutex> lock(m_previewResultMutex);
+        auto &state = m_materialPreviewStates[resourceKey];
+        if (state.textureName.empty())
+            state.textureName = BuildPreviewTextureName(resourceKey);
+
+        if (state.readyStamp == stamp && state.textureId != 0)
+            return true;
+
+        if (state.inFlight && state.inFlightStamp >= stamp)
+            return true;
+
+        if (state.inFlight)
+            return false;
+
+        state.inFlight = true;
+        state.inFlightStamp = stamp;
+        m_previewRequestQueue.push(MaterialPreviewRequest{resourceKey, matFilePath, stamp, size});
+    }
+
+    return true;
+}
+
+bool Infernux::ScheduleTexturePreviewTask(const std::string &resourceKey, const std::string &textureFilePath,
+                                          uint64_t stamp, int maxSize, bool nearest, bool srgb)
+{
+    if (resourceKey.empty() || textureFilePath.empty() || maxSize <= 0)
+        return false;
+
+    if (!m_previewTaskSystemInitialized)
+        InitPreviewTaskSystem(1);
+
+    {
+        std::lock_guard<std::mutex> lock(m_previewResultMutex);
+        auto &state = m_texturePreviewStates[resourceKey];
+        if (state.textureName.empty())
+            state.textureName = BuildTexturePreviewTextureName(resourceKey);
+
+        if (state.readyStamp == stamp && state.textureId != 0)
+            return true;
+
+        if (state.inFlight && state.inFlightStamp >= stamp)
+            return true;
+
+        if (state.inFlight)
+            return false;
+
+        state.inFlight = true;
+        state.inFlightStamp = stamp;
+    }
+
+    const TexturePreviewRequest req{resourceKey, textureFilePath, stamp, maxSize, nearest, srgb};
+    EnqueuePreviewTask([this, req]() {
+        TexturePreviewCompleted completed;
+        completed.resourceKey = req.resourceKey;
+        completed.stamp = req.stamp;
+        completed.nearest = req.nearest;
+
+        auto texData = InxTextureLoader::LoadFromFile(req.textureFilePath);
+        if (!texData.IsValid()) {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            m_texturePreviewCompletedQueue.push(std::move(completed));
+            return;
+        }
+
+        std::vector<unsigned char> sampled;
+        int outW = 0;
+        int outH = 0;
+        DownsampleNearestRgba(texData.pixels, texData.width, texData.height, req.maxSize, sampled, outW, outH);
+        if (sampled.empty() || outW <= 0 || outH <= 0) {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            m_texturePreviewCompletedQueue.push(std::move(completed));
+            return;
+        }
+
+        if (req.srgb)
+            ApplySrgbPreviewInPlace(sampled);
+
+        completed.width = outW;
+        completed.height = outH;
+        completed.success = true;
+        completed.pixels = std::move(sampled);
+
+        std::lock_guard<std::mutex> lock(m_previewResultMutex);
+        m_texturePreviewCompletedQueue.push(std::move(completed));
+    });
+
+    return true;
+}
+
+void Infernux::PumpPreviewTasks()
+{
+    if (!m_renderer)
+        return;
+
+    // Keep frame-time stable while still converging toward visual consistency.
+    constexpr int kMaxGpuPreviewJobsPerPump = 1;
+    int gpuBudget = kMaxGpuPreviewJobsPerPump;
+
+    while (gpuBudget > 0) {
+        MaterialPreviewRequest req;
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            if (m_previewRequestQueue.empty())
+                break;
+            req = std::move(m_previewRequestQueue.front());
+            m_previewRequestQueue.pop();
+        }
+
+        MaterialPreviewCompleted completed;
+        completed.resourceKey = req.resourceKey;
+        completed.stamp = req.stamp;
+        completed.size = req.size;
+
+        std::vector<unsigned char> pixels;
+        AssetDatabase *adb = GetAssetDatabase();
+        completed.success = MaterialPreviewer::RenderToPixels(req.matFilePath, req.size, pixels, adb, m_renderer.get());
+        if (completed.success)
+            completed.pixels = std::move(pixels);
+
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            m_previewCompletedQueue.push(std::move(completed));
+        }
+
+        --gpuBudget;
+    }
+
+    std::queue<MaterialPreviewCompleted> local;
+    {
+        std::lock_guard<std::mutex> lock(m_previewResultMutex);
+        local.swap(m_previewCompletedQueue);
+    }
+
+    while (!local.empty()) {
+        MaterialPreviewCompleted completed = std::move(local.front());
+        local.pop();
+
+        MaterialPreviewState stateSnapshot;
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            auto it = m_materialPreviewStates.find(completed.resourceKey);
+            if (it == m_materialPreviewStates.end())
+                continue;
+
+            it->second.inFlight = false;
+            it->second.inFlightStamp = 0;
+            if (it->second.textureName.empty())
+                it->second.textureName = BuildPreviewTextureName(completed.resourceKey);
+            stateSnapshot = it->second;
+        }
+
+        if (!completed.success || completed.pixels.empty())
+            continue;
+
+        if (stateSnapshot.textureName.empty())
+            continue;
+
+        const uint64_t texId = m_renderer->UploadTextureForImGui(
+            stateSnapshot.textureName,
+            completed.pixels.data(),
+            completed.size,
+            completed.size,
+            VK_FILTER_LINEAR
+        );
+
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            auto it = m_materialPreviewStates.find(completed.resourceKey);
+            if (it == m_materialPreviewStates.end())
+                continue;
+
+            if (texId != 0) {
+                it->second.textureId = texId;
+                it->second.readyStamp = completed.stamp;
+                it->second.readySize = completed.size;
+            }
+        }
+    }
+
+    std::queue<TexturePreviewCompleted> texLocal;
+    {
+        std::lock_guard<std::mutex> lock(m_previewResultMutex);
+        texLocal.swap(m_texturePreviewCompletedQueue);
+    }
+
+    while (!texLocal.empty()) {
+        TexturePreviewCompleted completed = std::move(texLocal.front());
+        texLocal.pop();
+
+        TexturePreviewState stateSnapshot;
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            auto it = m_texturePreviewStates.find(completed.resourceKey);
+            if (it == m_texturePreviewStates.end())
+                continue;
+
+            it->second.inFlight = false;
+            it->second.inFlightStamp = 0;
+            if (it->second.textureName.empty())
+                it->second.textureName = BuildTexturePreviewTextureName(completed.resourceKey);
+            stateSnapshot = it->second;
+        }
+
+        if (!completed.success || completed.pixels.empty() || completed.width <= 0 || completed.height <= 0)
+            continue;
+
+        if (stateSnapshot.textureName.empty())
+            continue;
+
+        const uint64_t texId = m_renderer->UploadTextureForImGui(
+            stateSnapshot.textureName,
+            completed.pixels.data(),
+            completed.width,
+            completed.height,
+            completed.nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
+
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            auto it = m_texturePreviewStates.find(completed.resourceKey);
+            if (it == m_texturePreviewStates.end())
+                continue;
+
+            if (texId != 0) {
+                it->second.textureId = texId;
+                it->second.readyStamp = completed.stamp;
+                it->second.readyWidth = completed.width;
+                it->second.readyHeight = completed.height;
+            }
+        }
+    }
+}
+
+uint64_t Infernux::GetMaterialPreviewTextureId(const std::string &resourceKey, uint64_t expectedStamp) const
+{
+    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+    auto it = m_materialPreviewStates.find(resourceKey);
+    if (it == m_materialPreviewStates.end())
+        return 0;
+    if (it->second.readyStamp != expectedStamp)
+        return 0;
+    return it->second.textureId;
+}
+
+uint64_t Infernux::GetTexturePreviewTextureId(const std::string &resourceKey, uint64_t expectedStamp) const
+{
+    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+    auto it = m_texturePreviewStates.find(resourceKey);
+    if (it == m_texturePreviewStates.end())
+        return 0;
+    if (it->second.readyStamp != expectedStamp)
+        return 0;
+    return it->second.textureId;
+}
+
+std::pair<int, int> Infernux::GetTexturePreviewSize(const std::string &resourceKey, uint64_t expectedStamp) const
+{
+    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+    auto it = m_texturePreviewStates.find(resourceKey);
+    if (it == m_texturePreviewStates.end())
+        return {0, 0};
+    if (it->second.readyStamp != expectedStamp)
+        return {0, 0};
+    return {it->second.readyWidth, it->second.readyHeight};
+}
+
+void Infernux::InvalidateMaterialPreviewTask(const std::string &resourceKey)
+{
+    if (resourceKey.empty())
+        return;
+
+    std::string textureName;
+    {
+        std::lock_guard<std::mutex> lock(m_previewResultMutex);
+        auto it = m_materialPreviewStates.find(resourceKey);
+        if (it != m_materialPreviewStates.end()) {
+            textureName = it->second.textureName;
+            m_materialPreviewStates.erase(it);
+        }
+    }
+
+    if (!textureName.empty() && m_renderer && m_renderer->HasImGuiTexture(textureName))
+        m_renderer->RemoveImGuiTexture(textureName);
+}
+
+void Infernux::InvalidateTexturePreviewTask(const std::string &resourceKey)
+{
+    if (resourceKey.empty())
+        return;
+
+    std::string textureName;
+    {
+        std::lock_guard<std::mutex> lock(m_previewResultMutex);
+        auto it = m_texturePreviewStates.find(resourceKey);
+        if (it != m_texturePreviewStates.end()) {
+            textureName = it->second.textureName;
+            m_texturePreviewStates.erase(it);
+        }
+    }
+
+    if (!textureName.empty() && m_renderer && m_renderer->HasImGuiTexture(textureName))
+        m_renderer->RemoveImGuiTexture(textureName);
+}
+
+bool Infernux::ScheduleMaterialSaveSnapshotTask(const std::string &key, const std::string &filePath,
+                                                const std::string &jsonSnapshot)
+{
+    (void)key;
+    if (filePath.empty())
+        return false;
+
+    if (!m_previewTaskSystemInitialized)
+        InitPreviewTaskSystem(1);
+
+    const std::string pathCopy = filePath;
+    const std::string jsonCopy = jsonSnapshot;
+    EnqueuePreviewTask([pathCopy, jsonCopy]() {
+        try {
+            std::ofstream out(ToFsPath(pathCopy), std::ios::binary | std::ios::trunc);
+            if (!out.is_open()) {
+                INXLOG_WARN("ScheduleMaterialSaveSnapshotTask: cannot open file for write: ", pathCopy);
+                return;
+            }
+            out.write(jsonCopy.data(), static_cast<std::streamsize>(jsonCopy.size()));
+            out.flush();
+        } catch (const std::exception &ex) {
+            INXLOG_WARN("ScheduleMaterialSaveSnapshotTask failed for ", pathCopy, ": ", ex.what());
+        } catch (...) {
+            INXLOG_WARN("ScheduleMaterialSaveSnapshotTask failed for ", pathCopy, ": unknown exception");
+        }
+    });
+
+    return true;
 }
 
 // ----------------------------------

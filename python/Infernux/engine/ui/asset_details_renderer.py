@@ -41,6 +41,7 @@ from Infernux.core.asset_types import (
 from .inspector_utils import max_label_w, field_label, render_apply_revert
 from .theme import Theme, ImGuiCol
 from .asset_execution_layer import AssetAccessMode, get_asset_execution_layer
+from .asset_resource_preview import render_resource_preview_rect
 from Infernux.debug import Debug
 
 
@@ -244,7 +245,7 @@ def _ensure_categories():
             FieldDef("flip_uvs", "asset.flip_uvs", WidgetType.CHECKBOX),
             FieldDef("optimize_mesh", "asset.optimize_mesh", WidgetType.CHECKBOX),
         ],
-        custom_header_fn=_render_mesh_info,
+        custom_header_fn=_render_mesh_header,
         extra_meta_keys=["mesh_count", "vertex_count", "index_count", "material_slot_count"],
         show_header=False,
     )
@@ -256,7 +257,7 @@ def _ensure_categories():
         load_fn=_load_material,
         refresh_fn=_refresh_material,
         custom_body_fn=_render_material_body,
-        autosave_debounce=0.35,
+        autosave_debounce=0.0,
     )
 
     # ── Prefab ─────────────────────────────────────────────────────────
@@ -264,6 +265,7 @@ def _ensure_categories():
         display_name="asset.display_prefab",
         access_mode=AssetAccessMode.READ_WRITE_RESOURCE,
         load_fn=_load_prefab,
+        custom_header_fn=_render_prefab_preview,
         custom_body_fn=_render_prefab_body,
         autosave_debounce=0.5,
     )
@@ -1187,6 +1189,34 @@ def _on_revert():
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+def _render_mesh_header(ctx: InxGUIContext, panel, state: _State):
+    """Render mesh preview + mesh metadata in inspector header."""
+    avail_w = max(32.0, ctx.get_content_region_avail_width() - 8.0)
+    draw_h = min(max(avail_w * 0.62, 120.0), 320.0)
+
+    if not render_resource_preview_rect(ctx, panel, state.file_path, avail_w, draw_h,
+                                        preview_size=int(max(avail_w, draw_h))):
+        ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
+        ctx.label("Model preview unavailable.")
+        ctx.pop_style_color(1)
+        ctx.separator()
+
+    _render_mesh_info(ctx, panel, state)
+
+
+def _render_prefab_preview(ctx: InxGUIContext, panel, state: _State):
+    """Render prefab preview via standalone resource preview module."""
+    avail_w = max(32.0, ctx.get_content_region_avail_width() - 8.0)
+    draw_h = min(max(avail_w * 0.62, 140.0), 360.0)
+
+    if not render_resource_preview_rect(ctx, panel, state.file_path, avail_w, draw_h,
+                                        preview_size=int(max(avail_w, draw_h))):
+        ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
+        ctx.label("Prefab preview unavailable.")
+        ctx.pop_style_color(1)
+    ctx.separator()
+
+
 def _render_mesh_info(ctx: InxGUIContext, panel, state: _State):
     """Render mesh metadata summary (vertex count, submesh count, etc.)."""
     meta = state.meta
@@ -1595,14 +1625,19 @@ _SPLITTER_H = 14.0
 
 
 def _render_texture_preview(ctx: InxGUIContext, panel, state: _State):
-    """Render a safe placeholder instead of the native texture preview.
+    """Render texture preview via standalone resource preview module."""
+    avail_w = max(32.0, ctx.get_content_region_avail_width() - 8.0)
+    draw_h = min(max(float(state.extra.get("preview_height", 200.0)), _PREVIEW_MIN_H), _PREVIEW_MAX_H)
 
-    The native preview path is temporarily disabled while investigating asset
-    selection crashes that reproduce reliably on texture clicks.
-    """
-    ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
-    ctx.label("Texture preview temporarily disabled in safe mode.")
-    ctx.pop_style_color(1)
+    if not render_resource_preview_rect(ctx, panel, state.file_path, avail_w, draw_h,
+                                        preview_size=int(max(avail_w, draw_h)),
+                                        texture_settings=state.settings,
+                                        preserve_aspect=True,
+                                        center=True):
+        ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
+        ctx.label("Texture preview unavailable.")
+        ctx.pop_style_color(1)
+
     ctx.separator()
 
 

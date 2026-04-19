@@ -40,7 +40,7 @@ from Infernux.engine.ui import panel_state as _panel_state
 _log = logging.getLogger("Infernux.bootstrap")
 
 _LAYOUT_VERSION = 5
-_TOTAL_STEPS = 12
+_TOTAL_STEPS = 13
 
 
 def _signal_progress(current_step: int, total: int, message: str) -> None:
@@ -142,6 +142,9 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
         self._report_progress("Loading scene\u2026")
         self._load_initial_scene()
 
+        self._report_progress("Prewarming material previews\u2026")
+        self._prewarm_material_previews()
+
         if self.engine:
             try:
                 self.engine.set_game_camera_enabled(True)
@@ -176,6 +179,71 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
         path = os.path.join(self.project_path, "ProjectSettings", "TagLayerSettings.json")
         if os.path.isfile(path):
             TagLayerManager.instance().load_from_file(path)
+
+    def _prewarm_material_previews(self):
+        """Prewarm material preview textures once at startup.
+
+        Uses the same Python preview API path as inspector runtime so first click
+        can hit the exact same cache key (size/tag) and avoid a second load.
+        """
+        if not self.engine:
+            return
+
+        native = self.engine.get_native_engine()
+        if native is None:
+            return
+
+        root = os.path.abspath(self.project_path)
+        if not os.path.isdir(root):
+            return
+
+        material_paths = []
+        for dirpath, _dirnames, filenames in os.walk(root):
+            # Skip engine/library caches to avoid unnecessary startup work.
+            low = dirpath.lower().replace("\\", "/")
+            if "/library" in low or "/logs" in low or "/temp" in low:
+                continue
+            for name in filenames:
+                if name.lower().endswith(".mat"):
+                    material_paths.append(os.path.join(dirpath, name))
+
+        if not material_paths:
+            return
+
+        # Route through the same preview cache API used by inspector.
+        try:
+            from Infernux.engine.ui.asset_resource_preview import get_resource_preview_texture_id
+        except Exception as _exc:
+            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+            return
+
+        class _BootstrapPreviewPanel:
+            def __init__(self, native_engine):
+                self._native_engine = native_engine
+
+            def get_native_engine(self):
+                return self._native_engine
+
+        preview_panel = _BootstrapPreviewPanel(native)
+
+        warmed = 0
+        for mat_path in material_paths:
+            try:
+                # Keep cache_tag empty to match first inspector draw.
+                tex_id = int(get_resource_preview_texture_id(
+                    preview_panel,
+                    mat_path,
+                    preview_size=256,
+                    cache_tag="",
+                    material_async=False,
+                ))
+                if tex_id:
+                    warmed += 1
+            except Exception as _exc:
+                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+                continue
+
+        Debug.log_internal(f"Material preview prewarm: {warmed}/{len(material_paths)}")
 
     def _create_managers(self):
         from Infernux.engine.undo import UndoManager

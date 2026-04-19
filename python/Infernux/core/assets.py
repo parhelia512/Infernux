@@ -302,9 +302,21 @@ class AssetManager:
     @classmethod
     def schedule_save(cls, key: str, save_fn: Callable[[], object], debounce_sec: float = _DEFAULT_DEBOUNCE_SEC):
         """Schedule a debounced save callback for a resource key (usually file path)."""
+        record = cls._scheduled_saves.get(key)
+        if record is not None:
+            record["save_fn"] = save_fn
+            # Preserve an already-armed next-flush save so continuous edits
+            # still commit once per frame instead of being postponed forever.
+            if float(debounce_sec) > 0.0:
+                record["deadline"] = time.perf_counter() + float(debounce_sec)
+                record["wait_one_flush"] = False
+            return
+
+        wait_one_flush = float(debounce_sec) <= 0.0
         cls._scheduled_saves[key] = {
             "deadline": time.perf_counter() + max(0.0, float(debounce_sec)),
             "save_fn": save_fn,
+            "wait_one_flush": wait_one_flush,
         }
 
     @classmethod
@@ -321,16 +333,32 @@ class AssetManager:
     @classmethod
     def _save_material_resource(cls, resource_obj):
         """Save a material resource and invalidate editor preview caches."""
+        file_path = getattr(resource_obj, "file_path", "") or ""
+
+        # Prefer C++ async save path when available to avoid main-thread stalls.
+        native = cls._native_engine()
+        if native and hasattr(native, "schedule_material_save_snapshot_task") and file_path:
+            try:
+                serialize = getattr(resource_obj, "serialize", None)
+                if callable(serialize):
+                    snapshot = serialize() or ""
+                    key = f"material-save|{file_path}"
+                    ok = bool(native.schedule_material_save_snapshot_task(key, file_path, snapshot))
+                    if ok:
+                        cls.on_material_saved(file_path)
+                        return True
+            except Exception as _exc:
+                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+
+        # Fallback for older native builds.
         save = getattr(resource_obj, "save", None)
         if not callable(save):
             return False
 
         result = save()
         save_ok = bool(result) if result is not None else True
-        if save_ok:
-            file_path = getattr(resource_obj, "file_path", "") or ""
-            if file_path:
-                cls.on_material_saved(file_path)
+        if save_ok and file_path:
+            cls.on_material_saved(file_path)
         return result
 
     @classmethod
@@ -366,6 +394,9 @@ class AssetManager:
             record = cls._scheduled_saves.get(key)
             if not record:
                 return
+            if bool(record.get("wait_one_flush", False)):
+                record["wait_one_flush"] = False
+                return
             if now < float(record.get("deadline", 0.0)):
                 return
             try:
@@ -376,7 +407,13 @@ class AssetManager:
                 cls._scheduled_saves.pop(key, None)
             return
 
-        due_keys = [k for k, v in cls._scheduled_saves.items() if now >= float(v.get("deadline", 0.0))]
+        due_keys = []
+        for k, v in cls._scheduled_saves.items():
+            if bool(v.get("wait_one_flush", False)):
+                v["wait_one_flush"] = False
+                continue
+            if now >= float(v.get("deadline", 0.0)):
+                due_keys.append(k)
         for k in due_keys:
             record = cls._scheduled_saves.get(k)
             try:
@@ -573,16 +610,36 @@ class AssetManager:
 
         native = cls._native_engine()
         if native is None or not hasattr(native, 'remove_imgui_texture'):
-            return
+            native = None
 
-        for ident in identifiers:
-            if not ident:
-                continue
-            try:
-                native.remove_imgui_texture(f"__ui_img__{ident}")
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                pass
+        if native is not None:
+            for ident in identifiers:
+                if not ident:
+                    continue
+                try:
+                    native.remove_imgui_texture(f"__ui_img__{ident}")
+                except Exception as _exc:
+                    Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+                    pass
+
+        try:
+            from Infernux.engine.ui.asset_resource_preview import invalidate_resource_preview
+            invalidate_resource_preview(path)
+        except Exception as _exc:
+            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+            pass
+
+        try:
+            from Infernux.engine.ui.window_manager import WindowManager
+            wm = WindowManager.instance()
+            if wm is not None:
+                for panel in list(getattr(wm, "_window_instances", {}).values()):
+                    invalidate = getattr(panel, "invalidate_texture_thumbnail", None)
+                    if callable(invalidate):
+                        invalidate(path)
+        except Exception as _exc:
+            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+            pass
 
     @classmethod
     def _invalidate_material_ui_cache(cls, path: str) -> None:

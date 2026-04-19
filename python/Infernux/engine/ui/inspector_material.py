@@ -5,7 +5,7 @@ This module provides ``render_material_body(ctx, panel, state)`` which renders
 the material-specific UI sections: shader selection, render settings,
 dynamic properties, and auto-save scheduling.
 
-State is managed by the unified ``asset_inspector`` module.
+State is managed by the unified ``asset_details_renderer`` module.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from Infernux.lib import InxGUIContext
 from Infernux.engine.i18n import t
 from . import inspector_support as _inspector_support
 from .asset_execution_layer import AssetAccessMode, get_asset_execution_layer
+from .asset_resource_preview import render_resource_preview_rect
 from .inspector_utils import (
     max_label_w,
     field_label,
@@ -530,19 +531,31 @@ def _render_properties_section(ctx, mat_data, is_builtin, default_open):
 
 
 def _apply_material_changes(panel, state, mat_data, native_mat,
-                            requires_pipeline_refresh, old_json, change_key, exec_layer):
+                            requires_deserialize, requires_pipeline_refresh,
+                            old_json, change_key, exec_layer):
     """Serialize and save material changes, record undo."""
     try:
-        native_mat.deserialize(json.dumps(mat_data))
+        # Hot-path optimization: most property drags already push values via
+        # native setters in render_material_property. Full JSON deserialize is
+        # only needed when material structure changed (shader sync/texture slots).
+        if requires_deserialize:
+            native_mat.deserialize(json.dumps(mat_data))
         if requires_pipeline_refresh:
             _refresh_pipeline(panel)
         _ensure_material_file_path(panel, native_mat)
         if exec_layer:
             exec_layer.schedule_rw_save(native_mat)
-        new_json = json.dumps(mat_data)
-        state.extra["cached_json"] = new_json
+        # Keep cached JSON coherent only when we actually need undo snapshots.
+        mgr = None
+        new_json = ""
         from Infernux.engine.undo import UndoManager, MaterialJsonCommand
         mgr = UndoManager.instance()
+        if mgr and not mgr.is_executing and mgr.enabled and old_json:
+            new_json = json.dumps(mat_data)
+            state.extra["cached_json"] = new_json
+        elif requires_deserialize:
+            # Structural changes should refresh cached_json for future comparisons.
+            state.extra["cached_json"] = json.dumps(mat_data)
         if mgr and not mgr.is_executing and mgr.enabled and old_json:
             if new_json != old_json:
                 mgr.record(MaterialJsonCommand(
@@ -559,7 +572,7 @@ def _apply_material_changes(panel, state, mat_data, native_mat,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Body renderer (called from asset_inspector)
+# Body renderer (called from asset_details_renderer)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -611,7 +624,7 @@ def _sync_shader_annotations(mat_data, state):
 def render_material_body(ctx: InxGUIContext, panel, state):
     """Render the material-specific inspector body.
 
-    *state* is the ``_State`` object from ``asset_inspector``.  Relevant
+    *state* is the ``_State`` object from ``asset_details_renderer``.  Relevant
     fields: ``state.settings`` (Material wrapper), ``state.extra``
     (native_mat, cached_data, shader_cache), ``state.exec_layer``.
     """
@@ -646,7 +659,15 @@ def render_material_body(ctx: InxGUIContext, panel, state):
     changed |= sync_ch
     requires_deserialize |= sync_ds
 
-    # ── Shader Section ─────────────────────────────────────────────────
+    # ── Top row: left = Shader + Surface, right = centered material preview ──
+    split_cols = 2
+    split_id = "##material_top_split"
+    did_split = ctx.begin_table(split_id, split_cols, 0, 0.0)
+    preview_size = 180.0
+    if did_split:
+        # Left column: Shader + Surface Options
+        ctx.table_next_column()
+
     s_ch, s_ds, s_pr, s_ck = _render_shader_section(ctx, mat_data, state, is_builtin, default_open_sections)
     changed |= s_ch
     requires_deserialize |= s_ds
@@ -656,13 +677,66 @@ def render_material_body(ctx: InxGUIContext, panel, state):
 
     ctx.separator()
 
-    # ── Surface Options (Render Settings) ──────────────────────────────
     so_ch, so_ds, so_pr, so_ck = _render_surface_options_section(ctx, mat_data, is_builtin, default_open_sections)
     changed |= so_ch
     requires_deserialize |= so_ds
     requires_pipeline_refresh |= so_pr
     if so_ck:
         change_key = so_ck
+
+    # Keep preview cache tag stable while user is actively editing; only refresh
+    # after edits settle for a short time, so material controls never stall.
+    now = _time.time()
+    cache_tag = state.extra.get("_material_cache_tag", "")
+    if not cache_tag:
+        # Keep initial tag empty so first inspector draw matches bootstrap prewarm key.
+        cache_tag = ""
+        state.extra["_material_cache_tag"] = cache_tag
+
+    pending_preview_refresh = bool(state.extra.get("_material_preview_pending", False))
+    refresh_ready_at = float(state.extra.get("_material_preview_ready_at", 0.0) or 0.0)
+    if pending_preview_refresh and now >= refresh_ready_at:
+        try:
+            cache_tag = json.dumps(mat_data, sort_keys=True, ensure_ascii=False)
+            state.extra["_material_cache_tag"] = cache_tag
+        except Exception:
+            cache_tag = state.extra.get("_material_cache_tag", cache_tag)
+        state.extra["_material_preview_pending"] = False
+
+    if did_split:
+        # Right column: material preview centered in its region.
+        ctx.table_next_column()
+        avail_w = max(140.0, ctx.get_content_region_avail_width())
+        preview_size = min(max(avail_w * 0.90, 140.0), 240.0)
+        preview_path = getattr(state, "file_path", "")
+        if not preview_path and _native_mat is not None:
+            preview_path = _ensure_material_file_path(panel, _native_mat)
+
+        card_h = preview_size + 34.0
+        if ctx.begin_child("##material_preview_card", avail_w, card_h, True):
+            ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
+            ctx.label("Preview")
+            ctx.pop_style_color(1)
+
+            if preview_path and render_resource_preview_rect(ctx, panel, preview_path,
+                                                avail_w - 8.0, preview_size,
+                                                preview_size=int(preview_size),
+                                                preserve_aspect=True,
+                                                center=True,
+                                                cache_tag=cache_tag):
+                # Bright accent border so the sphere preview is visually separated
+                # from nearby inspector sections.
+                x0 = ctx.get_item_rect_min_x()
+                y0 = ctx.get_item_rect_min_y()
+                x1 = ctx.get_item_rect_max_x()
+                y1 = ctx.get_item_rect_max_y()
+                ctx.draw_rect(x0, y0, x1, y1, 0.96, 0.90, 0.52, 1.0, 1.8, 5.0)
+            else:
+                ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
+                ctx.label("Material preview unavailable.")
+                ctx.pop_style_color(1)
+        ctx.end_child()
+        ctx.end_table()
 
     ctx.separator()
 
@@ -677,8 +751,13 @@ def render_material_body(ctx: InxGUIContext, panel, state):
 
     # ── Auto-save on change ─────────────────────────────────────────────
     if changed:
+        # Defer preview cache-tag update until edits settle; this keeps slider
+        # dragging responsive and avoids preview-triggered hitches.
+        state.extra["_material_preview_pending"] = True
+        state.extra["_material_preview_ready_at"] = _time.time() + 0.12
         _apply_material_changes(panel, state, mat_data, _native_mat,
-                                requires_pipeline_refresh, old_json, change_key, exec_layer)
+                                requires_deserialize, requires_pipeline_refresh,
+                                old_json, change_key, exec_layer)
 
     ctx.pop_style_var(2)
 
@@ -771,7 +850,7 @@ class _InlineMaterialExecLayer:
             "material",
             file_path,
             AssetAccessMode.READ_WRITE_RESOURCE,
-            autosave_debounce_sec=0.35,
+            autosave_debounce_sec=0.25,
         )
         self._panel._inline_material_exec_layer = layer
         layer.schedule_rw_save(resource_obj)

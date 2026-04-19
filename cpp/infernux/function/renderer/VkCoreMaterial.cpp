@@ -913,13 +913,13 @@ void InxVkCoreModular::CreateMaterialShadowPipeline(std::shared_ptr<InxMaterial>
             m_shadowMaterialDescPool == VK_NULL_HANDLE) {
             return;
         }
-        if (m_shadowPipelineReady) {
-            VkDevice dev = device;
-            VkDescriptorPool pool = m_shadowMaterialDescPool;
-            m_deletionQueue.Push([dev, pool, descriptorSet]() { vkFreeDescriptorSets(dev, pool, 1, &descriptorSet); });
-        } else {
-            vkFreeDescriptorSets(device, m_shadowMaterialDescPool, 1, &descriptorSet);
-        }
+
+        // Runtime texture/material invalidation can recreate shadow descriptor sets
+        // while previously recorded command buffers still reference older handles.
+        // Freeing an individual set here can invalidate an in-flight command buffer.
+        // Keep old sets alive and reclaim in bulk when shadow descriptor pool is
+        // destroyed/reset during shadow pipeline cleanup.
+        (void)descriptorSet;
     };
 
     if (needsShadowMaterialDesc) {

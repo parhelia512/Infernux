@@ -280,7 +280,7 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
     # -- Inspector invalidation --
     def _invalidate_asset_inspector(path):
         try:
-            from Infernux.engine.ui.asset_inspector import (
+            from Infernux.engine.ui.asset_details_renderer import (
                 invalidate_asset)
             invalidate_asset(path)
         except Exception as _exc:

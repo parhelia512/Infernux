@@ -324,34 +324,70 @@ void InxGUI::SetGUIFont(const char *fontPath, float fontSize)
 void InxGUI::BuildFrame()
 {
     static auto ctx = std::make_unique<InxGUIContext>();
+    ++m_guiFrameCounter;
 
-    // Flush deferred texture removals BEFORE starting the new ImGui frame.
-    // Textures queued for removal during the previous frame are now safe to
-    // destroy because Render()/RenderDrawData() has already consumed the
-    // draw list that may have referenced their descriptor sets.
-    if (!m_pendingTextureRemovals.empty()) {
+    constexpr uint64_t kTextureReleaseGraceFrames = 8;
+
+    auto releaseTextureResourceNow = [&](const ImGuiTextureResource &tex) {
         VkDevice device = m_vkCore_ptr->GetDevice();
-        vkDeviceWaitIdle(device);
+        if (tex.descriptorSet != VK_NULL_HANDLE)
+            ImGui_ImplVulkan_RemoveTexture(tex.descriptorSet);
+        if (tex.sampler != VK_NULL_HANDLE)
+            vkDestroySampler(device, tex.sampler, nullptr);
+        if (tex.imageView != VK_NULL_HANDLE)
+            vkDestroyImageView(device, tex.imageView, nullptr);
+        if (tex.image != VK_NULL_HANDLE) {
+            VmaAllocator allocator = m_vkCore_ptr->GetDeviceContext().GetVmaAllocator();
+            vmaDestroyImage(allocator, tex.image, tex.allocation);
+        }
+    };
 
+    // Queue removals first, then release after a grace window.
+    // Some panels may still emit one or two frames with stale cached TexID;
+    // delaying descriptor destruction prevents invalid VkDescriptorSet binds.
+    if (!m_pendingTextureRemovals.empty() || !m_pendingTextureResourceReleases.empty()) {
         for (const auto &name : m_pendingTextureRemovals) {
             auto it = m_textures_umap.find(name);
             if (it == m_textures_umap.end())
                 continue;
 
-            auto &tex = it->second;
-            if (tex.descriptorSet != VK_NULL_HANDLE)
-                ImGui_ImplVulkan_RemoveTexture(tex.descriptorSet);
-            if (tex.sampler != VK_NULL_HANDLE)
-                vkDestroySampler(device, tex.sampler, nullptr);
-            if (tex.imageView != VK_NULL_HANDLE)
-                vkDestroyImageView(device, tex.imageView, nullptr);
-            if (tex.image != VK_NULL_HANDLE) {
-                VmaAllocator allocator = m_vkCore_ptr->GetDeviceContext().GetVmaAllocator();
-                vmaDestroyImage(allocator, tex.image, tex.allocation);
-            }
+            m_deferredTextureReleases.push_back(
+                DeferredTextureRelease{it->second, m_guiFrameCounter + kTextureReleaseGraceFrames});
             m_textures_umap.erase(it);
         }
+
+        for (auto &tex : m_pendingTextureResourceReleases) {
+            m_deferredTextureReleases.push_back(
+                DeferredTextureRelease{tex, m_guiFrameCounter + kTextureReleaseGraceFrames});
+        }
+
+        m_pendingTextureResourceReleases.clear();
         m_pendingTextureRemovals.clear();
+    }
+
+    if (!m_deferredTextureReleases.empty()) {
+        std::vector<DeferredTextureRelease> stillDeferred;
+        std::vector<ImGuiTextureResource> readyToRelease;
+        stillDeferred.reserve(m_deferredTextureReleases.size());
+        readyToRelease.reserve(m_deferredTextureReleases.size());
+
+        for (auto &entry : m_deferredTextureReleases) {
+            if (entry.releaseFrame > m_guiFrameCounter) {
+                stillDeferred.push_back(entry);
+                continue;
+            }
+            readyToRelease.push_back(entry.resource);
+        }
+
+        if (!readyToRelease.empty()) {
+            // Some panels cache TexID for longer than the grace window.
+            // Runtime destruction can still invalidate those stale IDs.
+            // Keep retired resources alive and release them in Shutdown().
+            m_retiredTextureResources.insert(m_retiredTextureResources.end(), readyToRelease.begin(),
+                                             readyToRelease.end());
+        }
+
+        m_deferredTextureReleases.swap(stillDeferred);
     }
 
     ImGui_ImplSDL3_NewFrame();
@@ -543,7 +579,49 @@ void InxGUI::RecordCommand(VkCommandBuffer cmdBuf)
 
 void InxGUI::Shutdown()
 {
-    // Flush any pending texture removals
+    VkDevice device = m_vkCore_ptr->GetDevice();
+    vkDeviceWaitIdle(device);
+
+    // Flush any pending replaced textures that have not yet reached BuildFrame cleanup.
+    for (auto &tex : m_pendingTextureResourceReleases) {
+        if (tex.descriptorSet != VK_NULL_HANDLE)
+            ImGui_ImplVulkan_RemoveTexture(tex.descriptorSet);
+        if (tex.sampler != VK_NULL_HANDLE)
+            vkDestroySampler(m_vkCore_ptr->GetDevice(), tex.sampler, nullptr);
+        if (tex.imageView != VK_NULL_HANDLE)
+            vkDestroyImageView(m_vkCore_ptr->GetDevice(), tex.imageView, nullptr);
+        if (tex.image != VK_NULL_HANDLE) {
+            vmaDestroyImage(m_vkCore_ptr->GetDeviceContext().GetVmaAllocator(), tex.image, tex.allocation);
+        }
+    }
+    m_pendingTextureResourceReleases.clear();
+
+    for (auto &entry : m_deferredTextureReleases) {
+        auto &tex = entry.resource;
+        if (tex.descriptorSet != VK_NULL_HANDLE)
+            ImGui_ImplVulkan_RemoveTexture(tex.descriptorSet);
+        if (tex.sampler != VK_NULL_HANDLE)
+            vkDestroySampler(m_vkCore_ptr->GetDevice(), tex.sampler, nullptr);
+        if (tex.imageView != VK_NULL_HANDLE)
+            vkDestroyImageView(m_vkCore_ptr->GetDevice(), tex.imageView, nullptr);
+        if (tex.image != VK_NULL_HANDLE) {
+            vmaDestroyImage(m_vkCore_ptr->GetDeviceContext().GetVmaAllocator(), tex.image, tex.allocation);
+        }
+    }
+    m_deferredTextureReleases.clear();
+
+    for (auto &tex : m_retiredTextureResources) {
+        if (tex.descriptorSet != VK_NULL_HANDLE)
+            ImGui_ImplVulkan_RemoveTexture(tex.descriptorSet);
+        if (tex.sampler != VK_NULL_HANDLE)
+            vkDestroySampler(m_vkCore_ptr->GetDevice(), tex.sampler, nullptr);
+        if (tex.imageView != VK_NULL_HANDLE)
+            vkDestroyImageView(m_vkCore_ptr->GetDevice(), tex.imageView, nullptr);
+        if (tex.image != VK_NULL_HANDLE) {
+            vmaDestroyImage(m_vkCore_ptr->GetDeviceContext().GetVmaAllocator(), tex.image, tex.allocation);
+        }
+    }
+    m_retiredTextureResources.clear();
     m_pendingTextureRemovals.clear();
 
     // Clean up InxGUI-owned textures (image, imageView, sampler, memory).
@@ -609,37 +687,12 @@ void InxGUI::Unregister(const std::string &name)
 uint64_t InxGUI::UploadTextureForImGui(const std::string &name, const unsigned char *pixels, int width, int height,
                                        VkFilter filter)
 {
-    // Check if texture already exists
-    auto it = m_textures_umap.find(name);
-    if (it != m_textures_umap.end()) {
-        // Must destroy immediately (not deferred) because we're about to
-        // reuse the same name for a new upload in this call.
-        VkDevice device_rm = m_vkCore_ptr->GetDevice();
-        vkDeviceWaitIdle(device_rm);
-
-        auto &oldTex = it->second;
-        if (oldTex.descriptorSet != VK_NULL_HANDLE)
-            ImGui_ImplVulkan_RemoveTexture(oldTex.descriptorSet);
-        if (oldTex.sampler != VK_NULL_HANDLE)
-            vkDestroySampler(device_rm, oldTex.sampler, nullptr);
-        if (oldTex.imageView != VK_NULL_HANDLE)
-            vkDestroyImageView(device_rm, oldTex.imageView, nullptr);
-        if (oldTex.image != VK_NULL_HANDLE) {
-            VmaAllocator alloc_rm = m_vkCore_ptr->GetDeviceContext().GetVmaAllocator();
-            vmaDestroyImage(alloc_rm, oldTex.image, oldTex.allocation);
-        }
-        m_textures_umap.erase(it);
-
-        // Also remove from pending queue if it was there
-        m_pendingTextureRemovals.erase(
-            std::remove(m_pendingTextureRemovals.begin(), m_pendingTextureRemovals.end(), name),
-            m_pendingTextureRemovals.end());
-    }
+    // Keep current texture alive as a fallback while building a replacement.
+    auto existingIt = m_textures_umap.find(name);
+    const uint64_t fallbackTexId =
+        (existingIt != m_textures_umap.end()) ? reinterpret_cast<uint64_t>(existingIt->second.descriptorSet) : 0;
 
     VkDevice device = m_vkCore_ptr->GetDevice();
-    VkPhysicalDevice physDevice = m_vkCore_ptr->GetPhysicalDevice();
-    VkQueue queue = m_vkCore_ptr->GetGraphicsQueue();
-    VkCommandPool cmdPool = m_vkCore_ptr->GetCommandPool();
 
     VkDeviceSize imageSize = width * height * 4; // RGBA
 
@@ -683,7 +736,7 @@ uint64_t InxGUI::UploadTextureForImGui(const std::string &name, const unsigned c
     if (result != VK_SUCCESS) {
         INXLOG_ERROR("InxGUI::UploadTextureForImGui(): Failed to create image for '", name, "'");
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
-        return 0;
+        return fallbackTexId;
     }
 
     // Transition image layout and copy buffer to image
@@ -739,7 +792,7 @@ uint64_t InxGUI::UploadTextureForImGui(const std::string &name, const unsigned c
     if (vkCreateImageView(device, &viewInfo, nullptr, &tex.imageView) != VK_SUCCESS) {
         INXLOG_ERROR("InxGUI::UploadTextureForImGui(): Failed to create image view for '", name, "'");
         vmaDestroyImage(allocator, tex.image, tex.allocation);
-        return 0;
+        return fallbackTexId;
     }
 
     // Create sampler
@@ -763,7 +816,7 @@ uint64_t InxGUI::UploadTextureForImGui(const std::string &name, const unsigned c
         INXLOG_ERROR("InxGUI::UploadTextureForImGui(): Failed to create sampler for '", name, "'");
         vkDestroyImageView(device, tex.imageView, nullptr);
         vmaDestroyImage(allocator, tex.image, tex.allocation);
-        return 0;
+        return fallbackTexId;
     }
 
     // Create descriptor set for ImGui
@@ -775,7 +828,15 @@ uint64_t InxGUI::UploadTextureForImGui(const std::string &name, const unsigned c
         vkDestroySampler(device, tex.sampler, nullptr);
         vkDestroyImageView(device, tex.imageView, nullptr);
         vmaDestroyImage(allocator, tex.image, tex.allocation);
-        return 0;
+        return fallbackTexId;
+    }
+
+    // New texture is ready. Swap mapping atomically and defer old resource release.
+    if (existingIt != m_textures_umap.end()) {
+        m_pendingTextureResourceReleases.push_back(existingIt->second);
+        m_pendingTextureRemovals.erase(
+            std::remove(m_pendingTextureRemovals.begin(), m_pendingTextureRemovals.end(), name),
+            m_pendingTextureRemovals.end());
     }
 
     m_textures_umap[name] = tex;
