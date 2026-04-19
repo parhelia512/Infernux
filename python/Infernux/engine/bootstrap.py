@@ -409,6 +409,9 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             })
         _panel_state.put("project", {"current_path": self.project_panel.get_current_path()})
         _panel_state.put("window_manager", self.window_manager.save_state())
+        # Scene/Game views are runtime-driven and must not persist panel payloads.
+        _panel_state.delete("panel:scene_view")
+        _panel_state.delete("panel:game_view")
 
         # Persist individual panel states for every window id we still track
         # (singletons live in _default_instances; dynamically opened ids may only
@@ -419,6 +422,8 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             if wid in seen_ids:
                 continue
             seen_ids.add(wid)
+            if wid in {"scene_view", "game_view"}:
+                continue
             inst = wm._window_instances.get(wid) or wm._default_instances.get(wid)
             if inst is None:
                 continue

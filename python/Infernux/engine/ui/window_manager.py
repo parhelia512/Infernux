@@ -43,7 +43,7 @@ class WindowManager:
     """
     
     _instance: Optional['WindowManager'] = None
-    _ESSENTIAL_PANEL_IDS = {"inspector", "project"}
+    _RESET_REQUIRED_PANEL_IDS = {"inspector", "project"}
     
     def __init__(self, engine):
         self._engine = engine
@@ -168,9 +168,6 @@ class WindowManager:
     
     def close_window(self, window_id: str):
         """Close a window by its ID."""
-        if window_id in self._ESSENTIAL_PANEL_IDS:
-            self._open_windows[window_id] = True
-            return
         if window_id in self._open_windows:
             self._open_windows[window_id] = False
             self._notify_state_changed()
@@ -195,11 +192,13 @@ class WindowManager:
     
     def set_window_open(self, window_id: str, is_open: bool):
         """Set window open state (called by window when close button is clicked)."""
-        if window_id in self._ESSENTIAL_PANEL_IDS:
-            self._open_windows[window_id] = True
+        if window_id not in self._open_windows:
             return
-        if not is_open and window_id in self._open_windows:
-            self.close_window(window_id)
+        if is_open:
+            type_id = getattr(self._window_instances.get(window_id), "_window_type_id", None) or window_id
+            self.open_window(type_id, instance_id=window_id)
+            return
+        self.close_window(window_id)
     
     def get_registered_types(self) -> Dict[str, WindowInfo]:
         """Get all registered window types."""
@@ -215,10 +214,7 @@ class WindowManager:
         all_ids = set(self._default_instances.keys()) | set(self._open_windows.keys())
         return {
             "open_windows": {
-                window_id: (
-                    True if window_id in self._ESSENTIAL_PANEL_IDS
-                    else bool(self._open_windows.get(window_id, False))
-                )
+                window_id: bool(self._open_windows.get(window_id, False))
                 for window_id in all_ids
             },
             "active_panel_id": ClosablePanel.get_active_panel_id() or "",
@@ -231,8 +227,6 @@ class WindowManager:
 
         open_windows = data.get('open_windows', {}) or {}
         for window_id, is_open in open_windows.items():
-            if window_id in self._ESSENTIAL_PANEL_IDS:
-                is_open = True
             # Lazily create registered-type windows not yet in _default_instances.
             # If the user opened this panel in a prior session and it was saved
             # as open, restore it now.
@@ -321,7 +315,7 @@ class WindowManager:
     def _apply_reset_layout(self):
         # Ensure essential panels participate in reset even if their
         # default-instance registration was lost.
-        for wid in self._ESSENTIAL_PANEL_IDS:
+        for wid in self._RESET_REQUIRED_PANEL_IDS:
             if wid in self._registered_types:
                 self._builtin_defaults.add(wid)
             if wid not in self._default_instances and wid in self._registered_types:
@@ -336,10 +330,15 @@ class WindowManager:
                     pass
 
         # 1. Close any dynamically-opened windows (not part of builtin default set)
-        dynamic_ids = [wid for wid in list(self._open_windows) if wid not in self._builtin_defaults]
+        dynamic_ids = [
+            wid for wid, is_open in self._open_windows.items()
+            if is_open and wid not in self._builtin_defaults
+        ]
         for wid in dynamic_ids:
             self._open_windows[wid] = False
-            self._engine.unregister_gui(wid)
+            # Only unregister windows that are currently tracked as active instances.
+            if wid in self._window_instances:
+                self._engine.unregister_gui(wid)
             self._window_instances.pop(wid, None)
 
         # 2. Force ALL builtin default panels to be open and registered
