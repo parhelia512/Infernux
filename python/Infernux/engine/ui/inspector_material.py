@@ -712,18 +712,15 @@ def render_material_body(ctx: InxGUIContext, panel, state):
         if not preview_path and _native_mat is not None:
             preview_path = _ensure_material_file_path(panel, _native_mat)
 
-        card_h = preview_size + 8.0
-        if ctx.begin_child("##material_preview_card", avail_w, card_h, True):
-            if not (preview_path and render_resource_preview_rect(ctx, panel, preview_path,
-                                                avail_w - 8.0, preview_size,
-                                                preview_size=int(preview_size),
-                                                preserve_aspect=True,
-                                                center=True,
-                                                cache_tag=cache_tag)):
-                ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
-                ctx.label("Material preview unavailable.")
-                ctx.pop_style_color(1)
-        ctx.end_child()
+        if not (preview_path and render_resource_preview_rect(ctx, panel, preview_path,
+                                            avail_w, preview_size,
+                                            preview_size=int(preview_size),
+                                            preserve_aspect=True,
+                                            center=True,
+                                            cache_tag=cache_tag)):
+            ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
+            ctx.label("Material preview unavailable.")
+            ctx.pop_style_color(1)
         ctx.end_table()
 
     ctx.separator()
