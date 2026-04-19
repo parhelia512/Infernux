@@ -43,6 +43,7 @@ class WindowManager:
     """
     
     _instance: Optional['WindowManager'] = None
+    _ESSENTIAL_PANEL_IDS = {"inspector", "project"}
     
     def __init__(self, engine):
         self._engine = engine
@@ -124,8 +125,12 @@ class WindowManager:
         
         # Check if already open (for singletons)
         if info.singleton and window_id in self._open_windows and self._open_windows[window_id]:
-            print(f"[WindowManager] Window already open: {window_id}")
-            return self._window_instances.get(window_id)
+            existing = self._window_instances.get(window_id)
+            if existing is not None:
+                print(f"[WindowManager] Window already open: {window_id}")
+                return existing
+            # Heal stale state where open-flag says True but instance is missing.
+            self._open_windows[window_id] = False
         
         pending_instance = self._window_instances.get(window_id)
         if pending_instance is not None and self._open_windows.get(window_id, False):
@@ -163,6 +168,9 @@ class WindowManager:
     
     def close_window(self, window_id: str):
         """Close a window by its ID."""
+        if window_id in self._ESSENTIAL_PANEL_IDS:
+            self._open_windows[window_id] = True
+            return
         if window_id in self._open_windows:
             self._open_windows[window_id] = False
             self._notify_state_changed()
@@ -187,6 +195,9 @@ class WindowManager:
     
     def set_window_open(self, window_id: str, is_open: bool):
         """Set window open state (called by window when close button is clicked)."""
+        if window_id in self._ESSENTIAL_PANEL_IDS:
+            self._open_windows[window_id] = True
+            return
         if not is_open and window_id in self._open_windows:
             self.close_window(window_id)
     
@@ -204,7 +215,10 @@ class WindowManager:
         all_ids = set(self._default_instances.keys()) | set(self._open_windows.keys())
         return {
             "open_windows": {
-                window_id: bool(self._open_windows.get(window_id, False))
+                window_id: (
+                    True if window_id in self._ESSENTIAL_PANEL_IDS
+                    else bool(self._open_windows.get(window_id, False))
+                )
                 for window_id in all_ids
             },
             "active_panel_id": ClosablePanel.get_active_panel_id() or "",
@@ -217,6 +231,8 @@ class WindowManager:
 
         open_windows = data.get('open_windows', {}) or {}
         for window_id, is_open in open_windows.items():
+            if window_id in self._ESSENTIAL_PANEL_IDS:
+                is_open = True
             # Lazily create registered-type windows not yet in _default_instances.
             # If the user opened this panel in a prior session and it was saved
             # as open, restore it now.
@@ -279,6 +295,11 @@ class WindowManager:
 
     def reset_layout(self):
         """Reset to default layout: re-open default panels, clear ImGui docking state."""
+        self._enqueue_action(self._begin_reset_layout)
+
+    def _begin_reset_layout(self):
+        """Phase 1: clear docking/layout state, then rebuild next frame."""
+        self._engine.reset_imgui_layout()
         self._enqueue_action(self._apply_reset_layout)
 
     def process_pending_actions(self):
@@ -298,6 +319,22 @@ class WindowManager:
         self._pending_actions.append(action)
 
     def _apply_reset_layout(self):
+        # Ensure essential panels participate in reset even if their
+        # default-instance registration was lost.
+        for wid in self._ESSENTIAL_PANEL_IDS:
+            if wid in self._registered_types:
+                self._builtin_defaults.add(wid)
+            if wid not in self._default_instances and wid in self._registered_types:
+                try:
+                    inst = self._registered_types[wid].factory()
+                    try:
+                        inst._window_type_id = wid
+                    except Exception:
+                        pass
+                    self._default_instances[wid] = inst
+                except Exception:
+                    pass
+
         # 1. Close any dynamically-opened windows (not part of builtin default set)
         dynamic_ids = [wid for wid in list(self._open_windows) if wid not in self._builtin_defaults]
         for wid in dynamic_ids:
@@ -312,6 +349,8 @@ class WindowManager:
                 continue
             if hasattr(instance, '_is_open'):
                 instance._is_open = True
+            if hasattr(instance, 'open'):
+                instance.open()
 
             if hasattr(instance, 'set_window_manager'):
                 instance.set_window_manager(self)
@@ -319,14 +358,12 @@ class WindowManager:
             if self._window_instances.get(window_id) is not instance:
                 self._window_instances[window_id] = instance
 
-            if not self._open_windows.get(window_id, False):
-                self._open_windows[window_id] = True
-                self._engine.register_gui(window_id, instance)
-            else:
-                self._open_windows[window_id] = True
+            self._open_windows[window_id] = True
+            try:
+                self._engine.unregister_gui(window_id)
+            except Exception:
+                pass
+            self._engine.register_gui(window_id, instance)
 
         self._project_console_front_id = "project"
         self._notify_state_changed()
-
-        # 3. Clear ImGui in-memory docking layout + delete ini file (C++ side)
-        self._engine.reset_imgui_layout()

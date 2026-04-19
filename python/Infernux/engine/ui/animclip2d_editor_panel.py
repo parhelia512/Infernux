@@ -11,6 +11,7 @@ Opened from Window menu → 2D Animation Clip Editor.
 from __future__ import annotations
 
 import os
+import json
 import threading
 import time
 from dataclasses import dataclass, field
@@ -97,6 +98,9 @@ class AnimClip2DEditorPanel(EditorPanel):
         self._raw_pixels: Optional[list] = None
         self._raw_w: int = 0
         self._raw_h: int = 0
+        self._dirty: bool = False
+        self._last_saved_signature: str = ""
+        self._mark_saved_snapshot()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -110,6 +114,51 @@ class AnimClip2DEditorPanel(EditorPanel):
 
     def on_disable(self):
         self._cleanup_texture()
+        try:
+            from Infernux.engine.project_context import set_panel_dirty
+
+            set_panel_dirty(self.window_id, False)
+        except Exception:
+            pass
+
+    def _window_title_suffix(self) -> str:
+        self._recompute_dirty()
+        self._sync_project_dirty_flag()
+        return " *" if self._dirty else ""
+
+    def _sync_project_dirty_flag(self) -> None:
+        try:
+            from Infernux.engine.project_context import set_panel_dirty
+
+            set_panel_dirty(self.window_id, bool(self._dirty))
+        except Exception:
+            pass
+
+    def _current_edit_signature(self) -> str:
+        tex = self._tex
+        blob = {
+            "texture_path": tex.file_path if tex else "",
+            "texture_guid": tex.guid if tex else "",
+            "active": self._active_clip_idx,
+            "clips": [
+                {
+                    "name": c.name,
+                    "frames": list(c.frame_indices),
+                    "fps": float(c.fps),
+                    "saved_path": c.saved_path,
+                }
+                for c in self._clips
+            ],
+        }
+        return json.dumps(blob, sort_keys=True, ensure_ascii=True)
+
+    def _mark_saved_snapshot(self) -> None:
+        self._last_saved_signature = self._current_edit_signature()
+        self._dirty = False
+        self._sync_project_dirty_flag()
+
+    def _recompute_dirty(self) -> None:
+        self._dirty = self._current_edit_signature() != self._last_saved_signature
 
     def save_state(self) -> dict:
         clips_data = []
@@ -141,6 +190,7 @@ class AnimClip2DEditorPanel(EditorPanel):
             self._clips = [_ClipState()]
         self._active_clip_idx = max(0, min(
             int(data.get("active_clip", 0)), len(self._clips) - 1))
+        self._mark_saved_snapshot()
 
     # ------------------------------------------------------------------
     # Render — layout: header -> tabs -> preview/details -> sequence -> palette
@@ -151,6 +201,8 @@ class AnimClip2DEditorPanel(EditorPanel):
     _IMGUI_KEY_S = 564
 
     def on_render_content(self, ctx: InxGUIContext):
+        self._recompute_dirty()
+        self._sync_project_dirty_flag()
         # Ctrl+S save shortcut
         if ctx.is_key_down(self._IMGUI_MOD_CTRL) and ctx.is_key_pressed(self._IMGUI_KEY_S):
             clip = self._active_clip
@@ -933,6 +985,7 @@ class AnimClip2DEditorPanel(EditorPanel):
         self._clips = [cs]
         self._active_clip_idx = 0
         self._stop_playback()
+        self._mark_saved_snapshot()
 
     # ------------------------------------------------------------------
     # Save
@@ -970,6 +1023,7 @@ class AnimClip2DEditorPanel(EditorPanel):
                 AssetManager.reimport_asset(save_path)
             except Exception:
                 pass
+            self._mark_saved_snapshot()
         else:
             Debug.log_warning(f"[AnimClipEditor] Failed to save: {save_path}")
 
@@ -984,28 +1038,22 @@ class AnimClip2DEditorPanel(EditorPanel):
         safe_name = clip.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
         default_filename = f"{safe_name}.animclip2d"
 
-        def _on_result(result_path):
-            if result_path:
-                self._do_save_clip(clip, result_path)
+        result = None
+        try:
+            from ._dialogs import save_file_dialog
 
-        def _run():
-            result = None
-            try:
-                from ._dialogs import save_file_dialog
-                result = save_file_dialog(
-                    title="Save 2D Animation Clip",
-                    win32_filter="2D AnimClip files (*.animclip2d)\0*.animclip2d\0All files (*.*)\0*.*\0\0",
-                    initial_dir=initial_dir,
-                    default_filename=default_filename,
-                    default_ext="animclip2d",
-                    tk_filetypes=[("2D AnimClip", "*.animclip2d"), ("All Files", "*.*")],
-                )
-            except Exception as exc:
-                Debug.log_warning(f"[AnimClipEditor] Save dialog error: {exc}")
-            _on_result(result)
-
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
+            result = save_file_dialog(
+                title="Save 2D Animation Clip",
+                win32_filter="2D AnimClip files (*.animclip2d)\0*.animclip2d\0All files (*.*)\0*.*\0\0",
+                initial_dir=initial_dir,
+                default_filename=default_filename,
+                default_ext="animclip2d",
+                tk_filetypes=[("2D AnimClip", "*.animclip2d"), ("All Files", "*.*")],
+            )
+        except Exception as exc:
+            Debug.log_warning(f"[AnimClipEditor] Save dialog error: {exc}")
+        if result:
+            self._do_save_clip(clip, result)
 
     # ------------------------------------------------------------------
     # Playback helpers

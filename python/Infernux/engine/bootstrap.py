@@ -15,6 +15,7 @@ from typing import Optional
 
 from Infernux.lib import TagLayerManager
 import Infernux.resources as _resources
+from Infernux.debug import Debug
 from Infernux.engine.engine import Engine, LogLevel
 from Infernux.engine.resources_manager import ResourcesManager
 from Infernux.engine.play_mode import PlayModeManager, PlayModeState
@@ -388,6 +389,8 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
                 f.write(str(_LAYOUT_VERSION))
 
     def _persist_editor_state(self):
+        if bool(getattr(self, "_suspend_persist_state", False)):
+            return
         if self.console is None or self.project_panel is None or self.window_manager is None:
             return
         if self.toolbar is not None:
