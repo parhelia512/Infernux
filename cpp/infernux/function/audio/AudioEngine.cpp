@@ -12,8 +12,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <glm/glm.hpp>
 #include <cstring>
+#include <glm/glm.hpp>
 
 namespace infernux
 {

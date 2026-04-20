@@ -3,8 +3,8 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cfloat>
-#include <cstring>
 #include <cmath>
+#include <cstring>
 #include <type_traits>
 
 namespace infernux
