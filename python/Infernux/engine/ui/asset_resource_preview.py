@@ -40,6 +40,19 @@ def _resolve_native_engine(panel: Any) -> Any:
     return None
 
 
+def _try_get_cpp_mesh_preview(native: Any, norm_path: str) -> int:
+    """Query or schedule a mesh/model/prefab preview via the unified C++ API."""
+    if native is None:
+        return 0
+    cache_key = f"mesh|{norm_path}"
+    mtime_hint = safe_mtime_ns(norm_path)
+    try:
+        return int(native.query_or_schedule_mesh_preview(cache_key, norm_path, int(mtime_hint)))
+    except Exception as exc:
+        Debug.log(f"[Suppressed] {type(exc).__name__}: {exc}")
+    return 0
+
+
 def _try_get_cpp_texture_preview(native: Any, norm_path: str,
                                  texture_settings: Optional[Any]) -> tuple[int, int, int]:
     """Return (tex_id, width, height) via the unified C++ query.
@@ -130,7 +143,9 @@ def get_resource_preview_texture_id(panel: Any, file_path: str, preview_size: in
         return _try_get_cpp_material_preview_texture(
             native, norm_path, material_json=material_json, file_mtime_hint=mtime)
 
-    # model / prefab previews are intentionally removed from Python side.
+    if ext in _MODEL_EXTS or ext in _PREFAB_EXTS:
+        return _try_get_cpp_mesh_preview(native, norm_path)
+
     return 0
 
 
@@ -148,17 +163,17 @@ def render_resource_preview_rect(ctx: Any, panel: Any, file_path: str, width: fl
 
     norm_path = os.path.normpath(file_path)
     ext = os.path.splitext(norm_path)[1].lower()
-
-    # model / prefab previews are intentionally disabled in Python bridge.
-    if ext in _MODEL_EXTS or ext in _PREFAB_EXTS:
-        return False
-
-    # Compute stamp once and use for both tex_id and size query.
     tex_id = 0
     src_w = 0
     src_h = 0
 
-    if ext in _IMAGE_EXTS:
+    if ext in _MODEL_EXTS or ext in _PREFAB_EXTS:
+        tex_id = _try_get_cpp_mesh_preview(native, norm_path)
+        if tex_id == 0:
+            return False
+        src_w = 256
+        src_h = 256
+    elif ext in _IMAGE_EXTS:
         tex_id, src_w, src_h = _try_get_cpp_texture_preview(native, norm_path, texture_settings)
     elif ext in _MATERIAL_EXTS:
         # C++ handles change detection internally; just pass JSON or mtime hint.

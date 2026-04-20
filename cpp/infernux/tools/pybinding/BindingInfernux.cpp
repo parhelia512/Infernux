@@ -495,6 +495,11 @@ PYBIND11_MODULE(_Infernux, m)
                py::arg("material_json") = "", py::arg("file_mtime_hint") = 0,
                py::call_guard<py::gil_scoped_release>(),
                "Combined query + schedule for material preview. Returns ImGui texture id.")
+           .def("query_or_schedule_mesh_preview", &Infernux::QueryOrScheduleMeshPreview,
+               py::arg("resource_key"), py::arg("mesh_file_path"),
+               py::arg("file_mtime_hint") = 0,
+               py::call_guard<py::gil_scoped_release>(),
+               "Combined query + schedule for mesh/model preview. Returns ImGui texture id.")
            .def("schedule_texture_preview_task", &Infernux::ScheduleTexturePreviewTask,
                py::arg("resource_key"), py::arg("texture_file_path"), py::arg("stamp"),
                py::arg("nearest") = false, py::arg("srgb") = false,

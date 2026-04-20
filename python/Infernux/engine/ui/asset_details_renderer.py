@@ -1237,10 +1237,12 @@ def _on_revert():
 def _render_mesh_header(ctx: InxGUIContext, panel, state: _State):
     """Render mesh preview + mesh metadata in inspector header."""
     avail_w = max(32.0, ctx.get_content_region_avail_width() - 8.0)
-    draw_h = min(max(avail_w * 0.62, 120.0), 320.0)
+    draw_h = min(max(avail_w, 120.0), 320.0)
 
     if not render_resource_preview_rect(ctx, panel, state.file_path, avail_w, draw_h,
-                                        preview_size=int(max(avail_w, draw_h))):
+                                        preview_size=int(draw_h),
+                                        preserve_aspect=True,
+                                        center=True):
         ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
         ctx.label("Model preview unavailable.")
         ctx.pop_style_color(1)
@@ -1252,10 +1254,12 @@ def _render_mesh_header(ctx: InxGUIContext, panel, state: _State):
 def _render_prefab_preview(ctx: InxGUIContext, panel, state: _State):
     """Render prefab preview via standalone resource preview module."""
     avail_w = max(32.0, ctx.get_content_region_avail_width() - 8.0)
-    draw_h = min(max(avail_w * 0.62, 140.0), 360.0)
+    draw_h = min(max(avail_w, 140.0), 360.0)
 
     if not render_resource_preview_rect(ctx, panel, state.file_path, avail_w, draw_h,
-                                        preview_size=int(max(avail_w, draw_h))):
+                                        preview_size=int(draw_h),
+                                        preserve_aspect=True,
+                                        center=True):
         ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
         ctx.label("Prefab preview unavailable.")
         ctx.pop_style_color(1)

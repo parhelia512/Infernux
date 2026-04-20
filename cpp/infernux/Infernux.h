@@ -262,6 +262,20 @@ class Infernux
         const std::string &resourceKey, const std::vector<unsigned char> &imageData,
         uint64_t stamp, bool nearest);
 
+    /// @brief Combined query + schedule for mesh/model preview.
+    ///
+    /// Returns the current ImGui texture id (stale-return for anti-flicker).
+    /// Internally manages a monotonic generation counter; re-renders only
+    /// when the content changes (file mtime).
+    ///
+    /// @param resourceKey    Stable cache key (e.g. "mesh|<norm_path>")
+    /// @param meshFilePath   Path to the model file (.fbx, .obj, .gltf, ...)
+    /// @param fileMtimeHint  File mtime for change detection (0 = unknown)
+    /// @return ImGui texture id (0 if not ready yet)
+    uint64_t QueryOrScheduleMeshPreview(const std::string &resourceKey,
+                                        const std::string &meshFilePath,
+                                        uint64_t fileMtimeHint = 0);
+
     /// @brief Schedule async material save from JSON snapshot.
     /// @param key Coalescing key (usually file path)
     /// @param filePath Target .mat path
@@ -354,6 +368,22 @@ class Infernux
         bool srgb = false;
     };
 
+    struct MeshPreviewCompleted
+    {
+        std::string resourceKey;
+        uint64_t generation = 0;
+        int size = 0;
+        bool success = false;
+        std::vector<unsigned char> pixels;
+    };
+
+    struct MeshPreviewRequest
+    {
+        std::string resourceKey;
+        std::string meshFilePath;
+        uint64_t generation = 0;
+    };
+
     struct MaterialPreviewState
     {
         uint64_t generation = 0;       ///< Monotonic counter, bumped on detected content change
@@ -380,9 +410,22 @@ class Infernux
         bool srgb = false;
     };
 
+    struct MeshPreviewState
+    {
+        uint64_t generation = 0;
+        uint64_t readyGeneration = 0;
+        uint64_t lastFileMtime = 0;
+        bool inFlight = false;
+        int readySize = 0;
+        std::string textureName;
+        uint64_t textureId = 0;
+        std::string meshFilePath;     ///< Absolute path to model file
+    };
+
     void EnqueuePreviewTask(std::function<void()> fn);
     static std::string BuildPreviewTextureName(const std::string &resourceKey);
     static std::string BuildTexturePreviewTextureName(const std::string &resourceKey);
+    static std::string BuildMeshPreviewTextureName(const std::string &resourceKey);
 
     InxAppMetadata m_metadata{"Infernux", 0, 1, 0, "com.infrenderer.Infernux"};
 
@@ -413,9 +456,12 @@ class Infernux
     mutable std::mutex m_previewResultMutex;
     std::queue<MaterialPreviewCompleted> m_previewCompletedQueue;
     std::queue<TexturePreviewCompleted> m_texturePreviewCompletedQueue;
+    std::queue<MeshPreviewCompleted> m_meshPreviewCompletedQueue;
     std::queue<MaterialPreviewRequest> m_previewRequestQueue;
+    std::queue<MeshPreviewRequest> m_meshPreviewRequestQueue;
     std::unordered_map<std::string, MaterialPreviewState> m_materialPreviewStates;
     std::unordered_map<std::string, TexturePreviewState> m_texturePreviewStates;
+    std::unordered_map<std::string, MeshPreviewState> m_meshPreviewStates;
     int m_lastPumpFrame = -1;
     std::chrono::steady_clock::time_point m_lastMaterialRenderTime{};
 

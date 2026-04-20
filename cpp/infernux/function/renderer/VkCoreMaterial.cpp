@@ -12,6 +12,7 @@
 #include "InxError.h"
 #include "InxVkCoreModular.h"
 #include "gui/GPUMaterialPreview.h"
+#include "gui/GPUMeshPreview.h"
 #include "vk/VkPipelineHelpers.h"
 #include "vk/VkRenderUtils.h"
 
@@ -525,6 +526,7 @@ void InxVkCoreModular::ReinitializeMaterialPipelines(VkSampleCountFlagBits newSa
     // Preview render targets cache a render pass / framebuffer that must stay
     // compatible with the material pipelines' MSAA sample count.
     m_gpuMaterialPreview.reset();
+    m_gpuMeshPreview.reset();
 }
 
 bool InxVkCoreModular::RefreshMaterialPipeline(std::shared_ptr<InxMaterial> material, const std::string &vertShaderName,
@@ -1296,6 +1298,19 @@ bool InxVkCoreModular::RenderMaterialPreviewGPU(std::shared_ptr<InxMaterial> mat
     }
 
     return m_gpuMaterialPreview->RenderToPixels(*material, size, outPixels);
+}
+
+bool InxVkCoreModular::RenderMeshPreviewGPU(const InxMesh &mesh,
+                                            const std::vector<std::shared_ptr<InxMaterial>> &materials,
+                                            int size, std::vector<unsigned char> &outPixels)
+{
+    if (size <= 0 || !m_materialPipelineManagerInitialized)
+        return false;
+
+    if (!m_gpuMeshPreview)
+        m_gpuMeshPreview = std::make_unique<GPUMeshPreview>(this);
+
+    return m_gpuMeshPreview->RenderToPixels(mesh, materials, size, outPixels);
 }
 
 } // namespace infernux

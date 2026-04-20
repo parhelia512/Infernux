@@ -720,6 +720,36 @@ uint64_t ProjectPanel::GetMaterialThumbnail(const std::string &filePath)
     return m_engine->QueryOrScheduleMaterialPreview(resourceKey, filePath, "", mtimeNs);
 }
 
+uint64_t ProjectPanel::GetModelThumbnail(const std::string &filePath)
+{
+    if (filePath.empty() || !m_engine)
+        return 0;
+
+    double now = m_frameTimeNow;
+
+    uint64_t mtimeNs = 0;
+    auto it = m_modelMtimeCache.find(filePath);
+    if (it != m_modelMtimeCache.end() && (now - it->second.second) < 1.0) {
+        mtimeNs = it->second.first;
+    } else {
+        std::error_code ec;
+        if (!fs::exists(fs::u8path(filePath), ec))
+            return 0;
+        mtimeNs = GetMtimeNs(filePath);
+        m_modelMtimeCache[filePath] = {mtimeNs, now};
+    }
+    if (mtimeNs == 0)
+        return 0;
+
+    const std::string resourceKey = std::string("mesh|") + filePath;
+    return m_engine->QueryOrScheduleMeshPreview(resourceKey, filePath, mtimeNs);
+}
+
+uint64_t ProjectPanel::GetPrefabThumbnail(const std::string &filePath)
+{
+    return GetModelThumbnail(filePath);
+}
+
 void ProjectPanel::ProcessPendingThumbnails()
 {
     if (!m_engine)
@@ -1678,6 +1708,10 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                     displayTexId = GetThumbnail(item.path, item.mtimeNs);
                 else if (IsMaterialExt(item.ext))
                     displayTexId = GetMaterialThumbnail(item.path);
+                else if (IsModelExt(item.ext))
+                    displayTexId = GetModelThumbnail(item.path);
+                else if (item.ext == ".prefab")
+                    displayTexId = GetPrefabThumbnail(item.path);
                 if (displayTexId == 0)
                     displayTexId = GetTypeIconId(item);
             } else {
@@ -1686,12 +1720,37 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
 
             // ── Render icon ──
             if (displayTexId != 0) {
+                int srcW = 0;
+                int srcH = 0;
+                if (item.type == FileItem::File) {
+                    if (IsImageExt(item.ext) && m_engine) {
+                        const std::string resourceKey = std::string("tex|") + item.path;
+                        auto [readyW, readyH] = m_engine->GetTexturePreviewSize(resourceKey);
+                        srcW = readyW;
+                        srcH = readyH;
+                    } else if (IsMaterialExt(item.ext) || IsModelExt(item.ext) || item.ext == ".prefab") {
+                        srcW = 256;
+                        srcH = 256;
+                    }
+                }
+
                 // InvisibleButton for hit-testing; AddImage for drawing
                 // Much cheaper than ImageButton (no style/border processing)
                 ImGui::InvisibleButton("##ic", ImVec2(iconSize, iconSize));
                 ImVec2 rMin = ImGui::GetItemRectMin();
                 ImVec2 rMax = ImGui::GetItemRectMax();
-                drawList->AddImage(ImTextureRef(static_cast<ImTextureID>(displayTexId)), rMin, rMax);
+                ImVec2 drawMin = rMin;
+                ImVec2 drawMax = rMax;
+                if (srcW > 0 && srcH > 0) {
+                    const float scale = std::min(iconSize / static_cast<float>(srcW),
+                                                 iconSize / static_cast<float>(srcH));
+                    const float drawW = std::max(1.0f, static_cast<float>(srcW) * scale);
+                    const float drawH = std::max(1.0f, static_cast<float>(srcH) * scale);
+                    drawMin.x += (iconSize - drawW) * 0.5f;
+                    drawMin.y += (iconSize - drawH) * 0.5f;
+                    drawMax = ImVec2(drawMin.x + drawW, drawMin.y + drawH);
+                }
+                drawList->AddImage(ImTextureRef(static_cast<ImTextureID>(displayTexId)), drawMin, drawMax);
                 // Select on mouse RELEASE (not press) so that press-and-drag
                 // initiates drag-drop instead of changing the selection.
                 if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && !hasDragPayload)
