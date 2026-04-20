@@ -114,7 +114,7 @@ def _find_vscode_executable() -> str | None:
             try:
                 key = winreg.OpenKey(root, key_path)
             except OSError as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+                # Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
                 continue
             try:
                 exe_path, _ = winreg.QueryValueEx(key, '')
