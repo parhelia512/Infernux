@@ -816,8 +816,17 @@ bool MaterialPreviewer::RenderToPixels(const std::string &matFilePath, int size,
     std::string jsonStr((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     file.close();
 
+    return RenderFromJson(jsonStr, size, outPixels, adb, renderer);
+}
+
+bool MaterialPreviewer::RenderFromJson(const std::string &materialJson, int size, std::vector<unsigned char> &outPixels,
+                                       AssetDatabase *adb, InxRenderer *renderer)
+{
+    if (materialJson.empty())
+        return false;
+
     auto sourceMaterial = std::make_shared<InxMaterial>();
-    if (!sourceMaterial->Deserialize(jsonStr))
+    if (!sourceMaterial->Deserialize(materialJson))
         return false;
 
     // Preview rendering must not reuse the asset material's GUID-backed cache key,

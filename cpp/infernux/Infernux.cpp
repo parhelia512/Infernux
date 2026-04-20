@@ -348,102 +348,66 @@ static void ApplySrgbPreviewInPlace(std::vector<unsigned char> &pixels)
     }
 }
 
-bool Infernux::ScheduleMaterialPreviewTask(const std::string &resourceKey, const std::string &matFilePath, uint64_t stamp,
-                                          int size)
+bool Infernux::ScheduleMaterialPreviewTask(const std::string &resourceKey, const std::string &matFilePath, uint64_t stamp)
 {
-    if (resourceKey.empty() || matFilePath.empty() || size <= 0)
-        return false;
-
-    if (!m_previewTaskSystemInitialized)
-        InitPreviewTaskSystem(1);
-
-    {
-        std::lock_guard<std::mutex> lock(m_previewResultMutex);
-        auto &state = m_materialPreviewStates[resourceKey];
-        if (state.textureName.empty())
-            state.textureName = BuildPreviewTextureName(resourceKey);
-
-        if (state.readyStamp == stamp && state.textureId != 0)
-            return true;
-
-        if (state.inFlight && state.inFlightStamp >= stamp)
-            return true;
-
-        if (state.inFlight)
-            return false;
-
-        state.inFlight = true;
-        state.inFlightStamp = stamp;
-        m_previewRequestQueue.push(MaterialPreviewRequest{resourceKey, matFilePath, stamp, size});
-    }
-
+    // Legacy wrapper — delegates to the unified query function with mtime hint.
+    QueryOrScheduleMaterialPreview(resourceKey, matFilePath, "", stamp);
     return true;
 }
 
-bool Infernux::ScheduleTexturePreviewTask(const std::string &resourceKey, const std::string &textureFilePath,
-                                          uint64_t stamp, int maxSize, bool nearest, bool srgb)
+uint64_t Infernux::QueryOrScheduleMaterialPreview(const std::string &resourceKey, const std::string &matFilePath,
+                                                   const std::string &materialJson, uint64_t fileMtimeHint)
 {
-    if (resourceKey.empty() || textureFilePath.empty() || maxSize <= 0)
-        return false;
+    if (resourceKey.empty())
+        return 0;
 
     if (!m_previewTaskSystemInitialized)
         InitPreviewTaskSystem(1);
 
-    {
-        std::lock_guard<std::mutex> lock(m_previewResultMutex);
-        auto &state = m_texturePreviewStates[resourceKey];
-        if (state.textureName.empty())
-            state.textureName = BuildTexturePreviewTextureName(resourceKey);
+    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+    auto &state = m_materialPreviewStates[resourceKey];
+    if (state.textureName.empty())
+        state.textureName = BuildPreviewTextureName(resourceKey);
 
-        if (state.readyStamp == stamp && state.textureId != 0)
-            return true;
+    // ── Detect content changes ──────────────────────────────────
+    std::string renderJson;  // JSON to use if we schedule a render
 
-        if (state.inFlight && state.inFlightStamp >= stamp)
-            return true;
-
-        if (state.inFlight)
-            return false;
-
-        state.inFlight = true;
-        state.inFlightStamp = stamp;
+    if (!materialJson.empty()) {
+        const uint64_t h = std::hash<std::string>{}(materialJson);
+        if (h != state.lastJsonHash) {
+            state.lastJsonHash = h;
+            state.generation++;
+        }
+        renderJson = materialJson;  // prefer JSON for rendering
     }
 
-    const TexturePreviewRequest req{resourceKey, textureFilePath, stamp, maxSize, nearest, srgb};
-    EnqueuePreviewTask([this, req]() {
-        TexturePreviewCompleted completed;
-        completed.resourceKey = req.resourceKey;
-        completed.stamp = req.stamp;
-        completed.nearest = req.nearest;
+    if (fileMtimeHint != 0 && fileMtimeHint != state.lastFileMtime) {
+        state.lastFileMtime = fileMtimeHint;
+        // Only bump generation from mtime if no JSON was provided in this call
+        // (avoids double-bump when both are present).
+        if (materialJson.empty())
+            state.generation++;
+    }
 
-        auto texData = InxTextureLoader::LoadFromFile(req.textureFilePath);
-        if (!texData.IsValid()) {
-            std::lock_guard<std::mutex> lock(m_previewResultMutex);
-            m_texturePreviewCompletedQueue.push(std::move(completed));
-            return;
-        }
+    // ── Already up-to-date? ─────────────────────────────────────
+    if (state.readyGeneration == state.generation && state.textureId != 0)
+        return state.textureId;
 
-        std::vector<unsigned char> sampled;
-        int outW = 0;
-        int outH = 0;
-        DownsampleNearestRgba(texData.pixels, texData.width, texData.height, req.maxSize, sampled, outW, outH);
-        if (sampled.empty() || outW <= 0 || outH <= 0) {
-            std::lock_guard<std::mutex> lock(m_previewResultMutex);
-            m_texturePreviewCompletedQueue.push(std::move(completed));
-            return;
-        }
+    // ── Schedule render if not already in flight ────────────────
+    if (!state.inFlight && state.readyGeneration < state.generation) {
+        state.inFlight = true;
+        m_previewRequestQueue.push(MaterialPreviewRequest{resourceKey, matFilePath, state.generation, renderJson});
+    }
 
-        if (req.srgb)
-            ApplySrgbPreviewInPlace(sampled);
+    // Stale-return: keep showing old preview while new one renders (no flicker).
+    return state.textureId;
+}
 
-        completed.width = outW;
-        completed.height = outH;
-        completed.success = true;
-        completed.pixels = std::move(sampled);
-
-        std::lock_guard<std::mutex> lock(m_previewResultMutex);
-        m_texturePreviewCompletedQueue.push(std::move(completed));
-    });
-
+bool Infernux::ScheduleTexturePreviewTask(const std::string &resourceKey, const std::string &textureFilePath,
+                                          uint64_t stamp, bool nearest, bool srgb)
+{
+    // Legacy wrapper — delegates to the unified query function with content stamp hint.
+    QueryOrScheduleTexturePreview(resourceKey, textureFilePath, stamp, nearest, srgb, false);
     return true;
 }
 
@@ -452,11 +416,198 @@ void Infernux::PumpPreviewTasks()
     if (!m_renderer)
         return;
 
-    // Keep frame-time stable while still converging toward visual consistency.
-    constexpr int kMaxGpuPreviewJobsPerPump = 1;
-    int gpuBudget = kMaxGpuPreviewJobsPerPump;
+    // ── Per-frame guard ──────────────────────────────────────────
+    // Multiple call-sites (ProjectPanel::PreRender, Python inspector,
+    // Python texture queries) may invoke PumpPreviewTasks within the
+    // same ImGui frame.  Only the first call per frame does real work.
+    const int currentFrame = ImGui::GetFrameCount();
+    if (m_lastPumpFrame == currentFrame)
+        return;
+    m_lastPumpFrame = currentFrame;
 
-    while (gpuBudget > 0) {
+    // Global per-frame budget for GPU uploads (each UploadTextureForImGui
+    // does BeginSingleTimeCommands + fence wait ~1-2 ms).  We cap total
+    // uploads (material + texture) to keep the frame under budget.
+    // Raised to 3 so startup batch can upload 2 materials + 1 texture.
+    constexpr int kMaxUploadsPerFrame = 3;
+    int uploadBudget = kMaxUploadsPerFrame;
+
+    // ── Material render + upload (inline, single-phase) ──────────
+    // Material rendering is synchronous on the main thread (needs Vulkan
+    // GPU context), so there is no benefit in a 2-phase render→completed→
+    // upload pipeline — that only added 1 frame of latency per material.
+    // We now render AND upload in the same frame.
+    //
+    // Batch mode  (queueSize ≥ 2): render+upload up to 2 per frame,
+    //   no cooldown.  This covers bootstrap prewarm and multi-material
+    //   invalidation — N materials finish in ~⌈N/2⌉ frames.
+    // Interactive (queueSize < 2): render+upload 1 with 300 ms cooldown
+    //   to avoid stalling the UI during continuous slider dragging.
+    {
+        size_t queueSize = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            queueSize = m_previewRequestQueue.size();
+        }
+
+        if (queueSize > 0 && uploadBudget > 0) {
+            const bool batchMode = (queueSize >= 2);
+            constexpr int kMaterialCooldownMs = 300;
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - m_lastMaterialRenderTime);
+
+            int maxRenders = 0;
+            if (batchMode) {
+                // Startup / batch: render multiple, no cooldown.
+                maxRenders = std::min(uploadBudget, std::min(static_cast<int>(queueSize), 2));
+            } else if (elapsed.count() >= kMaterialCooldownMs) {
+                // Interactive: single render with cooldown.
+                maxRenders = std::min(uploadBudget, 1);
+            }
+
+            for (int renderIdx = 0; renderIdx < maxRenders; ++renderIdx) {
+                MaterialPreviewRequest req;
+                {
+                    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+                    if (m_previewRequestQueue.empty())
+                        break;
+                    req = std::move(m_previewRequestQueue.front());
+                    m_previewRequestQueue.pop();
+                }
+                if (req.resourceKey.empty())
+                    continue;
+
+                // ── Render to pixels (synchronous GPU, ~5-10 ms) ─────
+                std::vector<unsigned char> pixels;
+                AssetDatabase *adb = GetAssetDatabase();
+                bool ok = false;
+                if (!req.materialJson.empty()) {
+                    // Render from in-memory JSON snapshot (Inspector live edits).
+                    ok = MaterialPreviewer::RenderFromJson(
+                        req.materialJson, 256, pixels, adb, m_renderer.get());
+                } else {
+                    // Render from disk file (ProjectPanel thumbnails).
+                    ok = MaterialPreviewer::RenderToPixels(
+                        req.matFilePath, 256, pixels, adb, m_renderer.get());
+                }
+
+                if (!ok || pixels.empty()) {
+                    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+                    auto it = m_materialPreviewStates.find(req.resourceKey);
+                    if (it != m_materialPreviewStates.end()) {
+                        it->second.inFlight = false;
+                    }
+                    continue;
+                }
+
+                // ── Upload to ImGui (synchronous GPU, ~1-2 ms) ───────
+                std::string texName;
+                {
+                    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+                    auto it = m_materialPreviewStates.find(req.resourceKey);
+                    if (it == m_materialPreviewStates.end())
+                        continue;
+                    it->second.inFlight = false;
+                    if (it->second.textureName.empty())
+                        it->second.textureName = BuildPreviewTextureName(req.resourceKey);
+                    texName = it->second.textureName;
+                }
+                if (texName.empty())
+                    continue;
+
+                const uint64_t texId = m_renderer->UploadTextureForImGui(
+                    texName, pixels.data(), 256, 256, VK_FILTER_LINEAR);
+
+                {
+                    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+                    auto it = m_materialPreviewStates.find(req.resourceKey);
+                    if (it != m_materialPreviewStates.end() && texId != 0) {
+                        it->second.textureId = texId;
+                        it->second.readyGeneration = req.generation;
+                        it->second.readySize = 256;
+                    }
+                }
+                --uploadBudget;
+                m_lastMaterialRenderTime = now;
+            }
+        }
+    }
+
+    // ── Process completed texture uploads ────────────────────────
+    {
+        std::queue<TexturePreviewCompleted> texLocal;
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            texLocal.swap(m_texturePreviewCompletedQueue);
+        }
+
+        while (!texLocal.empty() && uploadBudget > 0) {
+            TexturePreviewCompleted completed = std::move(texLocal.front());
+            texLocal.pop();
+
+            TexturePreviewState stateSnapshot;
+            {
+                std::lock_guard<std::mutex> lock(m_previewResultMutex);
+                auto it = m_texturePreviewStates.find(completed.resourceKey);
+                if (it == m_texturePreviewStates.end())
+                    continue;
+
+                it->second.inFlight = false;
+                if (it->second.textureName.empty())
+                    it->second.textureName = BuildTexturePreviewTextureName(completed.resourceKey);
+                stateSnapshot = it->second;
+            }
+
+            if (!completed.success || completed.pixels.empty() ||
+                completed.width <= 0 || completed.height <= 0)
+                continue;
+
+            if (stateSnapshot.textureName.empty())
+                continue;
+
+            const uint64_t texId = m_renderer->UploadTextureForImGui(
+                stateSnapshot.textureName,
+                completed.pixels.data(),
+                completed.width,
+                completed.height,
+                completed.nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
+
+            {
+                std::lock_guard<std::mutex> lock(m_previewResultMutex);
+                auto it = m_texturePreviewStates.find(completed.resourceKey);
+                if (it == m_texturePreviewStates.end())
+                    continue;
+
+                if (texId != 0) {
+                    it->second.textureId = texId;
+                    it->second.readyGeneration = completed.generation;
+                    it->second.readyWidth = completed.width;
+                    it->second.readyHeight = completed.height;
+                }
+            }
+            --uploadBudget;
+        }
+
+        // Put unconsumed items back for next frame.
+        if (!texLocal.empty()) {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            while (!texLocal.empty()) {
+                m_texturePreviewCompletedQueue.push(std::move(texLocal.front()));
+                texLocal.pop();
+            }
+        }
+    }
+}
+
+void Infernux::FlushAllMaterialPreviews()
+{
+    if (!m_renderer)
+        return;
+
+    // Drain the entire material request queue synchronously.
+    // This is intended for bootstrap prewarm only — no budget, no cooldown.
+    for (;;) {
         MaterialPreviewRequest req;
         {
             std::lock_guard<std::mutex> lock(m_previewResultMutex);
@@ -465,160 +616,85 @@ void Infernux::PumpPreviewTasks()
             req = std::move(m_previewRequestQueue.front());
             m_previewRequestQueue.pop();
         }
+        if (req.resourceKey.empty())
+            continue;
 
-        MaterialPreviewCompleted completed;
-        completed.resourceKey = req.resourceKey;
-        completed.stamp = req.stamp;
-        completed.size = req.size;
-
+        // Render to pixels
         std::vector<unsigned char> pixels;
         AssetDatabase *adb = GetAssetDatabase();
-        completed.success = MaterialPreviewer::RenderToPixels(req.matFilePath, req.size, pixels, adb, m_renderer.get());
-        if (completed.success)
-            completed.pixels = std::move(pixels);
-
-        {
-            std::lock_guard<std::mutex> lock(m_previewResultMutex);
-            m_previewCompletedQueue.push(std::move(completed));
+        bool ok = false;
+        if (!req.materialJson.empty()) {
+            ok = MaterialPreviewer::RenderFromJson(
+                req.materialJson, 256, pixels, adb, m_renderer.get());
+        } else {
+            ok = MaterialPreviewer::RenderToPixels(
+                req.matFilePath, 256, pixels, adb, m_renderer.get());
         }
 
-        --gpuBudget;
-    }
+        if (!ok || pixels.empty()) {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            auto it = m_materialPreviewStates.find(req.resourceKey);
+            if (it != m_materialPreviewStates.end()) {
+                it->second.inFlight = false;
+            }
+            continue;
+        }
 
-    std::queue<MaterialPreviewCompleted> local;
-    {
-        std::lock_guard<std::mutex> lock(m_previewResultMutex);
-        local.swap(m_previewCompletedQueue);
-    }
-
-    while (!local.empty()) {
-        MaterialPreviewCompleted completed = std::move(local.front());
-        local.pop();
-
-        MaterialPreviewState stateSnapshot;
+        // Upload to ImGui
+        std::string texName;
         {
             std::lock_guard<std::mutex> lock(m_previewResultMutex);
-            auto it = m_materialPreviewStates.find(completed.resourceKey);
+            auto it = m_materialPreviewStates.find(req.resourceKey);
             if (it == m_materialPreviewStates.end())
                 continue;
-
             it->second.inFlight = false;
-            it->second.inFlightStamp = 0;
             if (it->second.textureName.empty())
-                it->second.textureName = BuildPreviewTextureName(completed.resourceKey);
-            stateSnapshot = it->second;
+                it->second.textureName = BuildPreviewTextureName(req.resourceKey);
+            texName = it->second.textureName;
         }
-
-        if (!completed.success || completed.pixels.empty())
-            continue;
-
-        if (stateSnapshot.textureName.empty())
+        if (texName.empty())
             continue;
 
         const uint64_t texId = m_renderer->UploadTextureForImGui(
-            stateSnapshot.textureName,
-            completed.pixels.data(),
-            completed.size,
-            completed.size,
-            VK_FILTER_LINEAR
-        );
+            texName, pixels.data(), 256, 256, VK_FILTER_LINEAR);
 
         {
             std::lock_guard<std::mutex> lock(m_previewResultMutex);
-            auto it = m_materialPreviewStates.find(completed.resourceKey);
-            if (it == m_materialPreviewStates.end())
-                continue;
-
-            if (texId != 0) {
+            auto it = m_materialPreviewStates.find(req.resourceKey);
+            if (it != m_materialPreviewStates.end() && texId != 0) {
                 it->second.textureId = texId;
-                it->second.readyStamp = completed.stamp;
-                it->second.readySize = completed.size;
+                it->second.readyGeneration = req.generation;
+                it->second.readySize = 256;
             }
         }
     }
 
-    std::queue<TexturePreviewCompleted> texLocal;
-    {
-        std::lock_guard<std::mutex> lock(m_previewResultMutex);
-        texLocal.swap(m_texturePreviewCompletedQueue);
-    }
-
-    while (!texLocal.empty()) {
-        TexturePreviewCompleted completed = std::move(texLocal.front());
-        texLocal.pop();
-
-        TexturePreviewState stateSnapshot;
-        {
-            std::lock_guard<std::mutex> lock(m_previewResultMutex);
-            auto it = m_texturePreviewStates.find(completed.resourceKey);
-            if (it == m_texturePreviewStates.end())
-                continue;
-
-            it->second.inFlight = false;
-            it->second.inFlightStamp = 0;
-            if (it->second.textureName.empty())
-                it->second.textureName = BuildTexturePreviewTextureName(completed.resourceKey);
-            stateSnapshot = it->second;
-        }
-
-        if (!completed.success || completed.pixels.empty() || completed.width <= 0 || completed.height <= 0)
-            continue;
-
-        if (stateSnapshot.textureName.empty())
-            continue;
-
-        const uint64_t texId = m_renderer->UploadTextureForImGui(
-            stateSnapshot.textureName,
-            completed.pixels.data(),
-            completed.width,
-            completed.height,
-            completed.nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
-
-        {
-            std::lock_guard<std::mutex> lock(m_previewResultMutex);
-            auto it = m_texturePreviewStates.find(completed.resourceKey);
-            if (it == m_texturePreviewStates.end())
-                continue;
-
-            if (texId != 0) {
-                it->second.textureId = texId;
-                it->second.readyStamp = completed.stamp;
-                it->second.readyWidth = completed.width;
-                it->second.readyHeight = completed.height;
-            }
-        }
-    }
+    m_lastMaterialRenderTime = std::chrono::steady_clock::now();
 }
 
-uint64_t Infernux::GetMaterialPreviewTextureId(const std::string &resourceKey, uint64_t expectedStamp) const
+uint64_t Infernux::GetMaterialPreviewTextureId(const std::string &resourceKey) const
 {
     std::lock_guard<std::mutex> lock(m_previewResultMutex);
     auto it = m_materialPreviewStates.find(resourceKey);
     if (it == m_materialPreviewStates.end())
         return 0;
-    if (it->second.readyStamp != expectedStamp)
-        return 0;
     return it->second.textureId;
 }
 
-uint64_t Infernux::GetTexturePreviewTextureId(const std::string &resourceKey, uint64_t expectedStamp) const
+uint64_t Infernux::GetTexturePreviewTextureId(const std::string &resourceKey) const
 {
     std::lock_guard<std::mutex> lock(m_previewResultMutex);
     auto it = m_texturePreviewStates.find(resourceKey);
     if (it == m_texturePreviewStates.end())
         return 0;
-    if (it->second.readyStamp != expectedStamp)
-        return 0;
     return it->second.textureId;
 }
 
-std::pair<int, int> Infernux::GetTexturePreviewSize(const std::string &resourceKey, uint64_t expectedStamp) const
+std::pair<int, int> Infernux::GetTexturePreviewSize(const std::string &resourceKey) const
 {
     std::lock_guard<std::mutex> lock(m_previewResultMutex);
     auto it = m_texturePreviewStates.find(resourceKey);
     if (it == m_texturePreviewStates.end())
-        return {0, 0};
-    if (it->second.readyStamp != expectedStamp)
         return {0, 0};
     return {it->second.readyWidth, it->second.readyHeight};
 }
@@ -628,18 +704,17 @@ void Infernux::InvalidateMaterialPreviewTask(const std::string &resourceKey)
     if (resourceKey.empty())
         return;
 
-    std::string textureName;
-    {
-        std::lock_guard<std::mutex> lock(m_previewResultMutex);
-        auto it = m_materialPreviewStates.find(resourceKey);
-        if (it != m_materialPreviewStates.end()) {
-            textureName = it->second.textureName;
-            m_materialPreviewStates.erase(it);
-        }
+    // Bump generation so next query re-renders.  Keep old textureId for
+    // stale-return anti-flicker.  Reset content hashes so both sources
+    // (JSON and mtime) re-evaluate on next call.
+    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+    auto it = m_materialPreviewStates.find(resourceKey);
+    if (it != m_materialPreviewStates.end()) {
+        it->second.generation++;
+        it->second.lastJsonHash = 0;
+        it->second.lastFileMtime = 0;
+        it->second.inFlight = false;
     }
-
-    if (!textureName.empty() && m_renderer && m_renderer->HasImGuiTexture(textureName))
-        m_renderer->RemoveImGuiTexture(textureName);
 }
 
 void Infernux::InvalidateTexturePreviewTask(const std::string &resourceKey)
@@ -647,18 +722,176 @@ void Infernux::InvalidateTexturePreviewTask(const std::string &resourceKey)
     if (resourceKey.empty())
         return;
 
-    std::string textureName;
+    // Bump generation so next query re-renders.  Keep old textureId for
+    // stale-return anti-flicker.  Reset content stamp so next call re-evaluates.
+    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+    auto it = m_texturePreviewStates.find(resourceKey);
+    if (it != m_texturePreviewStates.end()) {
+        it->second.generation++;
+        it->second.lastContentStamp = 0;
+        it->second.inFlight = false;
+    }
+}
+
+std::tuple<uint64_t, int, int> Infernux::QueryOrScheduleTexturePreview(
+    const std::string &resourceKey, const std::string &textureFilePath,
+    uint64_t contentStampHint, bool nearest, bool srgb, bool pump)
+{
+    if (resourceKey.empty() || textureFilePath.empty())
+        return {0, 0, 0};
+
+    if (pump)
+        PumpPreviewTasks();
+
+    if (!m_previewTaskSystemInitialized)
+        InitPreviewTaskSystem(1);
+
+    bool shouldEnqueue = false;
+    TexturePreviewRequest req;
+    uint64_t texId = 0;
+    int w = 0, h = 0;
+
     {
         std::lock_guard<std::mutex> lock(m_previewResultMutex);
-        auto it = m_texturePreviewStates.find(resourceKey);
-        if (it != m_texturePreviewStates.end()) {
-            textureName = it->second.textureName;
-            m_texturePreviewStates.erase(it);
+        auto &state = m_texturePreviewStates[resourceKey];
+        if (state.textureName.empty())
+            state.textureName = BuildTexturePreviewTextureName(resourceKey);
+
+        // ── Detect content changes ──────────────────────────────
+        if (contentStampHint != 0 && contentStampHint != state.lastContentStamp) {
+            state.lastContentStamp = contentStampHint;
+            state.generation++;
+        }
+
+        // Also bump generation if filter/srgb settings changed.
+        if (state.textureId != 0 && (nearest != state.nearest || srgb != state.srgb)) {
+            state.generation++;
+        }
+        state.nearest = nearest;
+        state.srgb = srgb;
+
+        // Stale-return: keep showing old preview while new one loads.
+        texId = state.textureId;
+        w = state.readyWidth;
+        h = state.readyHeight;
+
+        // Already up-to-date?
+        if (state.readyGeneration == state.generation && state.textureId != 0)
+            return {texId, w, h};
+
+        // Schedule render if not already in flight.
+        if (!state.inFlight && state.readyGeneration < state.generation) {
+            state.inFlight = true;
+            req = TexturePreviewRequest{resourceKey, textureFilePath, state.generation, nearest, srgb};
+            shouldEnqueue = true;
         }
     }
 
-    if (!textureName.empty() && m_renderer && m_renderer->HasImGuiTexture(textureName))
-        m_renderer->RemoveImGuiTexture(textureName);
+    if (shouldEnqueue) {
+        constexpr int kPreviewResolution = 256;
+        EnqueuePreviewTask([this, req, kPreviewResolution]() {
+            TexturePreviewCompleted completed;
+            completed.resourceKey = req.resourceKey;
+            completed.generation = req.generation;
+            completed.nearest = req.nearest;
+
+            auto texData = InxTextureLoader::LoadFromFile(req.textureFilePath);
+            if (!texData.IsValid()) {
+                std::lock_guard<std::mutex> lock(m_previewResultMutex);
+                m_texturePreviewCompletedQueue.push(std::move(completed));
+                return;
+            }
+
+            std::vector<unsigned char> sampled;
+            int outW = 0;
+            int outH = 0;
+            DownsampleNearestRgba(texData.pixels, texData.width, texData.height, kPreviewResolution, sampled, outW, outH);
+            if (sampled.empty() || outW <= 0 || outH <= 0) {
+                std::lock_guard<std::mutex> lock(m_previewResultMutex);
+                m_texturePreviewCompletedQueue.push(std::move(completed));
+                return;
+            }
+
+            if (req.srgb)
+                ApplySrgbPreviewInPlace(sampled);
+
+            completed.width = outW;
+            completed.height = outH;
+            completed.success = true;
+            completed.pixels = std::move(sampled);
+
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            m_texturePreviewCompletedQueue.push(std::move(completed));
+        });
+    }
+
+    // Stale-return: keep showing old preview while new one loads (no flicker).
+    return {texId, w, h};
+}
+
+bool Infernux::ScheduleTexturePreviewFromMemory(
+    const std::string &resourceKey, const std::vector<unsigned char> &imageData,
+    uint64_t stamp, bool nearest)
+{
+    if (resourceKey.empty() || imageData.empty())
+        return false;
+
+    if (!m_previewTaskSystemInitialized)
+        InitPreviewTaskSystem(1);
+
+    uint64_t gen = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_previewResultMutex);
+        auto &state = m_texturePreviewStates[resourceKey];
+        if (state.textureName.empty())
+            state.textureName = BuildTexturePreviewTextureName(resourceKey);
+
+        // Use caller's stamp as content-change hint.
+        if (stamp != 0 && stamp != state.lastContentStamp) {
+            state.lastContentStamp = stamp;
+            state.generation++;
+        }
+
+        if (state.readyGeneration == state.generation && state.textureId != 0)
+            return true;
+
+        if (state.inFlight)
+            return true;  // already in-flight
+
+        state.inFlight = true;
+        state.nearest = nearest;
+        gen = state.generation;
+    }
+
+    // Copy data so worker thread owns it.
+    auto dataCopy = std::make_shared<std::vector<unsigned char>>(imageData);
+    const std::string keyCopy = resourceKey;
+    const uint64_t genCopy = gen;
+    const bool nearestCopy = nearest;
+
+    EnqueuePreviewTask([this, keyCopy, dataCopy, genCopy, nearestCopy]() {
+        TexturePreviewCompleted completed;
+        completed.resourceKey = keyCopy;
+        completed.generation = genCopy;
+        completed.nearest = nearestCopy;
+
+        auto texData = InxTextureLoader::LoadFromMemory(dataCopy->data(), dataCopy->size());
+        if (!texData.IsValid()) {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            m_texturePreviewCompletedQueue.push(std::move(completed));
+            return;
+        }
+
+        completed.width = texData.width;
+        completed.height = texData.height;
+        completed.success = true;
+        completed.pixels = std::move(texData.pixels);
+
+        std::lock_guard<std::mutex> lock(m_previewResultMutex);
+        m_texturePreviewCompletedQueue.push(std::move(completed));
+    });
+
+    return true;
 }
 
 bool Infernux::ScheduleMaterialSaveSnapshotTask(const std::string &key, const std::string &filePath,

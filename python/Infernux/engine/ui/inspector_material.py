@@ -20,7 +20,7 @@ from Infernux.lib import InxGUIContext
 from Infernux.engine.i18n import t
 from . import inspector_support as _inspector_support
 from .asset_execution_layer import AssetAccessMode, get_asset_execution_layer
-from .asset_resource_preview import render_resource_preview_rect
+from .asset_resource_preview import get_resource_preview_texture_id
 from .inspector_utils import (
     max_label_w,
     field_label,
@@ -38,6 +38,33 @@ def _record_profile_timing(bucket: str, start_time: float) -> None:
     _inspector_support.record_inspector_profile_timing(
         bucket, (_time.perf_counter() - start_time) * 1000.0,
     )
+
+
+def _draw_centered_texture(ctx: InxGUIContext, tex_id: int, width: float, height: float,
+                           src_w: int = 256, src_h: int = 256) -> bool:
+    """Draw a cached preview texture without touching the preview query path."""
+    if tex_id == 0 or width <= 0.0 or height <= 0.0 or src_w <= 0 or src_h <= 0:
+        return False
+
+    scale = min(float(width) / float(src_w), float(height) / float(src_h))
+    draw_w = max(1.0, float(src_w) * scale)
+    draw_h = max(1.0, float(src_h) * scale)
+
+    offset_y = max((float(height) - draw_h) * 0.5, 0.0)
+    if offset_y > 0.0:
+        ctx.dummy(1.0, offset_y)
+
+    offset_x = max((float(width) - draw_w) * 0.5, 0.0)
+    if offset_x > 0.0:
+        ctx.set_cursor_pos_x(ctx.get_cursor_pos_x() + offset_x)
+
+    ctx.image(tex_id, draw_w, draw_h)
+
+    remaining_y = max(float(height) - draw_h - offset_y, 0.0)
+    if remaining_y > 0.0:
+        ctx.dummy(1.0, remaining_y)
+
+    return True
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -542,33 +569,87 @@ def _apply_material_changes(panel, state, mat_data, native_mat,
             native_mat.deserialize(json.dumps(mat_data))
         if requires_pipeline_refresh:
             _refresh_pipeline(panel)
-        _ensure_material_file_path(panel, native_mat)
+
+        # Use cached file-path when available (avoids per-frame panel lookup).
+        file_path = state.extra.get("_mat_file_path", "")
+        if not file_path:
+            file_path = _ensure_material_file_path(panel, native_mat)
+            if file_path:
+                state.extra["_mat_file_path"] = file_path
+
         if exec_layer:
             exec_layer.schedule_rw_save(native_mat)
-        # Keep cached JSON coherent only when we actually need undo snapshots.
-        mgr = None
-        new_json = ""
-        from Infernux.engine.undo import UndoManager, MaterialJsonCommand
-        mgr = UndoManager.instance()
-        if mgr and not mgr.is_executing and mgr.enabled and old_json:
+
+        # ── Deferred undo ───────────────────────────────────────────
+        # During continuous drag (60 fps), calling json.dumps every frame
+        # costs ~1-5 ms and is the main source of drag stutter.  Instead,
+        # we save the pre-drag JSON once and mark a pending undo commit.
+        # The actual json.dumps + record happens in render_material_body
+        # on the first frame where changed=False (drag ended).
+        if requires_deserialize:
+            # Structural changes (shader swap, texture slot) always need
+            # an immediate snapshot because they can't be replayed
+            # incrementally.
             new_json = json.dumps(mat_data)
             state.extra["cached_json"] = new_json
-        elif requires_deserialize:
-            # Structural changes should refresh cached_json for future comparisons.
-            state.extra["cached_json"] = json.dumps(mat_data)
-        if mgr and not mgr.is_executing and mgr.enabled and old_json:
-            if new_json != old_json:
+            # Pre-capture save snapshot.
+            if file_path:
+                from Infernux.core.assets import AssetManager
+                AssetManager.set_material_save_snapshot(file_path, new_json)
+            from Infernux.engine.undo import UndoManager, MaterialJsonCommand
+            mgr = UndoManager.instance()
+            if mgr and not mgr.is_executing and mgr.enabled and old_json and new_json != old_json:
                 mgr.record(MaterialJsonCommand(
-                    native_mat,
-                    old_json,
-                    new_json,
-                    "Edit Material",
+                    native_mat, old_json, new_json, "Edit Material",
                     refresh_callback=lambda _mat: _refresh_pipeline(panel),
                     edit_key=change_key,
                 ))
+        else:
+            # Lightweight path: just remember that an undo commit is needed.
+            if not state.extra.get("_undo_pending"):
+                # First frame of this drag — save the starting snapshot.
+                state.extra["_undo_old_json"] = old_json
+                state.extra["_undo_edit_key"] = change_key
+            state.extra["_undo_pending"] = True
     except (RuntimeError, ValueError) as _exc:
         Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
         pass
+
+
+def _flush_deferred_undo(panel, state, mat_data, native_mat):
+    """Commit deferred undo snapshot when drag ends (changed=False frame)."""
+    if not state.extra.get("_undo_pending"):
+        return
+    state.extra["_undo_pending"] = False
+
+    old_json = state.extra.pop("_undo_old_json", "")
+    edit_key = state.extra.pop("_undo_edit_key", "")
+    if not old_json:
+        return
+
+    try:
+        from Infernux.engine.undo import UndoManager, MaterialJsonCommand
+        mgr = UndoManager.instance()
+        if not (mgr and not mgr.is_executing and mgr.enabled):
+            return
+        new_json = json.dumps(mat_data)
+        state.extra["cached_json"] = new_json
+
+        # Pre-capture save snapshot so _save_material_resource doesn't need
+        # to call native_mat.serialize() on the main thread.
+        from Infernux.core.assets import AssetManager
+        file_path = state.extra.get("_mat_file_path", "")
+        if file_path:
+            AssetManager.set_material_save_snapshot(file_path, new_json)
+
+        if new_json != old_json:
+            mgr.record(MaterialJsonCommand(
+                native_mat, old_json, new_json, "Edit Material",
+                refresh_callback=lambda _mat: _refresh_pipeline(panel),
+                edit_key=edit_key,
+            ))
+    except (RuntimeError, ValueError) as _exc:
+        Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -702,6 +783,7 @@ def render_material_body(ctx: InxGUIContext, panel, state):
         except Exception:
             cache_tag = state.extra.get("_material_cache_tag", cache_tag)
         state.extra["_material_preview_pending"] = False
+        pending_preview_refresh = False
 
     if did_split:
         # Right column: material preview centered in its region.
@@ -712,12 +794,27 @@ def render_material_body(ctx: InxGUIContext, panel, state):
         if not preview_path and _native_mat is not None:
             preview_path = _ensure_material_file_path(panel, _native_mat)
 
-        if not (preview_path and render_resource_preview_rect(ctx, panel, preview_path,
-                                            avail_w, preview_size,
-                                            preview_size=int(preview_size),
-                                            preserve_aspect=True,
-                                            center=True,
-                                            cache_tag=cache_tag)):
+        last_preview_path = state.extra.get("_material_preview_path", "")
+        if preview_path != last_preview_path:
+            state.extra["_material_preview_path"] = preview_path
+            state.extra.pop("_material_preview_tex_id", None)
+
+        preview_tex_id = int(state.extra.get("_material_preview_tex_id", 0) or 0)
+        should_query_preview = bool(preview_path) and (not pending_preview_refresh or preview_tex_id == 0)
+        if should_query_preview:
+            # Pass live mat_data JSON so the C++ preview renderer uses the
+            # in-memory state instead of reading the (potentially stale) disk file.
+            queried_tex_id = int(get_resource_preview_texture_id(
+                panel,
+                preview_path,
+                preview_size=int(preview_size),
+                material_json=cache_tag,
+            ) or 0)
+            if queried_tex_id != 0:
+                preview_tex_id = queried_tex_id
+                state.extra["_material_preview_tex_id"] = queried_tex_id
+
+        if not _draw_centered_texture(ctx, preview_tex_id, avail_w, preview_size, 256, 256):
             ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
             ctx.label("Material preview unavailable.")
             ctx.pop_style_color(1)
@@ -739,10 +836,20 @@ def render_material_body(ctx: InxGUIContext, panel, state):
         # Defer preview cache-tag update until edits settle; this keeps slider
         # dragging responsive and avoids preview-triggered hitches.
         state.extra["_material_preview_pending"] = True
-        state.extra["_material_preview_ready_at"] = _time.time() + 0.12
+        state.extra["_material_preview_ready_at"] = _time.time() + 0.30
         _apply_material_changes(panel, state, mat_data, _native_mat,
                                 requires_deserialize, requires_pipeline_refresh,
                                 old_json, change_key, exec_layer)
+        # Mark the native version as "ours" so _refresh_material (called once
+        # per frame by asset_details_renderer) can skip the expensive
+        # serialize -> json.loads -> merge -> json.dumps round-trip.
+        try:
+            state.extra["_applied_version"] = _native_mat.get_version()
+        except (AttributeError, RuntimeError):
+            pass
+    else:
+        # Drag ended (or no edit this frame) — commit deferred undo snapshot.
+        _flush_deferred_undo(panel, state, mat_data, _native_mat)
 
     ctx.pop_style_var(2)
 
@@ -859,8 +966,12 @@ def _get_inline_material_extra(panel, native_mat) -> dict:
         mat_version = -1
 
     extra = cache.get(mat_id)
-    cache_hit = extra is not None and mat_version != -1 and extra.get("mat_version", -1) == mat_version
+    cache_hit = (extra is not None
+                 and mat_version != -1
+                 and (extra.get("mat_version", -1) == mat_version
+                      or extra.get("_applied_version", -2) == mat_version))
     if cache_hit:
+        extra["mat_version"] = mat_version
         return extra
 
     try:

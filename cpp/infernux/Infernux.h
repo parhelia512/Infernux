@@ -1,6 +1,7 @@
 #pragma once
 #include <core/types/InxFwdType.h>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <filesystem>
 #include <functional>
@@ -195,42 +196,71 @@ class Infernux
     /// @param resourceKey Stable cache key (e.g. "mat|<norm_path>")
     /// @param matFilePath Material file path
     /// @param stamp Revision stamp from caller
-    /// @param size Preview size (square)
     /// @return true if task accepted or already in-flight/ready for same/newer stamp.
-    bool ScheduleMaterialPreviewTask(const std::string &resourceKey, const std::string &matFilePath, uint64_t stamp,
-                                     int size = 256);
+    bool ScheduleMaterialPreviewTask(const std::string &resourceKey, const std::string &matFilePath, uint64_t stamp);
 
-    /// @brief Schedule a texture preview generation task.
-    /// @param resourceKey Stable cache key (e.g. "tex|<norm_path>")
-    /// @param textureFilePath Texture file path
-    /// @param stamp Revision stamp from caller
-    /// @param maxSize Max preview side length in pixels
-    /// @param nearest Use point filter for uploaded ImGui texture
-    /// @param srgb Apply gamma visualization conversion on preview pixels
-    /// @return true if task accepted or already in-flight/ready for same/newer stamp.
+    /// @brief Combined query + schedule for material preview.
+    ///
+    /// Returns the current ImGui texture id (stale-return for anti-flicker).
+    /// Internally manages a monotonic generation counter; re-renders only
+    /// when the content actually changes (JSON hash or file mtime).
+    ///
+    /// @param materialJson  If non-empty, render from this JSON (Inspector live edits).
+    /// @param fileMtimeHint If != 0 and materialJson is empty, used to detect file changes (ProjectPanel).
+    uint64_t QueryOrScheduleMaterialPreview(const std::string &resourceKey, const std::string &matFilePath,
+                                            const std::string &materialJson = "", uint64_t fileMtimeHint = 0);
+
+    /// @brief Schedule a texture preview generation task (legacy wrapper).
     bool ScheduleTexturePreviewTask(const std::string &resourceKey, const std::string &textureFilePath,
-                                    uint64_t stamp, int maxSize = 256, bool nearest = false, bool srgb = false);
+                                    uint64_t stamp, bool nearest = false, bool srgb = false);
 
     /// @brief Pump completed preview tasks on main thread and upload textures.
     void PumpPreviewTasks();
 
-    /// @brief Get uploaded texture id for a material preview key at expected stamp.
-    /// @return Non-zero ImGui texture id when ready and stamp matches.
-    uint64_t GetMaterialPreviewTextureId(const std::string &resourceKey, uint64_t expectedStamp) const;
+    /// @brief Synchronously render + upload ALL queued material previews.
+    /// Intended for bootstrap prewarm — ignores per-frame budget and cooldown.
+    void FlushAllMaterialPreviews();
 
-    /// @brief Get uploaded texture id for a texture preview key at expected stamp.
-    /// @return Non-zero ImGui texture id when ready and stamp matches.
-    uint64_t GetTexturePreviewTextureId(const std::string &resourceKey, uint64_t expectedStamp) const;
+    /// @brief Get uploaded texture id for a material preview key.
+    /// @return Non-zero ImGui texture id when available (stale-return for anti-flicker).
+    uint64_t GetMaterialPreviewTextureId(const std::string &resourceKey) const;
 
-    /// @brief Get uploaded texture preview dimensions when ready at expected stamp.
+    /// @brief Get uploaded texture id for a texture preview key.
+    /// @return Non-zero ImGui texture id when available (stale-return for anti-flicker).
+    uint64_t GetTexturePreviewTextureId(const std::string &resourceKey) const;
+
+    /// @brief Get uploaded texture preview dimensions.
     /// @return (width,height); (0,0) when not ready.
-    std::pair<int, int> GetTexturePreviewSize(const std::string &resourceKey, uint64_t expectedStamp) const;
+    std::pair<int, int> GetTexturePreviewSize(const std::string &resourceKey) const;
 
     /// @brief Invalidate one material preview task/cache entry.
     void InvalidateMaterialPreviewTask(const std::string &resourceKey);
 
     /// @brief Invalidate one texture preview task/cache entry.
     void InvalidateTexturePreviewTask(const std::string &resourceKey);
+
+    /// @brief Combined query + schedule for texture preview.
+    ///
+    /// Returns (textureId, width, height).  Internally manages a monotonic
+    /// generation counter; re-renders only when content changes.
+    ///
+    /// @param contentStampHint Caller-provided content hash (mtime combo, etc.).
+    ///        C++ uses this to detect changes and bump the generation counter.
+    std::tuple<uint64_t, int, int> QueryOrScheduleTexturePreview(
+        const std::string &resourceKey, const std::string &textureFilePath,
+        uint64_t contentStampHint, bool nearest, bool srgb, bool pump);
+
+    /// @brief Schedule texture preview from in-memory data (JPEG/PNG/etc.).
+    ///
+    /// The image bytes are decoded on a worker thread via stb_image.
+    /// @param resourceKey Stable cache key
+    /// @param imageData Raw encoded image bytes (JPEG, PNG, etc.)
+    /// @param stamp Revision stamp
+    /// @param nearest Use point filter for uploaded texture
+    /// @return true if task accepted
+    bool ScheduleTexturePreviewFromMemory(
+        const std::string &resourceKey, const std::vector<unsigned char> &imageData,
+        uint64_t stamp, bool nearest);
 
     /// @brief Schedule async material save from JSON snapshot.
     /// @param key Coalescing key (usually file path)
@@ -299,7 +329,7 @@ class Infernux
     struct TexturePreviewCompleted
     {
         std::string resourceKey;
-        uint64_t stamp = 0;
+        uint64_t generation = 0;
         int width = 0;
         int height = 0;
         bool nearest = false;
@@ -311,25 +341,26 @@ class Infernux
     {
         std::string resourceKey;
         std::string matFilePath;
-        uint64_t stamp = 0;
-        int size = 0;
+        uint64_t generation = 0;
+        std::string materialJson;  ///< If non-empty, render from this JSON instead of reading matFilePath from disk.
     };
 
     struct TexturePreviewRequest
     {
         std::string resourceKey;
         std::string textureFilePath;
-        uint64_t stamp = 0;
-        int maxSize = 0;
+        uint64_t generation = 0;
         bool nearest = false;
         bool srgb = false;
     };
 
     struct MaterialPreviewState
     {
+        uint64_t generation = 0;       ///< Monotonic counter, bumped on detected content change
+        uint64_t readyGeneration = 0;  ///< Generation of last completed render
+        uint64_t lastJsonHash = 0;     ///< std::hash of last JSON string seen
+        uint64_t lastFileMtime = 0;     ///< Last file mtime seen from ProjectPanel
         bool inFlight = false;
-        uint64_t inFlightStamp = 0;
-        uint64_t readyStamp = 0;
         int readySize = 0;
         std::string textureName;
         uint64_t textureId = 0;
@@ -337,13 +368,16 @@ class Infernux
 
     struct TexturePreviewState
     {
+        uint64_t generation = 0;        ///< Monotonic counter, bumped on detected content change
+        uint64_t readyGeneration = 0;   ///< Generation of last completed render
+        uint64_t lastContentStamp = 0;   ///< Last content stamp seen from caller
         bool inFlight = false;
-        uint64_t inFlightStamp = 0;
-        uint64_t readyStamp = 0;
         int readyWidth = 0;
         int readyHeight = 0;
         std::string textureName;
         uint64_t textureId = 0;
+        bool nearest = false;
+        bool srgb = false;
     };
 
     void EnqueuePreviewTask(std::function<void()> fn);
@@ -382,6 +416,8 @@ class Infernux
     std::queue<MaterialPreviewRequest> m_previewRequestQueue;
     std::unordered_map<std::string, MaterialPreviewState> m_materialPreviewStates;
     std::unordered_map<std::string, TexturePreviewState> m_texturePreviewStates;
+    int m_lastPumpFrame = -1;
+    std::chrono::steady_clock::time_point m_lastMaterialRenderTime{};
 
     void LoadImGuiLayout();
     void SaveImGuiLayout();

@@ -245,6 +245,16 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
 
         Debug.log_internal(f"Material preview prewarm: {warmed}/{len(material_paths)}")
 
+        # Synchronously flush the entire request queue now, before the main
+        # loop starts.  PumpPreviewTasks() is frame-budgeted (2/frame), so
+        # without this flush N materials would take ~⌈N/2⌉ frames to appear.
+        if hasattr(native, "flush_all_material_previews"):
+            try:
+                native.flush_all_material_previews()
+                Debug.log_internal("Material preview prewarm: flush complete")
+            except Exception as _exc:
+                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+
     def _create_managers(self):
         from Infernux.engine.undo import UndoManager
 
