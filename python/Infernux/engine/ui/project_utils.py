@@ -179,137 +179,238 @@ def open_in_vscode(file_path: str, line: int = 0, project_root: str = "") -> boo
         return False
 
 
+def _is_executable_file(path: str | None) -> bool:
+    """Return True if path exists, is a file, and is executable."""
+    return bool(path) and os.path.isfile(path) and os.access(path, os.X_OK)
 
-def _find_pycharm_executable() -> str | None:
-    """Locate a PyCharm executable on the current platform.
 
-    Search order:
-
-    1. ``shutil.which(...)`` for common launcher names.
-    2. Common JetBrains installation roots on Windows, scanning any folder
-       whose name starts with ``PyCharm``.
-    3. JetBrains Toolbox scripts and installed app directories.
-    4. Windows Registry uninstall entries.
-
-    Returns the full path to the executable, or *None* if not found.
-    """
+def _find_pycharm_from_launchers(launcher_names: tuple[str, ...]) -> str | None:
+    """Locate PyCharm from launcher names available on PATH."""
     import shutil
-    import platform
-
-    launcher_names = (
-        'pycharm64.exe',
-        'pycharm.exe',
-        'pycharm64',
-        'pycharm',
-    )
 
     for name in launcher_names:
         found = shutil.which(name)
         if found:
             return found
+    return None
 
-    system = platform.system()
 
-    if system == 'Darwin':
-        mac_candidates = (
-            '/Applications/PyCharm.app/Contents/MacOS/pycharm',
-            '/Applications/PyCharm CE.app/Contents/MacOS/pycharm',
-        )
-        for path in mac_candidates:
-            if os.path.isfile(path):
+def _find_pycharm_on_macos() -> str | None:
+    """Locate PyCharm on macOS from common app bundle paths."""
+    mac_candidates = (
+        '/Applications/PyCharm.app/Contents/MacOS/pycharm',
+        '/Applications/PyCharm CE.app/Contents/MacOS/pycharm',
+    )
+    for path in mac_candidates:
+        if _is_executable_file(path):
+            return path
+    return None
+
+
+def _find_pycharm_linux_snap() -> str | None:
+    """Locate PyCharm from common Snap launcher paths."""
+    snap_candidates = (
+        '/snap/bin/pycharm-professional',
+        '/snap/bin/pycharm-community',
+        '/snap/bin/pycharm',
+    )
+    for path in snap_candidates:
+        if _is_executable_file(path):
+            return path
+    return None
+
+
+def _find_pycharm_linux_flatpak() -> str | None:
+    """Locate PyCharm from common Flatpak exported launcher paths."""
+    home = os.path.expanduser('~')
+    app_ids = (
+        'com.jetbrains.PyCharm-Professional',
+        'com.jetbrains.PyCharm-Community',
+    )
+
+    export_roots = (
+        os.path.join(home, '.local', 'share', 'flatpak', 'exports', 'bin'),
+        '/var/lib/flatpak/exports/bin',
+    )
+
+    for root in export_roots:
+        for app_id in app_ids:
+            path = os.path.join(root, app_id)
+            if _is_executable_file(path):
                 return path
-        return None
 
-    if system != 'Windows':
-        return None
+    return None
 
-    def _find_in_jetbrains_root(root: str) -> str | None:
-        if not root or not os.path.isdir(root):
-            return None
+
+def _find_pycharm_linux_toolbox() -> str | None:
+    """Locate PyCharm installed by JetBrains Toolbox on Linux."""
+    home = os.path.expanduser('~')
+
+    toolbox_script_candidates = (
+        os.path.join(home, '.local', 'share', 'JetBrains', 'Toolbox', 'scripts', 'pycharm'),
+        os.path.join(home, '.local', 'share', 'JetBrains', 'Toolbox', 'scripts', 'pycharm.sh'),
+    )
+    for path in toolbox_script_candidates:
+        if _is_executable_file(path):
+            return path
+
+    toolbox_roots = (
+        os.path.join(home, '.local', 'share', 'JetBrains', 'Toolbox', 'apps', 'PyCharm-P'),
+        os.path.join(home, '.local', 'share', 'JetBrains', 'Toolbox', 'apps', 'PyCharm-C'),
+        os.path.join(home, '.local', 'share', 'JetBrains', 'Toolbox', 'apps', 'PyCharm Professional'),
+        os.path.join(home, '.local', 'share', 'JetBrains', 'Toolbox', 'apps', 'PyCharm Community'),
+        os.path.join(home, '.local', 'share', 'JetBrains', 'Toolbox', 'apps', 'PyCharm'),
+    )
+
+    for root in toolbox_roots:
+        if not os.path.isdir(root):
+            continue
 
         try:
-            entries = os.listdir(root)
+            channels = os.listdir(root)
         except OSError as _exc:
             Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            return None
+            continue
 
-        exe_names = (
-            'pycharm64.exe',
-            'pycharm.exe',
-            'pycharm64.bat',
-            'pycharm.bat',
-        )
-
-        for name in sorted(entries, reverse=True):
-            if not name.lower().startswith('pycharm'):
+        for channel in channels:
+            channel_dir = os.path.join(root, channel)
+            if not os.path.isdir(channel_dir):
                 continue
 
-            install_dir = os.path.join(root, name)
-            if not os.path.isdir(install_dir):
-                continue
-
-            bin_dir = os.path.join(install_dir, 'bin')
-            for exe_name in exe_names:
-                exe_path = os.path.join(bin_dir, exe_name)
-                if os.path.isfile(exe_path):
-                    return exe_path
-
-        return None
-
-    program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
-    program_files_x86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
-    local = os.environ.get('LOCALAPPDATA', '')
-
-    search_roots = [
-        os.path.join(program_files, 'JetBrains'),
-        os.path.join(program_files_x86, 'JetBrains'),
-    ]
-    if local:
-        search_roots.append(os.path.join(local, 'Programs', 'JetBrains'))
-
-    for root in search_roots:
-        found = _find_in_jetbrains_root(root)
-        if found:
-            return found
-
-    if local:
-        toolbox_script_candidates = (
-            os.path.join(local, 'JetBrains', 'Toolbox', 'scripts', 'pycharm.cmd'),
-            os.path.join(local, 'JetBrains', 'Toolbox', 'scripts', 'pycharm.bat'),
-            os.path.join(local, 'JetBrains', 'Toolbox', 'scripts', 'pycharm'),
-        )
-        for path in toolbox_script_candidates:
-            if os.path.isfile(path):
-                return path
-
-    if local:
-        toolbox_apps = os.path.join(local, 'JetBrains', 'Toolbox', 'apps', 'PyCharm')
-        if os.path.isdir(toolbox_apps):
-            exe_names = ('pycharm64.exe', 'pycharm.exe')
             try:
-                for edition in os.listdir(toolbox_apps):
-                    edition_dir = os.path.join(toolbox_apps, edition)
-                    if not os.path.isdir(edition_dir):
-                        continue
-
-                    for channel in os.listdir(edition_dir):
-                        channel_dir = os.path.join(edition_dir, channel)
-                        if not os.path.isdir(channel_dir):
-                            continue
-
-                        for build in sorted(os.listdir(channel_dir), reverse=True):
-                            build_dir = os.path.join(channel_dir, build)
-                            if not os.path.isdir(build_dir):
-                                continue
-
-                            bin_dir = os.path.join(build_dir, 'bin')
-                            for exe_name in exe_names:
-                                exe_path = os.path.join(bin_dir, exe_name)
-                                if os.path.isfile(exe_path):
-                                    return exe_path
+                builds = sorted(os.listdir(channel_dir), reverse=True)
             except OSError as _exc:
                 Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+                continue
 
+            for build in builds:
+                build_dir = os.path.join(channel_dir, build)
+                if not os.path.isdir(build_dir):
+                    continue
+
+                candidates = (
+                    os.path.join(build_dir, 'bin', 'pycharm.sh'),
+                    os.path.join(build_dir, 'bin', 'pycharm'),
+                )
+                for path in candidates:
+                    if _is_executable_file(path):
+                        return path
+
+    return None
+
+
+def _find_pycharm_on_linux() -> str | None:
+    """Locate PyCharm on Linux from PATH, Snap, Flatpak, and Toolbox."""
+    launcher_names = (
+        'pycharm',
+        'pycharm-professional',
+        'pycharm-community',
+        'pycharm64',
+        'charm',
+    )
+
+    found = _find_pycharm_from_launchers(launcher_names)
+    if found:
+        return found
+
+    found = _find_pycharm_linux_snap()
+    if found:
+        return found
+
+    found = _find_pycharm_linux_flatpak()
+    if found:
+        return found
+
+    found = _find_pycharm_linux_toolbox()
+    if found:
+        return found
+
+    return None
+
+
+def _find_pycharm_in_jetbrains_root(root: str) -> str | None:
+    """Locate PyCharm under a JetBrains installation root on Windows."""
+    if not root or not os.path.isdir(root):
+        return None
+
+    try:
+        entries = os.listdir(root)
+    except OSError as _exc:
+        Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+        return None
+
+    exe_names = (
+        'pycharm64.exe',
+        'pycharm.exe',
+        'pycharm64.bat',
+        'pycharm.bat',
+    )
+
+    for name in sorted(entries, reverse=True):
+        if not name.lower().startswith('pycharm'):
+            continue
+
+        install_dir = os.path.join(root, name)
+        if not os.path.isdir(install_dir):
+            continue
+
+        bin_dir = os.path.join(install_dir, 'bin')
+        for exe_name in exe_names:
+            exe_path = os.path.join(bin_dir, exe_name)
+            if os.path.isfile(exe_path):
+                return exe_path
+
+    return None
+
+
+def _find_pycharm_in_windows_toolbox(local: str) -> str | None:
+    """Locate PyCharm from JetBrains Toolbox scripts or app installs on Windows."""
+    if not local:
+        return None
+
+    toolbox_script_candidates = (
+        os.path.join(local, 'JetBrains', 'Toolbox', 'scripts', 'pycharm.cmd'),
+        os.path.join(local, 'JetBrains', 'Toolbox', 'scripts', 'pycharm.bat'),
+        os.path.join(local, 'JetBrains', 'Toolbox', 'scripts', 'pycharm'),
+    )
+    for path in toolbox_script_candidates:
+        if os.path.isfile(path):
+            return path
+
+    toolbox_apps = os.path.join(local, 'JetBrains', 'Toolbox', 'apps', 'PyCharm')
+    if not os.path.isdir(toolbox_apps):
+        return None
+
+    exe_names = ('pycharm64.exe', 'pycharm.exe')
+    try:
+        for edition in os.listdir(toolbox_apps):
+            edition_dir = os.path.join(toolbox_apps, edition)
+            if not os.path.isdir(edition_dir):
+                continue
+
+            for channel in os.listdir(edition_dir):
+                channel_dir = os.path.join(edition_dir, channel)
+                if not os.path.isdir(channel_dir):
+                    continue
+
+                for build in sorted(os.listdir(channel_dir), reverse=True):
+                    build_dir = os.path.join(channel_dir, build)
+                    if not os.path.isdir(build_dir):
+                        continue
+
+                    bin_dir = os.path.join(build_dir, 'bin')
+                    for exe_name in exe_names:
+                        exe_path = os.path.join(bin_dir, exe_name)
+                        if os.path.isfile(exe_path):
+                            return exe_path
+    except OSError as _exc:
+        Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+
+    return None
+
+
+def _find_pycharm_from_windows_registry() -> str | None:
+    """Locate PyCharm from Windows Registry uninstall entries."""
     try:
         import winreg
     except ImportError:
@@ -376,6 +477,65 @@ def _find_pycharm_executable() -> str | None:
             winreg.CloseKey(base_key)
 
     return None
+
+
+def _find_pycharm_on_windows() -> str | None:
+    """Locate PyCharm on Windows from PATH, install roots, Toolbox, and registry."""
+    launcher_names = (
+        'pycharm64.exe',
+        'pycharm.exe',
+        'pycharm64',
+        'pycharm',
+    )
+
+    found = _find_pycharm_from_launchers(launcher_names)
+    if found:
+        return found
+
+    program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
+    program_files_x86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
+    local = os.environ.get('LOCALAPPDATA', '')
+
+    search_roots = [
+        os.path.join(program_files, 'JetBrains'),
+        os.path.join(program_files_x86, 'JetBrains'),
+    ]
+    if local:
+        search_roots.append(os.path.join(local, 'Programs', 'JetBrains'))
+
+    for root in search_roots:
+        found = _find_pycharm_in_jetbrains_root(root)
+        if found:
+            return found
+
+    found = _find_pycharm_in_windows_toolbox(local)
+    if found:
+        return found
+
+    found = _find_pycharm_from_windows_registry()
+    if found:
+        return found
+
+    return None
+
+
+def _find_pycharm_executable() -> str | None:
+    """Locate a PyCharm executable on the current platform."""
+    import platform
+
+    system = platform.system()
+
+    if system == 'Darwin':
+        return _find_pycharm_on_macos()
+
+    if system == 'Linux':
+        return _find_pycharm_on_linux()
+
+    if system == 'Windows':
+        return _find_pycharm_on_windows()
+
+    return None
+
 
 
 def _ensure_pycharm_project_files(project_root: str) -> bool:
