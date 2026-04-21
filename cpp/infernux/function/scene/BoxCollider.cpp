@@ -13,6 +13,7 @@
 #include "GameObject.h"
 #include "MeshRenderer.h"
 #include "Transform.h"
+#include <InxLog.h>
 
 #include <nlohmann/json.hpp>
 
@@ -106,7 +107,8 @@ bool BoxCollider::Deserialize(const std::string &jsonStr)
         // Safe during scene load: RebuildShape() is a no-op when bodyId == 0xFFFFFFFF.
         RebuildShape();
         return true;
-    } catch (...) {
+    } catch (const std::exception &e) {
+        INXLOG_ERROR("BoxCollider::Deserialize failed: ", e.what());
         return false;
     }
 }

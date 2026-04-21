@@ -952,7 +952,8 @@ bool Rigidbody::Deserialize(const std::string &jsonStr)
         NotifyCollidersBodyTypeChanged();
 
         return true;
-    } catch (...) {
+    } catch (const std::exception &e) {
+        INXLOG_ERROR("Rigidbody::Deserialize failed: ", e.what());
         return false;
     }
 }

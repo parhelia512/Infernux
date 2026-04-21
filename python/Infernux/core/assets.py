@@ -76,10 +76,6 @@ class AssetManager:
     # Key = normalized file path, value = serialized JSON string.
     _material_save_snapshots: Dict[str, str] = {}
 
-    # Pre-captured material JSON snapshots for async save.
-    # Key = normalized file path, value = serialized JSON string.
-    _material_save_snapshots: Dict[str, str] = {}
-
     # Cached reference to C++ AssetRegistry singleton
     _registry = None
 

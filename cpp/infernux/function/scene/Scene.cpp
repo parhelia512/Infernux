@@ -675,7 +675,8 @@ GameObject *Scene::InstantiateFromJson(const std::string &jsonStr, GameObject *p
     json j;
     try {
         j = json::parse(jsonStr);
-    } catch (const std::exception &) {
+    } catch (const std::exception &e) {
+        INXLOG_ERROR("Scene::InstantiateFromJson: JSON parse error: ", e.what());
         return nullptr;
     }
 
@@ -810,6 +811,7 @@ bool Scene::Deserialize(const std::string &jsonStr)
 
         return true;
     } catch (const std::exception &e) {
+        INXLOG_ERROR("Scene::Deserialize failed for scene '", m_name, "': ", e.what());
         return false;
     }
 }
@@ -820,12 +822,14 @@ bool Scene::SaveToFile(const std::string &path) const
         std::string jsonStr = Serialize();
         std::ofstream file = OpenOutputFile(path, std::ios::out | std::ios::trunc);
         if (!file.is_open()) {
+            INXLOG_ERROR("Scene::SaveToFile: cannot open '", path, "' for writing");
             return false;
         }
         file << jsonStr;
         file.close();
         return true;
     } catch (const std::exception &e) {
+        INXLOG_ERROR("Scene::SaveToFile failed for '", path, "': ", e.what());
         return false;
     }
 }
@@ -835,6 +839,7 @@ bool Scene::LoadFromFile(const std::string &path)
     try {
         std::ifstream file = OpenInputFile(path);
         if (!file.is_open()) {
+            INXLOG_ERROR("Scene::LoadFromFile: cannot open '", path, "' for reading");
             return false;
         }
 
@@ -843,6 +848,7 @@ bool Scene::LoadFromFile(const std::string &path)
 
         return Deserialize(jsonStr);
     } catch (const std::exception &e) {
+        INXLOG_ERROR("Scene::LoadFromFile failed for '", path, "': ", e.what());
         return false;
     }
 }
