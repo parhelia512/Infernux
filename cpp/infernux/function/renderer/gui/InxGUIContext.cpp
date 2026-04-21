@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cstring>
 #include <type_traits>
 
 namespace infernux

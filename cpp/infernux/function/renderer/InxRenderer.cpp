@@ -398,10 +398,10 @@ void InxRenderer::DrawFrame()
     if (m_deltaTime > 0.1f)
         m_deltaTime = 0.1f;
 
-    // ========================================================================
-    // Frame Profiler — prints per-phase timings every 120 frames.
-    // Controlled by INFERNUX_FRAME_PROFILE in ProfileConfig.h (0 = off, 1 = on).
-    // ========================================================================
+        // ========================================================================
+        // Frame Profiler — prints per-phase timings every 120 frames.
+        // Controlled by INFERNUX_FRAME_PROFILE in ProfileConfig.h (0 = off, 1 = on).
+        // ========================================================================
 
 #if INFERNUX_FRAME_PROFILE
     struct FrameProfiler
@@ -808,19 +808,14 @@ void InxRenderer::DrawFrame()
             std::ostringstream oss;
             oss << std::fixed << std::setprecision(2);
             oss << "[Profile] avg" << INFERNUX_FRAME_PROFILE_WINDOW << " frame=" << (_fpAccum[0] / kWindow) << "ms"
-                << " | Delta=" << (_deltaAccumMs / kWindow) << "ms"
-                << " | Input=" << (_fpAccum[1] / kWindow) << "ms"
-                << " | Scene+Late=" << (_fpAccum[2] / kWindow) << "ms"
-                << " | GPUFence=" << (_fpAccum[3] / kWindow) << "ms"
-                << " | UI=" << (_fpAccum[4] / kWindow) << "ms"
-                << " | Prepare=" << (_fpAccum[5] / kWindow) << "ms"
-                << " | Render=" << (_fpAccum[6] / kWindow) << "ms"
-                << "(SV=" << (_srpSceneViewMs / kWindow) << "ms GV=" << (_srpGameViewMs / kWindow) << "ms)"
-                << " | Cleanup=" << (_fpAccum[7] / kWindow) << "ms"
-                << " | Lighting=" << (_fpAccum[8] / kWindow) << "ms"
-                << " | Graph+UBO=" << (_fpAccum[9] / kWindow) << "ms"
-                << " | DrawFrame=" << (_fpAccum[10] / kWindow) << "ms"
-                << " | End=" << (_fpAccum[11] / kWindow) << "ms";
+                << " | Delta=" << (_deltaAccumMs / kWindow) << "ms" << " | Input=" << (_fpAccum[1] / kWindow) << "ms"
+                << " | Scene+Late=" << (_fpAccum[2] / kWindow) << "ms" << " | GPUFence=" << (_fpAccum[3] / kWindow)
+                << "ms" << " | UI=" << (_fpAccum[4] / kWindow) << "ms" << " | Prepare=" << (_fpAccum[5] / kWindow)
+                << "ms" << " | Render=" << (_fpAccum[6] / kWindow) << "ms" << "(SV=" << (_srpSceneViewMs / kWindow)
+                << "ms GV=" << (_srpGameViewMs / kWindow) << "ms)" << " | Cleanup=" << (_fpAccum[7] / kWindow) << "ms"
+                << " | Lighting=" << (_fpAccum[8] / kWindow) << "ms" << " | Graph+UBO=" << (_fpAccum[9] / kWindow)
+                << "ms" << " | DrawFrame=" << (_fpAccum[10] / kWindow) << "ms" << " | End=" << (_fpAccum[11] / kWindow)
+                << "ms";
 
             {
                 const auto &bridgeProfile = SceneRenderBridge::Instance().GetSceneRenderer().GetProfileSnapshot();
@@ -829,8 +824,7 @@ void InxRenderer::DrawFrame()
                 oss << "\n  FrameCache: begin=" << (_detailAccum.frameCacheBeginMs / kWindow)
                     << "ms updateCall=" << (_detailAccum.sceneUpdateCallMs / kWindow)
                     << "ms lateCall=" << (_detailAccum.lateUpdateCallMs / kWindow)
-                    << "ms end=" << (_detailAccum.frameCacheEndMs / kWindow) << "ms"
-                    << "\n  PrepareDetail: total="
+                    << "ms end=" << (_detailAccum.frameCacheEndMs / kWindow) << "ms" << "\n  PrepareDetail: total="
                     << (bridgeProfile.prepareCalls ? bridgeProfile.prepareMs / bridgeProfile.prepareCalls : 0.0)
                     << "ms collect="
                     << (bridgeProfile.prepareCalls ? bridgeProfile.collectMs / bridgeProfile.prepareCalls : 0.0)
@@ -882,18 +876,12 @@ void InxRenderer::DrawFrame()
                     uint64_t shadowCalls = 0, shadowEligible = 0, shadowIssued = 0, shadowActualDraws = 0;
                     m_vkCore->GetDrawSubCounters(filteredCalls, filteredEligible, filteredIssued, filteredActualDraws,
                                                  shadowCalls, shadowEligible, shadowIssued, shadowActualDraws);
-                    oss << "\n  DrawFrame: Acquire=" << (drawSub[0] / n) << "ms"
-                        << " Record=" << (drawSub[1] / n) << "ms"
-                        << " Submit=" << (drawSub[2] / n) << "ms"
-                        << " Present=" << (drawSub[3] / n) << "ms"
-                        << "\n    Record: UBO=" << (drawSub[4] / n) << "ms"
-                        << " SceneGraph=" << (drawSub[5] / n) << "ms"
-                        << " PostScene=" << (drawSub[6] / n) << "ms"
-                        << " GUIGraph=" << (drawSub[7] / n) << "ms"
-                        << "\n    Filtered: total=" << (drawSub[8] / n) << "ms"
-                        << " filter=" << (drawSub[9] / n) << "ms"
-                        << " sort=" << (drawSub[10] / n) << "ms"
-                        << " draw=" << (drawSub[11] / n) << "ms"
+                    oss << "\n  DrawFrame: Acquire=" << (drawSub[0] / n) << "ms" << " Record=" << (drawSub[1] / n)
+                        << "ms" << " Submit=" << (drawSub[2] / n) << "ms" << " Present=" << (drawSub[3] / n) << "ms"
+                        << "\n    Record: UBO=" << (drawSub[4] / n) << "ms" << " SceneGraph=" << (drawSub[5] / n)
+                        << "ms" << " PostScene=" << (drawSub[6] / n) << "ms" << " GUIGraph=" << (drawSub[7] / n) << "ms"
+                        << "\n    Filtered: total=" << (drawSub[8] / n) << "ms" << " filter=" << (drawSub[9] / n)
+                        << "ms" << " sort=" << (drawSub[10] / n) << "ms" << " draw=" << (drawSub[11] / n) << "ms"
                         << " calls/frame=" << (static_cast<double>(filteredCalls) / n) << " eligible/call="
                         << (filteredCalls ? static_cast<double>(filteredEligible) / static_cast<double>(filteredCalls)
                                           : 0.0)
@@ -901,12 +889,9 @@ void InxRenderer::DrawFrame()
                         << (filteredCalls ? static_cast<double>(filteredIssued) / static_cast<double>(filteredCalls)
                                           : 0.0)
                         << " vkDraws/frame=" << (static_cast<double>(filteredActualDraws) / n)
-                        << "\n    Shadow: total=" << (drawSub[12] / n) << "ms"
-                        << " filter=" << (drawSub[13] / n) << "ms"
-                        << " sort=" << (drawSub[15] / n) << "ms"
-                        << " cull=" << (drawSub[16] / n) << "ms"
-                        << " upload=" << (drawSub[17] / n) << "ms"
-                        << " batch=" << (drawSub[18] / n) << "ms"
+                        << "\n    Shadow: total=" << (drawSub[12] / n) << "ms" << " filter=" << (drawSub[13] / n)
+                        << "ms" << " sort=" << (drawSub[15] / n) << "ms" << " cull=" << (drawSub[16] / n) << "ms"
+                        << " upload=" << (drawSub[17] / n) << "ms" << " batch=" << (drawSub[18] / n) << "ms"
                         << " calls/frame=" << (static_cast<double>(shadowCalls) / n) << " eligible/call="
                         << (shadowCalls ? static_cast<double>(shadowEligible) / static_cast<double>(shadowCalls) : 0.0)
                         << " issued/call="
