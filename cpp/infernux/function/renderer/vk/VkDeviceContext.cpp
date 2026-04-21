@@ -146,6 +146,7 @@ VkDeviceContext::VkDeviceContext(VkDeviceContext &&other) noexcept
     : m_instance(other.m_instance), m_debugMessenger(other.m_debugMessenger), m_surface(other.m_surface),
       m_physicalDevice(other.m_physicalDevice), m_device(other.m_device), m_vmaAllocator(other.m_vmaAllocator),
       m_graphicsQueue(other.m_graphicsQueue), m_presentQueue(other.m_presentQueue),
+      m_transferQueue(other.m_transferQueue), m_hasDedicatedTransferQueue(other.m_hasDedicatedTransferQueue),
       m_queueIndices(other.m_queueIndices), m_deviceProperties(other.m_deviceProperties),
       m_deviceFeatures(other.m_deviceFeatures),
       m_descriptorIndexingEnabled(other.m_descriptorIndexingEnabled),
@@ -159,6 +160,8 @@ VkDeviceContext::VkDeviceContext(VkDeviceContext &&other) noexcept
     other.m_vmaAllocator = VK_NULL_HANDLE;
     other.m_graphicsQueue = VK_NULL_HANDLE;
     other.m_presentQueue = VK_NULL_HANDLE;
+    other.m_transferQueue = VK_NULL_HANDLE;
+    other.m_hasDedicatedTransferQueue = false;
     other.m_descriptorIndexingEnabled = false;
     other.m_timelineSemaphoreEnabled = false;
 }
@@ -176,6 +179,8 @@ VkDeviceContext &VkDeviceContext::operator=(VkDeviceContext &&other) noexcept
         m_vmaAllocator = other.m_vmaAllocator;
         m_graphicsQueue = other.m_graphicsQueue;
         m_presentQueue = other.m_presentQueue;
+        m_transferQueue = other.m_transferQueue;
+        m_hasDedicatedTransferQueue = other.m_hasDedicatedTransferQueue;
         m_queueIndices = other.m_queueIndices;
         m_deviceProperties = other.m_deviceProperties;
         m_deviceFeatures = other.m_deviceFeatures;
@@ -191,6 +196,8 @@ VkDeviceContext &VkDeviceContext::operator=(VkDeviceContext &&other) noexcept
         other.m_vmaAllocator = VK_NULL_HANDLE;
         other.m_graphicsQueue = VK_NULL_HANDLE;
         other.m_presentQueue = VK_NULL_HANDLE;
+        other.m_transferQueue = VK_NULL_HANDLE;
+        other.m_hasDedicatedTransferQueue = false;
         other.m_descriptorIndexingEnabled = false;
         other.m_timelineSemaphoreEnabled = false;
     }
@@ -677,6 +684,20 @@ bool VkDeviceContext::CreateLogicalDevice(const DeviceConfig &config)
     vkGetDeviceQueue(m_device, m_queueIndices.graphicsFamily.value(), 0, &m_graphicsQueue);
     vkGetDeviceQueue(m_device, m_queueIndices.presentFamily.value(), 0, &m_presentQueue);
 
+    // Transfer queue: if the GPU advertised a dedicated transfer-only family
+    // (FindQueueFamilies's second pass), grab that queue handle so async
+    // upload work runs in parallel with the 3D queue. Otherwise alias to
+    // the graphics queue so call sites can always dispatch uploads through
+    // GetTransferQueue() without branching.
+    const uint32_t transferFamily = m_queueIndices.transferFamily.value_or(m_queueIndices.graphicsFamily.value());
+    m_hasDedicatedTransferQueue = (transferFamily != m_queueIndices.graphicsFamily.value());
+    if (m_hasDedicatedTransferQueue) {
+        vkGetDeviceQueue(m_device, transferFamily, 0, &m_transferQueue);
+        INXLOG_INFO("Async transfer queue enabled (family ", transferFamily, ", dedicated DMA path)");
+    } else {
+        m_transferQueue = m_graphicsQueue;
+    }
+
     return true;
 }
 
@@ -690,31 +711,53 @@ QueueFamilyIndices VkDeviceContext::FindQueueFamilies(VkPhysicalDevice device) c
     std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
 
+    // First pass: pick the canonical graphics+present queue family. Most
+    // discrete GPUs put graphics, present, transfer and compute on family 0.
     for (uint32_t i = 0; i < queueFamilyCount; i++) {
-        // Check for graphics support
-        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-            indices.graphicsFamily = i;
-        }
+        const auto flags = queueFamilies[i].queueFlags;
 
-        // Check for compute support
-        if (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
+        if ((flags & VK_QUEUE_GRAPHICS_BIT) && !indices.graphicsFamily.has_value()) {
+            indices.graphicsFamily = i;
+            // The graphics queue is always implicitly transfer+compute capable
+            // per the Vulkan spec — seed those as the conservative fallback so
+            // FindQueueFamilies always returns a complete set even on devices
+            // that expose only a single queue family.
+            indices.transferFamily = i;
             indices.computeFamily = i;
         }
 
-        // Check for transfer support
-        if (queueFamilies[i].queueFlags & VK_QUEUE_TRANSFER_BIT) {
-            indices.transferFamily = i;
-        }
-
-        // Check for present support
         VkBool32 presentSupport = VK_FALSE;
         vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_surface, &presentSupport);
-        if (presentSupport) {
+        if (presentSupport && !indices.presentFamily.has_value()) {
             indices.presentFamily = i;
         }
+    }
 
-        // Early exit if we have everything
-        if (indices.IsComplete()) {
+    // Second pass: prefer a DEDICATED transfer-only family if one exists.
+    // Discrete NVIDIA GPUs typically expose family index 1 (or 2) as a
+    // pure DMA / copy engine — using it for asset uploads runs in true
+    // parallel with the main 3D queue. Falls back to the graphics family
+    // (already seeded above) when no dedicated family is advertised.
+    for (uint32_t i = 0; i < queueFamilyCount; i++) {
+        const auto flags = queueFamilies[i].queueFlags;
+        const bool hasTransfer = (flags & VK_QUEUE_TRANSFER_BIT) != 0;
+        const bool hasGraphics = (flags & VK_QUEUE_GRAPHICS_BIT) != 0;
+        const bool hasCompute = (flags & VK_QUEUE_COMPUTE_BIT) != 0;
+        if (hasTransfer && !hasGraphics && !hasCompute) {
+            indices.transferFamily = i;
+            break;
+        }
+    }
+
+    // Third pass: prefer an async-compute family (compute-only, no graphics).
+    // Reserved for future Phase 5e compute work; today the engine still uses
+    // the graphics queue for compute dispatches.
+    for (uint32_t i = 0; i < queueFamilyCount; i++) {
+        const auto flags = queueFamilies[i].queueFlags;
+        const bool hasCompute = (flags & VK_QUEUE_COMPUTE_BIT) != 0;
+        const bool hasGraphics = (flags & VK_QUEUE_GRAPHICS_BIT) != 0;
+        if (hasCompute && !hasGraphics) {
+            indices.computeFamily = i;
             break;
         }
     }

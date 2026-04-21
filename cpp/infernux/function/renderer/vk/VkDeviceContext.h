@@ -167,6 +167,26 @@ class VkDeviceContext
         return m_presentQueue;
     }
 
+    /// @brief Get the transfer queue handle.
+    /// On GPUs with a dedicated transfer-only queue family this returns
+    /// a queue from that family (parallel with graphics). On GPUs without
+    /// dedicated transfer this returns the graphics queue itself, so call
+    /// sites can always dispatch uploads through here without branching.
+    /// Use HasDedicatedTransferQueue() to know whether async submission is
+    /// actually parallel.
+    [[nodiscard]] VkQueue GetTransferQueue() const
+    {
+        return m_transferQueue;
+    }
+
+    /// @brief True iff the transfer queue is on a different family than
+    /// graphics — i.e. submissions to it run truly in parallel with the
+    /// main 3D queue and do NOT contend for graphics throughput.
+    [[nodiscard]] bool HasDedicatedTransferQueue() const
+    {
+        return m_hasDedicatedTransferQueue;
+    }
+
     /// @brief Get queue family indices
     [[nodiscard]] const QueueFamilyIndices &GetQueueIndices() const
     {
@@ -302,6 +322,8 @@ class VkDeviceContext
     // Queue handles (not destroyed - owned by device)
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
     VkQueue m_presentQueue = VK_NULL_HANDLE;
+    VkQueue m_transferQueue = VK_NULL_HANDLE; ///< Either dedicated DMA queue or alias for m_graphicsQueue
+    bool m_hasDedicatedTransferQueue = false; ///< True iff transferFamily != graphicsFamily
 
     // ========================================================================
     // Device Information Cache
