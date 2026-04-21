@@ -30,6 +30,7 @@
 #include "VkHandle.h"
 #include "VkTypes.h"
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -415,6 +416,29 @@ class VkResourceManager
 
     // Tracked descriptor pools for cleanup
     std::vector<VkDescriptorPool> m_descriptorPools;
+
+    // ────────────────────────────────────────────────────────────────────
+    // Single-time-command pools.
+    //
+    // Pre Phase 5b every BeginSingleTimeCommands / EndSingleTimeCommands
+    // pair did vkAllocateCommandBuffers + vkCreateFence + vkQueueSubmit +
+    // vkWaitForFences + vkDestroyFence + vkFreeCommandBuffers, which is
+    // 4 kernel-driver round-trips PER tiny upload. Texture-heavy scenes
+    // were spending hundreds of microseconds per asset in driver allocation
+    // alone before any actual GPU work happened.
+    //
+    // The free-list below recycles fences and command buffers so steady-state
+    // usage hits the kernel exactly twice per submit (vkBeginCommandBuffer +
+    // vkQueueSubmit) and the wait itself.
+    //
+    // The mutex protects against concurrent uploads from background asset
+    // loading threads (Phase 5d will widen this to per-thread pools).
+    // ────────────────────────────────────────────────────────────────────
+    std::vector<VkCommandBuffer> m_freeSingleTimeCmdBuffers;
+    std::vector<VkFence> m_freeSingleTimeFences;
+    std::vector<VkFence> m_allSingleTimeFences;          // owned, destroyed in Destroy()
+    std::vector<VkCommandBuffer> m_allSingleTimeCmdBuffers; // owned via m_commandPool
+    std::mutex m_singleTimeMutex;
 };
 
 } // namespace vk

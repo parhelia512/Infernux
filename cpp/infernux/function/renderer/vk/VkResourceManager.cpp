@@ -148,6 +148,22 @@ void VkResourceManager::Destroy() noexcept
     }
     m_descriptorPools.clear();
 
+    // Tear down the single-time-command pools.
+    // m_allSingleTimeCmdBuffers is owned by m_commandPool — destroying the
+    // pool below frees them implicitly, so we only need to clear the lists.
+    {
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        for (VkFence fence : m_allSingleTimeFences) {
+            if (fence != VK_NULL_HANDLE) {
+                vkDestroyFence(m_device, fence, nullptr);
+            }
+        }
+        m_allSingleTimeFences.clear();
+        m_freeSingleTimeFences.clear();
+        m_allSingleTimeCmdBuffers.clear();
+        m_freeSingleTimeCmdBuffers.clear();
+    }
+
     // Destroy command pool
     if (m_commandPool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
@@ -554,14 +570,34 @@ void VkResourceManager::FreeCommandBuffer(const CommandBufferAllocation &allocat
 
 VkCommandBuffer VkResourceManager::BeginSingleTimeCommands()
 {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = m_commandPool;
-    allocInfo.commandBufferCount = 1;
+    // ────────────────────────────────────────────────────────────────────
+    // Phase 5b: pool command buffers and fences instead of churning them
+    // per upload. Hot path now hits zero kernel allocations after the
+    // first few warm-up uploads — see VkResourceManager.h for rationale.
+    // ────────────────────────────────────────────────────────────────────
+    VkCommandBuffer cmdBuffer = VK_NULL_HANDLE;
+    {
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        if (!m_freeSingleTimeCmdBuffers.empty()) {
+            cmdBuffer = m_freeSingleTimeCmdBuffers.back();
+            m_freeSingleTimeCmdBuffers.pop_back();
+        }
+    }
 
-    VkCommandBuffer cmdBuffer;
-    vkAllocateCommandBuffers(m_device, &allocInfo, &cmdBuffer);
+    if (cmdBuffer == VK_NULL_HANDLE) {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandPool = m_commandPool;
+        allocInfo.commandBufferCount = 1;
+        vkAllocateCommandBuffers(m_device, &allocInfo, &cmdBuffer);
+
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        m_allSingleTimeCmdBuffers.push_back(cmdBuffer);
+    } else {
+        // Recycled buffer carries left-over recording state — reset before reuse.
+        vkResetCommandBuffer(cmdBuffer, 0);
+    }
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -576,10 +612,27 @@ void VkResourceManager::EndSingleTimeCommands(VkCommandBuffer cmdBuffer)
 {
     vkEndCommandBuffer(cmdBuffer);
 
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    // Acquire (or lazily create) a recycled fence.
     VkFence submitFence = VK_NULL_HANDLE;
-    vkCreateFence(m_device, &fenceInfo, nullptr, &submitFence);
+    {
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        if (!m_freeSingleTimeFences.empty()) {
+            submitFence = m_freeSingleTimeFences.back();
+            m_freeSingleTimeFences.pop_back();
+        }
+    }
+    if (submitFence == VK_NULL_HANDLE) {
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        if (vkCreateFence(m_device, &fenceInfo, nullptr, &submitFence) != VK_SUCCESS) {
+            INXLOG_ERROR("VkResourceManager::EndSingleTimeCommands: vkCreateFence failed");
+            return;
+        }
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        m_allSingleTimeFences.push_back(submitFence);
+    } else {
+        vkResetFences(m_device, 1, &submitFence);
+    }
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -589,11 +642,14 @@ void VkResourceManager::EndSingleTimeCommands(VkCommandBuffer cmdBuffer)
     vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, submitFence);
     WaitForFencePumpingEvents(m_device, submitFence);
 
-    if (submitFence != VK_NULL_HANDLE) {
-        vkDestroyFence(m_device, submitFence, nullptr);
+    // Return both objects to the free list — the fence is reusable after
+    // vkResetFences (above) and the command buffer is reusable after the
+    // GPU has signalled (which is what WaitForFencePumpingEvents proved).
+    {
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        m_freeSingleTimeFences.push_back(submitFence);
+        m_freeSingleTimeCmdBuffers.push_back(cmdBuffer);
     }
-
-    vkFreeCommandBuffers(m_device, m_commandPool, 1, &cmdBuffer);
 }
 
 // ============================================================================
