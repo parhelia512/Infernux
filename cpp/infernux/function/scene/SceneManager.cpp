@@ -587,16 +587,19 @@ void SceneManager::SyncExternalRigidbodyMoves()
 
 void SceneManager::ClearComponentRegistries()
 {
+    // Renderer-facing registries: MeshRenderer/Light keep raw component
+    // pointers, so we must drop them before the owning GameObjects die during
+    // a Scene::Deserialize() rebuild (see the Scene Rebuild Contract).
     m_activeMeshRenderers.clear();
     m_activeMeshRendererSet.clear();
     m_activeLights.clear();
     ++m_meshRendererVersion;
 
-    // Flush stale physics pending queues.  During scene rebuild, edit-mode
-    // Collider::Awake() queues body creations whose handle.index entries linger
-    // in the dedup set.  If pool slots are reused on the next deserialize, the
-    // new QueueBodyCreation() silently fails the set insert, preventing body
-    // creation entirely.
+    // Physics pending queues: edit-mode Collider::Awake() may have queued
+    // body creations whose handle.index entries are about to be reused for
+    // freshly-allocated colliders. If we leave the dedup set populated, the
+    // new QueueBodyCreation() silently fails its insert and the body is never
+    // created, leading to invisible collisions/missing rigidbodies post-load.
     PhysicsECSStore::Instance().ClearPendingQueues();
 }
 
