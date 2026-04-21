@@ -711,11 +711,7 @@ void MaterialDescriptorManager::ResolveTextureProperties(const std::string &mate
     }
 
     if (!writes.empty()) {
-        // Material descriptor sets are shared across all frames-in-flight
-        // (not double-buffered).  Wait for all previously submitted command
-        // buffers to finish before writing image/sampler descriptors so we
-        // don't stomp a binding the GPU is still sampling.
-        vkDeviceWaitIdle(m_device);
+        WaitForGpuIdleBeforeSharedDescriptorWrite();
         vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 }
@@ -724,27 +720,36 @@ void MaterialDescriptorManager::BindTexture(const std::string &materialName, uin
                                             VkSampler sampler)
 {
     auto it = m_descriptorSets.find(materialName);
-    if (it != m_descriptorSets.end()) {
-        it->second->textureBindings[binding] = {imageView, sampler};
+    if (it == m_descriptorSets.end())
+        return;
 
-        // Update the descriptor set immediately
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = imageView;
-        imageInfo.sampler = sampler;
+    it->second->textureBindings[binding] = {imageView, sampler};
 
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = it->second->descriptorSet;
-        write.dstBinding = binding;
-        write.dstArrayElement = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.pImageInfo = &imageInfo;
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfo.imageView = imageView;
+    imageInfo.sampler = sampler;
 
-        // Shared descriptor set — wait for all in-flight usage before writing.
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = it->second->descriptorSet;
+    write.dstBinding = binding;
+    write.dstArrayElement = 0;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &imageInfo;
+
+    WaitForGpuIdleBeforeSharedDescriptorWrite();
+    vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+}
+
+void MaterialDescriptorManager::WaitForGpuIdleBeforeSharedDescriptorWrite()
+{
+    // See the helper's declaration in MaterialDescriptor.h for the rationale.
+    // Centralising the drain here gives a single audit point for the future
+    // double-buffered / FrameDeletionQueue replacement.
+    if (m_device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(m_device);
-        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
     }
 }
 

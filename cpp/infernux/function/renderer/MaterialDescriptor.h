@@ -226,6 +226,27 @@ class MaterialDescriptorManager
      */
     void BindTexture(const std::string &materialName, uint32_t binding, VkImageView imageView, VkSampler sampler);
 
+  private:
+    /**
+     * @brief Drain the GPU before mutating a shared descriptor set.
+     *
+     * Material descriptor sets are not double-buffered, so any binding
+     * change must wait until the GPU is no longer sampling the previous
+     * binding. The current implementation calls vkDeviceWaitIdle which
+     * is correct but maximally pessimistic — it serialises 100% of GPU
+     * work on a texture swap. The long-term fix is to either duplicate
+     * descriptor sets per frame-in-flight or push the old descriptor set
+     * onto the FrameDeletionQueue and allocate a fresh one. Both paths
+     * are beyond the scope of static cleanup; this helper centralises
+     * the stall so future work can replace it in one place.
+     *
+     * Pre-condition: must be called on the main thread, OUTSIDE of a
+     * frame's command-buffer recording.
+     */
+    void WaitForGpuIdleBeforeSharedDescriptorWrite();
+
+  public:
+
     /**
      * @brief Set a frame deletion queue for deferred GPU resource cleanup.
      *
