@@ -158,8 +158,10 @@ class AssetManager:
             if hasattr(asset, "_guid"):
                 try:
                     asset._guid = guid
-                except (AttributeError, TypeError) as _exc:
-                    Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+                except (AttributeError, TypeError):
+                    # Some asset wrappers expose _guid as a property without
+                    # a setter; the underlying GUID lookup still works via the
+                    # cache key, so a missing setter is benign here.
                     pass
             cls._put_cache(guid, asset)
         return asset
@@ -289,8 +291,8 @@ class AssetManager:
         try:
             guid = adb.import_asset(path)
             return bool(guid)
-        except (RuntimeError, OSError) as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+        except (RuntimeError, OSError) as exc:
+            Debug.log_suppressed("AssetManager.reimport_asset", exc)
             return False
 
     @classmethod
@@ -313,8 +315,8 @@ class AssetManager:
             return False
         try:
             return bool(adb.move_asset(old_path, new_path))
-        except (RuntimeError, OSError) as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+        except (RuntimeError, OSError) as exc:
+            Debug.log_suppressed("AssetManager.move_asset", exc)
             return False
 
     @classmethod
@@ -393,8 +395,8 @@ class AssetManager:
                     if ok:
                         cls.on_material_saved(file_path)
                         return True
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+            except Exception as exc:
+                Debug.log_suppressed("AssetManager.schedule_material_save_async.native_path", exc)
 
         # Fallback for older native builds — run synchronous save on the
         # IO thread pool to avoid blocking the main/render thread.
@@ -407,8 +409,8 @@ class AssetManager:
         def _fallback_save():
             try:
                 return save()
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+            except Exception as exc:
+                Debug.log_suppressed("AssetManager.schedule_material_save_async.fallback_save", exc)
                 return False
 
         _io_pool.submit(_fallback_save)
@@ -499,8 +501,8 @@ class AssetManager:
         try:
             from Infernux.lib import AssetRegistry
             return AssetRegistry.instance()
-        except (ImportError, RuntimeError, AttributeError) as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+        except (ImportError, RuntimeError, AttributeError) as exc:
+            Debug.log_suppressed("AssetManager._resolve_registry", exc)
             return None
 
     @classmethod
@@ -555,9 +557,10 @@ class AssetManager:
             cls._texture_cache[guid] = asset
         try:
             cls._cache[guid] = weakref.ref(asset)
-        except TypeError as _exc:
-            # Object doesn't support weakref — skip caching
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+        except TypeError:
+            # Object doesn't support weakref (e.g. some pybind types) —
+            # caching is best-effort and the asset will simply be reloaded
+            # next time it is requested.
             pass
 
     @classmethod
@@ -661,9 +664,8 @@ class AssetManager:
             for ident in identifiers:
                 if ident:
                     cache.invalidate(ident)
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
+        except Exception as exc:
+            Debug.log_suppressed("AssetManager._invalidate_texture_ui_cache.shared_cache", exc)
 
         native = cls._native_engine()
 
@@ -673,16 +675,17 @@ class AssetManager:
                     continue
                 try:
                     native.invalidate_texture_preview_task(f"ui_img|{ident}")
-                except Exception as _exc:
-                    Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                    pass
+                except Exception as exc:
+                    Debug.log_suppressed(
+                        "AssetManager._invalidate_texture_ui_cache.native_preview_task",
+                        exc,
+                    )
 
         try:
             from Infernux.engine.ui.asset_resource_preview import invalidate_resource_preview
             invalidate_resource_preview(path)
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
+        except Exception as exc:
+            Debug.log_suppressed("AssetManager._invalidate_texture_ui_cache.resource_preview", exc)
 
         try:
             from Infernux.engine.ui.window_manager import WindowManager
@@ -692,9 +695,8 @@ class AssetManager:
                     invalidate = getattr(panel, "invalidate_texture_thumbnail", None)
                     if callable(invalidate):
                         invalidate(path)
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
+        except Exception as exc:
+            Debug.log_suppressed("AssetManager._invalidate_texture_ui_cache.panels", exc)
 
     @classmethod
     def _invalidate_material_ui_cache(cls, path: str) -> None:
@@ -718,9 +720,8 @@ class AssetManager:
                     invalidate = getattr(panel, "invalidate_material_thumbnail", None)
                     if callable(invalidate):
                         invalidate(path)
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
+        except Exception as exc:
+            Debug.log_suppressed("AssetManager._invalidate_material_ui_cache.panels", exc)
 
     @classmethod
     def _remove_material_pipeline(cls, material_key: str) -> None:
@@ -771,8 +772,8 @@ class AssetManager:
                         continue
                     setattr(py_comp, "texture_path", "")
                     changed = True
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+        except Exception as exc:
+            Debug.log_suppressed("AssetManager._clear_deleted_texture_from_active_ui.scan", exc)
             return False
 
         if changed:
@@ -782,9 +783,11 @@ class AssetManager:
                 sfm = SceneFileManager.instance()
                 if sfm is not None:
                     sfm.mark_dirty()
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                pass
+            except Exception as exc:
+                Debug.log_suppressed(
+                    "AssetManager._clear_deleted_texture_from_active_ui.mark_dirty",
+                    exc,
+                )
 
         return changed
 
