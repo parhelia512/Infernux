@@ -280,6 +280,8 @@ class AssetManager:
         if asset_category == "mesh":
             cls._reload_mesh_asset(path)
 
+        cls._emit_editor_asset_changed(path, "modified")
+
         return True
 
     @classmethod
@@ -294,6 +296,18 @@ class AssetManager:
         except (RuntimeError, OSError) as _exc:
             Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
             return False
+
+    @classmethod
+    def _emit_editor_asset_changed(cls, path: str, event_type: str = "modified") -> None:
+        if not path:
+            return
+        try:
+            from Infernux.engine.ui.event_bus import EditorEventBus, EditorEvent
+
+            bus = EditorEventBus.instance()
+            bus.emit(EditorEvent.ASSET_CHANGED, path, event_type)
+        except Exception:
+            pass
 
     @classmethod
     def move_asset(cls, old_path: str, new_path: str) -> bool:

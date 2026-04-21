@@ -123,7 +123,7 @@ class SpriteRenderer(BuiltinComponent):
     _last_color: tuple = None
     _last_sprite: str = ""
     _material_ready: bool = False
-    _instance_counter: int = 0  # class-level counter for unique material names
+    _instance_counter: int = 0  # fallback counter before a stable component_id exists
 
     # ── Binding hook ────────────────────────────────────────────────
 
@@ -542,6 +542,31 @@ class SpriteRenderer(BuiltinComponent):
             return native
         return Material.from_native(native)
 
+    def _stable_default_material_name(self) -> str:
+        """Return a stable runtime material key for this SpriteRenderer."""
+        comp_id = int(getattr(self, "component_id", 0) or 0)
+        if comp_id > 0:
+            return f"SpriteUnlit_Default_{comp_id}"
+        return ""
+
+    @classmethod
+    def _next_temp_material_name(cls) -> str:
+        cls._instance_counter += 1
+        return f"SpriteUnlit_Temp{cls._instance_counter}"
+
+    def _stabilize_default_material_name(self, native_mat) -> None:
+        """Keep auto-created default sprite materials stable across scene reloads."""
+        desired_name = self._stable_default_material_name()
+        if not desired_name or native_mat is None:
+            return
+        try:
+            frag = getattr(native_mat, "frag_shader_name", None)
+            path = getattr(native_mat, "file_path", "") or ""
+            if frag == "sprite_unlit" and not path and getattr(native_mat, "name", "") != desired_name:
+                native_mat.name = desired_name
+        except Exception:
+            pass
+
     def _ensure_material(self):
         """Create the default sprite_unlit material if none is assigned."""
         cpp = self._cpp_component
@@ -550,6 +575,7 @@ class SpriteRenderer(BuiltinComponent):
         existing = cpp.get_material(0)
         if existing is not None:
             self._sprite_material = existing
+            self._stabilize_default_material_name(existing)
             self._material_ready = True
             # Reload sprite data in case we're restoring from a scene
             self._load_sprite_data()
@@ -565,12 +591,9 @@ class SpriteRenderer(BuiltinComponent):
             mat.surface_type = "opaque"
             mat.alpha_clip_enabled = True
             mat.alpha_clip_threshold = 0.5
-            # Give each instance a unique name so GetMaterialKey() returns a
-            # unique key — the renderer shares UBO/descriptor data per key,
-            # so without this all SpriteRenderers would share one set of
-            # material properties (color, texture, uvRect).
-            SpriteRenderer._instance_counter += 1
-            mat._native.name = f"SpriteUnlit_Inst{SpriteRenderer._instance_counter}"
+            # Runtime sprite materials still need a unique renderer key, but it
+            # must stay stable across Play/Stop for the same component.
+            mat._native.name = self._stable_default_material_name() or self._next_temp_material_name()
             mat.set_color("baseColor", 1.0, 1.0, 1.0, 1.0)
             mat.set_vector4("uvRect", 0.0, 0.0, 1.0, 1.0)
             self._sprite_material = mat._native

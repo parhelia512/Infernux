@@ -675,6 +675,17 @@ def _read_animclip_preview_settings(tex_file: str):
     return use_nearest, use_srgb, frames
 
 
+def _sprite_frame_imgui_uv(frame: SpriteFrame, tex_w: int, tex_h: int) -> Tuple[float, float, float, float]:
+    """Map sprite-frame coordinates to the existing ImGui preview UV convention."""
+    inv_w = float(max(tex_w, 1))
+    inv_h = float(max(tex_h, 1))
+    uv0_x = float(frame.x) / inv_w
+    uv0_y = float(frame.y) / inv_h
+    uv1_x = float(frame.x + frame.w) / inv_w
+    uv1_y = float(frame.y + frame.h) / inv_h
+    return uv0_x, uv0_y, uv1_x, uv1_y
+
+
 def _ensure_animclip_preview_texture(state: _State, tex_file: str) -> bool:
     """Queue/fetch sprite-sheet preview via native C++ task system."""
 
@@ -811,10 +822,7 @@ def _render_animclip_preview(ctx: InxGUIContext, clip, state: _State):
         return
 
     frame = frames[src_idx]
-    uv0_x = frame.x / max(tex_w, 1)
-    uv0_y = frame.y / max(tex_h, 1)
-    uv1_x = (frame.x + frame.w) / max(tex_w, 1)
-    uv1_y = (frame.y + frame.h) / max(tex_h, 1)
+    uv0_x, uv0_y, uv1_x, uv1_y = _sprite_frame_imgui_uv(frame, tex_w, tex_h)
 
     # Fit into available width, max 200px
     avail_w = ctx.get_content_region_avail_width()
@@ -1338,9 +1346,15 @@ def _ensure_sprite_texture(state: _State) -> bool:
     # Track sRGB + filter_mode so we re-upload when either changes
     cur_srgb = getattr(state.settings, 'srgb', False)
     cur_filter = getattr(state.settings, 'filter_mode', None)
+    meta = state.meta or read_meta_file(state.file_path) or {}
+    expected_w = int(meta.get("width", 0) or 0)
+    expected_h = int(meta.get("height", 0) or 0)
+    dims_match = ((expected_w <= 0 or ss.tex_w == expected_w)
+                  and (expected_h <= 0 or ss.tex_h == expected_h))
     if (ss.file_path == state.file_path and ss.tex_w > 0
             and getattr(ss, '_srgb', None) == cur_srgb
-            and getattr(ss, '_filter', None) == cur_filter):
+            and getattr(ss, '_filter', None) == cur_filter
+            and dims_match):
         return True
     # Preserve slice grid when only sRGB/filter changed for the same file
     same_file = (ss.file_path == state.file_path)
@@ -1379,9 +1393,16 @@ def _ensure_sprite_texture(state: _State) -> bool:
             pump=True,
         )
 
+        source_w = int(meta.get("width", 0) or 0)
+        source_h = int(meta.get("height", 0) or 0)
+        if source_w <= 0:
+            source_w = max(int(tex_w), 0)
+        if source_h <= 0:
+            source_h = max(int(tex_h), 0)
+
         ss.texture_id = int(tex_id)
-        ss.tex_w = max(int(tex_w), 0)
-        ss.tex_h = max(int(tex_h), 0)
+        ss.tex_w = source_w
+        ss.tex_h = source_h
     except Exception as exc:
         Debug.log_warning(f"[SpriteEditor] Preview task exception: {exc}")
         ss.texture_id = 0

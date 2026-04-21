@@ -78,6 +78,17 @@ _PLAYBACK_PLAYING = 1
 _U64 = 0xFFFFFFFFFFFFFFFF
 
 
+def _sprite_frame_imgui_uv(frame, tex_w: int, tex_h: int) -> Tuple[float, float, float, float]:
+    """Map sprite-frame coordinates to the existing ImGui preview UV convention."""
+    inv_w = float(max(tex_w, 1))
+    inv_h = float(max(tex_h, 1))
+    uv0_x = float(frame.x) / inv_w
+    uv0_y = float(frame.y) / inv_h
+    uv1_x = float(frame.x + frame.w) / inv_w
+    uv1_y = float(frame.y + frame.h) / inv_h
+    return uv0_x, uv0_y, uv1_x, uv1_y
+
+
 @editor_panel(
     "2D Animation Clip Editor",
     type_id="animclip2d_editor",
@@ -510,10 +521,7 @@ class AnimClip2DEditorPanel(EditorPanel):
 
                 if 0 <= fidx < len(tex.frames):
                     frame = tex.frames[fidx]
-                    uv0_x = frame.x / max(tex.tex_w, 1)
-                    uv0_y = frame.y / max(tex.tex_h, 1)
-                    uv1_x = (frame.x + frame.w) / max(tex.tex_w, 1)
-                    uv1_y = (frame.y + frame.h) / max(tex.tex_h, 1)
+                    uv0_x, uv0_y, uv1_x, uv1_y = _sprite_frame_imgui_uv(frame, tex.tex_w, tex.tex_h)
 
                     # Fit preview into available space, centered
                     max_dim = max(8.0, min(_PREVIEW_MAX_SIZE, child_w - 24.0, child_h - 16.0))
@@ -578,11 +586,7 @@ class AnimClip2DEditorPanel(EditorPanel):
 
                         if 0 <= frame_idx < len(tex.frames):
                             frame = tex.frames[frame_idx]
-
-                            uv0_x = frame.x / max(tex.tex_w, 1)
-                            uv0_y = frame.y / max(tex.tex_h, 1)
-                            uv1_x = (frame.x + frame.w) / max(tex.tex_w, 1)
-                            uv1_y = (frame.y + frame.h) / max(tex.tex_h, 1)
+                            uv0_x, uv0_y, uv1_x, uv1_y = _sprite_frame_imgui_uv(frame, tex.tex_w, tex.tex_h)
 
                             # Aspect-preserving image inside square button
                             aspect = frame.w / max(frame.h, 1)
@@ -654,11 +658,7 @@ class AnimClip2DEditorPanel(EditorPanel):
                 if ctx.begin_table("##palette_grid", cols, 0, 0.0):
                     for i, frame in enumerate(tex.frames):
                         ctx.table_next_column()
-
-                        uv0_x = frame.x / max(tex.tex_w, 1)
-                        uv0_y = frame.y / max(tex.tex_h, 1)
-                        uv1_x = (frame.x + frame.w) / max(tex.tex_w, 1)
-                        uv1_y = (frame.y + frame.h) / max(tex.tex_h, 1)
+                        uv0_x, uv0_y, uv1_x, uv1_y = _sprite_frame_imgui_uv(frame, tex.tex_w, tex.tex_h)
 
                         # Aspect-preserving image inside square button
                         aspect = frame.w / max(frame.h, 1)
