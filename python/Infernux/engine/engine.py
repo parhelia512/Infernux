@@ -172,17 +172,15 @@ class Engine():
             from Infernux.engine.deferred_task import DeferredTaskRunner
             try:
                 DeferredTaskRunner.instance().tick()
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                pass
+            except Exception as exc:
+                Debug.log_suppressed("Engine.pre_gui_tick.DeferredTaskRunner", exc)
             try:
                 from Infernux.engine.ui.window_manager import WindowManager
                 manager = WindowManager.instance()
                 if manager is not None:
                     manager.process_pending_actions()
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                pass
+            except Exception as exc:
+                Debug.log_suppressed("Engine.pre_gui_tick.WindowManager", exc)
         self._engine.set_pre_gui_callback(_pre_gui_tick)
 
         # Install a post-draw callback that runs AFTER GPU submit + present.
@@ -203,14 +201,12 @@ class Engine():
             if sfm is not None:
                 try:
                     sfm.poll_pending_save()
-                except Exception as _exc:
-                    Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                    pass
+                except Exception as exc:
+                    Debug.log_suppressed("Engine.post_draw_tick.poll_pending_save", exc)
                 try:
                     sfm.poll_deferred_load()
-                except Exception as _exc:
-                    Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                    pass
+                except Exception as exc:
+                    Debug.log_suppressed("Engine.post_draw_tick.poll_deferred_load", exc)
             # Periodic manual GC: gen0 every 120 frames (~1s at 120fps),
             # gen1 every 600 frames (~5s), full every 3000 frames (~25s).
             _gc_frame[0] += 1
@@ -292,9 +288,8 @@ class Engine():
         try:
             from Infernux.core.material import Material
             Material.flush_all_pending()
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
+        except Exception as exc:
+            Debug.log_suppressed("Engine._flush_pending_material_saves", exc)
 
     def _clear_uploaded_gizmos(self):
         """Clear uploaded gizmo buffers once when Scene View is hidden."""
@@ -349,9 +344,8 @@ class Engine():
         if callable(self._before_exit_callback):
             try:
                 self._before_exit_callback()
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                pass
+            except Exception as exc:
+                Debug.log_suppressed("Engine.exit.before_exit_callback", exc)
 
         # Safety net: if cleanup hangs (C++ deadlock, thread stuck), force-kill
         # the process after a generous timeout so we never leave zombie procs.
@@ -409,9 +403,8 @@ class Engine():
             sm = _NativeSceneMgr.instance()
             if sm:
                 sm.stop()
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
+        except Exception as exc:
+            Debug.log_suppressed("Engine._shutdown_play_mode.SceneManager.stop", exc)
 
         # 2. Destroy all live Python components (on_destroy + GC helpers)
         try:
@@ -420,13 +413,14 @@ class Engine():
                 for comp in list(comp_list):
                     try:
                         comp._call_on_destroy()
-                    except Exception as _exc:
-                        Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                        pass
+                    except Exception as exc:
+                        Debug.log_suppressed(
+                            f"Engine._shutdown_play_mode.on_destroy[{type(comp).__name__}]",
+                            exc,
+                        )
             InxComponent._clear_all_instances()
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
+        except Exception as exc:
+            Debug.log_suppressed("Engine._shutdown_play_mode.clear_all_instances", exc)
 
         # 3. Flip state to EDIT so nothing else treats us as playing
         pmm._state = PlayModeState.EDIT
@@ -463,15 +457,18 @@ class Engine():
                     return False
                 try:
                     save_handler()
-                except Exception as _exc:
-                    Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+                except Exception as exc:
+                    Debug.log_suppressed(
+                        f"Engine._confirm_dirty_panels_before_exit.save_handler[{panel_id}]",
+                        exc,
+                    )
                     return False
                 if is_panel_dirty(panel_id):
                     # Save was cancelled or failed.
                     return False
             return True
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+        except Exception as exc:
+            Debug.log_suppressed("Engine._confirm_dirty_panels_before_exit", exc)
             return True
 
     def set_gui_font(self, font_path, font_size=18):
