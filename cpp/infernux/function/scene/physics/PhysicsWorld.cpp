@@ -304,15 +304,24 @@ void PhysicsWorld::Shutdown()
         return;
 
     INXLOG_INFO("PhysicsWorld: Shutting down...");
+
+    // Step 1: drop contact pair tracking and the body→collider lookup before
+    // any body dies, so callbacks racing the teardown can't dereference
+    // freed Collider* pointers.
     if (m_contactListener)
         m_contactListener->ClearAll();
     m_bodyToCollider.clear();
+
+    // Step 2: tear down subsystems in dependency order (newest first).
     m_contactListener.reset();
     m_physicsSystem.reset();
     m_jobSystem.reset();
     m_tempAllocator.reset();
     m_layers.reset();
 
+    // Step 3: drop Jolt's process-global state. Safe because every owned
+    // unique_ptr above has been released, so no Jolt object outlives the
+    // factory.
     JPH::UnregisterTypes();
     delete JPH::Factory::sInstance;
     JPH::Factory::sInstance = nullptr;
@@ -547,11 +556,11 @@ void PhysicsWorld::DestroyBody(Collider *collider)
     if (id == 0xFFFFFFFF)
         return;
 
-    JPH::BodyID bodyId(id);
+    // Contract: caller (Collider::UnregisterBody) must have already removed
+    // this body from the broadphase. See PhysicsWorld.h::DestroyBody for the
+    // full ordering invariant.
     JPH::BodyInterface &bodyInterface = m_physicsSystem->GetBodyInterface();
-    // NOTE: Caller (Collider::UnregisterBody) must have already called
-    // RemoveFromBroadphase() before reaching here.
-    bodyInterface.DestroyBody(bodyId);
+    bodyInterface.DestroyBody(JPH::BodyID(id));
 
     m_bodyToCollider.erase(id);
 }
