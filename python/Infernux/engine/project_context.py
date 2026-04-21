@@ -149,8 +149,8 @@ def get_script_module_name(path: Optional[str]) -> Optional[str]:
     try:
         if os.path.commonpath([resolved_abs, assets_root]) != assets_root:
             return None
-    except ValueError as _exc:
-        Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+    except ValueError as exc:
+        Debug.log_suppressed("project_context.normalize_relative_path", exc)
         return None
 
     rel_path = os.path.relpath(resolved_abs, assets_root)
@@ -213,9 +213,8 @@ def get_script_import_paths(path: Optional[str] = None) -> list[str]:
                 if parent_dir and parent_dir not in roots:
                     roots.append(parent_dir)
                 return roots
-        except ValueError as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
+        except ValueError as exc:
+            Debug.log_suppressed("project_context.collect_assets_roots", exc)
 
     if assets_root:
         roots.append(assets_root)
@@ -284,9 +283,8 @@ def resolve_guid_to_path(guid: str) -> Optional[str]:
                 try:
                     with open(manifest, "r", encoding="utf-8") as f:
                         _guid_manifest = json.load(f)
-                except (json.JSONDecodeError, OSError) as _exc:
-                    Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                    pass
+                except (json.JSONDecodeError, OSError) as exc:
+                    Debug.log_suppressed("project_context.load_guid_manifest", exc)
     if _guid_manifest and guid and guid in _guid_manifest:
         rel = _guid_manifest[guid]
         if _project_root:

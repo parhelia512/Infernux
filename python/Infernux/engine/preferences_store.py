@@ -30,9 +30,8 @@ def _prefs_path() -> str:
             ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf)
             if buf.value:
                 docs = pathlib.Path(buf.value)
-        except (OSError, ValueError) as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
+        except (OSError, ValueError) as exc:
+            Debug.log_suppressed("preferences_store.resolve_documents_dir", exc)
     else:
         docs = pathlib.Path.home() / "Documents"
 
@@ -67,8 +66,8 @@ class PreferencesStore:
             with open(self._path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return data if isinstance(data, dict) else {}
-        except (json.JSONDecodeError, OSError) as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+        except (json.JSONDecodeError, OSError) as exc:
+            Debug.log_suppressed("preferences_store.load", exc)
             return {}
 
     def save(self, data: dict) -> None:
@@ -76,9 +75,8 @@ class PreferencesStore:
         try:
             with open(self._path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-        except OSError as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
+        except OSError as exc:
+            Debug.log_suppressed("preferences_store.save", exc)
 
     def get(self, key: str, default=None):
         """Return a single preference value."""

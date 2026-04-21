@@ -46,9 +46,8 @@ def _plog(msg):
     try:
         with open(path, "a", encoding="utf-8") as f:
             f.write(str(msg) + "\n")
-    except OSError as _exc:
-        Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-        pass
+    except OSError as exc:
+        Debug.log_suppressed("player_bootstrap.write_player_log", exc)
 
 
 class PlayerBootstrap:
@@ -92,8 +91,9 @@ class PlayerBootstrap:
             from Infernux.engine.project_requirements import ensure_project_requirements
 
             ensure_project_requirements(self.project_path, auto_install=False)
-        except ImportError as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+        except ImportError:
+            # Optional packaging helper missing — runtime continues without
+            # auto-install; happens in slim distribution variants.
             pass
 
     def _init_engine(self):
@@ -162,9 +162,8 @@ class PlayerBootstrap:
             try:
                 with open(bs_path, "r", encoding="utf-8", errors="replace") as _f:
                     data = _json.load(_f)
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                pass
+            except Exception as exc:
+                Debug.log_suppressed("player_bootstrap.load_build_manifest", exc)
         scenes = data.get("scenes", [])
         if not scenes:
             Debug.log_warning("No scenes in BuildSettings.json — starting with empty scene")

@@ -7,6 +7,7 @@ callbacks to a C++ ``ProjectPanel`` instance.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -271,8 +272,11 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
                 load_component_from_file, ScriptLoadError)
             load_component_from_file(file_path)
             return True
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+        except Exception as exc:
+            Debug.log_suppressed(
+                f"bootstrap_project.validate_script_component[{os.path.basename(file_path)}]",
+                exc,
+            )
             return False
 
     pp.validate_script_component = _validate_script_component
@@ -283,9 +287,8 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
             from Infernux.engine.ui.asset_details_renderer import (
                 invalidate_asset)
             invalidate_asset(path)
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
+        except Exception as exc:
+            Debug.log_suppressed("bootstrap_project.invalidate_asset_inspector", exc)
 
     pp.invalidate_asset_inspector = _invalidate_asset_inspector
 
@@ -303,9 +306,8 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
                 files = im.get_dropped_files()
                 if files and pp.get_current_path():
                     pp.receive_dropped_files(files)
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                pass
+            except Exception as exc:
+                Debug.log_suppressed("bootstrap_project.ExternalDropForwarder.on_render", exc)
 
     bs._external_drop_forwarder = _ExternalDropForwarder()
     bs.engine.register_gui("project_drop_forwarder", bs._external_drop_forwarder)
