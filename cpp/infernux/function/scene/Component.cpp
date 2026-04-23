@@ -247,6 +247,7 @@ bool Component::Deserialize(const std::string &jsonStr)
         // instance_guid is now derived from component_id; ignore legacy string values
         return true;
     } catch (const std::exception &e) {
+        INXLOG_ERROR("Component::Deserialize failed for '", GetTypeName(), "' (id=", m_componentId, "): ", e.what());
         return false;
     }
 }

@@ -687,6 +687,14 @@ class InxVkCoreModular
         return m_deletionQueue;
     }
 
+    /// @brief Get the async upload context. Always valid after Initialize();
+    /// will alias to the graphics queue if the GPU has no dedicated transfer
+    /// family, so callers don't need to branch.
+    [[nodiscard]] vk::AsyncTransferContext &GetAsyncTransferContext()
+    {
+        return m_asyncTransferContext;
+    }
+
     /// @brief Inline-update the lighting UBO in a command buffer.
     ///
     /// Uses vkCmdUpdateBuffer with proper pipeline barriers so that all
@@ -755,6 +763,7 @@ class InxVkCoreModular
     vk::VkSwapchainManager m_swapchain;
     vk::VkPipelineManager m_pipelineManager;
     vk::VkResourceManager m_resourceManager;
+    vk::AsyncTransferContext m_asyncTransferContext;
     vk::RenderGraph m_renderGraph;
 
     // ========================================================================

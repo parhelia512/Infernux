@@ -30,6 +30,7 @@
 #include "VkHandle.h"
 #include "VkTypes.h"
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -401,6 +402,25 @@ class VkResourceManager
         m_skipWaitIdle = v;
     }
 
+    /**
+     * @brief Plug an AsyncTransferContext for opt-in async-queue uploads.
+     *
+     * When set, CreateTextureFromPixels first attempts the async path
+     * (VK_SHARING_MODE_CONCURRENT image + transfer-queue submit). On
+     * single-queue-family GPUs, when async upload isn't legal (e.g. mipmap
+     * generation requires graphics-queue blit), or when the async submit
+     * itself fails, we transparently fall back to the legacy graphics-queue
+     * synchronous path so behaviour is identical from the caller's view.
+     *
+     * Pass nullptr to disable; resource manager is independent of the
+     * async-transfer subsystem.
+     */
+    void SetAsyncTransferContext(class AsyncTransferContext *transfer, uint32_t graphicsQueueFamily)
+    {
+        m_asyncTransfer = transfer;
+        m_graphicsQueueFamily = graphicsQueueFamily;
+    }
+
   private:
     bool m_skipWaitIdle = false;
     VmaAllocator m_vmaAllocator = VK_NULL_HANDLE;
@@ -409,12 +429,41 @@ class VkResourceManager
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
 
+    // Optional plug-in async-transfer context. Lifetime is owned externally
+    // (typically InxVkCoreModular::m_asyncTransferContext) — VkResourceManager
+    // never destroys it. nullptr means "always use the synchronous path".
+    class AsyncTransferContext *m_asyncTransfer = nullptr;
+    uint32_t m_graphicsQueueFamily = 0;
+
     // Cached samplers
     VkSampler m_linearSampler = VK_NULL_HANDLE;
     VkSampler m_nearestSampler = VK_NULL_HANDLE;
 
     // Tracked descriptor pools for cleanup
     std::vector<VkDescriptorPool> m_descriptorPools;
+
+    // ────────────────────────────────────────────────────────────────────
+    // Single-time-command pools.
+    //
+    // Pre Phase 5b every BeginSingleTimeCommands / EndSingleTimeCommands
+    // pair did vkAllocateCommandBuffers + vkCreateFence + vkQueueSubmit +
+    // vkWaitForFences + vkDestroyFence + vkFreeCommandBuffers, which is
+    // 4 kernel-driver round-trips PER tiny upload. Texture-heavy scenes
+    // were spending hundreds of microseconds per asset in driver allocation
+    // alone before any actual GPU work happened.
+    //
+    // The free-list below recycles fences and command buffers so steady-state
+    // usage hits the kernel exactly twice per submit (vkBeginCommandBuffer +
+    // vkQueueSubmit) and the wait itself.
+    //
+    // The mutex protects against concurrent uploads from background asset
+    // loading threads (Phase 5d will widen this to per-thread pools).
+    // ────────────────────────────────────────────────────────────────────
+    std::vector<VkCommandBuffer> m_freeSingleTimeCmdBuffers;
+    std::vector<VkFence> m_freeSingleTimeFences;
+    std::vector<VkFence> m_allSingleTimeFences;             // owned, destroyed in Destroy()
+    std::vector<VkCommandBuffer> m_allSingleTimeCmdBuffers; // owned via m_commandPool
+    std::mutex m_singleTimeMutex;
 };
 
 } // namespace vk

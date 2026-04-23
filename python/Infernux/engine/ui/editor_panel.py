@@ -466,5 +466,8 @@ class EditorPanel(ClosablePanel):
         self._pop_window_style(ctx)
 
         # Fire the close hook when the panel is closed.
-        if not self._is_open:
+        # Also reset _enable_called so a future reopen runs on_enable() again,
+        # matching the documented "created or reopened" contract.
+        if not self._is_open and self._enable_called:
+            self._enable_called = False
             self.on_disable()

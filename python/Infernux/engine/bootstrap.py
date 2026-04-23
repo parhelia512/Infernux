@@ -53,9 +53,8 @@ def _signal_progress(current_step: int, total: int, message: str) -> None:
             f.write(f"LOADING:{current_step}/{total}:{message}\n")
             f.flush()
             os.fsync(f.fileno())
-    except OSError as _exc:
-        Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-        pass
+    except OSError as exc:
+        Debug.log_suppressed("EditorBootstrap.write_loading_progress", exc)
 
 from ._bootstrap_panels import BootstrapPanelsMixin
 from ._bootstrap_selection import BootstrapSelectionMixin
@@ -213,8 +212,8 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
         # Route through the same preview cache API used by inspector.
         try:
             from Infernux.engine.ui.asset_resource_preview import get_resource_preview_texture_id
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+        except Exception as exc:
+            Debug.log_suppressed("EditorBootstrap.material_preview_prewarm.import", exc)
             return
 
         class _BootstrapPreviewPanel:
@@ -239,8 +238,11 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
                 ))
                 if tex_id:
                     warmed += 1
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+            except Exception as exc:
+                Debug.log_suppressed(
+                    f"EditorBootstrap.material_preview_prewarm[{os.path.basename(mat_path)}]",
+                    exc,
+                )
                 continue
 
         Debug.log_internal(f"Material preview prewarm: {warmed}/{len(material_paths)}")
@@ -252,8 +254,8 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             try:
                 native.flush_all_material_previews()
                 Debug.log_internal("Material preview prewarm: flush complete")
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+            except Exception as exc:
+                Debug.log_suppressed("EditorBootstrap.material_preview_prewarm.flush_all", exc)
 
     def _create_managers(self):
         from Infernux.engine.undo import UndoManager

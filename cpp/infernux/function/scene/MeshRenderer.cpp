@@ -778,6 +778,7 @@ bool MeshRenderer::Deserialize(const std::string &jsonStr)
 
         return true;
     } catch (const std::exception &e) {
+        INXLOG_ERROR("MeshRenderer::Deserialize failed: ", e.what());
         return false;
     }
 }

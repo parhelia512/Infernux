@@ -1,5 +1,6 @@
 #include "SpriteRenderer.h"
 #include "ComponentFactory.h"
+#include <InxLog.h>
 #include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <function/scene/PrimitiveMeshes.h>
 #include <nlohmann/json.hpp>
@@ -84,7 +85,8 @@ bool SpriteRenderer::Deserialize(const std::string &jsonStr)
         }
 
         return true;
-    } catch (const std::exception &) {
+    } catch (const std::exception &e) {
+        INXLOG_ERROR("SpriteRenderer::Deserialize failed: ", e.what());
         return false;
     }
 }

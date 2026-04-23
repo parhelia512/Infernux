@@ -826,6 +826,7 @@ bool GameObject::Deserialize(const std::string &jsonStr)
 
         return true;
     } catch (const std::exception &e) {
+        INXLOG_ERROR("GameObject::Deserialize failed for '", m_name, "' (id=", m_id, "): ", e.what());
         return false;
     }
 }

@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cmath>
 #include <core/config/MathConstants.h>
+#include <core/threading/JobSystem.h>
 #include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <function/resources/InxMaterial/InxMaterial.h>
 #include <function/resources/InxMesh/InxMesh.h>
@@ -89,6 +90,11 @@ InxRenderer::~InxRenderer()
         m_view->Quit();
     }
     m_view.reset();
+
+    // 5. Stop the engine-wide worker pool. Done last so any
+    //    last-minute teardown work scheduled by subsystem destructors
+    //    above has a thread to run on.
+    JobSystem::Shutdown();
 }
 
 void InxRenderer::SetCameraPos(float x, float y, float z)
@@ -154,6 +160,14 @@ void InxRenderer::Init(int width, int height, InxAppMetadata appMetaData)
     if (!m_vkCore) {
         INXLOG_ERROR("Failed to create InxVkCoreModular.");
         return;
+    }
+
+    // Bring up the engine-wide C++ thread pool BEFORE Vulkan / scene init so
+    // any subsystem that wants to schedule background work can. Idempotent
+    // when called twice (e.g. when an external host already initialised it),
+    // and Shutdown() in ~InxRenderer pairs with Initialize() here.
+    if (!JobSystem::IsAvailable()) {
+        JobSystem::Initialize();
     }
 
     m_vkCore->SetWindowSize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));

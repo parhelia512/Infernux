@@ -288,9 +288,17 @@ VkDescriptorPool MaterialDescriptorManager::CreateDescriptorPool(uint32_t maxMat
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, maxMaterials * samplerDescriptorsPerMaterial},
     };
 
+    VkDescriptorPoolCreateFlags poolFlags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    if (m_updateAfterBindEnabled) {
+        // Required when any layout allocated from this pool carries
+        // VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT
+        // (see ShaderProgram::CreateDescriptorSetLayouts).
+        poolFlags |= VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    }
+
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT; // Allow freeing individual sets
+    poolInfo.flags = poolFlags;
     poolInfo.maxSets = maxMaterials;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
@@ -711,11 +719,7 @@ void MaterialDescriptorManager::ResolveTextureProperties(const std::string &mate
     }
 
     if (!writes.empty()) {
-        // Material descriptor sets are shared across all frames-in-flight
-        // (not double-buffered).  Wait for all previously submitted command
-        // buffers to finish before writing image/sampler descriptors so we
-        // don't stomp a binding the GPU is still sampling.
-        vkDeviceWaitIdle(m_device);
+        WaitForGpuIdleBeforeSharedDescriptorWrite();
         vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 }
@@ -724,27 +728,44 @@ void MaterialDescriptorManager::BindTexture(const std::string &materialName, uin
                                             VkSampler sampler)
 {
     auto it = m_descriptorSets.find(materialName);
-    if (it != m_descriptorSets.end()) {
-        it->second->textureBindings[binding] = {imageView, sampler};
+    if (it == m_descriptorSets.end())
+        return;
 
-        // Update the descriptor set immediately
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = imageView;
-        imageInfo.sampler = sampler;
+    it->second->textureBindings[binding] = {imageView, sampler};
 
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = it->second->descriptorSet;
-        write.dstBinding = binding;
-        write.dstArrayElement = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.pImageInfo = &imageInfo;
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfo.imageView = imageView;
+    imageInfo.sampler = sampler;
 
-        // Shared descriptor set — wait for all in-flight usage before writing.
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = it->second->descriptorSet;
+    write.dstBinding = binding;
+    write.dstArrayElement = 0;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &imageInfo;
+
+    WaitForGpuIdleBeforeSharedDescriptorWrite();
+    vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+}
+
+void MaterialDescriptorManager::WaitForGpuIdleBeforeSharedDescriptorWrite()
+{
+    // Fast path: when descriptor indexing UPDATE_AFTER_BIND is enabled,
+    // the driver tracks descriptor liveness internally and lets us rewrite
+    // bindings that are currently in command buffers in flight. No drain
+    // is required and the editor texture-edit hot path becomes truly free.
+    if (m_updateAfterBindEnabled) {
+        return;
+    }
+
+    // Legacy fallback: layouts/pools were created without the descriptor-
+    // indexing flags (older GPU or feature unsupported), so we still have
+    // to drain the device before mutating a shared descriptor set.
+    if (m_device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(m_device);
-        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
     }
 }
 

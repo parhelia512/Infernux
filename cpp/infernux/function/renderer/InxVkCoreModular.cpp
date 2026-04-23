@@ -149,6 +149,7 @@ InxVkCoreModular::~InxVkCoreModular()
     m_depthImage.reset();
 
     m_renderGraph.Destroy();
+    m_asyncTransferContext.Destroy();
     m_resourceManager.Destroy();
 
     // RenderGraph::Destroy() and MaterialPipelineManager::Shutdown()
@@ -214,6 +215,26 @@ void InxVkCoreModular::PrepareSurface()
     if (!m_resourceManager.Initialize(m_deviceContext)) {
         INXLOG_ERROR("Failed to initialize resource manager");
         return;
+    }
+
+    // Initialize the async-transfer context. On GPUs without a dedicated
+    // transfer queue this aliases to the graphics queue and behaves like
+    // a pooled-fence fast path; on GPUs with one (most discrete cards) it
+    // unlocks truly parallel asset uploads. Failures are non-fatal — the
+    // engine simply keeps using the synchronous VkResourceManager path.
+    const auto &queueIndices = m_deviceContext.GetQueueIndices();
+    const uint32_t graphicsFamily = queueIndices.graphicsFamily.value_or(0);
+    const uint32_t transferFamily = queueIndices.transferFamily.value_or(graphicsFamily);
+    if (m_asyncTransferContext.Initialize(m_deviceContext.GetDevice(), transferFamily,
+                                          m_deviceContext.GetTransferQueue(),
+                                          m_deviceContext.HasDedicatedTransferQueue())) {
+        // Plug the async context into the resource manager so non-mipmap
+        // texture uploads route through the dedicated DMA queue. Mipmap
+        // generation still falls back to the graphics queue because
+        // vkCmdBlitImage is not legal on transfer-only queues.
+        m_resourceManager.SetAsyncTransferContext(&m_asyncTransferContext, graphicsFamily);
+    } else {
+        INXLOG_WARN("Async transfer context unavailable; uploads will use the graphics queue.");
     }
 
     // Initialize pipeline manager

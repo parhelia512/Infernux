@@ -195,6 +195,12 @@ class PhysicsECSStore
         return m_rigidbodyPool.GetAliveHandles();
     }
 
+    /// Null out cachedRigidbody on every alive collider that references *dying*.
+    /// Idempotent and safe to call with a Rigidbody* that no other collider
+    /// references — used both as part of ReleaseRigidbody and as a public hook
+    /// for paths that need to invalidate caches before a Rigidbody is destroyed.
+    void ScrubCachedRigidbody(Rigidbody *dying);
+
     /// Zero-allocation iteration over all alive rigidbodies.
     template <typename Func> void ForEachAliveRigidbody(Func &&func)
     {
