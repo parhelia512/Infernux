@@ -246,7 +246,6 @@ class MaterialDescriptorManager
     void WaitForGpuIdleBeforeSharedDescriptorWrite();
 
   public:
-
     /**
      * @brief Set a frame deletion queue for deferred GPU resource cleanup.
      *

@@ -461,7 +461,7 @@ class VkResourceManager
     // ────────────────────────────────────────────────────────────────────
     std::vector<VkCommandBuffer> m_freeSingleTimeCmdBuffers;
     std::vector<VkFence> m_freeSingleTimeFences;
-    std::vector<VkFence> m_allSingleTimeFences;          // owned, destroyed in Destroy()
+    std::vector<VkFence> m_allSingleTimeFences;             // owned, destroyed in Destroy()
     std::vector<VkCommandBuffer> m_allSingleTimeCmdBuffers; // owned via m_commandPool
     std::mutex m_singleTimeMutex;
 };

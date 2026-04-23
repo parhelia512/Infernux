@@ -148,8 +148,7 @@ VkDeviceContext::VkDeviceContext(VkDeviceContext &&other) noexcept
       m_graphicsQueue(other.m_graphicsQueue), m_presentQueue(other.m_presentQueue),
       m_transferQueue(other.m_transferQueue), m_hasDedicatedTransferQueue(other.m_hasDedicatedTransferQueue),
       m_queueIndices(other.m_queueIndices), m_deviceProperties(other.m_deviceProperties),
-      m_deviceFeatures(other.m_deviceFeatures),
-      m_descriptorIndexingEnabled(other.m_descriptorIndexingEnabled),
+      m_deviceFeatures(other.m_deviceFeatures), m_descriptorIndexingEnabled(other.m_descriptorIndexingEnabled),
       m_timelineSemaphoreEnabled(other.m_timelineSemaphoreEnabled), m_validationEnabled(other.m_validationEnabled)
 {
     other.m_instance = VK_NULL_HANDLE;
@@ -617,8 +616,8 @@ bool VkDeviceContext::CreateLogicalDevice(const DeviceConfig &config)
 
     VkPhysicalDeviceFeatures deviceFeatures{};
     deviceFeatures.samplerAnisotropy = VK_TRUE;
-    deviceFeatures.fillModeNonSolid = VK_TRUE; // For wireframe
-    deviceFeatures.depthBiasClamp = VK_TRUE;   // For shadow depth bias clamping
+    deviceFeatures.fillModeNonSolid = VK_TRUE;              // For wireframe
+    deviceFeatures.depthBiasClamp = VK_TRUE;                // For shadow depth bias clamping
     deviceFeatures.wideLines = supportedFeatures.wideLines; // For debug lines (when available)
 
     // Vulkan 1.2 features — opt into descriptor-indexing capabilities only
@@ -629,8 +628,7 @@ bool VkDeviceContext::CreateLogicalDevice(const DeviceConfig &config)
     features12.descriptorIndexing = supported12.descriptorIndexing;
     features12.descriptorBindingPartiallyBound = supported12.descriptorBindingPartiallyBound;
     features12.descriptorBindingVariableDescriptorCount = supported12.descriptorBindingVariableDescriptorCount;
-    features12.descriptorBindingSampledImageUpdateAfterBind =
-        supported12.descriptorBindingSampledImageUpdateAfterBind;
+    features12.descriptorBindingSampledImageUpdateAfterBind = supported12.descriptorBindingSampledImageUpdateAfterBind;
     features12.descriptorBindingUniformBufferUpdateAfterBind =
         supported12.descriptorBindingUniformBufferUpdateAfterBind;
     features12.descriptorBindingStorageBufferUpdateAfterBind =

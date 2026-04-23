@@ -52,8 +52,8 @@ void JobSystem::Initialize(uint32_t workerCount)
         g_instance->m_workers.emplace_back([] { JobSystem::Get().WorkerLoop(); });
     }
 
-    INXLOG_INFO("JobSystem online with ", resolved, " worker thread(s) (hw_concurrency=",
-                std::thread::hardware_concurrency(), ")");
+    INXLOG_INFO("JobSystem online with ", resolved,
+                " worker thread(s) (hw_concurrency=", std::thread::hardware_concurrency(), ")");
 }
 
 void JobSystem::Shutdown()
@@ -194,8 +194,7 @@ void JobSystem::WorkerLoop()
         Task task;
         {
             std::unique_lock<std::mutex> guard(m_queueMutex);
-            m_queueCv.wait(guard,
-                           [this] { return !m_queue.empty() || !m_running.load(std::memory_order_acquire); });
+            m_queueCv.wait(guard, [this] { return !m_queue.empty() || !m_running.load(std::memory_order_acquire); });
 
             if (!m_running.load(std::memory_order_acquire) && m_queue.empty()) {
                 return;

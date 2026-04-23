@@ -281,9 +281,8 @@ bool VkImageHandle::Create(VmaAllocator allocator, VkDevice device, uint32_t wid
 
 bool VkImageHandle::CreateConcurrent(VmaAllocator allocator, VkDevice device, uint32_t width, uint32_t height,
                                      VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
-                                     VkMemoryPropertyFlags properties,
-                                     const std::vector<uint32_t> &sharedQueueFamilies, VkSampleCountFlagBits samples,
-                                     uint32_t mipLevels)
+                                     VkMemoryPropertyFlags properties, const std::vector<uint32_t> &sharedQueueFamilies,
+                                     VkSampleCountFlagBits samples, uint32_t mipLevels)
 {
     // CONCURRENT sharing requires at least 2 distinct queue families per
     // the Vulkan spec; silently downgrade if the caller can't actually
@@ -686,8 +685,7 @@ bool VkTexture::CreateFromPixelsAsync(VmaAllocator allocator, VkDevice device, V
     // ────────────────────────────────────────────────────────────────────
 
     const uint32_t transferQueueFamily = transfer.GetQueueFamily();
-    const bool wantAsync =
-        transfer.IsAsyncCapable() && transferQueueFamily != graphicsQueueFamily && !generateMipmaps;
+    const bool wantAsync = transfer.IsAsyncCapable() && transferQueueFamily != graphicsQueueFamily && !generateMipmaps;
 
     if (!wantAsync) {
         // Either no dedicated transfer queue, or we need mipmap blits which
