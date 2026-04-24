@@ -758,7 +758,13 @@ void ProjectPanel::AppendModelSubAssets(std::vector<FileItem> &out, AssetDatabas
         out.push_back(std::move(sub));
     }
 
-    // ── Embedded animation takes (one row per take; inspect as virtual .animclip3d) ──
+    // ── Embedded animation takes (one row per take; virtual id = model GUID when available) ──
+    std::string animVirtualBase = modelPath;
+    if (adb) {
+        std::string g = adb->GetGuidFromPath(modelPath);
+        if (!g.empty())
+            animVirtualBase = std::move(g);
+    }
     std::vector<std::string> animNames = SplitCommaList(TryGetMetaString(meta, "animation_names_csv"));
     int animCount = TryGetMetaInt(meta, "animation_count", -1);
     if (!animNames.empty()) {
@@ -770,7 +776,7 @@ void ProjectPanel::AppendModelSubAssets(std::vector<FileItem> &out, AssetDatabas
             sub.type = FileItem::SubMesh;
             const std::string &takeName = animNames[static_cast<size_t>(i)];
             sub.name = takeName + ".animclip3d";
-            sub.path = MakeSubAssetVirtualPath(modelPath, kSubAnimToken, i);
+            sub.path = MakeSubAssetVirtualPath(animVirtualBase, kSubAnimToken, i);
             sub.ext = ".animclip3d";
             sub.parentPath = modelPath;
             sub.mtimeNs = childMtime;
@@ -781,7 +787,7 @@ void ProjectPanel::AppendModelSubAssets(std::vector<FileItem> &out, AssetDatabas
             FileItem sub{};
             sub.type = FileItem::SubMesh;
             sub.name = std::string("… ") + std::to_string(total - show) + " more animation takes";
-            sub.path = MakeSubAssetVirtualPath(modelPath, kSubAnimToken, 999999);
+            sub.path = MakeSubAssetVirtualPath(animVirtualBase, kSubAnimToken, 999999);
             sub.ext = ".animclip3d";
             sub.parentPath = modelPath;
             sub.mtimeNs = childMtime;
@@ -792,7 +798,7 @@ void ProjectPanel::AppendModelSubAssets(std::vector<FileItem> &out, AssetDatabas
         FileItem sub{};
         sub.type = FileItem::SubMesh;
         sub.name = std::string("Animations: ") + std::to_string(animCount) + " take(s) (reimport for names)";
-        sub.path = MakeSubAssetVirtualPath(modelPath, kSubAnimToken, 0);
+        sub.path = MakeSubAssetVirtualPath(animVirtualBase, kSubAnimToken, 0);
         sub.ext = ".animclip3d";
         sub.parentPath = modelPath;
         sub.mtimeNs = childMtime;

@@ -338,7 +338,7 @@ class NodeGraphView:
 
         # Drop targets on the canvas
         if ctx.begin_drag_drop_target():
-            for dtype in ("ANIMCLIP_FILE", "ANIMFSM_FILE", "ASSET_FILE"):
+            for dtype in ("ANIMCLIP_FILE", "ANIMCLIP3D_FILE", "ANIMFSM_FILE", "ASSET_FILE"):
                 payload = ctx.accept_drag_drop_payload(dtype)
                 if payload and self.on_canvas_drop:
                     mx = ctx.get_mouse_pos_x()

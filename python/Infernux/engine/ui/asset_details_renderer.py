@@ -123,7 +123,12 @@ def _meta_host_path_for_virtual_asset(file_path: str) -> str:
     for tok in ("::submat:", "::subanim:", "::subbone:"):
         pos = file_path.find(tok)
         if pos != -1:
-            return file_path[:pos]
+            base = file_path[:pos]
+            from Infernux.core.animation_clip3d import resolve_model_disk_path_from_virtual_base
+            resolved = resolve_model_disk_path_from_virtual_base(base)
+            if resolved:
+                return resolved
+            return base
     return file_path
 
 

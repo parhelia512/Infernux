@@ -13,8 +13,32 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+
+def resolve_model_disk_path_from_virtual_base(base: str) -> Optional[str]:
+    """Map virtual clip prefix (asset GUID or absolute model file path) to a readable model file path."""
+    b = (base or "").strip()
+    if not b:
+        return None
+    try:
+        uuid.UUID(b)
+    except (ValueError, TypeError, AttributeError):
+        p = os.path.normpath(b)
+        return p if os.path.isfile(p) else None
+
+    try:
+        from Infernux.core.assets import AssetManager
+        adb = getattr(AssetManager, "_asset_database", None)
+        if adb:
+            p = adb.get_path_from_guid(b)
+            if p and os.path.isfile(p):
+                return os.path.normpath(p)
+    except Exception:
+        pass
+    return None
 
 
 @dataclass
@@ -124,12 +148,13 @@ class AnimationClip3D:
 
     @classmethod
     def from_embedded_take_virtual_path(cls, virtual_path: str) -> Optional["AnimationClip3D"]:
-        """Build a read-only clip view for ``model.fbx::subanim:<index>`` (Project Panel)."""
+        """Build a read-only clip for ``<guid|path>::subanim:<index>`` (Project Panel embedded takes)."""
         token = "::subanim:"
         if token not in virtual_path:
             return None
         base, _, rest = virtual_path.partition(token)
-        if not base.strip():
+        base = base.strip()
+        if not base:
             return None
         try:
             idx = int(rest.strip())
@@ -138,12 +163,14 @@ class AnimationClip3D:
         # Placeholder / overflow row from the project panel
         if idx < 0 or idx >= 999999:
             return None
-        if not os.path.isfile(base):
+
+        model_disk = resolve_model_disk_path_from_virtual_base(base)
+        if not model_disk:
             return None
 
         from Infernux.core.asset_types import read_meta_file
 
-        meta = read_meta_file(base) or {}
+        meta = read_meta_file(model_disk) or {}
         csv = (meta.get("animation_names_csv") or "")
         if isinstance(csv, str):
             names = [p.strip() for p in csv.split(",") if p.strip()]
@@ -154,7 +181,12 @@ class AnimationClip3D:
             return None
 
         take_name = names[idx]
-        guid = _read_asset_guid_from_meta_sidecar(base)
+        meta_guid = _read_asset_guid_from_meta_sidecar(model_disk)
+        try:
+            uuid.UUID(base)
+            source_guid = base
+        except (ValueError, TypeError, AttributeError):
+            source_guid = meta_guid
         bind_csv = (meta.get("bone_names_csv") or "")
         if isinstance(bind_csv, str):
             bind_names = [p.strip() for p in bind_csv.split(",") if p.strip()]
@@ -163,8 +195,8 @@ class AnimationClip3D:
 
         clip = cls(
             name=take_name,
-            source_model_guid=guid,
-            source_model_path=os.path.normpath(base),
+            source_model_guid=source_guid,
+            source_model_path=model_disk,
             take_name=take_name,
             bind_pose_bone_names=bind_names,
             speed=1.0,
