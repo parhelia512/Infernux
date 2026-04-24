@@ -61,6 +61,26 @@ class SkinnedMeshRenderer : public MeshRenderer
         return m_activeTakeName;
     }
 
+    /// Elapsed time in the current clip (seconds). Runtime-only, not serialized — fed by SkeletalAnimator.
+    void SetRuntimeAnimationTime(float t)
+    {
+        m_runtimeAnimationTime = t;
+    }
+    [[nodiscard]] float GetRuntimeAnimationTime() const
+    {
+        return m_runtimeAnimationTime;
+    }
+
+    /// Normalized clip progress [0,1] when a duration is known. Runtime-only.
+    void SetRuntimeAnimationNormalizedTime(float n)
+    {
+        m_runtimeAnimationNormalized = n;
+    }
+    [[nodiscard]] float GetRuntimeAnimationNormalizedTime() const
+    {
+        return m_runtimeAnimationNormalized;
+    }
+
     [[nodiscard]] bool HasAnimationTakes() const
     {
         return !m_animationTakeNames.empty();
@@ -75,6 +95,8 @@ class SkinnedMeshRenderer : public MeshRenderer
     std::string m_sourceModelPath;
     std::vector<std::string> m_animationTakeNames;
     std::string m_activeTakeName;
+    float m_runtimeAnimationTime = 0.0f;
+    float m_runtimeAnimationNormalized = 0.0f;
 };
 
 } // namespace infernux

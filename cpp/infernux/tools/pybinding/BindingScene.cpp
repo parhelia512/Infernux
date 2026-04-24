@@ -829,7 +829,13 @@ void RegisterSceneBindings(py::module_ &m)
         .def(
             "get_animation_take_names",
             [](const SkinnedMeshRenderer &sr) { return sr.GetAnimationTakeNames(); },
-            "Get imported animation take names from the source model");
+            "Get imported animation take names from the source model")
+        .def_property("runtime_animation_time", &SkinnedMeshRenderer::GetRuntimeAnimationTime,
+                      &SkinnedMeshRenderer::SetRuntimeAnimationTime,
+                      "Current clip time in seconds (runtime; driven by SkeletalAnimator)")
+        .def_property("runtime_animation_normalized_time", &SkinnedMeshRenderer::GetRuntimeAnimationNormalizedTime,
+                      &SkinnedMeshRenderer::SetRuntimeAnimationNormalizedTime,
+                      "Normalized clip time 0..1 (runtime; driven when duration is known)");
 
     // ========================================================================
     // SpriteRenderer — inherits MeshRenderer for rendering, adds sprite props

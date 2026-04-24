@@ -111,6 +111,7 @@ __all__ = [
     "AudioListener",
     "SpriteRenderer",
     "SpiritAnimator",
+    "SkeletalAnimator",
     "Animator3D",
     # Decorators
     "require_component",

@@ -396,6 +396,8 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             from Infernux.core.asset_types import asset_category_from_extension
             if "::submat:" in path:
                 cat = "material"
+            elif "::subanim:" in path:
+                cat = "animclip3d"
             else:
                 ext = os.path.splitext(path)[1].lower()
                 cat = asset_category_from_extension(ext) or ""

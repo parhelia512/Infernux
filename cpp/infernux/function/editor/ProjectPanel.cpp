@@ -88,7 +88,9 @@ static std::string SelectionPathForInspector(const std::string &path)
     // Embedded material slots use the material inspector (Python + virtual path).
     if (path.find(kSubMatToken) != std::string::npos)
         return path;
-    // Bones / animation listing rows still inspect the parent source model.
+    // Embedded animation takes use the 3D clip inspector (Python + virtual path).
+    if (path.find(kSubAnimToken) != std::string::npos)
+        return path;
     return ResolveRealAssetPath(path);
 }
 
@@ -756,48 +758,7 @@ void ProjectPanel::AppendModelSubAssets(std::vector<FileItem> &out, AssetDatabas
         out.push_back(std::move(sub));
     }
 
-    // ── Skeleton / bones (debug listing; data comes from ModelImporter) ──
-    std::vector<std::string> boneNames = SplitCommaList(TryGetMetaString(meta, "bone_names_csv"));
-    int boneCount = TryGetMetaInt(meta, "bone_count", -1);
-    if (!boneNames.empty()) {
-        const int maxShow = 32;
-        const int total = static_cast<int>(boneNames.size());
-        const int show = std::min(total, maxShow);
-        for (int i = 0; i < show; ++i) {
-            FileItem sub{};
-            sub.type = FileItem::SubMesh;
-            sub.name = std::string("Bone: ") + boneNames[static_cast<size_t>(i)];
-            sub.path = MakeSubAssetVirtualPath(modelPath, kSubBoneToken, i);
-            sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
-            sub.parentPath = modelPath;
-            sub.mtimeNs = childMtime;
-            sub.slotIndex = i;
-            out.push_back(std::move(sub));
-        }
-        if (total > show) {
-            FileItem sub{};
-            sub.type = FileItem::SubMesh;
-            sub.name = std::string("… ") + std::to_string(total - show) + " more bones";
-            sub.path = MakeSubAssetVirtualPath(modelPath, kSubBoneToken, 999999);
-            sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
-            sub.parentPath = modelPath;
-            sub.mtimeNs = childMtime;
-            sub.slotIndex = -1;
-            out.push_back(std::move(sub));
-        }
-    } else if (boneCount > 0) {
-        FileItem sub{};
-        sub.type = FileItem::SubMesh;
-        sub.name = std::string("Skeleton: ") + std::to_string(boneCount) + " bone(s) (reimport for names)";
-        sub.path = MakeSubAssetVirtualPath(modelPath, kSubBoneToken, 0);
-        sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
-        sub.parentPath = modelPath;
-        sub.mtimeNs = childMtime;
-        sub.slotIndex = -1;
-        out.push_back(std::move(sub));
-    }
-
-    // ── Embedded animation clips (names only; authoring uses .animclip3d) ──
+    // ── Embedded animation takes (one row per take; inspect as virtual .animclip3d) ──
     std::vector<std::string> animNames = SplitCommaList(TryGetMetaString(meta, "animation_names_csv"));
     int animCount = TryGetMetaInt(meta, "animation_count", -1);
     if (!animNames.empty()) {
@@ -807,9 +768,10 @@ void ProjectPanel::AppendModelSubAssets(std::vector<FileItem> &out, AssetDatabas
         for (int i = 0; i < show; ++i) {
             FileItem sub{};
             sub.type = FileItem::SubMesh;
-            sub.name = std::string("Anim: ") + animNames[static_cast<size_t>(i)];
+            const std::string &takeName = animNames[static_cast<size_t>(i)];
+            sub.name = takeName + ".animclip3d";
             sub.path = MakeSubAssetVirtualPath(modelPath, kSubAnimToken, i);
-            sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
+            sub.ext = ".animclip3d";
             sub.parentPath = modelPath;
             sub.mtimeNs = childMtime;
             sub.slotIndex = i;
@@ -818,9 +780,9 @@ void ProjectPanel::AppendModelSubAssets(std::vector<FileItem> &out, AssetDatabas
         if (total > show) {
             FileItem sub{};
             sub.type = FileItem::SubMesh;
-            sub.name = std::string("… ") + std::to_string(total - show) + " more anims";
+            sub.name = std::string("… ") + std::to_string(total - show) + " more animation takes";
             sub.path = MakeSubAssetVirtualPath(modelPath, kSubAnimToken, 999999);
-            sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
+            sub.ext = ".animclip3d";
             sub.parentPath = modelPath;
             sub.mtimeNs = childMtime;
             sub.slotIndex = -1;
@@ -829,9 +791,9 @@ void ProjectPanel::AppendModelSubAssets(std::vector<FileItem> &out, AssetDatabas
     } else if (animCount > 0) {
         FileItem sub{};
         sub.type = FileItem::SubMesh;
-        sub.name = std::string("Animations: ") + std::to_string(animCount) + " clip(s) (reimport for names)";
+        sub.name = std::string("Animations: ") + std::to_string(animCount) + " take(s) (reimport for names)";
         sub.path = MakeSubAssetVirtualPath(modelPath, kSubAnimToken, 0);
-        sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
+        sub.ext = ".animclip3d";
         sub.parentPath = modelPath;
         sub.mtimeNs = childMtime;
         sub.slotIndex = -1;
@@ -1067,8 +1029,8 @@ uint64_t ProjectPanel::GetTypeIconId(const FileItem &item) const
         auto sit = iconMap.find("__dir__");
         key = sit != iconMap.end() ? &sit->second : &fallbackKey;
     } else if (item.type == FileItem::SubMesh) {
-        auto sit = iconMap.find(".fbx");
-        key = sit != iconMap.end() ? &sit->second : &fallbackKey;
+        auto mapIt = iconMap.find(item.ext.empty() ? ".fbx" : item.ext);
+        key = mapIt != iconMap.end() ? &mapIt->second : &fallbackKey;
     } else if (item.type == FileItem::SubMaterial) {
         auto sit = iconMap.find(".mat");
         key = sit != iconMap.end() ? &sit->second : &fallbackKey;

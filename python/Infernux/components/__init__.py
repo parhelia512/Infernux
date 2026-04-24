@@ -82,7 +82,8 @@ from .decorators import (
     Icon,
 )
 from .animator2d import SpiritAnimator
-from .animator3d import Animator3D
+from .skeletal_animator import SkeletalAnimator
+from .animator3d import Animator3D  # deprecated alias
 
 __all__ = [
     "InxComponent",
@@ -144,5 +145,6 @@ __all__ = [
     "Icon",
     # Animation
     "SpiritAnimator",
+    "SkeletalAnimator",
     "Animator3D",
 ]

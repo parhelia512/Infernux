@@ -1795,16 +1795,16 @@ class AnimFSMEditorPanel(EditorPanel):
             if not scene:
                 return
             from Infernux.components.animator2d import SpiritAnimator
-            from Infernux.components.animator3d import Animator3D
+            from Infernux.components.skeletal_animator import SkeletalAnimator
             norm = os.path.normpath(fsm_path)
             for go in scene.get_all_objects():
                 animator = go.get_component(SpiritAnimator)
                 if animator and animator._fsm and os.path.normpath(
                         animator._fsm.file_path or "") == norm:
                     animator.reload_controller()
-                animator3d = go.get_component(Animator3D)
-                if animator3d and animator3d._fsm and os.path.normpath(
-                        animator3d._fsm.file_path or "") == norm:
-                    animator3d.reload_controller()
+                skel = go.get_component(SkeletalAnimator)
+                if skel and skel._fsm and os.path.normpath(
+                        skel._fsm.file_path or "") == norm:
+                    skel.reload_controller()
         except Exception:
             pass

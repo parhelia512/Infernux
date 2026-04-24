@@ -2,7 +2,7 @@
 SkinnedMeshRenderer — Python wrapper for the native SkinnedMeshRenderer component.
 
 This currently reuses MeshRenderer's rendering/material API while exposing
-animated-model metadata and the active take selection used by Animator3D.
+animated-model metadata and the active take selection used by SkeletalAnimator.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ class SkinnedMeshRenderer(MeshRenderer):
         FieldType.STRING,
         default="",
         readonly=True,
+        visible_when=lambda _c: False,
         tooltip="GUID of the source animated model asset",
     )
     source_model_path = CppProperty(
@@ -32,6 +33,7 @@ class SkinnedMeshRenderer(MeshRenderer):
         FieldType.STRING,
         default="",
         readonly=True,
+        visible_when=lambda _c: False,
         tooltip="Filesystem path of the source animated model",
     )
     active_take_name = CppProperty(

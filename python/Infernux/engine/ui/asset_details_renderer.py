@@ -113,6 +113,21 @@ class AssetCategoryDef:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Virtual assets (model ::submat / ::subanim) — map to real disk path for .meta
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _meta_host_path_for_virtual_asset(file_path: str) -> str:
+    if not file_path:
+        return file_path
+    for tok in ("::submat:", "::subanim:", "::subbone:"):
+        pos = file_path.find(tok)
+        if pos != -1:
+            return file_path[:pos]
+    return file_path
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Unified state
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -145,7 +160,7 @@ class _State:
         self.reset()
         self.file_path = file_path
         self.category = category
-        self.meta = read_meta_file(file_path)
+        self.meta = read_meta_file(_meta_host_path_for_virtual_asset(file_path))
         result = cat_def.load_fn(file_path)
         if result is None:
             return False
@@ -648,10 +663,15 @@ def _render_animclip_body(ctx: InxGUIContext, panel, state: _State):
 def _load_animclip3d(path: str):
     from Infernux.core.animation_clip3d import AnimationClip3D
 
+    if "::subanim:" in path:
+        clip = AnimationClip3D.from_embedded_take_virtual_path(path)
+        if clip is None:
+            return None
+        return clip, {"clip_path": path, "embedded_model_take": True}
     clip = AnimationClip3D.load(path)
     if clip is None:
         return None
-    return clip, {"clip_path": path}
+    return clip, {"clip_path": path, "embedded_model_take": False}
 
 
 def _render_animclip3d_body(ctx: InxGUIContext, panel, state: _State):
@@ -674,6 +694,13 @@ def _render_animclip3d_body(ctx: InxGUIContext, panel, state: _State):
     lw = max_label_w(ctx, labels)
 
     ctx.dummy(0, 4)
+
+    embedded = bool(state.extra.get("embedded_model_take"))
+    if embedded:
+        ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
+        ctx.label(t("asset.animclip3d_embedded_hint"))
+        ctx.pop_style_color(1)
+        ctx.dummy(0, 4)
 
     clip_display_name = os.path.splitext(os.path.basename(state.file_path))[0] if state.file_path else clip.name
     field_label(ctx, t("asset.animclip3d_name"), lw)
@@ -701,6 +728,9 @@ def _render_animclip3d_body(ctx: InxGUIContext, panel, state: _State):
         model_display = "None (Model)"
 
     changed = False
+
+    if embedded:
+        ctx.begin_disabled(True)
 
     field_label(ctx, t("asset.animclip3d_source_model"), lw)
 
@@ -772,6 +802,10 @@ def _render_animclip3d_body(ctx: InxGUIContext, panel, state: _State):
     if bool(new_loop) != bool(clip.loop):
         clip.loop = bool(new_loop)
         changed = True
+
+    if embedded:
+        ctx.end_disabled()
+        changed = False
 
     # ── Imported bone summary (read-only) ─────────────────────────
     if clip.bind_pose_bone_names:
