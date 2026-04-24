@@ -25,19 +25,13 @@ class SkinnedMeshRenderer : public MeshRenderer
         return "SkinnedMeshRenderer";
     }
 
-    void SetSourceModelGuid(const std::string &guid)
-    {
-        m_sourceModelGuid = guid;
-    }
+    void SetSourceModelGuid(const std::string &guid);
     [[nodiscard]] const std::string &GetSourceModelGuid() const
     {
         return m_sourceModelGuid;
     }
 
-    void SetSourceModelPath(const std::string &path)
-    {
-        m_sourceModelPath = path;
-    }
+    void SetSourceModelPath(const std::string &path);
     [[nodiscard]] const std::string &GetSourceModelPath() const
     {
         return m_sourceModelPath;
@@ -52,20 +46,14 @@ class SkinnedMeshRenderer : public MeshRenderer
         return m_animationTakeNames;
     }
 
-    void SetActiveTakeName(const std::string &name)
-    {
-        m_activeTakeName = name;
-    }
+    void SetActiveTakeName(const std::string &name);
     [[nodiscard]] const std::string &GetActiveTakeName() const
     {
         return m_activeTakeName;
     }
 
     /// Elapsed time in the current clip (seconds). Runtime-only, not serialized — fed by SkeletalAnimator.
-    void SetRuntimeAnimationTime(float t)
-    {
-        m_runtimeAnimationTime = t;
-    }
+    void SetRuntimeAnimationTime(float t);
     [[nodiscard]] float GetRuntimeAnimationTime() const
     {
         return m_runtimeAnimationTime;
@@ -86,17 +74,39 @@ class SkinnedMeshRenderer : public MeshRenderer
         return !m_animationTakeNames.empty();
     }
 
+    [[nodiscard]] bool HasRuntimeSkinnedMesh() const
+    {
+        return !m_runtimeSkinnedVertices.empty() && !m_runtimeSkinnedIndices.empty();
+    }
+    [[nodiscard]] const std::vector<Vertex> &GetRuntimeSkinnedVertices() const
+    {
+        return m_runtimeSkinnedVertices;
+    }
+    [[nodiscard]] const std::vector<uint32_t> &GetRuntimeSkinnedIndices() const
+    {
+        return m_runtimeSkinnedIndices;
+    }
+    [[nodiscard]] const std::vector<SubMesh> &GetRuntimeSkinnedSubMeshes() const
+    {
+        return m_runtimeSkinnedSubMeshes;
+    }
+
     [[nodiscard]] std::string Serialize() const override;
     bool Deserialize(const std::string &jsonStr) override;
     [[nodiscard]] std::unique_ptr<Component> Clone() const override;
 
   private:
+    void RefreshRuntimeSkinnedMesh();
+
     std::string m_sourceModelGuid;
     std::string m_sourceModelPath;
     std::vector<std::string> m_animationTakeNames;
     std::string m_activeTakeName;
     float m_runtimeAnimationTime = 0.0f;
     float m_runtimeAnimationNormalized = 0.0f;
+    std::vector<Vertex> m_runtimeSkinnedVertices;
+    std::vector<uint32_t> m_runtimeSkinnedIndices;
+    std::vector<SubMesh> m_runtimeSkinnedSubMeshes;
 };
 
 } // namespace infernux

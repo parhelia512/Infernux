@@ -18,27 +18,61 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
-def resolve_model_disk_path_from_virtual_base(base: str) -> Optional[str]:
-    """Map virtual clip prefix (asset GUID or absolute model file path) to a readable model file path."""
-    b = (base or "").strip()
-    if not b:
+def is_asset_guid_string(s: str) -> bool:
+    """True for dashed UUIDs or 32 hex chars (no hyphens) as used in the asset database."""
+    t = (s or "").strip()
+    if not t:
+        return False
+    if len(t) == 32 and all(c in "0123456789abcdefABCDEF" for c in t):
+        return True
+    try:
+        uuid.UUID(t)
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def _iter_guid_lookups(s: str):
+    s = s.strip()
+    if not s:
+        return
+    yield s
+    h = s.replace("-", "").lower()
+    if len(h) == 32 and all(c in "0123456789abcdef" for c in h):
+        dashed = f"{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
+        if dashed != s:
+            yield dashed
+
+
+def resolve_disk_path_for_guid_string(adb, guid: str) -> Optional[str]:
+    """Resolve an asset file path, accepting compact 32-hex and dashed UUIDs."""
+    if not adb or not (guid or "").strip():
         return None
     try:
-        uuid.UUID(b)
-    except (ValueError, TypeError, AttributeError):
-        p = os.path.normpath(b)
-        return p if os.path.isfile(p) else None
-
-    try:
-        from Infernux.core.assets import AssetManager
-        adb = getattr(AssetManager, "_asset_database", None)
-        if adb:
-            p = adb.get_path_from_guid(b)
+        for g in _iter_guid_lookups(guid):
+            p = adb.get_path_from_guid(g)
             if p and os.path.isfile(p):
                 return os.path.normpath(p)
     except Exception:
         pass
     return None
+
+
+def resolve_model_disk_path_from_virtual_base(base: str) -> Optional[str]:
+    """Map virtual clip prefix (asset GUID or absolute model file path) to a readable model file path."""
+    b = (base or "").strip()
+    if not b:
+        return None
+    if is_asset_guid_string(b):
+        try:
+            from Infernux.core.assets import AssetManager
+            adb = getattr(AssetManager, "_asset_database", None)
+            p = resolve_disk_path_for_guid_string(adb, b)
+            return p
+        except Exception:
+            return None
+    p = os.path.normpath(b)
+    return p if os.path.isfile(p) else None
 
 
 @dataclass
@@ -182,10 +216,9 @@ class AnimationClip3D:
 
         take_name = names[idx]
         meta_guid = _read_asset_guid_from_meta_sidecar(model_disk)
-        try:
-            uuid.UUID(base)
+        if is_asset_guid_string(base):
             source_guid = base
-        except (ValueError, TypeError, AttributeError):
+        else:
             source_guid = meta_guid
         bind_csv = (meta.get("bone_names_csv") or "")
         if isinstance(bind_csv, str):

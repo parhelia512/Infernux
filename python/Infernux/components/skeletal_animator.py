@@ -16,9 +16,93 @@ from Infernux.components.serialized_field import serialized_field
 from Infernux.components.decorators import require_component, disallow_multiple, add_component_menu
 from Infernux.components.builtin.skinned_mesh_renderer import SkinnedMeshRenderer
 from Infernux.core.anim_state_machine import AnimStateMachine, AnimState, AnimTransition
-from Infernux.core.animation_clip3d import AnimationClip3D
+from Infernux.core.animation_clip3d import AnimationClip3D, resolve_disk_path_for_guid_string
 from Infernux.core.asset_ref import AnimStateMachineRef
 from Infernux.debug import Debug
+
+
+def _normalize_guid_key(s: str) -> str:
+    """Case-insensitive, hyphen-insensitive key for comparing asset GUIDs."""
+    return (s or "").replace("-", "").strip().lower()
+
+
+def _try_guid_for_model_path(db, path: str) -> str:
+    """Resolve a model file path to its asset GUID via the database, if available."""
+    if not db or not (path or "").strip():
+        return ""
+    p0 = str(path).strip()
+    if not p0:
+        return ""
+    seen = set()
+    cands: list = []
+    for p in (p0, os.path.normpath(p0), os.path.normpath(os.path.abspath(p0))):
+        if p and p not in seen:
+            seen.add(p)
+            cands.append(p)
+    for p in cands:
+        try:
+            g = db.get_guid_from_path(p)
+            if g and str(g).strip():
+                return str(g).strip()
+        except Exception:
+            pass
+    return ""
+
+
+def _model_keys_for_source(db, source_guid: str, source_path: str) -> tuple:
+    """
+    Return (key, had_explicit_guid) where key is the normalized 32-hex id when known.
+    Uses serialized GUID first, then path→GUID from the database.
+    """
+    g = (source_guid or "").strip()
+    k = _normalize_guid_key(g)
+    if k:
+        return (k, True)
+    g2 = _try_guid_for_model_path(db, source_path) if db else ""
+    k2 = _normalize_guid_key(g2)
+    if k2:
+        return (k2, False)
+    return ("", False)
+
+
+def _skinned_mismatch_message(
+    db,
+    clip: AnimationClip3D,
+    source_model_guid: str,
+    source_model_path: str,
+) -> str:
+    """
+    If clip and renderer are definitely different model assets, return a warning string.
+    Prefers GUID and path→GUID; does not use raw path comparison when both GUID keys match.
+    """
+    p_clip = (getattr(clip, "source_model_path", "") or "").strip()
+    g_clip = (getattr(clip, "source_model_guid", "") or "").strip()
+    p_rend = (source_model_path or "").strip()
+    g_rend = (source_model_guid or "").strip()
+
+    k_clip, _ = _model_keys_for_source(db, g_clip, p_clip)
+    k_rend, _ = _model_keys_for_source(db, g_rend, p_rend)
+
+    if k_clip and k_rend and k_clip != k_rend:
+        return (
+            f"[SkeletalAnimator] Clip source model does not match SkinnedMeshRenderer "
+            f"(clip guid≈{g_clip!r} path='{p_clip}' vs "
+            f"renderer guid≈{g_rend!r} path='{p_rend}')."
+        )
+    if k_clip and k_rend:
+        return ""
+
+    if k_clip or k_rend:
+        return ""
+
+    p_clip_n = os.path.normcase(os.path.normpath(p_clip)) if p_clip else ""
+    p_rend_n = os.path.normcase(os.path.normpath(p_rend)) if p_rend else ""
+    if p_clip and p_rend and p_clip_n and p_rend_n and p_clip_n != p_rend_n:
+        return (
+            f"[SkeletalAnimator] Clip source path does not match renderer source, and "
+            f"neither could be resolved to a GUID. clip='{p_clip}' vs renderer='{p_rend}'"
+        )
+    return ""
 
 
 def _get_asset_database():
@@ -43,13 +127,17 @@ def _resolve_clip_path(state: AnimState) -> Optional[str]:
         db = _get_asset_database()
         if db:
             try:
-                path = db.get_path_from_guid(state.clip_guid)
-                if path and os.path.isfile(path):
+                path = resolve_disk_path_for_guid_string(db, state.clip_guid)
+                if path:
                     return path
             except Exception:
                 pass
-    if state.clip_path and os.path.isfile(state.clip_path):
-        return state.clip_path
+    raw = (state.clip_path or "").strip()
+    # Project panel: embedded FBX take as "<guid>::subanim:<index>" (not a file path).
+    if raw and "::subanim:" in raw:
+        return raw
+    if raw and os.path.isfile(raw):
+        return raw
     return None
 
 
@@ -60,6 +148,11 @@ def _clip_duration_hint(clip: Optional[AnimationClip3D]) -> float:
         return max(float(getattr(clip, "duration_hint", 0.0) or 0.0), 0.0)
     except Exception:
         return 0.0
+
+
+# When importer/meta leaves duration unknown (e.g. embedded FBX takes), use this for
+# normalized_time and looping so native/runtime hooks see monotonic [0,1) progress.
+_DEFAULT_PLAYBACK_SEC_WHEN_UNKNOWN_DURATION = 1.0
 
 
 @require_component(SkinnedMeshRenderer)
@@ -161,7 +254,9 @@ class SkeletalAnimator(InxComponent):
         duration = _clip_duration_hint(self._current_clip)
         if duration > 0.0:
             return min(self._elapsed / duration, 1.0)
-        return 0.0
+        # No duration in asset — assume a neutral loop period so time/normalized are not stuck.
+        t = _DEFAULT_PLAYBACK_SEC_WHEN_UNKNOWN_DURATION
+        return (self._elapsed % t) / t
 
     def play(self, state_name: str = "") -> bool:
         if not self._fsm:
@@ -285,20 +380,13 @@ class SkeletalAnimator(InxComponent):
         if clip is not None:
             take_name = str(getattr(clip, "take_name", "") or "")
 
-            renderer_guid = str(getattr(self._skinned_renderer, "source_model_guid", "") or "")
-            renderer_path = str(getattr(self._skinned_renderer, "source_model_path", "") or "")
-            clip_guid = str(getattr(clip, "source_model_guid", "") or "")
-            clip_path = str(getattr(clip, "source_model_path", "") or "")
-            if clip_guid and renderer_guid and clip_guid != renderer_guid:
-                Debug.log_warning(
-                    f"[SkeletalAnimator] Clip source GUID '{clip_guid}' does not match "
-                    f"renderer source '{renderer_guid}'."
-                )
-            elif clip_path and renderer_path and os.path.normpath(clip_path) != os.path.normpath(renderer_path):
-                Debug.log_warning(
-                    f"[SkeletalAnimator] Clip source path '{clip_path}' does not match "
-                    f"renderer source '{renderer_path}'."
-                )
+            r = self._skinned_renderer
+            renderer_guid = str(getattr(r, "source_model_guid", "") or "")
+            renderer_path = str(getattr(r, "source_model_path", "") or "")
+            db = _get_asset_database()
+            msg = _skinned_mismatch_message(db, clip, renderer_guid, renderer_path)
+            if msg:
+                Debug.log_warning(msg)
 
         self._skinned_renderer.active_take_name = take_name
 

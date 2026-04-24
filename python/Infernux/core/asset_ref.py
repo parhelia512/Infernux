@@ -176,7 +176,8 @@ class AnimStateMachineRef(AssetRefBase):
         db = _get_asset_database()
         if db and self._guid:
             try:
-                path = db.get_path_from_guid(self._guid)
+                from Infernux.core.animation_clip3d import resolve_disk_path_for_guid_string
+                path = resolve_disk_path_for_guid_string(db, self._guid) or db.get_path_from_guid(self._guid)
                 if path:
                     from Infernux.core.anim_state_machine import AnimStateMachine
                     return AnimStateMachine.load(path)
