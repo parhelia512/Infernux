@@ -1794,7 +1794,7 @@ class AnimFSMEditorPanel(EditorPanel):
             scene = SceneManager.instance().get_active_scene()
             if not scene:
                 return
-            from Infernux.components.animator2d import SpiritAnimator
+            from Infernux.components.spirit_animator import SpiritAnimator
             from Infernux.components.skeletal_animator import SkeletalAnimator
             norm = os.path.normpath(fsm_path)
             for go in scene.get_all_objects():

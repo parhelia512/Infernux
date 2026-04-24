@@ -112,7 +112,6 @@ __all__ = [
     "SpriteRenderer",
     "SpiritAnimator",
     "SkeletalAnimator",
-    "Animator3D",
     # Decorators
     "require_component",
     "disallow_multiple",
