@@ -57,7 +57,9 @@ def _rebuild_material_entries(renderers):
                 label = f"{slot_names[slot_idx]} (Slot {slot_idx})"
             else:
                 label = f"Element {slot_idx}"
-            is_default = slot_idx >= len(material_guids) or not material_guids[slot_idx]
+            mat_path = getattr(mat, "file_path", "") if mat is not None else ""
+            is_embedded = isinstance(mat_path, str) and "::submat:" in mat_path
+            is_default = (slot_idx >= len(material_guids) or not material_guids[slot_idx]) and not is_embedded
             valid_entries.append({
                 "label": label,
                 "material": mat,

@@ -23,7 +23,7 @@ from Infernux.core.anim_state_machine import (
     AnimTransition,
     AnimParameter,
 )
-from Infernux.core.asset_ref import AnimationClipRef, get_asset_type_config
+from Infernux.core.asset_ref import AnimationClipRef, AnimationClip3DRef, get_asset_type_config
 from Infernux.core.node_graph import (
     GraphLink,
     GraphNode,
@@ -979,9 +979,13 @@ class AnimFSMEditorPanel(EditorPanel):
 
     # ── Detail panel (right side) ─────────────────────────────────────
 
-    @staticmethod
-    def _clip_ref_for_state(state: AnimState) -> AnimationClipRef:
-        """Build an ``AnimationClipRef`` with path hint resolved for Inspector-style labels."""
+    def _fsm_clip_asset_type(self) -> str:
+        fsm = self._fsm
+        mode = getattr(fsm, "mode", "2d") if fsm is not None else "2d"
+        return "AnimationClip3D" if mode == "3d" else "AnimationClip"
+
+    def _clip_ref_for_state(self, state: AnimState):
+        """Build a clip ref (2D/3D) with path hint resolved for Inspector-style labels."""
         path = (state.clip_path or "").strip()
         if not path and state.clip_guid:
             try:
@@ -992,6 +996,8 @@ class AnimFSMEditorPanel(EditorPanel):
                     path = adb.get_path_from_guid(state.clip_guid) or ""
             except Exception:
                 pass
+        if self._fsm_clip_asset_type() == "AnimationClip3D":
+            return AnimationClip3DRef(guid=state.clip_guid or "", path_hint=path)
         return AnimationClipRef(guid=state.clip_guid or "", path_hint=path)
 
     def _detail_checkbox_row_right(self, ctx: InxGUIContext, lw: float, label_key: str, wid: str, value: bool) -> bool:
@@ -1007,10 +1013,10 @@ class AnimFSMEditorPanel(EditorPanel):
         self, ctx: InxGUIContext, state: AnimState, node, lw: float,
     ) -> None:
         """Same object-field UX as the main Inspector (basename, picker, drag-drop, clear)."""
-        cfg = get_asset_type_config("AnimationClip") or {}
-        type_hint = str(cfg.get("display", "AnimClip2D"))
-        drag_type = str(cfg.get("drag_type", "ANIMCLIP_FILE"))
-        extensions = cfg.get("extensions", ("*.animclip2d",))
+        cfg = get_asset_type_config(self._fsm_clip_asset_type()) or {}
+        type_hint = str(cfg.get("display", "AnimClip"))
+        drag_type = cfg.get("drag_type", "ANIMCLIP_FILE")
+        extensions = cfg.get("extensions", ("*.animclip2d", "*.animclip3d"))
         prefix = str(cfg.get("prefix", "aclip"))
 
         ref = self._clip_ref_for_state(state)
@@ -1595,14 +1601,21 @@ class AnimFSMEditorPanel(EditorPanel):
 
     def _on_canvas_drop(self, payload_type: str, payload: str, gx: float, gy: float):
         """Handle items dropped onto the node graph canvas."""
-        if payload_type == "ANIMCLIP_FILE" and payload:
+        if payload and payload_type in ("ANIMCLIP_FILE", "ANIMCLIP3D_FILE"):
+            p = (payload or "").strip()
+            if not p:
+                return
+            ext = os.path.splitext(p)[1].lower()
+            expected = ".animclip3d" if self._fsm_clip_asset_type() == "AnimationClip3D" else ".animclip2d"
+            if ext != expected:
+                return
             # Check if dropped on an existing state node
             for uid, name in self._uid_to_name.items():
                 node = self._graph.find_node(uid)
                 if node and abs(node.pos_x - gx) < 80 and abs(node.pos_y - gy) < 40:
                     state = self._fsm.get_state(name) if self._fsm else None
                     if state:
-                        self._assign_clip_to_state(state, payload, node, record_undo=True)
+                        self._assign_clip_to_state(state, p, node, record_undo=True)
                     return
             # Otherwise create a new state with this clip (state name stays independent)
             if self._fsm:
@@ -1613,7 +1626,7 @@ class AnimFSMEditorPanel(EditorPanel):
                 node.data["label"] = state.name
                 self._name_to_uid[state.name] = node.uid
                 self._uid_to_name[node.uid] = state.name
-                self._assign_clip_to_state(state, payload, node, record_undo=False)
+                self._assign_clip_to_state(state, p, node, record_undo=False)
                 node.data["loop"] = state.loop
                 node.data["restart_same_clip"] = state.restart_same_clip
                 self._view.selected_nodes = [node.uid]
@@ -1677,8 +1690,14 @@ class AnimFSMEditorPanel(EditorPanel):
     def _assign_clip_to_state(self, state: AnimState, clip_path: str, node=None, *, record_undo: bool = True):
         """Assign a clip path/guid to a state."""
         before = self._undo_snapshot() if record_undo else None
-        state.clip_guid = self._resolve_guid(clip_path) if clip_path else ""
-        state.clip_path = "" if state.clip_guid else (clip_path or "")
+        p = (clip_path or "").strip()
+        if p:
+            ext = os.path.splitext(p)[1].lower()
+            expected = ".animclip3d" if self._fsm_clip_asset_type() == "AnimationClip3D" else ".animclip2d"
+            if ext != expected:
+                return
+        state.clip_guid = self._resolve_guid(p) if p else ""
+        state.clip_path = "" if state.clip_guid else (p or "")
         self._dirty = True
         if record_undo and before is not None:
             self._try_record_undo("Assign clip", before, self._undo_snapshot())

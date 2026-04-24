@@ -499,6 +499,9 @@ PREFAB_EXTENSIONS = frozenset({".prefab"})
 # Animation clip extension
 ANIMCLIP_EXTENSIONS = frozenset({".animclip2d"})
 
+# 3D animation clip extension (skeletal takes embedded in model files)
+ANIMCLIP3D_EXTENSIONS = frozenset({".animclip3d"})
+
 # Animation state machine extension
 ANIMFSM_EXTENSIONS = frozenset({".animfsm"})
 
@@ -522,6 +525,8 @@ def asset_category_from_extension(ext: str) -> Optional[str]:
         return "prefab"
     if ext in ANIMCLIP_EXTENSIONS:
         return "animclip"
+    if ext in ANIMCLIP3D_EXTENSIONS:
+        return "animclip3d"
     if ext in ANIMFSM_EXTENSIONS:
         return "animfsm"
     return None

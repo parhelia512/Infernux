@@ -5,11 +5,14 @@
 #include <function/renderer/gui/InxResourcePreviewer.h>
 
 #include <algorithm>
+#include <any>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <imgui_internal.h>
+#include <unordered_set>
 
 #ifdef INX_PLATFORM_WINDOWS
 #include <ShlObj.h> // CF_HDROP, DragQueryFileW
@@ -21,6 +24,74 @@ namespace fs = std::filesystem;
 
 namespace
 {
+constexpr const char *kSubMatToken = "::submat:";
+constexpr const char *kSubBoneToken = "::subbone:";
+constexpr const char *kSubAnimToken = "::subanim:";
+
+static std::string TrimCopy(std::string s)
+{
+    auto notSpace = [](unsigned char ch) { return !std::isspace(ch); };
+    while (!s.empty() && !notSpace(static_cast<unsigned char>(s.front())))
+        s.erase(s.begin());
+    while (!s.empty() && !notSpace(static_cast<unsigned char>(s.back())))
+        s.pop_back();
+    return s;
+}
+
+static std::vector<std::string> SplitCommaList(const std::string &csv)
+{
+    std::vector<std::string> out;
+    std::string cur;
+    for (char ch : csv) {
+        if (ch == ',') {
+            auto t = TrimCopy(cur);
+            if (!t.empty())
+                out.push_back(std::move(t));
+            cur.clear();
+        } else {
+            cur.push_back(ch);
+        }
+    }
+    auto t = TrimCopy(cur);
+    if (!t.empty())
+        out.push_back(std::move(t));
+    return out;
+}
+
+static std::string MakeSubAssetVirtualPath(const std::string &basePath, const char *token, int index)
+{
+    return basePath + token + std::to_string(index);
+}
+
+static bool IsVirtualSubAssetPath(const std::string &path)
+{
+    return path.find(kSubMatToken) != std::string::npos || path.find(kSubBoneToken) != std::string::npos ||
+           path.find(kSubAnimToken) != std::string::npos;
+}
+
+static std::string ResolveRealAssetPath(const std::string &path)
+{
+    if (path.empty())
+        return path;
+    for (const char *tok : {kSubMatToken, kSubBoneToken, kSubAnimToken}) {
+        auto pos = path.find(tok);
+        if (pos != std::string::npos)
+            return path.substr(0, pos);
+    }
+    return path;
+}
+
+static std::string SelectionPathForInspector(const std::string &path)
+{
+    if (path.empty())
+        return path;
+    // Embedded material slots use the material inspector (Python + virtual path).
+    if (path.find(kSubMatToken) != std::string::npos)
+        return path;
+    // Bones / animation listing rows still inspect the parent source model.
+    return ResolveRealAssetPath(path);
+}
+
 /// True if the mouse is over the docked/floating Inspector window (screen space).
 /// Prevents Project panel from clearing file selection when clicking empty Inspector space.
 bool IsMouseOverInspectorWindow()
@@ -116,6 +187,7 @@ const std::unordered_map<std::string, std::string> &ProjectPanel::GetIconMap()
         {".otf", "font"},         {".txt", "text"},         {".md", "readme"},        {".json", "config"},
         {".yaml", "config"},      {".yml", "config"},       {".xml", "config"},       {".scene", "scene"},
         {".prefab", "prefab"},
+        {".animclip3d", "config"},
     };
     return map;
 }
@@ -137,6 +209,7 @@ const std::unordered_map<std::string, ProjectPanel::DragDropInfo> &ProjectPanel:
         {".pic", {"TEXTURE_FILE", "Texture"}},     {".wav", {"AUDIO_FILE", "Audio"}},
         {".ttf", {"FONT_FILE", "Font"}},           {".otf", {"FONT_FILE", "Font"}},
         {".scene", {"SCENE_FILE", "Scene"}},       {".animclip2d", {"ANIMCLIP_FILE", "2D AnimClip"}},
+        {".animclip3d", {"ANIMCLIP3D_FILE", "3D AnimClip"}},
         {".animfsm", {"ANIMFSM_FILE", "AnimFSM"}},
     };
     return map;
@@ -203,6 +276,8 @@ const char *ProjectPanel::GetFileTypeTag(const std::string &filename)
         return "[SCN]";
     if (ext == ".prefab")
         return "[PRE]";
+    if (ext == ".animclip3d")
+        return "[A3]";
     if (ext == ".wav")
         return "[AUD]";
     if (ext == ".ttf" || ext == ".otf")
@@ -432,7 +507,7 @@ void ProjectPanel::NotifySelectionChanged()
     if (!onFileSelected)
         return;
     if (m_selectedFiles.size() == 1)
-        onFileSelected(m_selectedFiles[0]);
+        onFileSelected(SelectionPathForInspector(m_selectedFiles[0]));
     else
         onFileSelected("");
 }
@@ -447,12 +522,23 @@ std::vector<std::string> ProjectPanel::GetSelectedPaths() const
 {
     std::vector<std::string> result;
     std::error_code ec;
+    std::unordered_set<std::string> seen;
     for (auto &p : m_selectedFiles) {
-        if (!p.empty() && fs::exists(fs::u8path(p), ec))
-            result.push_back(p);
+        if (p.empty())
+            continue;
+        std::string real = ResolveRealAssetPath(p);
+        if (real.empty())
+            continue;
+        if (!fs::exists(fs::u8path(real), ec))
+            continue;
+        if (seen.insert(real).second)
+            result.push_back(real);
     }
-    if (result.empty() && !m_selectedFile.empty() && fs::exists(fs::u8path(m_selectedFile), ec))
-        result.push_back(m_selectedFile);
+    if (result.empty() && !m_selectedFile.empty()) {
+        std::string real = ResolveRealAssetPath(m_selectedFile);
+        if (!real.empty() && fs::exists(fs::u8path(real), ec))
+            result.push_back(real);
+    }
     return result;
 }
 
@@ -585,6 +671,174 @@ ProjectPanel::DirTreeMeta *ProjectPanel::GetDirTreeMeta(const std::string &path)
     return &meta;
 }
 
+namespace
+{
+std::string TryGetMetaString(const infernux::InxResourceMeta *meta, const std::string &key)
+{
+    if (!meta || key.empty())
+        return {};
+    const auto &map = meta->GetMetadata();
+    auto it = map.find(key);
+    if (it == map.end())
+        return {};
+    const auto &typeName = it->second.first;
+    const auto &value = it->second.second;
+    try {
+        if (typeName == "string")
+            return std::any_cast<std::string>(value);
+    } catch (...) {
+    }
+    return {};
+}
+
+int TryGetMetaInt(const infernux::InxResourceMeta *meta, const std::string &key, int defaultValue)
+{
+    if (!meta || key.empty())
+        return defaultValue;
+    const auto &map = meta->GetMetadata();
+    auto it = map.find(key);
+    if (it == map.end())
+        return defaultValue;
+    const auto &typeName = it->second.first;
+    const auto &value = it->second.second;
+    try {
+        if (typeName == "int")
+            return std::any_cast<int>(value);
+        if (typeName == "size_t")
+            return static_cast<int>(std::any_cast<size_t>(value));
+        if (typeName == "float")
+            return static_cast<int>(std::lround(std::any_cast<float>(value)));
+    } catch (...) {
+    }
+    return defaultValue;
+}
+} // namespace
+
+void ProjectPanel::AppendModelSubAssets(std::vector<FileItem> &out, AssetDatabase *adb, const FileItem &modelItem)
+{
+    const std::string &modelPath = modelItem.path;
+    const infernux::InxResourceMeta *meta = nullptr;
+    if (adb)
+        meta = adb->GetMetaByPath(modelPath);
+
+    const uint64_t childMtime = modelItem.mtimeNs;
+
+    // ── Materials (material slots) ────────────────────────────────────
+    std::vector<std::string> matNames = SplitCommaList(TryGetMetaString(meta, "material_slots"));
+    int matCount = TryGetMetaInt(meta, "material_slot_count", -1);
+    if (matNames.empty() && matCount > 0) {
+        matNames.reserve(static_cast<size_t>(matCount));
+        for (int i = 0; i < matCount; ++i)
+            matNames.push_back("Material_" + std::to_string(i));
+    }
+
+    if (!matNames.empty()) {
+        for (int i = 0; i < static_cast<int>(matNames.size()); ++i) {
+            FileItem sub{};
+            sub.type = FileItem::SubMaterial;
+            sub.name = matNames[static_cast<size_t>(i)];
+            sub.path = MakeSubAssetVirtualPath(modelPath, kSubMatToken, i);
+            sub.ext = ".mat";
+            sub.parentPath = modelPath;
+            sub.mtimeNs = childMtime;
+            sub.slotIndex = i;
+            out.push_back(std::move(sub));
+        }
+    } else {
+        FileItem sub{};
+        sub.type = FileItem::SubMaterial;
+        sub.name = "(No materials in meta — reimport model)";
+        sub.path = MakeSubAssetVirtualPath(modelPath, kSubMatToken, -1);
+        sub.ext = ".mat";
+        sub.parentPath = modelPath;
+        sub.mtimeNs = childMtime;
+        sub.slotIndex = -1;
+        out.push_back(std::move(sub));
+    }
+
+    // ── Skeleton / bones (debug listing; data comes from ModelImporter) ──
+    std::vector<std::string> boneNames = SplitCommaList(TryGetMetaString(meta, "bone_names_csv"));
+    int boneCount = TryGetMetaInt(meta, "bone_count", -1);
+    if (!boneNames.empty()) {
+        const int maxShow = 32;
+        const int total = static_cast<int>(boneNames.size());
+        const int show = std::min(total, maxShow);
+        for (int i = 0; i < show; ++i) {
+            FileItem sub{};
+            sub.type = FileItem::SubMesh;
+            sub.name = std::string("Bone: ") + boneNames[static_cast<size_t>(i)];
+            sub.path = MakeSubAssetVirtualPath(modelPath, kSubBoneToken, i);
+            sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
+            sub.parentPath = modelPath;
+            sub.mtimeNs = childMtime;
+            sub.slotIndex = i;
+            out.push_back(std::move(sub));
+        }
+        if (total > show) {
+            FileItem sub{};
+            sub.type = FileItem::SubMesh;
+            sub.name = std::string("… ") + std::to_string(total - show) + " more bones";
+            sub.path = MakeSubAssetVirtualPath(modelPath, kSubBoneToken, 999999);
+            sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
+            sub.parentPath = modelPath;
+            sub.mtimeNs = childMtime;
+            sub.slotIndex = -1;
+            out.push_back(std::move(sub));
+        }
+    } else if (boneCount > 0) {
+        FileItem sub{};
+        sub.type = FileItem::SubMesh;
+        sub.name = std::string("Skeleton: ") + std::to_string(boneCount) + " bone(s) (reimport for names)";
+        sub.path = MakeSubAssetVirtualPath(modelPath, kSubBoneToken, 0);
+        sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
+        sub.parentPath = modelPath;
+        sub.mtimeNs = childMtime;
+        sub.slotIndex = -1;
+        out.push_back(std::move(sub));
+    }
+
+    // ── Embedded animation clips (names only; authoring uses .animclip3d) ──
+    std::vector<std::string> animNames = SplitCommaList(TryGetMetaString(meta, "animation_names_csv"));
+    int animCount = TryGetMetaInt(meta, "animation_count", -1);
+    if (!animNames.empty()) {
+        const int maxShow = 24;
+        const int total = static_cast<int>(animNames.size());
+        const int show = std::min(total, maxShow);
+        for (int i = 0; i < show; ++i) {
+            FileItem sub{};
+            sub.type = FileItem::SubMesh;
+            sub.name = std::string("Anim: ") + animNames[static_cast<size_t>(i)];
+            sub.path = MakeSubAssetVirtualPath(modelPath, kSubAnimToken, i);
+            sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
+            sub.parentPath = modelPath;
+            sub.mtimeNs = childMtime;
+            sub.slotIndex = i;
+            out.push_back(std::move(sub));
+        }
+        if (total > show) {
+            FileItem sub{};
+            sub.type = FileItem::SubMesh;
+            sub.name = std::string("… ") + std::to_string(total - show) + " more anims";
+            sub.path = MakeSubAssetVirtualPath(modelPath, kSubAnimToken, 999999);
+            sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
+            sub.parentPath = modelPath;
+            sub.mtimeNs = childMtime;
+            sub.slotIndex = -1;
+            out.push_back(std::move(sub));
+        }
+    } else if (animCount > 0) {
+        FileItem sub{};
+        sub.type = FileItem::SubMesh;
+        sub.name = std::string("Animations: ") + std::to_string(animCount) + " clip(s) (reimport for names)";
+        sub.path = MakeSubAssetVirtualPath(modelPath, kSubAnimToken, 0);
+        sub.ext = modelItem.ext.empty() ? ".fbx" : modelItem.ext;
+        sub.parentPath = modelPath;
+        sub.mtimeNs = childMtime;
+        sub.slotIndex = -1;
+        out.push_back(std::move(sub));
+    }
+}
+
 std::vector<ProjectPanel::FileItem> *ProjectPanel::GetProjectItems(const std::string &path, DirSnapshot *snapshot)
 {
     if (!snapshot)
@@ -611,13 +865,18 @@ std::vector<ProjectPanel::FileItem> *ProjectPanel::GetProjectItems(const std::st
         return &cacheIt->second.items;
     }
 
-    // Build augmented list — model sub-assets are handled via callback
-    // For now just return snapshot items (sub-asset expansion requires
-    // AssetRegistry callback which is Python-side)
     auto &cached = m_augmentedCache[path];
     cached.mtimeNs = snapshot->mtimeNs;
     cached.expandedPaths = expandedPaths;
-    cached.items = snapshot->items; // Copy base items
+    cached.items.clear();
+    cached.items.reserve(snapshot->items.size() + 8);
+
+    std::unordered_set<std::string> expandedSet(expandedPaths.begin(), expandedPaths.end());
+    for (const auto &item : snapshot->items) {
+        cached.items.push_back(item);
+        if (item.type == FileItem::File && IsModelExt(item.ext) && expandedSet.count(item.path) > 0)
+            AppendModelSubAssets(cached.items, m_assetDatabase, item);
+    }
     return &cached.items;
 }
 
@@ -636,11 +895,16 @@ uint64_t ProjectPanel::GetMaterialMtimeNs(const std::string &filePath)
     if (it != m_materialMtimeCache.end() && (now - it->second.second) < 1.0)
         return it->second.first;
 
+    std::string diskPath = filePath;
+    const auto subPos = filePath.find(kSubMatToken);
+    if (subPos != std::string::npos)
+        diskPath = filePath.substr(0, subPos);
+
     std::error_code ec;
-    if (!fs::exists(fs::u8path(filePath), ec))
+    if (!fs::exists(fs::u8path(diskPath), ec))
         return 0;
 
-    uint64_t mtimeNs = GetMtimeNs(filePath);
+    uint64_t mtimeNs = GetMtimeNs(diskPath);
     m_materialMtimeCache[filePath] = {mtimeNs, now};
     return mtimeNs;
 }
@@ -1001,6 +1265,8 @@ void ProjectPanel::HandleItemClick(const FileItem &item, InxGUIContext *ctx)
         } else if (item.ext == ".animclip2d") {
             if (openAnimClip)
                 openAnimClip(item.path);
+        } else if (item.ext == ".animclip3d") {
+            // 3D clips are edited via the Inspector (Python asset_details_renderer).
         } else if (item.ext == ".animfsm") {
             if (openAnimFsm)
                 openAnimFsm(item.path);
@@ -1037,7 +1303,7 @@ void ProjectPanel::HandleKeyboardShortcuts(InxGUIContext *ctx)
 
     auto selected = GetSelectedPaths();
     bool hasSel = !selected.empty();
-    bool singleSel = (selected.size() == 1 && !m_selectedFile.empty());
+    bool singleSel = (selected.size() == 1 && !m_selectedFile.empty() && !IsVirtualSubAssetPath(m_selectedFile));
 
     if (hasSel) {
         if (ctx->IsKeyPressed(kKeyF2) && singleSel)
@@ -1128,6 +1394,12 @@ void ProjectPanel::ReceiveDroppedFiles(const std::vector<std::string> &paths)
 
 void ProjectPanel::BeginRename(const std::string &path)
 {
+    if (path.empty())
+        return;
+    // Virtual sub-assets are not real files — renaming them would be meaningless.
+    if (IsVirtualSubAssetPath(path))
+        return;
+
     m_renamingPath = path;
     auto name = fs::u8path(path).filename().string();
     std::error_code ec;
@@ -1699,8 +1971,9 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                 auto tic = m_typeIconCache.find("model_3d");
                 displayTexId = tic != m_typeIconCache.end() ? tic->second : 0;
             } else if (item.type == FileItem::SubMaterial) {
-                auto tic = m_typeIconCache.find("material");
-                displayTexId = tic != m_typeIconCache.end() ? tic->second : 0;
+                displayTexId = GetMaterialThumbnail(item.path);
+                if (displayTexId == 0)
+                    displayTexId = GetTypeIconId(item);
             } else if (item.type == FileItem::File) {
                 if (IsImageExt(item.ext))
                     displayTexId = GetThumbnail(item.path, item.mtimeNs);
@@ -1730,6 +2003,9 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                         srcW = 256;
                         srcH = 256;
                     }
+                } else if (item.type == FileItem::SubMaterial) {
+                    srcW = 256;
+                    srcH = 256;
                 }
 
                 // InvisibleButton for hit-testing; AddImage for drawing
@@ -1894,11 +2170,12 @@ void ProjectPanel::RenderContextMenu(InxGUIContext *ctx)
     }
 
     std::error_code ec;
-    if (!m_selectedFile.empty() && fs::exists(fs::u8path(m_selectedFile), ec)) {
+    const std::string selectedReal = m_selectedFile.empty() ? std::string() : ResolveRealAssetPath(m_selectedFile);
+    if (!m_selectedFile.empty() && !selectedReal.empty() && fs::exists(fs::u8path(selectedReal), ec)) {
         ctx->Separator();
         if (ctx->Selectable(Tr("project.reveal_in_explorer"), false)) {
             if (revealInExplorer)
-                revealInExplorer(m_selectedFile);
+                revealInExplorer(selectedReal);
         }
         ctx->Separator();
         auto selectedPaths = GetSelectedPaths();
@@ -1911,7 +2188,7 @@ void ProjectPanel::RenderContextMenu(InxGUIContext *ctx)
                 ClipboardPaste();
         }
         ctx->Separator();
-        bool canRename = (selectedPaths.size() == 1);
+        bool canRename = (selectedPaths.size() == 1) && !IsVirtualSubAssetPath(m_selectedFile);
         if (!canRename)
             ctx->BeginDisabled();
         if (ctx->Selectable(Tr("project.rename"), false))
@@ -1946,7 +2223,8 @@ void ProjectPanel::RenderContextMenu(InxGUIContext *ctx)
 
 void ProjectPanel::RenderDragDropSource(InxGUIContext *ctx, const FileItem &item)
 {
-    if (item.type != FileItem::Dir && item.type != FileItem::File)
+    // Embedded model materials are browse-only (no drag — use a standalone .mat to assign).
+    if (item.type != FileItem::Dir && item.type != FileItem::File && item.type != FileItem::SubMesh)
         return;
 
     // BeginDragDropSource is cheap (~1µs) — returns false 99.9% of the time.
@@ -1957,6 +2235,42 @@ void ProjectPanel::RenderDragDropSource(InxGUIContext *ctx, const FileItem &item
     if (item.type == FileItem::Dir) {
         ctx->SetDragDropPayload(DRAG_TYPE_PROJECT_ITEM, item.path);
         ctx->Label("Folder: " + item.name);
+        ctx->EndDragDropSource();
+        return;
+    }
+
+    if (item.type == FileItem::SubMesh) {
+        // Drag embedded FBX sub-entries as the parent model asset (GUID when possible).
+        if (item.parentPath.empty()) {
+            ctx->EndDragDropSource();
+            return;
+        }
+
+        std::string ext = fs::u8path(item.parentPath).extension().string();
+        for (auto &c : ext)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        auto &gdMap = GetGuidDragDropMap();
+        auto gdIt = gdMap.find(ext);
+
+        if (gdIt != gdMap.end()) {
+            std::string guid;
+            if (getGuidFromPath)
+                guid = getGuidFromPath(item.parentPath);
+            else if (m_assetDatabase)
+                guid = m_assetDatabase->GetGuidFromPath(item.parentPath);
+
+            if (!guid.empty())
+                ctx->SetDragDropPayload(gdIt->second.guidPayloadType, guid);
+            else
+                ctx->SetDragDropPayload(gdIt->second.pathPayloadType, item.parentPath);
+
+            ctx->Label(std::string("Model") + ": " + item.name);
+        } else {
+            ctx->SetDragDropPayload(DRAG_TYPE_PROJECT_ITEM, item.parentPath);
+            ctx->Label("Model: " + item.name);
+        }
+
         ctx->EndDragDropSource();
         return;
     }

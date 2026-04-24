@@ -208,6 +208,7 @@ static void ApplyFbxMaterialData(MeshRenderer *renderer, const std::shared_ptr<I
     if (!renderer || !mesh)
         return;
     const auto &slotData = mesh->GetMaterialSlotData();
+    const auto &slotNames = mesh->GetMaterialSlotNames();
     if (slotData.empty())
         return;
     auto defaultMat = AssetRegistry::Instance().GetBuiltinMaterial("DefaultLit");
@@ -225,6 +226,12 @@ static void ApplyFbxMaterialData(MeshRenderer *renderer, const std::shared_ptr<I
         mat->SetColor("emissionColor", sd.emissionColor);
         mat->SetFloat("metallic", sd.metallic);
         mat->SetFloat("smoothness", sd.smoothness);
+        if (s < slotNames.size() && !slotNames[s].empty())
+            mat->SetName(slotNames[s]);
+        else
+            mat->SetName("EmbeddedMaterial_" + std::to_string(s));
+        if (!mesh->GetFilePath().empty())
+            mat->SetFilePath(mesh->GetFilePath() + "::submat:" + std::to_string(s));
         renderer->SetMaterial(s, std::move(mat));
     }
 }

@@ -4,8 +4,11 @@
 #include <core/log/InxLog.h>
 #include <function/renderer/InxRenderer.h>
 #include <function/resources/AssetDatabase/AssetDatabase.h>
+#include <function/resources/AssetImporter/AssetImporter.h>
+#include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <function/resources/InxFileLoader/InxTextureLoader.hpp>
 #include <function/resources/InxMaterial/InxMaterial.h>
+#include <function/resources/InxMesh/InxMesh.h>
 
 #include <algorithm>
 #include <cctype>
@@ -851,6 +854,35 @@ bool MaterialPreviewer::RenderFromJson(const std::string &materialJson, int size
 
     MaterialPreviewRenderer::RenderPreview(*material, size, outPixels, resolver, pMapping);
     return true;
+}
+
+bool MaterialPreviewer::RenderModelEmbeddedMaterialToPixels(const std::string &modelPath, uint32_t slotIndex, int size,
+                                                            std::vector<unsigned char> &outPixels,
+                                                            AssetDatabase *adb, InxRenderer *renderer)
+{
+    if (modelPath.empty())
+        return false;
+
+    auto mesh = AssetRegistry::Instance().LoadAssetByPath<InxMesh>(modelPath, ResourceType::Mesh);
+    if (!mesh || slotIndex >= mesh->GetMaterialSlotCount())
+        return false;
+
+    const auto &slotDataVec = mesh->GetMaterialSlotData();
+    if (slotIndex >= static_cast<uint32_t>(slotDataVec.size()))
+        return false;
+
+    const auto &sd = slotDataVec[slotIndex];
+    auto defaultMat = AssetRegistry::Instance().GetBuiltinMaterial("DefaultLit");
+    if (!defaultMat)
+        return false;
+
+    auto mat = defaultMat->Clone();
+    mat->SetColor("baseColor", sd.baseColor);
+    mat->SetColor("emissionColor", sd.emissionColor);
+    mat->SetFloat("metallic", sd.metallic);
+    mat->SetFloat("smoothness", sd.smoothness);
+
+    return RenderFromJson(mat->Serialize(), size, outPixels, adb, renderer);
 }
 
 } // namespace infernux
