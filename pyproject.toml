@@ -31,8 +31,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://chenlizheme.github.io/Infernux/"
-Documentation = "https://chenlizheme.github.io/Infernux/wiki.html"
+Homepage = "https://infernux-engine.com/"
+Documentation = "https://infernux-engine.com/wiki.html"
 Repository = "https://github.com/ChenlizheMe/Infernux"
 Issues = "https://github.com/ChenlizheMe/Infernux/issues"
 

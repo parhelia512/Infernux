@@ -21,8 +21,8 @@
 
 <p align="center">
   <a href="README.md">English</a> ·
-  <a href="https://chenlizheme.github.io/Infernux/">官网</a> ·
-  <a href="https://chenlizheme.github.io/Infernux/wiki.html">文档</a> ·
+  <a href="https://infernux-engine.com/">官网</a> ·
+  <a href="https://infernux-engine.com/wiki.html">文档</a> ·
   <a href="https://arxiv.org/pdf/2604.10263">技术报告</a> ·
   <a href="#快速开始">快速开始</a>
 </p>
@@ -154,8 +154,8 @@ python -m pytest test/ -v
 
 ## 文档
 
-- 官网：<https://chenlizheme.github.io/Infernux/>
-- 文档入口：<https://chenlizheme.github.io/Infernux/wiki.html>
+- 官网：<https://infernux-engine.com/>
+- 文档入口：<https://infernux-engine.com/wiki.html>
 - 技术报告：[Infernux: A Python-Native Game Engine with JIT-Accelerated Scripting（arXiv:2604.10263）](https://arxiv.org/pdf/2604.10263)
 - API 参考：从 Python 包自动生成，并发布到 `docs/wiki/site/`
 

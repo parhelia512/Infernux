@@ -1899,6 +1899,7 @@ def _generate_mkdocs_yml(nav_entries: Dict[str, List[Tuple[str, str]]]):
     lines.append("site_name: Infernux Scripting API")
     lines.append("site_description: Infernux Game Engine Scripting API Reference")
     lines.append("site_author: Infernux Team")
+    lines.append("site_url: https://infernux-engine.com/wiki/site/")
     lines.append("")
     lines.append("use_directory_urls: false")
     lines.append("")
