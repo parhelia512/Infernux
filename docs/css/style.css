@@ -445,13 +445,23 @@ img { max-width: 100%; display: block; }
     position: relative;
     z-index: 1;
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.9fr);
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, min(56ch, 100%));
     gap: 48px;
     padding: 56px 56px 60px;
 }
 
 .hero-copy { position: relative; z-index: 1; }
-.hero-panel { position: relative; z-index: 1; display: grid; gap: 18px; align-content: start; }
+.hero-panel {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 18px;
+    align-content: start;
+    min-width: 0;
+    max-width: 56ch;
+    justify-self: end;
+    width: 100%;
+}
 
 /* Mission codename */
 .hero-codename {
@@ -635,9 +645,10 @@ img { max-width: 100%; display: block; }
     box-shadow: var(--shadow-soft);
 }
 
-/* Code preview */
+/* Code preview (hero: ≤56 columns; width follows 56ch grid rail) */
 .code-preview {
     overflow: hidden;
+    max-width: 56ch;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--code-bg);
@@ -674,6 +685,9 @@ img { max-width: 100%; display: block; }
 .code-preview pre {
     padding: 18px 22px;
     overflow-x: auto;
+    /* Hard cap ~56 characters per line for monospace (matches hero rail) */
+    max-width: 56ch;
+    box-sizing: content-box;
 }
 
 .code-preview code {
@@ -1365,6 +1379,11 @@ img { max-width: 100%; display: block; }
     .section-head,
     .cta-panel {
         grid-template-columns: 1fr;
+    }
+
+    .hero-panel {
+        justify-self: stretch;
+        max-width: none;
     }
 
     .grid-3,
