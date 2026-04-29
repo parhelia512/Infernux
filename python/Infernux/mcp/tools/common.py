@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Callable
 
 from Infernux.mcp.threading import MainThreadCommandQueue
@@ -110,9 +111,13 @@ def fail(
 
 def main_thread(name: str, fn, *, timeout_ms: int = 30000, explain: dict[str, Any] | None = None) -> dict[str, Any]:
     response_explain = explain or explain_for(name)
+    started = time.monotonic()
     try:
-        return ok(MainThreadCommandQueue.instance().run_sync(name, fn, timeout_ms=timeout_ms), explain=response_explain)
+        result = ok(MainThreadCommandQueue.instance().run_sync(name, fn, timeout_ms=timeout_ms), explain=response_explain)
+        _record_trace(name, True, started)
+        return result
     except TimeoutError as exc:
+        _record_trace(name, False, started, str(exc))
         return fail(
             "error.timeout",
             str(exc),
@@ -120,13 +125,25 @@ def main_thread(name: str, fn, *, timeout_ms: int = 30000, explain: dict[str, An
             explain=response_explain,
         )
     except ValueError as exc:
+        _record_trace(name, False, started, str(exc))
         return fail("error.invalid_argument", str(exc), hint="Check parameter schema with mcp.help or component.describe_type.", explain=response_explain)
     except FileExistsError as exc:
+        _record_trace(name, False, started, str(exc))
         return fail("error.exists", str(exc), hint="Use overwrite=true or choose a different path/name.", explain=response_explain)
     except FileNotFoundError as exc:
+        _record_trace(name, False, started, str(exc))
         return fail("error.not_found", str(exc), hint="Use scene.inspect, gameobject.find, or asset.search to locate valid targets.", explain=response_explain)
     except Exception as exc:
+        _record_trace(name, False, started, str(exc))
         return fail("error.internal", str(exc), hint="Read console.read and retry with a smaller operation.", explain=response_explain)
+
+
+def _record_trace(name: str, ok_flag: bool, started: float, error: str = "") -> None:
+    try:
+        from Infernux.mcp.project_tools.trace import record_tool_call
+        record_tool_call(name, ok=ok_flag, elapsed_ms=(time.monotonic() - started) * 1000.0, error=error)
+    except Exception:
+        pass
 
 
 def register_and_tool(mcp, name: str, **metadata: Any) -> Callable:

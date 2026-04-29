@@ -213,6 +213,8 @@ def register_docs_tools(mcp, project_path: str) -> None:
                 "asset": ["asset.list", "asset.search", "asset.read_text", "asset.write_text", "asset.refresh"],
                 "camera": ["camera.find_main", "camera.ensure_main", "camera.setup_2d_card_game"],
                 "runtime": ["editor.play", "runtime.wait", "runtime.run_for", "runtime.read_errors"],
+                "project_tools": ["project_tools.list", "project_tools.reload", "project_tools.validate", "project_tools.audit"],
+                "trace": ["mcp.trace.start", "mcp.trace.stop", "mcp.trace.current", "mcp.trace.list"],
             },
             "tools": [meta["name"] for meta in list_tool_metadata()],
         })
