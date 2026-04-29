@@ -183,12 +183,29 @@ def register_docs_tools(mcp, project_path: str) -> None:
             "endpoint": server.endpoint_url(),
         })
 
+    @mcp.tool(name="mcp.discovery")
+    def mcp_discovery() -> dict:
+        """Return connection info and project-local discovery file locations."""
+        info = server.connection_info()
+        return ok({
+            **info,
+            "project_root": project_path,
+            "files": {
+                name: client["file"]
+                for name, client in info.get("clients", {}).items()
+            },
+            "config_snippets": {
+                name: client.get("config") or client.get("toml")
+                for name, client in info.get("clients", {}).items()
+            },
+        })
+
     @mcp.tool(name="mcp.capabilities")
     def mcp_capabilities() -> dict:
         """Return high-level capability groups and known tool names."""
         return ok({
             "groups": {
-                "foundation": ["mcp.ping", "mcp.version", "mcp.health", "mcp.help"],
+                "foundation": ["mcp.ping", "mcp.version", "mcp.discovery", "mcp.health", "mcp.help"],
                 "self_description": ["engine.concepts", "engine.concept.get", "workflow.list", "workflow.help"],
                 "scene": ["scene.inspect", "scene.get_hierarchy", "scene.save", "scene.open", "scene.new"],
                 "gameobject": ["hierarchy.create_object", "gameobject.find", "gameobject.get", "gameobject.set_parent"],
@@ -342,7 +359,7 @@ def _register_metadata() -> None:
     }.items():
         register_tool_metadata(name, summary=summary)
     for name in [
-        "mcp.ping", "mcp.version", "mcp.capabilities", "mcp.health", "mcp.help", "mcp.batch",
+        "mcp.ping", "mcp.version", "mcp.discovery", "mcp.capabilities", "mcp.health", "mcp.help", "mcp.batch",
         "engine.concepts", "engine.concept.get", "workflow.list", "workflow.help",
         "workflow.examples",
     ]:

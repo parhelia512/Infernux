@@ -21,8 +21,8 @@ def register_material_tools(mcp, project_path: str) -> None:
             if os.path.exists(file_path) and not overwrite:
                 raise FileExistsError(f"Material already exists: {path}")
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            mat = Material.create_default_unlit() if str(template).lower() == "unlit" else Material.create_default_lit()
-            mat.name = os.path.splitext(os.path.basename(file_path))[0]
+            name = os.path.splitext(os.path.basename(file_path))[0]
+            mat = Material.create_unlit(name) if str(template).lower() == "unlit" else Material.create_lit(name)
             _set_properties(mat, properties or {})
             mat.save(file_path)
             notify_asset_changed(file_path, "created")
