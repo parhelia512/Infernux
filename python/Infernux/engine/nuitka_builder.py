@@ -486,6 +486,15 @@ class NuitkaBuilder:
     # Python bytecode at runtime for its LLVM JIT compiler — Nuitka's
     # C compilation removes the bytecode, making @njit silently fail.
     _JIT_NOFOLLOW_PACKAGES = frozenset({"numba", "llvmlite", "numpy"})
+    _GAME_BUILD_EXCLUDED_PACKAGES = frozenset({"mcp", "fastmcp"})
+    _GAME_BUILD_NOFOLLOW_MODULES = frozenset({
+        "Infernux.mcp",
+        "Infernux.mcp.server",
+        "Infernux.mcp.threading",
+        "Infernux.mcp.tools",
+        "mcp",
+        "fastmcp",
+    })
 
     # Directories stripped from raw-copied JIT packages to slim down
     # the build output.  These are never needed at runtime.
@@ -529,7 +538,10 @@ class NuitkaBuilder:
         self.icon_path = icon_path
         self.console_mode = console_mode
         self.lto = lto
-        self.extra_include_packages = list(extra_include_packages or [])
+        self.extra_include_packages = [
+            pkg for pkg in list(extra_include_packages or [])
+            if not self._is_game_build_excluded_package(pkg)
+        ]
         self.extra_include_data = list(extra_include_data or [])
         self.extra_requirements_files = [
             os.path.abspath(path)
@@ -542,6 +554,11 @@ class NuitkaBuilder:
         tag = hashlib.md5(self.output_dir.encode()).hexdigest()[:8]
         self._staging_dir = os.path.join(_STAGING_ROOT, tag)
         self._builder_python = _resolve_builder_python()
+
+    @classmethod
+    def _is_game_build_excluded_package(cls, package_name: str) -> bool:
+        root = (package_name or "").split(".", 1)[0].lower().replace("_", "-")
+        return root in cls._GAME_BUILD_EXCLUDED_PACKAGES
 
     # ------------------------------------------------------------------
     # Public API
@@ -752,6 +769,9 @@ class NuitkaBuilder:
         ):
             cmd.append(f"--nofollow-import-to={_editor_mod}")
 
+        for _excluded_mod in sorted(self._GAME_BUILD_NOFOLLOW_MODULES):
+            cmd.append(f"--nofollow-import-to={_excluded_mod}")
+
         # Exclude JIT packages from Nuitka compilation — they will be
         # injected as raw site-packages afterwards so numba retains the
         # Python bytecode it needs for LLVM JIT at runtime.
@@ -775,7 +795,7 @@ class NuitkaBuilder:
             cmd.append("--include-module=multiprocessing")
 
         for pkg in self.extra_include_packages:
-            if pkg not in _nofollow_jit:
+            if pkg not in _nofollow_jit and not self._is_game_build_excluded_package(pkg):
                 cmd.append(f"--include-package={pkg}")
 
         for pattern in self.extra_include_data:

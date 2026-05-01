@@ -174,11 +174,12 @@ class Engine():
                 DeferredTaskRunner.instance().tick()
             except Exception as exc:
                 Debug.log_suppressed("Engine.pre_gui_tick.DeferredTaskRunner", exc)
-            try:
-                from Infernux.mcp.threading import MainThreadCommandQueue
-                MainThreadCommandQueue.instance().drain()
-            except Exception as exc:
-                Debug.log_suppressed("Engine.pre_gui_tick.MainThreadCommandQueue", exc)
+            if not _PLAYER_MODE:
+                try:
+                    from Infernux.mcp.threading import MainThreadCommandQueue
+                    MainThreadCommandQueue.instance().drain()
+                except Exception as exc:
+                    Debug.log_suppressed("Engine.pre_gui_tick.MainThreadCommandQueue", exc)
             try:
                 from Infernux.engine.ui.window_manager import WindowManager
                 manager = WindowManager.instance()
