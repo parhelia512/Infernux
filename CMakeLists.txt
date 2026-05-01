@@ -313,8 +313,10 @@ add_custom_target(package_and_install_python ALL
         -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
         -P "${CMAKE_SOURCE_DIR}/cmake/ensure_python_packaging_tools.cmake"
 
-    COMMAND ${CMAKE_COMMAND} -E echo "Building Python package via '${Python3_EXECUTABLE} -m build'..."
-    COMMAND "${Python3_EXECUTABLE}" -m build --no-isolation --outdir "${CMAKE_SOURCE_DIR}/dist"
+    COMMAND ${CMAKE_COMMAND} -E echo "Building Python wheel via '${Python3_EXECUTABLE} -m build --wheel'..."
+    COMMAND ${CMAKE_COMMAND} -E env
+        "INFERNUX_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "${Python3_EXECUTABLE}" -m build --wheel --no-isolation --outdir "${CMAKE_SOURCE_DIR}/dist"
 
     COMMAND ${CMAKE_COMMAND} -E echo "Installing built wheel via pip..."
     COMMAND ${CMAKE_COMMAND}

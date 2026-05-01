@@ -112,6 +112,7 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
     _GAME_DATA_DIRS = ["Assets", "ProjectSettings", "materials"]
     _EXCLUDE_PATTERNS = {"__pycache__", ".git", ".gitignore", ".infernux-engine-lock.json"}
     _ICON_EXTS = {".png", ".jpg", ".jpeg", ".ico"}
+    _GAME_BUILD_EXCLUDED_PACKAGES = frozenset({"mcp", "fastmcp"})
 
     def __init__(
         self,
@@ -669,20 +670,29 @@ finally:
                     f"  copied {dirname}/ in {time.perf_counter() - _t0:.2f}s"
                 )
 
-        # When JIT is disabled, strip numba from the shipped requirements
-        # so the player runtime doesn't warn about "missing packages: numba".
-        if not self.enable_jit:
-            req_file = os.path.join(data_dir, "ProjectSettings", "requirements.txt")
-            if os.path.isfile(req_file):
-                with open(req_file, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                filtered = [
-                    ln for ln in lines
-                    if not re.match(r"^\s*numba\b", ln, re.IGNORECASE)
-                ]
-                if len(filtered) != len(lines):
-                    with open(req_file, "w", encoding="utf-8") as f:
-                        f.writelines(filtered)
+        self._filter_shipped_requirements(data_dir)
+
+    def _filter_shipped_requirements(self, data_dir: str) -> None:
+        req_file = os.path.join(data_dir, "ProjectSettings", "requirements.txt")
+        if not os.path.isfile(req_file):
+            return
+
+        with open(req_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        def _keep(line: str) -> bool:
+            if self._is_game_build_excluded_requirement(line):
+                return False
+            if not self.enable_jit and re.match(r"^\s*numba\b", line, re.IGNORECASE):
+                return False
+            return True
+
+        filtered = [line for line in lines if _keep(line)]
+        if len(filtered) == len(lines):
+            return
+
+        with open(req_file, "w", encoding="utf-8") as f:
+            f.writelines(filtered)
 
     # ------------------------------------------------------------------
     # Collect user script dependencies
@@ -698,6 +708,7 @@ finally:
         "Infernux",
         # Excluded editor-only / build-only packages
         "watchdog", "PIL", "cv2", "imageio", "psd_tools",
+        "mcp", "fastmcp",
         "tkinter", "unittest", "test", "pip", "setuptools",
         "distutils", "ensurepip",
     })
@@ -897,6 +908,10 @@ finally:
         # player reads pre-extracted .infsplash blobs via struct.
         for _build_pkg in ("av", "av.libs", "imageio"):
             _queue_dir(os.path.join(final_dir, _build_pkg))
+
+        for _mcp_pkg in self._GAME_BUILD_EXCLUDED_PACKAGES:
+            _queue_dir(os.path.join(final_dir, _mcp_pkg))
+        _queue_dir(os.path.join(final_dir, "Infernux", "mcp"))
 
         # Remove any leaked ffmpeg DLLs from the dist root that Nuitka's
         # DLL scanner may have copied from the av package.

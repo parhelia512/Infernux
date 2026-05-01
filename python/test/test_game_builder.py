@@ -6,6 +6,7 @@ import json
 import pytest
 
 from Infernux.engine.game_builder import BuildOutputDirectoryError, GameBuilder
+from Infernux.engine.nuitka_builder import NuitkaBuilder
 
 
 def _make_project(tmp_path):
@@ -82,6 +83,83 @@ class TestGameBuilderOutputSafety:
 
 
 class TestGameBuilderDependencyCollection:
+    def test_collect_user_dependencies_excludes_mcp_packages_from_requirements(self, tmp_path, monkeypatch):
+        project_root = _make_project(tmp_path)
+        (project_root / "requirements.txt").write_text(
+            "mcp>=1.24,<2\nfastmcp\n",
+            encoding="utf-8",
+        )
+        builder = GameBuilder(str(project_root), str(tmp_path / "build_output"), game_name="TestGame")
+
+        def fake_find_spec(name):
+            assert name not in {"mcp", "fastmcp"}
+            return None
+
+        monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+
+        assert builder._collect_user_dependencies() == []
+
+    def test_collect_user_dependencies_excludes_mcp_packages_from_asset_imports(self, tmp_path, monkeypatch):
+        project_root = _make_project(tmp_path)
+        _write_asset_script(project_root, "tooling.py", "import mcp\nimport fastmcp\n")
+        builder = GameBuilder(str(project_root), str(tmp_path / "build_output"), game_name="TestGame")
+
+        def fake_find_spec(name):
+            assert name not in {"mcp", "fastmcp"}
+            return None
+
+        monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+
+        assert builder._collect_user_dependencies() == []
+
+    def test_project_requirement_files_filters_mcp_for_game_build(self, tmp_path):
+        project_root = _make_project(tmp_path)
+        req_path = project_root / "requirements.txt"
+        req_path.write_text(
+            "# keep comments\n"
+            "mcp>=1.24,<2\n"
+            "requests>=2\n"
+            "fastmcp\n",
+            encoding="utf-8",
+        )
+        builder = GameBuilder(str(project_root), str(tmp_path / "build_output"), game_name="TestGame")
+
+        filtered_files = builder._project_requirement_files()
+
+        assert len(filtered_files) == 1
+        filtered_text = open(filtered_files[0], "r", encoding="utf-8").read()
+        assert "requests>=2" in filtered_text
+        assert "mcp" not in filtered_text.lower()
+        assert "fastmcp" not in filtered_text.lower()
+        assert "mcp>=1.24,<2" in req_path.read_text(encoding="utf-8")
+
+    def test_filter_shipped_requirements_removes_mcp_and_disabled_jit(self, tmp_path):
+        data_dir = tmp_path / "build_output" / "Data"
+        settings_dir = data_dir / "ProjectSettings"
+        settings_dir.mkdir(parents=True)
+        req_path = settings_dir / "requirements.txt"
+        req_path.write_text(
+            "numba>=0.61.0\n"
+            "mcp>=1.24,<2\n"
+            "fastmcp\n"
+            "requests>=2\n",
+            encoding="utf-8",
+        )
+        builder = _make_builder(tmp_path, tmp_path / "build_output")
+
+        builder._filter_shipped_requirements(str(data_dir))
+
+        filtered_text = req_path.read_text(encoding="utf-8")
+        assert "requests>=2" in filtered_text
+        assert "numba" not in filtered_text.lower()
+        assert "mcp" not in filtered_text.lower()
+        assert "fastmcp" not in filtered_text.lower()
+
+    def test_nuitka_builder_treats_mcp_as_game_build_excluded(self):
+        assert NuitkaBuilder._is_game_build_excluded_package("mcp")
+        assert NuitkaBuilder._is_game_build_excluded_package("fastmcp.server")
+        assert not NuitkaBuilder._is_game_build_excluded_package("requests")
+
     def test_collect_user_dependencies_adds_llvmlite_for_numba_import(self, tmp_path, monkeypatch):
         project_root = _make_project(tmp_path)
         _write_asset_script(project_root, "stress.py", "import numba\n")
