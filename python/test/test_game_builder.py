@@ -6,6 +6,7 @@ import json
 import pytest
 
 from Infernux.engine.game_builder import BuildOutputDirectoryError, GameBuilder
+from Infernux.engine import nuitka_builder as nuitka_builder_module
 from Infernux.engine.nuitka_builder import NuitkaBuilder
 
 
@@ -48,6 +49,16 @@ class TestGameBuilderOutputSafety:
         assert exc_info.value.entries == ["keep.txt"]
 
         assert keep_file.read_text(encoding="utf-8") == "keep"
+
+    def test_validate_allows_only_build_temp_output_dir(self, tmp_path):
+        output_dir = tmp_path / "build_output"
+        temp_dir = output_dir / "_build_temp"
+        nested_dir = temp_dir / "nested"
+        nested_dir.mkdir(parents=True)
+        (nested_dir / "stale.bin").write_bytes(b"stale")
+        builder = _make_builder(tmp_path, output_dir)
+
+        builder._validate()
 
     def test_clean_output_allows_marked_build_directory(self, tmp_path):
         output_dir = tmp_path / "build_output"
@@ -245,3 +256,164 @@ class TestGameBuilderAutoParallelExport:
         deps = builder._collect_user_dependencies()
 
         assert deps == ["llvmlite", "numba", "numpy"]
+
+
+class TestNuitkaWindowsSdkEnvironment:
+    def test_augment_windows_sdk_environment_adds_kits_tools_and_paths(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(nuitka_builder_module.sys, "platform", "win32")
+
+        sdk_root = tmp_path / "Windows Kits" / "10"
+        sdk_version = "10.0.22621.0"
+        for relative_dir in (
+            f"Include/{sdk_version}/ucrt",
+            f"Include/{sdk_version}/shared",
+            f"Include/{sdk_version}/um",
+            f"Include/{sdk_version}/winrt",
+            f"Lib/{sdk_version}/ucrt/x64",
+            f"Lib/{sdk_version}/um/x64",
+            f"bin/{sdk_version}/x64",
+        ):
+            (sdk_root / relative_dir).mkdir(parents=True, exist_ok=True)
+        (sdk_root / "Include" / sdk_version / "um" / "Windows.h").write_text("", encoding="utf-8")
+
+        for tool_name in ("rc.exe", "mt.exe"):
+            tool_path = sdk_root / "bin" / sdk_version / "x64" / tool_name
+            tool_path.write_text("", encoding="utf-8")
+            tool_path.chmod(0o755)
+
+        msvc_bin = tmp_path / "msvc" / "bin"
+        msvc_bin.mkdir(parents=True)
+        for tool_name in ("cl.exe", "link.exe"):
+            tool_path = msvc_bin / tool_name
+            tool_path.write_text("", encoding="utf-8")
+            tool_path.chmod(0o755)
+        msvc_include = tmp_path / "msvc" / "include"
+        msvc_lib = tmp_path / "msvc" / "lib" / "x64"
+        msvc_include.mkdir(parents=True)
+        msvc_lib.mkdir(parents=True)
+        (msvc_include / "excpt.h").write_text("", encoding="utf-8")
+        (msvc_lib / "vcruntime.lib").write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(nuitka_builder_module, "_windows_sdk_roots_from_registry", lambda: [str(sdk_root)])
+        env = {
+            "PATH": str(msvc_bin),
+            "INCLUDE": str(msvc_include),
+            "LIB": str(msvc_lib),
+        }
+
+        augmented = nuitka_builder_module._augment_windows_sdk_environment(env)
+        forced = nuitka_builder_module._force_msvc_tool_variables(augmented)
+
+        assert nuitka_builder_module._msvc_env_ready(forced)
+        assert str(sdk_root / "bin" / sdk_version / "x64") in forced["PATH"]
+        assert str(sdk_root / "Include" / sdk_version / "um") in forced["INCLUDE"]
+        assert str(sdk_root / "Lib" / sdk_version / "um" / "x64") in forced["LIB"]
+        assert str(sdk_root / "Lib" / sdk_version / "um" / "x64") in forced["LIBPATH"]
+        assert forced["WindowsSdkBinPath"].rstrip("\\/").endswith(str(sdk_root / "bin" / sdk_version / "x64"))
+        assert forced["UniversalCRTSdkDir"].rstrip("\\/").endswith(str(sdk_root))
+        assert forced["MSSDK_DIR"].rstrip("\\/").endswith(str(sdk_root))
+        assert forced["WindowsSDKVersion"] == sdk_version
+        assert forced["CC"].endswith("cl.exe")
+        assert forced["CXX"].endswith("cl.exe")
+        assert "LINK" not in forced
+        assert forced["RC"].endswith("rc.exe")
+        assert forced["MT"].endswith("mt.exe")
+
+    def test_force_msvc_tool_variables_removes_link_environment_options(self, tmp_path):
+        tool_dir = tmp_path / "Program Files" / "MSVC" / "bin"
+        tool_dir.mkdir(parents=True)
+        for tool_name in ("cl.exe", "link.exe", "rc.exe", "mt.exe"):
+            tool_path = tool_dir / tool_name
+            tool_path.write_text("", encoding="utf-8")
+            tool_path.chmod(0o755)
+
+        forced = nuitka_builder_module._force_msvc_tool_variables({
+            "PATH": str(tool_dir),
+            "LINK": str(tool_dir / "link.exe"),
+            "_LINK_": str(tool_dir / "link.exe"),
+        })
+
+        assert forced["CC"].endswith("cl.exe")
+        assert forced["CXX"].endswith("cl.exe")
+        assert "LINK" not in forced
+        assert "_LINK_" not in forced
+        assert forced["RC"].endswith("rc.exe")
+        assert forced["MT"].endswith("mt.exe")
+
+    def test_sdk_only_environment_is_not_ready_without_msvc_headers_and_libs(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(nuitka_builder_module.sys, "platform", "win32")
+
+        sdk_root = tmp_path / "Windows Kits" / "10"
+        sdk_version = "10.0.26100.0"
+        for relative_dir in (
+            f"Include/{sdk_version}/ucrt",
+            f"Include/{sdk_version}/shared",
+            f"Include/{sdk_version}/um",
+            f"Lib/{sdk_version}/ucrt/x64",
+            f"Lib/{sdk_version}/um/x64",
+            f"bin/{sdk_version}/x64",
+        ):
+            (sdk_root / relative_dir).mkdir(parents=True, exist_ok=True)
+        (sdk_root / "Include" / sdk_version / "um" / "Windows.h").write_text("", encoding="utf-8")
+        for tool_name in ("rc.exe", "mt.exe"):
+            tool_path = sdk_root / "bin" / sdk_version / "x64" / tool_name
+            tool_path.write_text("", encoding="utf-8")
+            tool_path.chmod(0o755)
+
+        msvc_bin = tmp_path / "msvc" / "bin"
+        msvc_bin.mkdir(parents=True)
+        for tool_name in ("cl.exe", "link.exe"):
+            tool_path = msvc_bin / tool_name
+            tool_path.write_text("", encoding="utf-8")
+            tool_path.chmod(0o755)
+
+        monkeypatch.setattr(nuitka_builder_module, "_windows_sdk_roots_from_registry", lambda: [str(sdk_root)])
+        env = nuitka_builder_module._augment_windows_sdk_environment({"PATH": str(msvc_bin)})
+
+        missing = nuitka_builder_module._msvc_env_missing_parts(env)
+        assert "MSVC INCLUDE (excpt.h)" in missing
+        assert "MSVC LIB (vcruntime.lib)" in missing
+        assert not nuitka_builder_module._msvc_env_ready(env)
+
+    def test_windows_sdk_roots_include_explicit_override(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(nuitka_builder_module.sys, "platform", "win32")
+        sdk_root = tmp_path / "custom-sdk"
+        sdk_root.mkdir()
+        monkeypatch.setenv("INFERNUX_WINDOWS_SDK_DIR", str(sdk_root))
+        monkeypatch.setattr(nuitka_builder_module, "_windows_sdk_roots_from_registry", lambda: [])
+
+        assert str(sdk_root) in nuitka_builder_module._windows_sdk_roots({})
+
+    def test_msvc_environment_scripts_include_explicit_vs_root(self, tmp_path, monkeypatch):
+        vs_root = tmp_path / "VS"
+        script_path = vs_root / "Common7" / "Tools" / "VsDevCmd.bat"
+        script_path.parent.mkdir(parents=True)
+        script_path.write_text("", encoding="utf-8")
+        monkeypatch.setenv("INFERNUX_VSINSTALLDIR", str(vs_root))
+        monkeypatch.delenv("INFERNUX_VCVARSALL", raising=False)
+        monkeypatch.setattr(nuitka_builder_module, "_visual_studio_roots_from_vswhere", lambda: [])
+        monkeypatch.setattr(nuitka_builder_module, "_visual_studio_roots_from_registry", lambda: [])
+
+        assert (str(script_path), ["-arch=x64", "-host_arch=x64"]) in nuitka_builder_module._find_msvc_environment_scripts()
+
+    def test_windows_nuitka_command_does_not_force_msvc_latest(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(nuitka_builder_module.sys, "platform", "win32")
+        monkeypatch.setattr(nuitka_builder_module, "_has_msvc_toolchain", lambda: True)
+
+        builder = object.__new__(NuitkaBuilder)
+        builder._builder_python = "python"
+        builder.console_mode = "disable"
+        builder._staging_dir = str(tmp_path / "stage")
+        builder.output_filename = "Game.exe"
+        builder.lto = False
+        builder.extra_include_packages = []
+        builder.extra_include_data = []
+        builder.raw_copy_packages = []
+        builder.product_name = "Game"
+        builder.file_version = "1.0.0.0"
+        builder.icon_path = None
+        builder._staged_entry = str(tmp_path / "boot.py")
+
+        cmd = builder._build_command()
+
+        assert "--msvc=latest" not in cmd

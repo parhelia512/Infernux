@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -57,11 +58,289 @@ def _which_in_env(executable: str, env: dict[str, str]) -> str:
     return shutil.which(executable, path=env.get("PATH", "")) or ""
 
 
+def _split_env_paths(value: str) -> list[str]:
+    return [entry for entry in (value or "").split(os.pathsep) if entry]
+
+
+def _dedupe_env_paths(paths: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        if not path:
+            continue
+        normalized = os.path.normcase(os.path.abspath(os.path.expandvars(path)))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(path)
+    return result
+
+
+def _set_env_paths(env: dict[str, str], key: str, paths: list[str]) -> None:
+    env[key] = os.pathsep.join(_dedupe_env_paths(paths))
+
+
+def _env_path_has_file(env: dict[str, str], key: str, filename: str) -> bool:
+    for directory in _split_env_paths(env.get(key, "")):
+        if os.path.isfile(os.path.join(os.path.expandvars(directory.strip().strip('"')), filename)):
+            return True
+    return False
+
+
+def _with_trailing_backslash(path: str) -> str:
+    return os.path.abspath(path).rstrip("\\/") + "\\"
+
+
+def _version_sort_key(version: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for item in re.split(r"[^0-9]+", version):
+        if not item:
+            continue
+        try:
+            parts.append(int(item))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
+def _windows_sdk_roots_from_registry() -> list[str]:
+    if sys.platform != "win32":
+        return []
+
+    try:
+        import winreg
+    except ImportError:
+        return []
+
+    roots: list[str] = []
+    seen: set[str] = set()
+
+    def _add(path: str) -> None:
+        if not path:
+            return
+        root = os.path.abspath(os.path.expandvars(path.strip().strip('"')))
+        if not os.path.isdir(root):
+            return
+        normalized = os.path.normcase(root)
+        if normalized in seen:
+            return
+        seen.add(normalized)
+        roots.append(root)
+
+    hives = (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER)
+    views = [0]
+    for view_name in ("KEY_WOW64_64KEY", "KEY_WOW64_32KEY"):
+        view_value = getattr(winreg, view_name, 0)
+        if view_value and view_value not in views:
+            views.append(view_value)
+
+    keys = (
+        r"SOFTWARE\Microsoft\Windows Kits\Installed Roots",
+        r"SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots",
+    )
+    value_names = ("KitsRoot11", "KitsRoot10", "KitsRoot")
+    for hive in hives:
+        for access in views:
+            for key_name in keys:
+                try:
+                    with winreg.OpenKey(hive, key_name, 0, winreg.KEY_READ | access) as key_handle:
+                        for value_name in value_names:
+                            try:
+                                value, _kind = winreg.QueryValueEx(key_handle, value_name)
+                            except OSError:
+                                continue
+                            if isinstance(value, str):
+                                _add(value)
+                except OSError:
+                    continue
+    return roots
+
+
+def _windows_sdk_roots(env: Optional[dict[str, str]] = None) -> list[str]:
+    roots: list[str] = []
+    seen: set[str] = set()
+
+    def _add(path: str) -> None:
+        if not path:
+            return
+        root = os.path.abspath(os.path.expandvars(path.strip().strip('"')))
+        if not os.path.isdir(root):
+            return
+        normalized = os.path.normcase(root)
+        if normalized in seen:
+            return
+        seen.add(normalized)
+        roots.append(root)
+
+    if env:
+        _add(env.get("INFERNUX_WINDOWS_SDK_DIR", ""))
+        _add(env.get("WindowsSdkDir", ""))
+        _add(env.get("UniversalCRTSdkDir", ""))
+    _add(os.environ.get("INFERNUX_WINDOWS_SDK_DIR", ""))
+    _add(os.environ.get("WindowsSdkDir", ""))
+    _add(os.environ.get("UniversalCRTSdkDir", ""))
+    for root in _windows_sdk_roots_from_registry():
+        _add(root)
+    program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    _add(os.path.join(program_files_x86, "Windows Kits", "10"))
+    _add(os.path.join(program_files, "Windows Kits", "10"))
+    return roots
+
+
+def _find_windows_sdk_layout(env: Optional[dict[str, str]] = None) -> dict[str, object]:
+    if sys.platform != "win32":
+        return {}
+
+    for sdk_root in _windows_sdk_roots(env):
+        include_root = os.path.join(sdk_root, "Include")
+        lib_root = os.path.join(sdk_root, "Lib")
+        bin_root = os.path.join(sdk_root, "bin")
+        if not os.path.isdir(include_root):
+            continue
+
+        versions = [
+            name for name in os.listdir(include_root)
+            if os.path.isdir(os.path.join(include_root, name))
+        ]
+        for version in sorted(versions, key=_version_sort_key, reverse=True):
+            include_dirs = [
+                os.path.join(include_root, version, component)
+                for component in ("ucrt", "shared", "um", "winrt", "cppwinrt")
+                if os.path.isdir(os.path.join(include_root, version, component))
+            ]
+            lib_dirs = [
+                os.path.join(lib_root, version, component, "x64")
+                for component in ("ucrt", "um")
+                if os.path.isdir(os.path.join(lib_root, version, component, "x64"))
+            ]
+            bin_dirs = [
+                os.path.join(bin_root, version, "x64"),
+                os.path.join(bin_root, "x64"),
+            ]
+            tool_dirs = [
+                path for path in bin_dirs
+                if os.path.isfile(os.path.join(path, "rc.exe"))
+                and os.path.isfile(os.path.join(path, "mt.exe"))
+            ]
+            has_windows_headers = os.path.isfile(os.path.join(include_root, version, "um", "Windows.h"))
+            has_um_libs = os.path.isdir(os.path.join(lib_root, version, "um", "x64"))
+            has_ucrt_libs = os.path.isdir(os.path.join(lib_root, version, "ucrt", "x64"))
+            if tool_dirs and include_dirs and lib_dirs and has_windows_headers and has_um_libs and has_ucrt_libs:
+                return {
+                    "root": sdk_root,
+                    "version": version,
+                    "tool_dirs": tool_dirs,
+                    "include_dirs": include_dirs,
+                    "lib_dirs": lib_dirs,
+                }
+    return {}
+
+
+def _augment_windows_sdk_environment(env: dict[str, str]) -> dict[str, str]:
+    if sys.platform != "win32":
+        return env
+
+    layout = _find_windows_sdk_layout(env)
+    if not layout:
+        return env
+
+    augmented = dict(env)
+    tool_dirs = [str(path) for path in layout.get("tool_dirs", [])]
+    include_dirs = [str(path) for path in layout.get("include_dirs", [])]
+    lib_dirs = [str(path) for path in layout.get("lib_dirs", [])]
+
+    _set_env_paths(augmented, "PATH", tool_dirs + _split_env_paths(augmented.get("PATH", "")))
+    _set_env_paths(augmented, "INCLUDE", include_dirs + _split_env_paths(augmented.get("INCLUDE", "")))
+    _set_env_paths(augmented, "LIB", lib_dirs + _split_env_paths(augmented.get("LIB", "")))
+    _set_env_paths(augmented, "LIBPATH", lib_dirs + _split_env_paths(augmented.get("LIBPATH", "")))
+
+    sdk_root = str(layout.get("root", ""))
+    sdk_version = str(layout.get("version", ""))
+    if sdk_root:
+        augmented["WindowsSdkDir"] = _with_trailing_backslash(sdk_root)
+        augmented["UniversalCRTSdkDir"] = _with_trailing_backslash(sdk_root)
+        augmented["MSSDK_DIR"] = _with_trailing_backslash(sdk_root)
+    if tool_dirs:
+        augmented["WindowsSdkBinPath"] = _with_trailing_backslash(tool_dirs[0])
+    if sdk_version:
+        sdk_version = sdk_version.rstrip("\\/")
+        augmented["WindowsSDKVersion"] = sdk_version
+        augmented["UCRTVersion"] = sdk_version
+    return augmented
+
+
+def _msvc_env_missing_parts(env: dict[str, str]) -> list[str]:
+    missing: list[str] = []
+    if not _which_in_env("cl.exe", env):
+        missing.append("cl.exe")
+    if not _which_in_env("link.exe", env):
+        missing.append("link.exe")
+    if not _which_in_env("rc.exe", env):
+        missing.append("rc.exe")
+    if not _which_in_env("mt.exe", env):
+        missing.append("mt.exe")
+    if not env.get("INCLUDE"):
+        missing.append("INCLUDE")
+    elif not _env_path_has_file(env, "INCLUDE", "excpt.h"):
+        missing.append("MSVC INCLUDE (excpt.h)")
+    if not env.get("LIB"):
+        missing.append("LIB")
+    elif not _env_path_has_file(env, "LIB", "vcruntime.lib"):
+        missing.append("MSVC LIB (vcruntime.lib)")
+    return missing
+
+
 def _msvc_env_ready(env: dict[str, str]) -> bool:
-    return bool(
-        _which_in_env("cl.exe", env)
-        and env.get("INCLUDE")
-        and env.get("LIB")
+    return not _msvc_env_missing_parts(env)
+
+
+def _force_msvc_tool_variables(env: dict[str, str]) -> dict[str, str]:
+    updated = dict(env)
+    # MSVC's linker consumes LINK/_LINK_ environment variables as additional
+    # linker options.  Setting LINK to a full path like "C:\Program Files\..."
+    # makes link.exe interpret "C:\Program" as an input object file.
+    updated.pop("LINK", None)
+    updated.pop("_LINK_", None)
+    sdk_root = updated.get("WindowsSdkDir") or updated.get("UniversalCRTSdkDir")
+    if sdk_root:
+        updated["WindowsSdkDir"] = _with_trailing_backslash(sdk_root)
+        updated["UniversalCRTSdkDir"] = _with_trailing_backslash(sdk_root)
+        updated.setdefault("MSSDK_DIR", _with_trailing_backslash(sdk_root))
+    if updated.get("WindowsSDKVersion"):
+        updated["WindowsSDKVersion"] = updated["WindowsSDKVersion"].rstrip("\\/")
+    if updated.get("UCRTVersion"):
+        updated["UCRTVersion"] = updated["UCRTVersion"].rstrip("\\/")
+
+    cl_path = _which_in_env("cl.exe", updated) or "cl.exe"
+    updated["CC"] = cl_path
+    updated["CXX"] = cl_path
+
+    rc_path = _which_in_env("rc.exe", updated)
+    if rc_path:
+        updated["RC"] = rc_path
+    mt_path = _which_in_env("mt.exe", updated)
+    if mt_path:
+        updated["MT"] = mt_path
+    return updated
+
+
+def _windows_toolchain_summary(env: dict[str, str]) -> str:
+    def _short(value: str) -> str:
+        return value or "<missing>"
+
+    return (
+        "MSVC toolchain: "
+        f"cl={_short(_which_in_env('cl.exe', env))}, "
+        f"link={_short(_which_in_env('link.exe', env))}, "
+        f"rc={_short(_which_in_env('rc.exe', env))}, "
+        f"mt={_short(_which_in_env('mt.exe', env))}, "
+        f"excpt.h={_env_path_has_file(env, 'INCLUDE', 'excpt.h')}, "
+        f"vcruntime.lib={_env_path_has_file(env, 'LIB', 'vcruntime.lib')}, "
+        f"WindowsSdkDir={env.get('WindowsSdkDir', '<missing>')}, "
+        f"WindowsSDKVersion={env.get('WindowsSDKVersion', '<missing>')}, "
+        f"UCRTVersion={env.get('UCRTVersion', '<missing>')}, "
+        f"MSSDK_DIR={env.get('MSSDK_DIR', '<missing>')}"
     )
 
 
@@ -212,6 +491,19 @@ def _visual_studio_roots_from_registry() -> list[str]:
 def _find_msvc_environment_scripts() -> list[tuple[str, list[str]]]:
     """Return candidate VS environment scripts for x64 MSVC builds."""
     roots: list[str] = []
+    explicit_script = os.environ.get("INFERNUX_VCVARSALL", "")
+    if explicit_script and os.path.isfile(explicit_script):
+        script_name = os.path.basename(explicit_script).lower()
+        if script_name == "vsdevcmd.bat":
+            return [(explicit_script, ["-arch=x64", "-host_arch=x64"])]
+        if script_name == "vcvars64.bat":
+            return [(explicit_script, [])]
+        return [(explicit_script, ["x64"])]
+
+    explicit_vs_root = os.environ.get("INFERNUX_VSINSTALLDIR", "")
+    if explicit_vs_root and os.path.isdir(explicit_vs_root):
+        roots.append(explicit_vs_root)
+
     roots.extend(_visual_studio_roots_from_vswhere())
     roots.extend(_visual_studio_roots_from_registry())
 
@@ -301,7 +593,10 @@ def _ensure_windows_msvc_environment(env: dict[str, str]) -> dict[str, str]:
     if sys.platform != "win32":
         return env
 
+    env = _augment_windows_sdk_environment(dict(env))
     if _msvc_env_ready(env):
+        env = _force_msvc_tool_variables(env)
+        Debug.log_internal(_windows_toolchain_summary(env))
         return env
 
     failures: list[str] = []
@@ -314,13 +609,15 @@ def _ensure_windows_msvc_environment(env: dict[str, str]) -> dict[str, str]:
 
         merged = dict(env)
         merged.update(captured)
+        merged = _augment_windows_sdk_environment(merged)
         if _msvc_env_ready(merged):
-            merged.setdefault("CC", "cl")
-            merged.setdefault("CXX", "cl")
+            merged = _force_msvc_tool_variables(merged)
             Debug.log_internal(f"Loaded MSVC build environment from {script_path}")
+            Debug.log_internal(_windows_toolchain_summary(merged))
             return merged
 
-        failures.append(f"{script_path}: cl.exe/INCLUDE/LIB not available after initialization")
+        missing = ", ".join(_msvc_env_missing_parts(merged)) or "unknown"
+        failures.append(f"{script_path}: missing {missing} after initialization")
 
     details = "\n".join(failures[-3:])
     raise RuntimeError(
@@ -328,7 +625,8 @@ def _ensure_windows_msvc_environment(env: dict[str, str]) -> dict[str, str]:
         "Visual Studio was detected, but Infernux could not initialize the C++ toolchain "
         "for Nuitka/SCons.\n"
         "Install or repair Visual Studio 2022 with 'Desktop development with C++', "
-        "including MSVC v143 and a Windows 10/11 SDK, then try again.\n"
+        "including MSVC v143 and a Windows 10/11 SDK, then try again. If the SDK is already installed, "
+        "make sure WindowsSdkDir points at the Windows Kits root or repair the VS workload so rc.exe/mt.exe are registered.\n"
         f"Details:\n{details}"
     )
 
@@ -714,7 +1012,10 @@ class NuitkaBuilder:
                     "MinGW fallback has been disabled.\n"
                     "Install Visual Studio 2022 Build Tools or Visual Studio with the Desktop development with C++ workload, then try again."
                 )
-            cmd.append("--msvc=latest")
+            # Do not pass --msvc=latest here.  _run_nuitka initializes a full
+            # cl/link/rc/mt + Windows SDK environment before spawning Nuitka;
+            # forcing "latest" makes SCons run its own VS/SDK discovery again,
+            # which is exactly what fails on some machines with a valid SDK.
 
         # Link-time optimization for smaller and faster binaries
         if self.lto:
@@ -969,6 +1270,9 @@ class NuitkaBuilder:
 
         if proc.returncode != 0:
             tail = "\n".join(lines_collected[-30:])
+            diagnostics = self._read_scons_diagnostics()
+            if diagnostics:
+                tail = tail + "\n\n" + diagnostics
             raise RuntimeError(
                 f"Nuitka compilation failed (exit code {proc.returncode}).\n"
                 f"Last output:\n{tail}"
@@ -982,6 +1286,23 @@ class NuitkaBuilder:
                 "Compilation may have failed silently."
             )
         return dist_dir
+
+    def _read_scons_diagnostics(self) -> str:
+        build_dir = os.path.join(self._staging_dir, "boot.build")
+        chunks: list[str] = []
+        for filename in ("scons-report.txt", "scons-error-report.txt"):
+            path = os.path.join(build_dir, filename)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    text = f.read().strip()
+            except OSError as _exc:
+                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+                continue
+            if text:
+                chunks.append(f"--- {filename} ---\n{text[-5000:]}")
+        return "\n\n".join(chunks)
 
     # ------------------------------------------------------------------
     # Inject native engine libraries
@@ -1119,6 +1440,8 @@ class NuitkaBuilder:
             if sys.platform == "win32":
                 rc = subprocess.call(
                     ["robocopy", src, str(dst), "/E",
+                     "/MT:16", "/R:1", "/W:1", "/XJ",
+                     "/COPY:DAT", "/DCOPY:DAT",
                      "/XD", *xd_dirs,
                      "/XF", "*.pyc", "*.pdb", "*.lib", "*.a",
                      "/NFL", "/NDL", "/NJH", "/NJS", "/NP"],
@@ -1163,6 +1486,8 @@ class NuitkaBuilder:
                 if sys.platform == "win32":
                     subprocess.call(
                         ["robocopy", libs_src, str(libs_dst), "/E",
+                         "/MT:16", "/R:1", "/W:1", "/XJ",
+                         "/COPY:DAT", "/DCOPY:DAT",
                          "/NFL", "/NDL", "/NJH", "/NJS", "/NP"],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,

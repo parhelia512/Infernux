@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-RUNTIME_PROFILE_VERSION = 3
+RUNTIME_PROFILE_VERSION = 4
 
 # Keep the managed runtime limited to the packages needed to launch Infernux
 # projects and build standalone players from a project's private Python copy.

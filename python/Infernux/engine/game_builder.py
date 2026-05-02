@@ -109,6 +109,7 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
     """Build a standalone native game distribution using Nuitka."""
 
     OUTPUT_MARKER_FILENAME = ".infernux-build-output"
+    _BUILD_TEMP_DIR_NAME = "_build_temp"
     _GAME_DATA_DIRS = ["Assets", "ProjectSettings", "materials"]
     _EXCLUDE_PATTERNS = {"__pycache__", ".git", ".gitignore", ".infernux-engine-lock.json"}
     _ICON_EXTS = {".png", ".jpg", ".jpeg", ".ico"}
@@ -334,6 +335,10 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
         entries = [entry.name for entry in os.scandir(self.output_dir)]
         if not entries:
             return
+        if entries == [self._BUILD_TEMP_DIR_NAME]:
+            temp_dir = os.path.join(self.output_dir, self._BUILD_TEMP_DIR_NAME)
+            if os.path.isdir(temp_dir) and not os.path.islink(temp_dir):
+                return
 
         marker_path = self._output_marker_path(self.output_dir)
         if os.path.isfile(marker_path):
@@ -513,7 +518,7 @@ finally:
 '''
         # Write boot script to a temp location (NuitkaBuilder will copy
         # it into its ASCII-safe staging directory).
-        boot_dir = os.path.join(self.output_dir, "_build_temp")
+        boot_dir = os.path.join(self.output_dir, self._BUILD_TEMP_DIR_NAME)
         os.makedirs(boot_dir, exist_ok=True)
         boot_path = os.path.join(boot_dir, "boot.py")
         with open(boot_path, "w", encoding="utf-8") as f:
@@ -587,6 +592,8 @@ finally:
             # shutil.move for large directory trees (native NTFS ops).
             rc = subprocess.call(
                 ["robocopy", dist_dir, final_dir, "/E", "/MOVE",
+                 "/MT:16", "/R:1", "/W:1", "/XJ",
+                 "/COPY:DAT", "/DCOPY:DAT",
                  "/NFL", "/NDL", "/NJH", "/NJS", "/NP"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -650,6 +657,8 @@ finally:
                     os.makedirs(dst, exist_ok=True)
                     rc = subprocess.call(
                         ["robocopy", src, dst, "/E",
+                         "/MT:16", "/R:1", "/W:1", "/XJ",
+                         "/COPY:DAT", "/DCOPY:DAT",
                          "/NFL", "/NDL", "/NJH", "/NJS", "/NP",
                          "/XD", "__pycache__", ".git"],
                         stdout=subprocess.DEVNULL,
