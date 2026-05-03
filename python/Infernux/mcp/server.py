@@ -74,13 +74,18 @@ def start_server(project_path: str, *, host: str = HOST, port: int = PORT) -> bo
     def _run() -> None:
         last_error = None
         try:
-            for transport in ("http", "streamable-http"):
+            # Order matters: VS Code / Copilot negotiate MCP over streamable HTTP first
+            # (see VS Code docs: HTTP Stream transport, then SSE fallback). FastMCP's
+            # plain ``http`` transport can bind successfully but never completes the
+            # JSON-RPC initialize handshake with those clients — logs show endless
+            # "Waiting for server to respond to `initialize` request...".
+            for transport in ("streamable-http", "http"):
                 try:
                     _server.run(transport=transport, host=host, port=int(port))
                     return
                 except Exception as exc:
                     last_error = exc
-                    if transport == "streamable-http":
+                    if transport == "http":
                         raise
         except Exception as exc:
             Debug.log_error(f"Infernux MCP HTTP server stopped: {exc or last_error}")
