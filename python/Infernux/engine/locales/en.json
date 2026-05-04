@@ -44,6 +44,7 @@
   "animclip_editor.pause": "Pause",
   "animclip_editor.stop": "Stop",
   "animclip_editor.save_clip": "Save Clip",
+  "animclip_editor.save_as": "Save As...",
   "animclip_editor.delete_clip": "Delete Clip",
   "animfsm_editor.no_file": "No state machine loaded",
   "animfsm_editor.open_hint": "Open a .animfsm file from the Project panel",

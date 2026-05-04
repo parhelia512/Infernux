@@ -44,6 +44,7 @@
   "animclip_editor.pause": "暂停",
   "animclip_editor.stop": "停止",
   "animclip_editor.save_clip": "保存片段",
+  "animclip_editor.save_as": "另存为...",
   "animclip_editor.delete_clip": "删除片段",
   "animfsm_editor.no_file": "未加载状态机",
   "animfsm_editor.open_hint": "从项目面板打开一个 .animfsm 文件",
