@@ -6,6 +6,7 @@
 #include "Light.h"
 #include "MeshRenderer.h"
 #include "Rigidbody.h"
+#include "SkinnedMeshRenderer.h"
 #include "Transform.h"
 #include "TransformECSStore.h"
 #include "physics/PhysicsECSStore.h"
@@ -198,12 +199,22 @@ void SceneManager::Update(float deltaTime)
 
             // Sync collider transforms before physics step (serial-skip when nothing moved)
             t0 = ProfileClock::now();
-            SyncCollidersToPhysics();
+            SyncCollidersToPhysics(m_fixedTimeStep);
             m_lastFrameProfile.syncCollidersMs += ProfileMsSince(t0);
 
             t0 = ProfileClock::now();
             m_activeScene->FixedUpdate(m_fixedTimeStep);
             m_lastFrameProfile.fixedUpdateMs += ProfileMsSince(t0);
+
+            // FixedUpdate may rotate/move kinematic colliders or instantiate
+            // new physics objects. Flush those changes before the Jolt step.
+            t0 = ProfileClock::now();
+            SyncExternalRigidbodyMoves();
+            m_lastFrameProfile.syncExternalMovesMs += ProfileMsSince(t0);
+            FlushPendingBroadphase();
+            t0 = ProfileClock::now();
+            SyncCollidersToPhysics(m_fixedTimeStep);
+            m_lastFrameProfile.syncCollidersMs += ProfileMsSince(t0);
 
             // Step Jolt physics world
             t0 = ProfileClock::now();
@@ -350,8 +361,11 @@ void SceneManager::Step(float deltaTime)
     // Detect external moves before stepping physics
     SyncExternalRigidbodyMoves();
     FlushPendingBroadphase();
-    SyncCollidersToPhysics();
+    SyncCollidersToPhysics(m_fixedTimeStep);
     m_activeScene->FixedUpdate(m_fixedTimeStep);
+    SyncExternalRigidbodyMoves();
+    FlushPendingBroadphase();
+    SyncCollidersToPhysics(m_fixedTimeStep);
     PhysicsWorld::Instance().Step(m_fixedTimeStep);
     PhysicsWorld::Instance().DispatchContactEvents();
     SyncRigidbodiesToTransform();
@@ -403,7 +417,7 @@ void SceneManager::ExtractPersistentObjects(Scene *scene)
     }
 }
 
-void SceneManager::SyncCollidersToPhysics()
+void SceneManager::SyncCollidersToPhysics(float fixedDeltaTime)
 {
     // ── Unity-style deferred transform sync ──
     // Skip the entire collider walk when no transform has been invalidated
@@ -419,14 +433,14 @@ void SceneManager::SyncCollidersToPhysics()
     // Something moved — walk all colliders via zero-allocation ForEach.
     // Each collider's SyncTransformToPhysics() has its own lastSyncedPos/Rot
     // early-out so only colliders that actually moved pay for a Jolt call.
-    PhysicsECSStore::Instance().ForEachAliveCollider([this](ColliderECSData &data) {
+    PhysicsECSStore::Instance().ForEachAliveCollider([this, fixedDeltaTime](ColliderECSData &data) {
         auto *col = data.owner;
         if (!col || !col->IsEnabled())
             return;
         auto *go = col->GetGameObject();
         if (!go || go->GetScene() != m_activeScene)
             return;
-        col->SyncTransformToPhysics();
+        col->SyncTransformToPhysics(fixedDeltaTime);
     });
 }
 
@@ -647,9 +661,9 @@ void SceneManager::NotifyMeshRendererChanged(MeshRenderer *renderer)
         ++m_meshRendererVersion;
 }
 
-void SceneManager::MarkMeshRenderersDirtyForAsset(const std::string &meshGuid)
+void SceneManager::MarkMeshRenderersDirtyForAsset(const std::string &meshGuid, const std::string &meshPath)
 {
-    if (meshGuid.empty())
+    if (meshGuid.empty() && meshPath.empty())
         return;
     for (auto *renderer : m_activeMeshRenderers) {
         if (renderer && renderer->HasMeshAsset() && renderer->GetMeshAssetGuid() == meshGuid) {
@@ -658,6 +672,12 @@ void SceneManager::MarkMeshRenderersDirtyForAsset(const std::string &meshGuid)
             auto mesh = renderer->GetMeshAssetRef().Get();
             if (mesh)
                 renderer->SetLocalBounds(mesh->GetBoundsMin(), mesh->GetBoundsMax());
+        }
+        if (auto *skinned = dynamic_cast<SkinnedMeshRenderer *>(renderer)) {
+            const bool guidMatches = !meshGuid.empty() && skinned->GetSourceModelGuid() == meshGuid;
+            const bool pathMatches = !meshPath.empty() && skinned->GetSourceModelPath() == meshPath;
+            if (guidMatches || pathMatches)
+                skinned->ReloadSourceModel();
         }
     }
 }

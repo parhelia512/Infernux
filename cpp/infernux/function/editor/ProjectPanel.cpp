@@ -1310,8 +1310,14 @@ void ProjectPanel::HandleKeyboardShortcuts(InxGUIContext *ctx)
     }
 
     // Early out: avoid GetSelectedPaths() syscalls when no key is pressed
-    bool anyRelevantKey = ctx->IsKeyPressed(kKeyF2) || ctx->IsKeyPressed(kKeyDelete) ||
-                          (ctrl && (ctx->IsKeyPressed(kKeyC) || ctx->IsKeyPressed(kKeyX) || ctx->IsKeyPressed(kKeyV)));
+    const bool copyPressed = ctrl && ctx->IsKeyPressed(kKeyC);
+    const bool cutPressed = ctrl && ctx->IsKeyPressed(kKeyX);
+    const bool pastePressed = ctrl && ctx->IsKeyPressed(kKeyV);
+    if ((copyPressed || cutPressed || pastePressed) && isHierarchySelectionEmpty && !isHierarchySelectionEmpty())
+        return;
+
+    bool anyRelevantKey = ctx->IsKeyPressed(kKeyF2) || ctx->IsKeyPressed(kKeyDelete) || copyPressed || cutPressed ||
+                          pastePressed;
     if (!anyRelevantKey)
         return;
 
@@ -1330,14 +1336,14 @@ void ProjectPanel::HandleKeyboardShortcuts(InxGUIContext *ctx)
             m_selectedFiles.clear();
             m_selectedSet.clear();
             NotifySelectionChanged();
-        } else if (ctrl && ctx->IsKeyPressed(kKeyC))
+        } else if (copyPressed)
             ClipboardCopy(selected);
-        else if (ctrl && ctx->IsKeyPressed(kKeyX))
+        else if (cutPressed)
             ClipboardCut(selected);
-        else if (ctrl && ctx->IsKeyPressed(kKeyV))
+        else if (pastePressed)
             ClipboardPaste();
     } else {
-        if (ctrl && ctx->IsKeyPressed(kKeyV))
+        if (pastePressed)
             ClipboardPaste();
     }
 }

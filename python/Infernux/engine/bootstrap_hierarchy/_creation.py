@@ -30,20 +30,20 @@ def wire_creation_callbacks(ctx):
     )
     hp.create_empty = lambda parent_id: _create("empty", parent_id)
 
-    # Data-driven entries for Rendering and UI context menus.
+    # Data-driven entries for Hierarchy context menus.
     hp.clear_create_entries()
     hp.add_create_entry(
-        "Rendering",
+        "Camera",
         "hierarchy.camera",
         lambda parent_id: _create("rendering.camera", parent_id),
     )
     hp.add_create_entry(
-        "Rendering",
+        "PostProcessing",
         "hierarchy.render_stack",
         lambda parent_id: _create("rendering.render_stack", parent_id),
     )
     hp.add_create_entry(
-        "Rendering",
+        "2D",
         "hierarchy.sprite_renderer",
         lambda parent_id: _create("rendering.sprite_renderer", parent_id),
     )
@@ -51,14 +51,4 @@ def wire_creation_callbacks(ctx):
         "UI",
         "hierarchy.ui_canvas",
         lambda parent_id: _create("ui.canvas", parent_id),
-    )
-    hp.add_create_entry(
-        "UI",
-        "hierarchy.ui_text",
-        lambda parent_id: _create("ui.text", parent_id),
-    )
-    hp.add_create_entry(
-        "UI",
-        "hierarchy.ui_button",
-        lambda parent_id: _create("ui.button", parent_id),
     )

@@ -202,6 +202,12 @@ class Engine():
         # nearly every frame inside random timing windows.
         _gc_frame = [0]  # mutable counter for closure
         def _post_draw_tick():
+            try:
+                from Infernux.core.assets import AssetManager
+                AssetManager.flush_pending_gpu_texture_reloads()
+            except Exception as exc:
+                Debug.log_suppressed("Engine.post_draw_tick.flush_texture_reloads", exc)
+
             from Infernux.engine.scene_manager import SceneFileManager
             sfm = SceneFileManager.instance()
             if sfm is not None:

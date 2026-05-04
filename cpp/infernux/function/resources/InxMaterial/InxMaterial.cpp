@@ -33,9 +33,9 @@ std::shared_ptr<InxMaterial> CreateTexturedComponentGizmoIconMaterial(const std:
     state.cullMode = VK_CULL_MODE_NONE;
     state.frontFace = VK_FRONT_FACE_CLOCKWISE;
     state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    state.depthTestEnable = false;
+    state.depthTestEnable = true;
     state.depthWriteEnable = false;
-    state.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+    state.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     state.blendEnable = true;
     state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
     state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
