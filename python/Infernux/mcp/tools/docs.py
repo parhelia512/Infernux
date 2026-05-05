@@ -25,9 +25,9 @@ CONCEPTS: dict[str, dict[str, Any]] = {
         "summary": "A loaded world containing root GameObjects and their children.",
         "notes": [
             "Scene object IDs are editor-session IDs; reacquire them after reload.",
-            "Use scene.inspect for a compact map and scene.get_hierarchy for nested structure.",
+            "Use scene_inspect for a compact map and scene_get_hierarchy for nested structure.",
         ],
-        "tools": ["scene.inspect", "scene.get_hierarchy", "scene.save", "scene.open", "scene.new"],
+        "tools": ["scene_inspect", "scene_get_hierarchy", "scene_save", "scene_open", "scene_new"],
     },
     "GameObject": {
         "summary": "A scene entity with a Transform and zero or more Components.",
@@ -35,7 +35,7 @@ CONCEPTS: dict[str, dict[str, Any]] = {
             "Every GameObject has a Transform.",
             "Use stable names and hierarchy paths for generated content so agents can find it later.",
         ],
-        "tools": ["hierarchy.create_object", "gameobject.find", "gameobject.get", "gameobject.set_parent"],
+        "tools": ["hierarchy_create_object", "gameobject_find", "gameobject_get", "gameobject_set_parent"],
     },
     "Transform": {
         "summary": "Position, rotation, scale, and hierarchy relationship for a GameObject.",
@@ -43,7 +43,7 @@ CONCEPTS: dict[str, dict[str, Any]] = {
             "World fields: position/euler_angles.",
             "Local fields: local_position/local_euler_angles/local_scale.",
         ],
-        "tools": ["transform.set", "gameobject.set_parent", "camera.attach_to_target"],
+        "tools": ["transform_set", "gameobject_set_parent", "camera_attach_to_target"],
     },
     "Component": {
         "summary": "Behavior or data attached to a GameObject.",
@@ -51,54 +51,54 @@ CONCEPTS: dict[str, dict[str, Any]] = {
             "Built-in components are backed by C++ wrappers.",
             "Python components inherit InxComponent and can expose serialized_field metadata.",
         ],
-        "tools": ["component.list_types", "component.describe_type", "gameobject.add_component"],
+        "tools": ["component_list_types", "component_describe_type", "gameobject_add_component"],
     },
     "Python Component": {
         "summary": "User-authored gameplay script inheriting from Infernux.components.InxComponent.",
         "notes": [
             "Lifecycle methods include awake, start, update, late_update, on_enable, on_disable, on_destroy.",
-            "Use asset.write_text to create scripts, asset.refresh to import them, and gameobject.add_component with script_path to attach.",
+            "Use asset_write_text to create scripts, asset_refresh to import them, and gameobject_add_component with script_path to attach.",
         ],
-        "tools": ["asset.write_text", "asset.refresh", "gameobject.add_component", "runtime.read_errors"],
+        "tools": ["asset_write_text", "asset_refresh", "gameobject_add_component", "runtime_read_errors"],
     },
     "Builtin Component": {
         "summary": "A C++ engine component exposed through Python wrapper metadata.",
         "notes": [
             "Examples: Camera, Light, MeshRenderer, Rigidbody, BoxCollider.",
-            "Use component.describe_type before setting fields.",
+            "Use component_describe_type before setting fields.",
         ],
-        "tools": ["component.list_types", "component.describe_type", "component.set_field"],
+        "tools": ["component_list_types", "component_describe_type", "component_set_field"],
     },
     "AssetDatabase": {
         "summary": "Tracks Assets/ files and maps project paths to GUIDs.",
         "notes": [
             "Generated or agent-authored files should follow the user's requested path or the existing project/module structure.",
-            "Call asset.refresh after external writes if the editor does not auto-import immediately.",
+            "Call asset_refresh after external writes if the editor does not auto-import immediately.",
         ],
-        "tools": ["asset.list", "asset.search", "asset.resolve", "asset.refresh"],
+        "tools": ["asset_list", "asset_search", "asset_resolve", "asset_refresh"],
     },
     "PlayMode": {
         "summary": "Runtime simulation mode with editor-scene isolation.",
         "notes": [
-            "Use editor.play, runtime.wait, runtime.read_errors, then editor.stop for validation.",
+            "Use editor_play, runtime_wait, runtime_read_errors, then editor_stop for validation.",
             "Script load errors can block entering Play Mode.",
         ],
-        "tools": ["editor.play", "runtime.wait", "runtime.run_for", "runtime.read_errors", "editor.stop"],
+        "tools": ["editor_play", "runtime_wait", "runtime_run_for", "runtime_read_errors", "editor_stop"],
     },
     "Camera": {
         "summary": "Rendering view for Game View. Agents should reuse Main Camera when present.",
         "notes": [
-            "Use camera.ensure_main instead of blindly creating another camera.",
+            "Use camera_ensure_main instead of blindly creating another camera.",
             "Card games usually want an orthographic camera; third-person games usually attach camera to a target.",
         ],
-        "tools": ["camera.find_main", "camera.ensure_main", "camera.setup_2d_card_game", "camera.setup_third_person"],
+        "tools": ["camera_find_main", "camera_ensure_main", "camera_setup_2d_card_game", "camera_setup_third_person"],
     },
     "UI Canvas": {
         "summary": "Root object for UI elements such as text and buttons.",
         "notes": [
-            "UI tools are planned as semantic wrappers; low-level creation can use hierarchy.create_object with ui.* kinds.",
+            "UI tools are planned as semantic wrappers; low-level creation can use hierarchy_create_object with ui.* kinds.",
         ],
-        "tools": ["hierarchy.create_object", "workflow.help"],
+        "tools": ["hierarchy_create_object", "workflow_help"],
     },
     "Input": {
         "summary": "Runtime input facade used by Python components.",
@@ -106,14 +106,14 @@ CONCEPTS: dict[str, dict[str, Any]] = {
             "Use Infernux.input.Input.get_axis('Horizontal') and get_axis('Vertical') for WASD movement.",
             "Input is Game View focus-gated.",
         ],
-        "tools": ["asset.write_text", "runtime.run_for"],
+        "tools": ["asset_write_text", "runtime_run_for"],
     },
     "Undo": {
         "summary": "Editor undo/dirty tracking layer for hierarchy and inspector changes.",
         "notes": [
             "MCP mutation tools should mark scenes/assets dirty or call editor undo helpers when available.",
         ],
-        "tools": ["gameobject.set", "component.set_field", "scene.save"],
+        "tools": ["gameobject_set", "component_set_field", "scene_save"],
     },
 }
 
@@ -122,22 +122,22 @@ WORKFLOWS: dict[str, dict[str, Any]] = {
     "physics_test_scene": {
         "summary": "Create a ground plane, dynamic cube, collider, rigidbody, light, and camera.",
         "steps": [
-            "Call camera.ensure_main or camera.setup_third_person rather than creating duplicate cameras.",
+            "Call camera_ensure_main or camera_setup_third_person rather than creating duplicate cameras.",
             "Create primitive.plane and add BoxCollider.",
             "Create primitive.cube, add BoxCollider and Rigidbody.",
-            "Run editor.play, runtime.wait, runtime.read_errors.",
+            "Run editor_play, runtime_wait, runtime.read_errors.",
         ],
-        "tools": ["hierarchy.create_object", "gameobject.add_component", "transform.set", "editor.play"],
+        "tools": ["hierarchy_create_object", "gameobject_add_component", "transform_set", "editor_play"],
     },
     "third_person_controller": {
         "summary": "Create a controllable character with a following camera.",
         "steps": [
             "Write an InxComponent script with Input.get_axis and Rigidbody.velocity.",
             "Create or reuse a player GameObject.",
-            "Use camera.ensure_main, then camera.attach_to_target or camera.setup_third_person.",
+            "Use camera_ensure_main, then camera_attach_to_target or camera.setup_third_person.",
             "Enter Play Mode and validate with runtime.get_object_state.",
         ],
-        "tools": ["asset.write_text", "gameobject.add_component", "camera.setup_third_person", "runtime.read_errors"],
+        "tools": ["asset_write_text", "gameobject_add_component", "camera_setup_third_person", "runtime_read_errors"],
     },
     "card_game_shell": {
         "summary": "Create folders, scripts, JSON data, orthographic camera, and UI roots for a Balatro-style prototype.",
@@ -148,19 +148,19 @@ WORKFLOWS: dict[str, dict[str, Any]] = {
             "Create UI Canvas hierarchy for menu, run screen, hand, shop, and game over.",
             "Run Play Mode and validate console/runtime state.",
         ],
-        "tools": ["asset.write_text", "asset.write_json", "camera.setup_2d_card_game", "runtime.read_errors"],
+        "tools": ["asset_write_text", "asset_write_json", "camera_setup_2d_card_game", "runtime_read_errors"],
     },
     "script_attach_play_validate": {
         "summary": "Write a gameplay script, attach it, play, read errors, stop.",
         "steps": [
-            "asset.write_text(path='Assets/.../MyComponent.py')",
-            "asset.refresh",
-            "gameobject.add_component(component_type='MyComponent', script_path='Assets/.../MyComponent.py')",
-            "editor.play",
-            "runtime.wait(play_state='playing')",
-            "runtime.read_errors",
+            "asset_write_text(path='Assets/.../MyComponent.py')",
+            "asset_refresh",
+            "gameobject_add_component(component_type='MyComponent', script_path='Assets/.../MyComponent.py')",
+            "editor_play",
+            "runtime_wait(play_state='playing')",
+            "runtime_read_errors",
         ],
-        "tools": ["asset.write_text", "asset.refresh", "gameobject.add_component", "editor.play", "runtime.read_errors"],
+        "tools": ["asset_write_text", "asset_refresh", "gameobject_add_component", "editor_play", "runtime_read_errors"],
     },
 }
 
@@ -170,40 +170,40 @@ INTENT_RECOMMENDATIONS: dict[str, dict[str, Any]] = {
         "match": ["camera", "frame", "view", "visible", "subject", "target", "照全", "相机", "主体", "看不全"],
         "summary": "Diagnose the main camera view and frame likely subject objects.",
         "tools": [
-            "mcp.catalog.search",
-            "scene.query.summary",
-            "scene.query.subjects",
-            "camera.find_main",
-            "camera.visibility_report",
-            "camera.frame_targets",
+            "mcp_catalog_search",
+            "scene_query_summary",
+            "scene_query_subjects",
+            "camera_find_main",
+            "camera_visibility_report",
+            "camera_frame_targets",
         ],
     },
     "find_scene_objects": {
         "match": ["find", "query", "object", "name", "component", "gameobject", "查找", "物体", "名字"],
         "summary": "Find GameObjects by name, path, component, tag, layer, or activity.",
-        "tools": ["scene.query.objects", "gameobject.get", "gameobject.describe_spatial"],
+        "tools": ["scene_query_objects", "gameobject_get", "gameobject_describe_spatial"],
     },
     "renderstack_postprocess": {
         "match": ["renderstack", "render stack", "postprocess", "bloom", "pipeline", "渲染", "后处理"],
         "summary": "Inspect and edit the scene RenderStack pipeline and effects.",
         "tools": [
-            "renderstack.find_or_create",
-            "renderstack.inspect",
-            "renderstack.list_pipelines",
-            "renderstack.list_passes",
-            "renderstack.add_pass",
-            "renderstack.set_pass_params",
+            "renderstack_find_or_create",
+            "renderstack_inspect",
+            "renderstack_list_pipelines",
+            "renderstack_list_passes",
+            "renderstack_add_pass",
+            "renderstack_set_pass_params",
         ],
     },
     "shader_authoring": {
         "match": ["shader", "glsl", "material", "fragment", "vertex", "shadingmodel", "着色器", "材质"],
         "summary": "Discover shader architecture, annotations, property declarations, and material binding rules.",
-        "tools": ["shader.guide", "shader.catalog", "shader.describe", "api.get", "material.create", "asset.create_builtin_resource"],
+        "tools": ["shader_guide", "shader_catalog", "shader_describe", "api_get", "material_create", "asset_create_builtin_resource"],
     },
     "audio_authoring": {
         "match": ["audio", "sound", "music", "sfx", "listener", "audiosource", "audioclip", "音频", "声音"],
         "summary": "Understand AudioSource multi-track playback, AudioClip loading, and AudioListener placement.",
-        "tools": ["audio.guide", "api.get", "component.describe_type", "gameobject.add_component"],
+        "tools": ["audio_guide", "api_get", "component_describe_type", "gameobject_add_component"],
     },
 }
 
@@ -212,12 +212,12 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
     config = config or capabilities.current_config()
     _register_metadata()
 
-    @mcp.tool(name="mcp.ping")
+    @mcp.tool(name="mcp_ping")
     def mcp_ping() -> dict:
         """Return a lightweight MCP liveness response."""
         return ok({"pong": True, "endpoint": server.endpoint_url()})
 
-    @mcp.tool(name="mcp.version")
+    @mcp.tool(name="mcp_version")
     def mcp_version() -> dict:
         """Return MCP server version and protocol information."""
         return ok({
@@ -227,7 +227,7 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
             "endpoint": server.endpoint_url(),
         })
 
-    @mcp.tool(name="mcp.discovery")
+    @mcp.tool(name="mcp_discovery")
     def mcp_discovery() -> dict:
         """Return connection info and project-local discovery file locations."""
         info = server.connection_info()
@@ -244,44 +244,44 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
             },
         })
 
-    @mcp.tool(name="mcp.capabilities")
+    @mcp.tool(name="mcp_capabilities")
     def mcp_capabilities() -> dict:
         """Return high-level capability groups and known tool names."""
         return ok({
             "agent_guidance": [
                 "Infernux APIs are new and engine-specific. Do not guess unfamiliar Python, component, shader, audio, or UI APIs.",
-                "Use api.search(query) and api.get(name) for Python/stub-backed APIs before writing scripts.",
-                "Use component.describe_type(component_type) before mutating component fields.",
-                "Use shader.guide, shader.catalog, and shader.describe before creating or binding shaders.",
-                "Some write tools require a knowledge_token from the matching guide, e.g. shader.guide, audio.guide, or api.get('ui').",
-                "Use mcp.catalog.search or mcp.catalog.recommend before selecting MCP tools.",
+                "Use api_search(query) and api_get(name) for Python/stub-backed APIs before writing scripts.",
+                "Use component_describe_type(component_type) before mutating component fields.",
+                "Use shader_guide, shader_catalog, and shader_describe before creating or binding shaders.",
+                "Some write tools require a knowledge_token from the matching guide, e.g. shader_guide, audio_guide, or api_get('ui').",
+                "Use mcp_catalog_search or mcp_catalog_recommend before selecting MCP tools.",
             ],
             "catalog": _catalog_tree(),
             "groups": {
-                "foundation": ["mcp.ping", "mcp.version", "mcp.discovery", "mcp.health", "mcp.help", "mcp.catalog.list"],
-                "api": ["api.subsystems", "api.search", "api.get", "shader.guide", "audio.guide"],
-                "shader": ["shader.guide", "shader.catalog", "shader.describe"],
-                "audio": ["audio.guide", "component.describe_type"],
-                "self_description": ["engine.concepts", "engine.concept.get", "workflow.list", "workflow.help"],
-                "scene": ["scene.status", "scene.inspect", "scene.get_hierarchy", "scene.query.summary", "scene.query.objects"],
-                "scene_lifecycle": ["scene.save", "scene.open", "scene.new"],
-                "gameobject": ["hierarchy.create_object", "gameobject.find", "gameobject.get", "gameobject.describe_spatial"],
-                "component": ["component.list_types", "component.describe_type", "component.set_field"],
-                "asset": ["asset.ensure_folder", "asset.list", "asset.search", "asset.read_text", "asset.write_text", "asset.refresh"],
-                "camera": ["camera.find_main", "camera.describe_view", "camera.visibility_report", "camera.frame_targets"],
-                "renderstack": ["renderstack.inspect", "renderstack.list_pipelines", "renderstack.add_pass", "renderstack.set_pass_params"],
-                "runtime": ["editor.play", "runtime.wait", "runtime.run_for", "runtime.read_errors"],
-                "project_tools": ["project_tools.list", "project_tools.reload", "project_tools.validate", "project_tools.audit"],
-                "trace": ["mcp.trace.start", "mcp.trace.stop", "mcp.trace.current", "mcp.trace.list"],
-                "session_log": ["mcp.session_log.info", "mcp.session_log.read", "mcp.session_log.clear"],
-                "transactions": ["transaction.begin", "transaction.status", "transaction.commit", "transaction.rollback"],
-                "research": ["mcp.config.get", "mcp.contracts.list", "mcp.contracts.validate", "mcp.evolution.suggest_tools"],
+                "foundation": ["mcp_ping", "mcp_version", "mcp_discovery", "mcp_health", "mcp_help", "mcp_catalog_list"],
+                "api": ["api_subsystems", "api_search", "api_get", "shader_guide", "audio_guide"],
+                "shader": ["shader_guide", "shader_catalog", "shader_describe"],
+                "audio": ["audio_guide", "component_describe_type"],
+                "self_description": ["engine_concepts", "engine_concept_get", "workflow_list", "workflow_help"],
+                "scene": ["scene_status", "scene_inspect", "scene_get_hierarchy", "scene_query_summary", "scene_query_objects"],
+                "scene_lifecycle": ["scene_save", "scene_open", "scene_new"],
+                "gameobject": ["hierarchy_create_object", "gameobject_find", "gameobject_get", "gameobject_describe_spatial"],
+                "component": ["component_list_types", "component_describe_type", "component_set_field"],
+                "asset": ["asset_ensure_folder", "asset_list", "asset_search", "asset_read_text", "asset_write_text", "asset_refresh"],
+                "camera": ["camera_find_main", "camera_describe_view", "camera_visibility_report", "camera_frame_targets"],
+                "renderstack": ["renderstack_inspect", "renderstack_list_pipelines", "renderstack_add_pass", "renderstack_set_pass_params"],
+                "runtime": ["editor_play", "runtime_wait", "runtime_run_for", "runtime_read_errors"],
+                "project_tools": ["project_tools_list", "project_tools_reload", "project_tools_validate", "project_tools_audit"],
+                "trace": ["mcp_trace_start", "mcp_trace_stop", "mcp_trace_current", "mcp_trace_list"],
+                "session_log": ["mcp_session_log_info", "mcp_session_log_read", "mcp_session_log_clear"],
+                "transactions": ["transaction_begin", "transaction_status", "transaction_commit", "transaction_rollback"],
+                "research": ["mcp_config_get", "mcp_contracts_list", "mcp_contracts_validate", "mcp_evolution_suggest_tools"],
             },
             "tools": [meta["name"] for meta in list_tool_metadata() if capabilities.tool_enabled(meta["name"])],
             "config": capabilities.current_config(),
         })
 
-    @mcp.tool(name="mcp.health")
+    @mcp.tool(name="mcp_health")
     def mcp_health() -> dict:
         """Report editor, scene, asset database, and queue readiness."""
 
@@ -313,30 +313,30 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
                 "project_root": project_path,
             }
 
-        return main_thread("mcp.health", _health)
+        return main_thread("mcp_health", _health)
 
-    @mcp.tool(name="mcp.list_tools_verbose")
+    @mcp.tool(name="mcp_list_tools_verbose")
     def mcp_list_tools_verbose() -> dict:
         """Return registered tool metadata."""
         return ok({"tools": _visible_metadata()})
 
-    @mcp.tool(name="mcp.help")
+    @mcp.tool(name="mcp_help")
     def mcp_help(tool_name: str = "") -> dict:
         """Return detailed help for one tool or all tool groups."""
         if tool_name:
             return ok({"tool": get_tool_metadata(tool_name)})
         return ok({"tools": _visible_metadata(), "workflows": list(WORKFLOWS), "concepts": list(CONCEPTS)})
 
-    @mcp.tool(name="mcp.catalog.list")
+    @mcp.tool(name="mcp_catalog_list")
     def mcp_catalog_list() -> dict:
         """Return the hierarchical MCP tool catalog."""
         return ok({
             "catalog": _catalog_tree(),
             "categories": _catalog_categories(),
-            "recommend": "Use mcp.catalog.search(query) or mcp.catalog.recommend(intent) before choosing tools.",
+            "recommend": "Use mcp_catalog_search(query) or mcp_catalog_recommend(intent) before choosing tools.",
         })
 
-    @mcp.tool(name="mcp.catalog.get")
+    @mcp.tool(name="mcp_catalog_get")
     def mcp_catalog_get(category: str = "") -> dict:
         """Return tools under a category such as camera/framing or scene/query."""
         needle = str(category or "").strip().lower()
@@ -348,13 +348,13 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
                 tools.append(meta)
         return ok({"category": category, "tools": tools, "count": len(tools), "categories": _catalog_categories()})
 
-    @mcp.tool(name="mcp.catalog.search")
+    @mcp.tool(name="mcp_catalog_search")
     def mcp_catalog_search(query: str, category: str = "", limit: int = 20) -> dict:
         """Search tools by name, category, summary, tags, aliases, and concepts."""
         matches = _search_catalog(str(query or ""), category=str(category or ""), limit=int(limit or 20))
         return ok({"query": query, "category": category, "matches": matches})
 
-    @mcp.tool(name="mcp.catalog.recommend")
+    @mcp.tool(name="mcp_catalog_recommend")
     def mcp_catalog_recommend(intent: str, limit: int = 12) -> dict:
         """Recommend a tool chain for a natural-language intent."""
         lowered = str(intent or "").lower()
@@ -379,7 +379,7 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
         return ok({"intent": intent, "recommendations": recommendations[: max(int(limit or 12), 1)]})
 
     if capabilities.feature_enabled("batch_execution"):
-        @mcp.tool(name="mcp.batch")
+        @mcp.tool(name="mcp_batch")
         def mcp_batch(steps: list[dict[str, Any]], continue_on_error: bool = False) -> dict:
             """Execute a list of MCP tool calls and return an operation trace.
 
@@ -419,12 +419,12 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
             truncated = len(steps or []) > max_steps
             return ok({"ok": all(item.get("ok") for item in trace), "trace": trace, "truncated": truncated}, trace=trace)
 
-    @mcp.tool(name="engine.concepts")
+    @mcp.tool(name="engine_concepts")
     def engine_concepts() -> dict:
         """List Infernux concepts exposed to agents."""
         return ok({"concepts": [{"name": key, "summary": value["summary"]} for key, value in sorted(CONCEPTS.items())]})
 
-    @mcp.tool(name="engine.concept.get")
+    @mcp.tool(name="engine_concept_get")
     def engine_concept_get(name: str) -> dict:
         """Return a single concept page."""
         key = _lookup_key(CONCEPTS, name)
@@ -432,12 +432,12 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
             return ok({"found": False, "available": sorted(CONCEPTS)})
         return ok({"name": key, **CONCEPTS[key]})
 
-    @mcp.tool(name="workflow.list")
+    @mcp.tool(name="workflow_list")
     def workflow_list() -> dict:
         """List documented workflows."""
         return ok({"workflows": [{"name": key, "summary": value["summary"]} for key, value in sorted(WORKFLOWS.items())]})
 
-    @mcp.tool(name="workflow.help")
+    @mcp.tool(name="workflow_help")
     def workflow_help(name: str) -> dict:
         """Return detailed workflow guidance."""
         key = _lookup_key(WORKFLOWS, name)
@@ -445,7 +445,7 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
             return ok({"found": False, "available": sorted(WORKFLOWS)})
         return ok({"name": key, **WORKFLOWS[key]})
 
-    @mcp.tool(name="workflow.examples")
+    @mcp.tool(name="workflow_examples")
     def workflow_examples(name: str = "") -> dict:
         """Return compact workflow examples."""
         if name:
@@ -538,84 +538,84 @@ def _search_catalog(query: str, *, category: str = "", limit: int = 20) -> list[
 
 
 def _self_description_category(name: str) -> str:
-    if name.startswith("mcp.catalog."):
+    if name.startswith("mcp_catalog_"):
         return "foundation/catalog"
-    if name.startswith("api."):
+    if name.startswith("api_"):
         return "foundation/api"
-    if name.startswith("shader."):
+    if name.startswith("shader_"):
         return "shader/guide"
-    if name.startswith("audio."):
+    if name.startswith("audio_"):
         return "audio/guide"
     return "foundation/discovery"
 
 
 def _self_description_tags(name: str) -> list[str]:
-    if name.startswith("mcp.catalog."):
+    if name.startswith("mcp_catalog_"):
         return ["catalog", "discover", "tools"]
-    if name.startswith("api."):
+    if name.startswith("api_"):
         return ["api", "script", "docs", "subsystem"]
-    if name.startswith("shader."):
+    if name.startswith("shader_"):
         return ["shader", "glsl", "material", "docs"]
-    if name.startswith("audio."):
+    if name.startswith("audio_"):
         return ["audio", "sound", "script", "docs"]
     return ["self-description", "help"]
 
 
 def _register_metadata() -> None:
     for name, summary in {
-        "project.info": "Return current project, active scene, play state, and selection.",
-        "editor.get_state": "Return lightweight editor state.",
-        "editor.play": "Enter Play Mode only after the active scene is saved, clean, and not loading.",
-        "editor.stop": "Exit Play Mode; idempotent when already in edit mode.",
-        "editor.step": "Step one frame only while Play Mode is paused.",
-        "scene.status": "Return active scene path, dirty flag, and suggested save path.",
-        "scene.inspect": "Return compact active scene summary.",
-        "scene.get_hierarchy": "Return active scene hierarchy.",
-        "scene.save": "Save the active scene through SceneFileManager; use this instead of asset tools for .scene files.",
-        "scene.open": "Open a scene file only when not playing, not dirty, and not already loading.",
-        "scene.new": "Create a new empty scene only with force=true and a reason.",
-        "hierarchy.create_object": "Create a GameObject using registered HierarchyCreationService kinds.",
-        "gameobject.add_component": "Attach a built-in or Python script component to a GameObject.",
-        "component.describe_type": "Describe fields and metadata for a component type.",
-        "asset.ensure_folder": "Ensure a project folder exists; succeeds when the folder already exists.",
-        "asset.write_text": "Write a UTF-8 project file and notify AssetDatabase.",
-        "console.read": "Read recent editor console entries.",
+        "project_info": "Return current project, active scene, play state, and selection.",
+        "editor_get_state": "Return lightweight editor state.",
+        "editor_play": "Enter Play Mode only after the active scene is saved, clean, and not loading.",
+        "editor_stop": "Exit Play Mode; idempotent when already in edit mode.",
+        "editor_step": "Step one frame only while Play Mode is paused.",
+        "scene_status": "Return active scene path, dirty flag, and suggested save path.",
+        "scene_inspect": "Return compact active scene summary.",
+        "scene_get_hierarchy": "Return active scene hierarchy.",
+        "scene_save": "Save the active scene through SceneFileManager; use this instead of asset tools for .scene files.",
+        "scene_open": "Open a scene file only when not playing, not dirty, and not already loading.",
+        "scene_new": "Create a new empty scene only with force=true and a reason.",
+        "hierarchy_create_object": "Create a GameObject using registered HierarchyCreationService kinds.",
+        "gameobject_add_component": "Attach a built-in or Python script component to a GameObject.",
+        "component_describe_type": "Describe fields and metadata for a component type.",
+        "asset_ensure_folder": "Ensure a project folder exists; succeeds when the folder already exists.",
+        "asset_write_text": "Write a UTF-8 project file and notify AssetDatabase.",
+        "console_read": "Read recent editor console entries.",
     }.items():
         register_tool_metadata(name, summary=summary)
-    for name in ["scene.save", "scene.open", "scene.new", "editor.play", "editor.step"]:
+    for name in ["scene_save", "scene_open", "scene_new", "editor_play", "editor_step"]:
         register_tool_metadata(
             name,
             summary=get_tool_metadata(name).get("summary", ""),
             recovery=[
-                "Call scene.status before changing scenes or entering Play Mode.",
+                "Call scene_status before changing scenes or entering Play Mode.",
                 "If scene.loading is true, wait and retry later.",
-                "If scene.dirty is true, call scene.save before scene.open/scene.new/editor.play.",
-                "Do not use asset.write_text/write_json/patch_text for .scene files.",
+                "If scene.dirty is true, call scene_save before scene_open/scene_new/editor_play.",
+                "Do not use asset_write_text/write_json/patch_text for .scene files.",
             ],
-            next_suggested_tools=["scene.status", "runtime.wait", "mcp.health"],
+            next_suggested_tools=["scene_status", "runtime_wait", "mcp_health"],
             concepts={"Active Scene": "Only the currently open scene may be edited through MCP scene mutation tools."},
             side_effects=["May change editor scene state or Play Mode state."],
         )
     for name in [
-        "mcp.ping", "mcp.version", "mcp.discovery", "mcp.capabilities", "mcp.health", "mcp.help", "mcp.batch",
-        "mcp.catalog.list", "mcp.catalog.get", "mcp.catalog.search", "mcp.catalog.recommend",
-        "api.subsystems", "api.get", "api.search", "shader.guide", "shader.catalog", "shader.describe", "audio.guide",
-        "engine.concepts", "engine.concept.get", "workflow.list", "workflow.help",
-        "workflow.examples",
+        "mcp_ping", "mcp_version", "mcp_discovery", "mcp_capabilities", "mcp_health", "mcp_help", "mcp_batch",
+        "mcp_catalog_list", "mcp_catalog_get", "mcp_catalog_search", "mcp_catalog_recommend",
+        "api_subsystems", "api_get", "api_search", "shader_guide", "shader_catalog", "shader_describe", "audio_guide",
+        "engine_concepts", "engine_concept_get", "workflow_list", "workflow_help",
+        "workflow_examples",
     ]:
         register_tool_metadata(
             name,
             summary=f"Self-description tool: {name}.",
             category=_self_description_category(name),
             tags=_self_description_tags(name),
-            aliases=["tool menu", "categories", "search tools", "script api", "shader api", "audio api"] if name.startswith(("mcp.catalog.", "api.", "shader.", "audio.")) else [],
+            aliases=["tool menu", "categories", "search tools", "script api", "shader api", "audio api"] if name.startswith(("mcp_catalog_", "api_", "shader_", "audio_")) else [],
             level="foundation",
         )
     for name, summary in {
-        "scene.query.objects": "Search scene objects with semantic filters.",
-        "scene.query.summary": "Return grouped scene semantics for cameras, lights, renderers, UI, scripts, and subjects.",
-        "scene.query.subjects": "Rank likely primary scene subjects.",
-        "gameobject.describe_spatial": "Describe object transform, hierarchy path, components, and approximate bounds.",
+        "scene_query_objects": "Search scene objects with semantic filters.",
+        "scene_query_summary": "Return grouped scene semantics for cameras, lights, renderers, UI, scripts, and subjects.",
+        "scene_query_subjects": "Rank likely primary scene subjects.",
+        "gameobject_describe_spatial": "Describe object transform, hierarchy path, components, and approximate bounds.",
     }.items():
         register_tool_metadata(
             name,
@@ -629,7 +629,7 @@ def _register_metadata() -> None:
                 "For exact matching, use query.name_exact or query.path_exact.",
                 "If subjects is empty in a bootstrap scene, create or locate a renderable/gameplay object before camera framing.",
             ],
-            next_suggested_tools=["camera.visibility_report", "gameobject.get", "component.get"],
+            next_suggested_tools=["camera_visibility_report", "gameobject_get", "component_get"],
         )
 
 

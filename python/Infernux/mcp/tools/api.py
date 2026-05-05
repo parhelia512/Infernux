@@ -27,18 +27,18 @@ SUBSYSTEM_GUIDES: dict[str, dict[str, Any]] = {
         "summary": "Agent-facing API discovery policy for a young, fast-moving engine.",
         "concepts": [
             "Do not guess unfamiliar Infernux APIs from Unity or other engines.",
-            "For Python-layer APIs, call api.search(query), then api.get(symbol_or_module). The index is generated from .pyi stubs first, then .py source.",
-            "For components, call component.list_types and component.describe_type before setting fields.",
-            "For shader authoring, call shader.guide, shader.catalog, and shader.describe because shader behavior is C++/compiler-backed and annotation-driven.",
-            "For MCP tools, call mcp.catalog.search or mcp.catalog.recommend before choosing tools.",
+            "For Python-layer APIs, call api_search(query), then api_get(symbol_or_module). The index is generated from .pyi stubs first, then .py source.",
+            "For components, call component_list_types and component_describe_type before setting fields.",
+            "For shader authoring, call shader_guide, shader_catalog, and shader_describe because shader behavior is C++/compiler-backed and annotation-driven.",
+            "For MCP tools, call mcp_catalog_search or mcp_catalog_recommend before choosing tools.",
         ],
         "workflow": [
-            "1. Search: api.search('audio source play one shot') or mcp.catalog.recommend(intent).",
-            "2. Inspect: api.get('AudioSource') or component.describe_type('AudioSource').",
+            "1. Search: api_search('audio source play one shot') or mcp_catalog_recommend(intent).",
+            "2. Inspect: api_get('AudioSource') or component_describe_type('AudioSource').",
             "3. Act: use scene/component/asset tools with the exact fields and signatures returned.",
-            "4. Validate: use runtime.read_errors, console.read, or subsystem-specific describe/report tools.",
+            "4. Validate: use runtime_read_errors, console_read, or subsystem-specific describe/report tools.",
         ],
-        "symbols": ["api.search", "api.get", "mcp.catalog.search", "component.describe_type", "shader.guide"],
+        "symbols": ["api_search", "api_get", "mcp_catalog_search", "component_describe_type", "shader_guide"],
     },
     "shader": {
         "summary": "Three-layer shader authoring model: surface fragment/vertex shaders, shading models, and GLSL libraries/templates.",
@@ -54,10 +54,10 @@ SUBSYSTEM_GUIDES: dict[str, dict[str, Any]] = {
             "RenderGraph fullscreen effects use fullscreen_triangle.vert automatically and bind fragment shader IDs through p.fullscreen_quad(shader_id).",
         ],
         "workflow": [
-            "Call shader.catalog to discover built-in shader IDs and examples.",
-            "Call shader.describe(shader_id, kind='fragment') before binding a material to a custom fragment shader.",
-            "Create .frag/.vert through asset.create_builtin_resource(kind='shader') or asset.write_text.",
-            "After editing shader files, call asset.refresh and use Shader.reload(shader_id) from scripts if runtime reload is needed.",
+            "Call shader_catalog to discover built-in shader IDs and examples.",
+            "Call shader_describe(shader_id, kind='fragment') before binding a material to a custom fragment shader.",
+            "Create .frag/.vert through asset_create_builtin_resource(kind='shader') or asset.write_text.",
+            "After editing shader files, call asset_refresh and use Shader.reload(shader_id) from scripts if runtime reload is needed.",
             "For materials, use Material.create_lit/create_unlit, then set vert_shader_name/frag_shader_name or set_shader for matching IDs.",
         ],
         "common_mistakes": [
@@ -65,7 +65,7 @@ SUBSYSTEM_GUIDES: dict[str, dict[str, Any]] = {
             "Do not assign a .shadingmodel or .glsl library as Material.frag_shader_name.",
             "Do not invent property names in Material unless the shader declares them or intentionally uses dynamic properties.",
             "Texture2D defaults are symbolic names such as white; material values should be texture GUID/path/wrapper, not a vec4.",
-            "Do not assume Shader.reload is fully bound for every runtime path; prefer asset.refresh and material/pipeline refresh tools when available.",
+            "Do not assume Shader.reload is fully bound for every runtime path; prefer asset_refresh and material/pipeline refresh tools when available.",
         ],
         "rules": {
             "file_kinds": {
@@ -106,11 +106,11 @@ SUBSYSTEM_GUIDES: dict[str, dict[str, Any]] = {
                 "Use material.vert_shader_name for vertex shader id.",
                 "Use material.frag_shader_name for fragment shader id.",
                 "Do not bind .glsl libraries or .shadingmodel files directly as material shaders.",
-                "Use material.get_properties MCP to inspect shader.vertex, shader.fragment, render_queue, and synced properties.",
+                "Use material_get_properties MCP to inspect shader.vertex, shader.fragment, render_queue, and synced properties.",
             ],
             "property_types": PROPERTY_TYPES,
         },
-        "symbols": ["Shader", "Material", "shader.catalog", "shader.describe", "shader.guide"],
+        "symbols": ["Shader", "Material", "shader_catalog", "shader_describe", "shader_guide"],
     },
     "audio": {
         "summary": "Audio uses AudioListener for the ears, AudioSource for multi-track playback, and AudioClip for WAV assets.",
@@ -133,16 +133,16 @@ SUBSYSTEM_GUIDES: dict[str, dict[str, Any]] = {
             "AudioClip.load currently documents WAV loading; avoid assuming MP3/OGG unless the asset importer says so.",
             "Attach one AudioListener to the main camera instead of adding listeners to many objects.",
         ],
-        "symbols": ["AudioSource", "AudioListener", "AudioClip", "audio.guide"],
+        "symbols": ["AudioSource", "AudioListener", "AudioClip", "audio_guide"],
     },
     "component": {
         "summary": "Python components inherit InxComponent; built-ins expose CppProperty fields and delegate methods.",
         "concepts": [
-            "Use component.list_types and component.describe_type for exact component fields.",
+            "Use component_list_types and component_describe_type for exact component fields.",
             "Use serialized_field for script fields that should persist and appear in the inspector.",
             "Use lifecycle methods awake/start/update/late_update/on_enable/on_disable/on_destroy.",
         ],
-        "symbols": ["InxComponent", "serialized_field", "component.describe_type", "component.list_types"],
+        "symbols": ["InxComponent", "serialized_field", "component_describe_type", "component_list_types"],
     },
     "material": {
         "summary": "Material wraps InxMaterial and stores shader selection, render state, and typed shader properties.",
@@ -151,14 +151,14 @@ SUBSYSTEM_GUIDES: dict[str, dict[str, Any]] = {
             "Use vert_shader_name and frag_shader_name when vertex/fragment shader IDs differ.",
             "Use set_color/set_float/set_int/set_vector*/set_texture based on shader @property declarations.",
         ],
-        "symbols": ["Material", "shader.describe", "material.create", "material.set_property"],
+        "symbols": ["Material", "shader_describe", "material_create", "material_set_property"],
     },
     "ui": {
         "summary": "Screen-space UI uses UICanvas plus UIText, UIImage, UIButton, pointer events, and persistent UIEventEntry bindings.",
         "concepts": [
             "Create a UICanvas root, then child UI elements such as UIText, UIImage, and UIButton.",
             "Positions and sizes are in canvas design pixels, scaled by UICanvas.compute_scale for the Game View.",
-            "Use api.get('UICanvas'), api.get('UIText'), api.get('UIButton'), and api.get('InxUIScreenComponent') before scripting UI.",
+            "Use api_get('UICanvas'), api_get('UIText'), api_get('UIButton'), and api_get('InxUIScreenComponent') before scripting UI.",
             "UIButton.on_click is a runtime UIEvent; persistent callbacks use on_click_entries.",
         ],
         "symbols": ["UICanvas", "UIText", "UIImage", "UIButton", "UIEvent", "PointerEventData"],
@@ -172,7 +172,7 @@ _API_INDEX: dict[str, Any] | None = None
 def register_api_tools(mcp) -> None:
     _register_metadata()
 
-    @mcp.tool(name="api.subsystems")
+    @mcp.tool(name="api_subsystems")
     def api_subsystems() -> dict:
         """List documented engine subsystems available to agents."""
         return ok({
@@ -184,7 +184,7 @@ def register_api_tools(mcp) -> None:
             "python_api": _api_index_summary(),
         })
 
-    @mcp.tool(name="api.get")
+    @mcp.tool(name="api_get")
     def api_get(name: str) -> dict:
         """Return a subsystem guide or symbol API page."""
         key = str(name or "").strip()
@@ -193,7 +193,7 @@ def register_api_tools(mcp) -> None:
             payload = {"kind": "subsystem", "name": key.lower(), **guide}
             if key.lower() in {"shader", "audio", "ui", "material"}:
                 lock_scope = "shader" if key.lower() == "material" else key.lower()
-                payload["knowledge_lock"] = issue_knowledge_token(lock_scope, source_tool=f"api.get:{key.lower()}")
+                payload["knowledge_lock"] = issue_knowledge_token(lock_scope, source_tool=f"api_get:{key.lower()}")
             return ok(payload)
         symbol = _symbol_doc(key)
         if symbol:
@@ -209,7 +209,7 @@ def register_api_tools(mcp) -> None:
             "available_modules": sorted(index["modules"]),
         })
 
-    @mcp.tool(name="api.search")
+    @mcp.tool(name="api_search")
     def api_search(query: str, limit: int = 20) -> dict:
         """Search subsystem guides, symbols, shader IDs, and component names."""
         query_l = str(query or "").lower()
@@ -256,18 +256,18 @@ def register_api_tools(mcp) -> None:
         matches.sort(key=lambda item: (-item["score"], item["kind"], item["name"]))
         return ok({"query": query, "matches": matches[: max(int(limit or 20), 1)]})
 
-    @mcp.tool(name="shader.guide")
+    @mcp.tool(name="shader_guide")
     def shader_guide(topic: str = "") -> dict:
         """Return shader authoring rules, property annotation syntax, and examples."""
         guide = dict(SUBSYSTEM_GUIDES["shader"])
         guide["property_types"] = PROPERTY_TYPES
         guide["examples"] = _shader_examples()
-        guide["knowledge_lock"] = issue_knowledge_token("shader", source_tool="shader.guide")
+        guide["knowledge_lock"] = issue_knowledge_token("shader", source_tool="shader_guide")
         if topic:
             guide["topic"] = topic
         return ok(guide)
 
-    @mcp.tool(name="shader.catalog")
+    @mcp.tool(name="shader_catalog")
     def shader_catalog(kind: str = "", include_hidden: bool = False) -> dict:
         """List shader IDs from project and built-in shader roots."""
         shaders = [
@@ -281,7 +281,7 @@ def register_api_tools(mcp) -> None:
             grouped.setdefault(item["kind"], []).append(item)
         return ok({"shaders": shaders, "grouped": grouped, "property_types": PROPERTY_TYPES})
 
-    @mcp.tool(name="shader.describe")
+    @mcp.tool(name="shader_describe")
     def shader_describe(shader_id: str, kind: str = "") -> dict:
         """Describe a shader file, annotations, material properties, and usage."""
         shader_id_l = str(shader_id or "").strip().lower()
@@ -293,13 +293,13 @@ def register_api_tools(mcp) -> None:
             return ok({"found": False, "shader_id": shader_id, "available": [item["shader_id"] for item in _scan_shaders()]})
         return ok({"shader_id": shader_id, "matches": candidates, "usage": _shader_usage(candidates)})
 
-    @mcp.tool(name="audio.guide")
+    @mcp.tool(name="audio_guide")
     def audio_guide(topic: str = "") -> dict:
         """Return AudioSource/AudioListener/AudioClip usage guidance."""
         guide = dict(SUBSYSTEM_GUIDES["audio"])
         guide["examples"] = _audio_examples()
         guide["symbols"] = [_symbol_doc(name) for name in ("AudioSource", "AudioListener", "AudioClip")]
-        guide["knowledge_lock"] = issue_knowledge_token("audio", source_tool="audio.guide")
+        guide["knowledge_lock"] = issue_knowledge_token("audio", source_tool="audio_guide")
         if topic:
             guide["topic"] = topic
         return ok(guide)
@@ -333,7 +333,7 @@ def _symbol_doc(symbol: str) -> dict[str, Any]:
             {"name": item.get("name", ""), "qualname": item.get("qualname", ""), "module": item.get("module", ""), "source": item.get("source", "")}
             for item in candidates
         ]
-        doc["recommendation"] = "Use api.get with the module-qualified name from alternatives for deterministic results."
+        doc["recommendation"] = "Use api_get with the module-qualified name from alternatives for deterministic results."
     runtime = _runtime_symbol_doc(doc.get("module", ""), doc.get("name", ""))
     if runtime:
         doc.setdefault("runtime_doc", runtime.get("doc", ""))
@@ -725,7 +725,7 @@ def _shader_usage(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     usage = {
         "material_binding": [],
         "notes": [],
-        "next_tools": ["shader.catalog", "asset.create_builtin_resource", "asset.write_text", "asset.refresh", "material.create"],
+        "next_tools": ["shader_catalog", "asset_create_builtin_resource", "asset_write_text", "asset_refresh", "material_create"],
     }
     if "vertex" in kinds:
         usage["material_binding"].append("material.vert_shader_name = '<shader_id>'")
@@ -807,11 +807,11 @@ def _score(query: str, haystack: str) -> int:
 def _agent_api_guidance() -> list[str]:
     return [
         "Infernux is new and changes quickly. Do not infer unknown APIs from Unity; query them first.",
-        "Use api.search(query) for Python/stub-backed APIs, then api.get(symbol_or_module) for signatures and docstrings.",
-        "Use component.describe_type(component_type) before component.set_field/component.set_fields.",
-        "Use shader.guide, shader.catalog, and shader.describe for shader authoring because shader behavior is C++/annotation/compiler-backed.",
+        "Use api_search(query) for Python/stub-backed APIs, then api_get(symbol_or_module) for signatures and docstrings.",
+        "Use component_describe_type(component_type) before component_set_field/component_set_fields.",
+        "Use shader_guide, shader_catalog, and shader_describe for shader authoring because shader behavior is C++/annotation/compiler-backed.",
         "When a guide returns data.knowledge_lock.token, pass that token as knowledge_token to gated write tools for that subsystem.",
-        "Use mcp.catalog.search or mcp.catalog.recommend before selecting MCP tools for unfamiliar tasks.",
+        "Use mcp_catalog_search or mcp_catalog_recommend before selecting MCP tools for unfamiliar tasks.",
     ]
 
 
@@ -828,13 +828,13 @@ def _project_rel(path: str) -> str:
 
 def _register_metadata() -> None:
     for name, summary, category, tags in [
-        ("api.subsystems", "List documented engine subsystems and API entry points.", "foundation/api", ["api", "subsystem", "docs"]),
-        ("api.get", "Return a subsystem guide or symbol API page.", "foundation/api", ["api", "docs", "symbol"]),
-        ("api.search", "Search subsystem guides, symbols, shader IDs, and component names.", "foundation/api", ["api", "search"]),
-        ("shader.guide", "Return shader authoring rules and examples.", "shader/guide", ["shader", "guide", "glsl"]),
-        ("shader.catalog", "List project and built-in shader IDs.", "shader/catalog", ["shader", "catalog", "vertex", "fragment", "shadingmodel"]),
-        ("shader.describe", "Describe shader annotations, properties, and material binding usage.", "shader/catalog", ["shader", "properties", "material"]),
-        ("audio.guide", "Return AudioSource, AudioListener, and AudioClip usage guidance.", "audio/guide", ["audio", "guide", "script"]),
+        ("api_subsystems", "List documented engine subsystems and API entry points.", "foundation/api", ["api", "subsystem", "docs"]),
+        ("api_get", "Return a subsystem guide or symbol API page.", "foundation/api", ["api", "docs", "symbol"]),
+        ("api_search", "Search subsystem guides, symbols, shader IDs, and component names.", "foundation/api", ["api", "search"]),
+        ("shader_guide", "Return shader authoring rules and examples.", "shader/guide", ["shader", "guide", "glsl"]),
+        ("shader_catalog", "List project and built-in shader IDs.", "shader/catalog", ["shader", "catalog", "vertex", "fragment", "shadingmodel"]),
+        ("shader_describe", "Describe shader annotations, properties, and material binding usage.", "shader/catalog", ["shader", "properties", "material"]),
+        ("audio_guide", "Return AudioSource, AudioListener, and AudioClip usage guidance.", "audio/guide", ["audio", "guide", "script"]),
     ]:
         register_tool_metadata(
             name,
@@ -843,5 +843,5 @@ def _register_metadata() -> None:
             tags=tags,
             level="foundation" if name.startswith("api.") else "semantic",
             aliases=["script api", "engine api", "how to use", "查询API"] + tags,
-            next_suggested_tools=["api.search", "api.get", "component.describe_type"],
+            next_suggested_tools=["api_search", "api_get", "component_describe_type"],
         )

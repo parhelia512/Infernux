@@ -6,7 +6,7 @@ from Infernux.mcp.tools.common import main_thread
 
 
 def register_console_tools(mcp) -> None:
-    @mcp.tool(name="console.read")
+    @mcp.tool(name="console_read")
     def console_read(limit: int = 100, levels: list[str] | None = None) -> dict:
         """Read recent DebugConsole entries."""
 
@@ -27,4 +27,4 @@ def register_console_tools(mcp) -> None:
                 })
             return {"entries": entries}
 
-        return main_thread("console.read", _read)
+        return main_thread("console_read", _read)

@@ -6,7 +6,7 @@ from Infernux.mcp.tools.common import main_thread
 
 
 def register_project_tools(mcp, project_path: str) -> None:
-    @mcp.tool(name="project.info")
+    @mcp.tool(name="project_info")
     def project_info() -> dict:
         """Return the currently opened project and scene state."""
 
@@ -32,4 +32,4 @@ def register_project_tools(mcp, project_path: str) -> None:
                 "selected_ids": sel.get_ids() if sel else [],
             }
 
-        return main_thread("project.info", _read)
+        return main_thread("project_info", _read)

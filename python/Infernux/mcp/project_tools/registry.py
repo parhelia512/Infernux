@@ -84,7 +84,7 @@ class ProjectToolRegistry:
                 name,
                 summary=definition.summary,
                 side_effects=["Runs project-defined Python code from Assets/AgentTools."],
-                recovery=["Use project_tools.audit and project_tools.validate to diagnose project tool failures."],
+                recovery=["Use project_tools_audit and project_tools_validate to diagnose project tool failures."],
                 concepts={"Project MCP Tool": "A project-owned Python function exposed to agents as an MCP tool."},
             )
             if name in self._registered_names:
@@ -178,7 +178,7 @@ class ProjectToolRegistry:
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             self._audit("call", False, message, tool=name, traceback_text="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
-            result = fail("error.project_tool", message, hint="Use project_tools.audit and project_tools.validate to inspect this project-defined tool.", explain=explain)
+            result = fail("error.project_tool", message, hint="Use project_tools_audit and project_tools_validate to inspect this project-defined tool.", explain=explain)
             record_tool_result(name, ok=False, elapsed_ms=_elapsed_ms(started), arguments=_arguments(definition, args, kwargs), result=result, error=message)
             return result
 

@@ -6,7 +6,7 @@ from Infernux.mcp.tools.common import main_thread
 
 
 def register_hierarchy_tools(mcp) -> None:
-    @mcp.tool(name="hierarchy.list_create_kinds")
+    @mcp.tool(name="hierarchy_list_create_kinds")
     def hierarchy_list_create_kinds() -> dict:
         """List object kinds supported by hierarchy.create_object."""
 
@@ -14,9 +14,9 @@ def register_hierarchy_tools(mcp) -> None:
             from Infernux.engine.hierarchy_creation_service import HierarchyCreationService
             return {"kinds": HierarchyCreationService.instance().list_create_kinds()}
 
-        return main_thread("hierarchy.list_create_kinds", _list)
+        return main_thread("hierarchy_list_create_kinds", _list)
 
-    @mcp.tool(name="hierarchy.create_object")
+    @mcp.tool(name="hierarchy_create_object")
     def hierarchy_create_object(
         kind: str,
         parent_id: int = 0,
@@ -34,4 +34,4 @@ def register_hierarchy_tools(mcp) -> None:
                 select=bool(select),
             )
 
-        return main_thread("hierarchy.create_object", _create)
+        return main_thread("hierarchy_create_object", _create)

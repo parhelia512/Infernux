@@ -6,7 +6,7 @@ from Infernux.mcp.tools.common import main_thread, scene_status
 
 
 def register_editor_tools(mcp) -> None:
-    @mcp.tool(name="editor.get_state")
+    @mcp.tool(name="editor_get_state")
     def editor_get_state() -> dict:
         """Return lightweight editor state."""
 
@@ -29,9 +29,9 @@ def register_editor_tools(mcp) -> None:
                 "scene_status": scene_status(),
             }
 
-        return main_thread("editor.get_state", _read)
+        return main_thread("editor_get_state", _read)
 
-    @mcp.tool(name="editor.play")
+    @mcp.tool(name="editor_play")
     def editor_play() -> dict:
         """Enter Play Mode."""
 
@@ -55,9 +55,9 @@ def register_editor_tools(mcp) -> None:
             except Exception:
                 pass
             if not status["saved_to_file"]:
-                raise RuntimeError("Cannot enter Play Mode until the active scene is saved. Call scene.save first.")
+                raise RuntimeError("Cannot enter Play Mode until the active scene is saved. Call scene_save first.")
             if status["dirty"]:
-                raise RuntimeError("Cannot enter Play Mode while the active scene is dirty. Call scene.save first.")
+                raise RuntimeError("Cannot enter Play Mode while the active scene is dirty. Call scene_save first.")
             accepted = bool(pmm.enter_play_mode())
             return {
                 "accepted": accepted,
@@ -65,12 +65,12 @@ def register_editor_tools(mcp) -> None:
                 "requested_state": "playing" if accepted else pmm.state.name.lower(),
                 "deferred": bool(accepted),
                 "preflight": status,
-                "next_suggested_tools": ["runtime.wait", "mcp.health", "runtime.read_errors"] if accepted else ["scene.status"],
+                "next_suggested_tools": ["runtime_wait", "mcp_health", "runtime_read_errors"] if accepted else ["scene_status"],
             }
 
-        return main_thread("editor.play", _play)
+        return main_thread("editor_play", _play)
 
-    @mcp.tool(name="editor.stop")
+    @mcp.tool(name="editor_stop")
     def editor_stop() -> dict:
         """Exit Play Mode."""
 
@@ -83,9 +83,9 @@ def register_editor_tools(mcp) -> None:
                 return {"accepted": True, "already_stopped": True, "state": "edit"}
             return {"accepted": bool(pmm.exit_play_mode()), "already_stopped": False, "state": pmm.state.name.lower()}
 
-        return main_thread("editor.stop", _stop)
+        return main_thread("editor_stop", _stop)
 
-    @mcp.tool(name="editor.pause")
+    @mcp.tool(name="editor_pause")
     def editor_pause() -> dict:
         """Pause Play Mode."""
 
@@ -95,12 +95,12 @@ def register_editor_tools(mcp) -> None:
             if pmm is None:
                 raise RuntimeError("PlayModeManager is not available.")
             if pmm.state.name.lower() != "playing":
-                raise RuntimeError("editor.pause requires Play Mode to be playing.")
+                raise RuntimeError("editor_pause requires Play Mode to be playing.")
             return {"accepted": bool(pmm.pause()), "state": pmm.state.name.lower()}
 
-        return main_thread("editor.pause", _pause)
+        return main_thread("editor_pause", _pause)
 
-    @mcp.tool(name="editor.resume")
+    @mcp.tool(name="editor_resume")
     def editor_resume() -> dict:
         """Resume from paused Play Mode."""
 
@@ -110,12 +110,12 @@ def register_editor_tools(mcp) -> None:
             if pmm is None:
                 raise RuntimeError("PlayModeManager is not available.")
             if pmm.state.name.lower() != "paused":
-                raise RuntimeError("editor.resume requires Play Mode to be paused.")
+                raise RuntimeError("editor_resume requires Play Mode to be paused.")
             return {"accepted": bool(pmm.resume()), "state": pmm.state.name.lower()}
 
-        return main_thread("editor.resume", _resume)
+        return main_thread("editor_resume", _resume)
 
-    @mcp.tool(name="editor.step")
+    @mcp.tool(name="editor_step")
     def editor_step() -> dict:
         """Step one frame while Play Mode is paused."""
 
@@ -125,13 +125,13 @@ def register_editor_tools(mcp) -> None:
             if pmm is None:
                 raise RuntimeError("PlayModeManager is not available.")
             if pmm.state.name.lower() != "paused":
-                raise RuntimeError("editor.step requires paused Play Mode. Call editor.pause after editor.play before stepping.")
+                raise RuntimeError("editor_step requires paused Play Mode. Call editor_pause after editor_play before stepping.")
             pmm.step_frame()
             return {"state": pmm.state.name.lower()}
 
-        return main_thread("editor.step", _step)
+        return main_thread("editor_step", _step)
 
-    @mcp.tool(name="editor.select")
+    @mcp.tool(name="editor_select")
     def editor_select(object_ids: list[int] | None = None, primary_id: int = 0) -> dict:
         """Set the current editor selection."""
 
@@ -147,4 +147,4 @@ def register_editor_tools(mcp) -> None:
                 sel.clear()
             return {"selected_ids": sel.get_ids()}
 
-        return main_thread("editor.select", _select, arguments={"object_ids": object_ids or [], "primary_id": primary_id})
+        return main_thread("editor_select", _select, arguments={"object_ids": object_ids or [], "primary_id": primary_id})

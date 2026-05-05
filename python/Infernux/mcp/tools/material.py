@@ -17,7 +17,7 @@ from Infernux.mcp.tools.common import (
 def register_material_tools(mcp, project_path: str) -> None:
     _register_metadata()
 
-    @mcp.tool(name="material.create")
+    @mcp.tool(name="material_create")
     def material_create(
         path: str,
         template: str = "lit",
@@ -28,7 +28,7 @@ def register_material_tools(mcp, project_path: str) -> None:
         """Create a material asset and optionally set properties."""
 
         def _create():
-            require_knowledge_token("shader", knowledge_token, required_tool="shader.guide")
+            require_knowledge_token("shader", knowledge_token, required_tool="shader_guide")
             import os
             from Infernux.core.material import Material
             file_path = resolve_project_path(project_path, path)
@@ -42,9 +42,9 @@ def register_material_tools(mcp, project_path: str) -> None:
             notify_asset_changed(file_path, "created")
             return {"path": os.path.relpath(file_path, project_path).replace("\\", "/"), **_material_info(mat)}
 
-        return main_thread("material.create", _create, arguments={"path": path, "template": template, "overwrite": overwrite, "knowledge_token": knowledge_token})
+        return main_thread("material_create", _create, arguments={"path": path, "template": template, "overwrite": overwrite, "knowledge_token": knowledge_token})
 
-    @mcp.tool(name="material.get_properties")
+    @mcp.tool(name="material_get_properties")
     def material_get_properties(path: str) -> dict:
         """Read material properties."""
 
@@ -53,14 +53,14 @@ def register_material_tools(mcp, project_path: str) -> None:
             mat = _load_material(project_path, path)
             return {"path": os.path.relpath(resolve_project_path(project_path, path), project_path).replace("\\", "/"), **_material_info(mat)}
 
-        return main_thread("material.get_properties", _get)
+        return main_thread("material_get_properties", _get)
 
-    @mcp.tool(name="material.set_property")
+    @mcp.tool(name="material_set_property")
     def material_set_property(path: str, name: str, value: Any, value_type: str = "auto", knowledge_token: str = "") -> dict:
         """Set one material property."""
 
         def _set():
-            require_knowledge_token("shader", knowledge_token, required_tool="shader.guide")
+            require_knowledge_token("shader", knowledge_token, required_tool="shader_guide")
             file_path = resolve_project_path(project_path, path)
             mat = _load_material(project_path, path)
             _set_one(mat, name, value, value_type)
@@ -69,7 +69,7 @@ def register_material_tools(mcp, project_path: str) -> None:
             notify_asset_changed(file_path, "modified")
             return {"path": path, "name": name, "value": serialize_value(mat.get_property(name)), **_material_info(mat)}
 
-        return main_thread("material.set_property", _set, arguments={"path": path, "name": name, "value_type": value_type, "knowledge_token": knowledge_token})
+        return main_thread("material_set_property", _set, arguments={"path": path, "name": name, "value_type": value_type, "knowledge_token": knowledge_token})
 
 
 def _load_material(project_path: str, path: str):
@@ -126,9 +126,9 @@ def _material_info(mat) -> dict[str, Any]:
 
 def _register_metadata() -> None:
     for name, summary in {
-        "material.create": "Create a material asset.",
-        "material.get_properties": "Read material shader selection and properties.",
-        "material.set_property": "Set a material shader property.",
+        "material_create": "Create a material asset.",
+        "material_get_properties": "Read material shader selection and properties.",
+        "material_set_property": "Set a material shader property.",
     }.items():
         register_tool_metadata(
             name,
@@ -136,7 +136,7 @@ def _register_metadata() -> None:
             category="assets/materials",
             tags=["material", "shader", "properties"],
             aliases=["shader selection", "fragment shader", "vertex shader", "材质", "着色器属性"],
-            preconditions=["Requires a valid shader knowledge_token from shader.guide or api.get('shader')."],
-            recovery=["Call shader.guide, read the guide, then retry with data.knowledge_lock.token as knowledge_token."],
-            next_suggested_tools=["shader.describe", "shader.catalog", "api.get"],
+            preconditions=["Requires a valid shader knowledge_token from shader_guide or api_get('shader')."],
+            recovery=["Call shader_guide, read the guide, then retry with data.knowledge_lock.token as knowledge_token."],
+            next_suggested_tools=["shader_describe", "shader_catalog", "api_get"],
         )

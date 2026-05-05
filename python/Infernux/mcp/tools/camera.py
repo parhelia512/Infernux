@@ -11,7 +11,7 @@ from Infernux.mcp.tools.common import coerce_vector3, main_thread, register_tool
 def register_camera_tools(mcp) -> None:
     _register_metadata()
 
-    @mcp.tool(name="camera.find_main")
+    @mcp.tool(name="camera_find_main")
     def camera_find_main() -> dict:
         """Find likely main cameras in the active scene."""
 
@@ -20,9 +20,9 @@ def register_camera_tools(mcp) -> None:
             preferred = _pick_main_camera(cameras)
             return {"main": preferred, "cameras": cameras}
 
-        return main_thread("camera.find_main", _find)
+        return main_thread("camera_find_main", _find)
 
-    @mcp.tool(name="camera.ensure_main")
+    @mcp.tool(name="camera_ensure_main")
     def camera_ensure_main(name: str = "Main Camera", create_if_missing: bool = True) -> dict:
         """Return an existing main camera or create one if needed."""
 
@@ -43,9 +43,9 @@ def register_camera_tools(mcp) -> None:
             _try_set_scene_main_camera(int(chosen["id"]))
             return {"camera": chosen, "created": chosen.get("reason") == "created"}
 
-        return main_thread("camera.ensure_main", _ensure)
+        return main_thread("camera_ensure_main", _ensure)
 
-    @mcp.tool(name="camera.set_main")
+    @mcp.tool(name="camera_set_main")
     def camera_set_main(object_id: int) -> dict:
         """Set Scene.main_camera when supported by the binding."""
 
@@ -56,9 +56,9 @@ def register_camera_tools(mcp) -> None:
             applied = _try_set_scene_main_camera(int(object_id))
             return {"object_id": int(object_id), "applied": applied}
 
-        return main_thread("camera.set_main", _set)
+        return main_thread("camera_set_main", _set)
 
-    @mcp.tool(name="camera.describe_view")
+    @mcp.tool(name="camera_describe_view")
     def camera_describe_view(camera_id: int = 0) -> dict:
         """Describe a camera's transform, projection, and viewport."""
 
@@ -69,9 +69,9 @@ def register_camera_tools(mcp) -> None:
                 raise ValueError(f"GameObject {int(cam.id)} does not have a Camera component.")
             return {"camera": _camera_snapshot(cam, comp)}
 
-        return main_thread("camera.describe_view", _describe, arguments={"camera_id": camera_id})
+        return main_thread("camera_describe_view", _describe, arguments={"camera_id": camera_id})
 
-    @mcp.tool(name="camera.visibility_report")
+    @mcp.tool(name="camera_visibility_report")
     def camera_visibility_report(
         camera_id: int = 0,
         target_ids: list[int] | None = None,
@@ -89,12 +89,12 @@ def register_camera_tools(mcp) -> None:
             return _visibility_report(cam, comp, targets, float(padding))
 
         return main_thread(
-            "camera.visibility_report",
+            "camera_visibility_report",
             _report,
             arguments={"camera_id": camera_id, "target_ids": target_ids or [], "target_query": target_query or {}},
         )
 
-    @mcp.tool(name="camera.frame_targets")
+    @mcp.tool(name="camera_frame_targets")
     def camera_frame_targets(
         camera_id: int = 0,
         target_ids: list[int] | None = None,
@@ -120,12 +120,12 @@ def register_camera_tools(mcp) -> None:
             return {"camera": _camera_snapshot(cam, comp), "targets": [_target_entry(obj) for obj in targets], "bounds": bounds, "applied": applied, "visibility": report}
 
         return main_thread(
-            "camera.frame_targets",
+            "camera_frame_targets",
             _frame,
             arguments={"camera_id": camera_id, "target_ids": target_ids or [], "target_query": target_query or {}, "padding": padding, "mode": mode},
         )
 
-    @mcp.tool(name="camera.look_at")
+    @mcp.tool(name="camera_look_at")
     def camera_look_at(
         camera_id: int = 0,
         target_id: int = 0,
@@ -146,16 +146,16 @@ def register_camera_tools(mcp) -> None:
                 value = coerce_vector3(position)
                 target_pos = [float(value.x), float(value.y), float(value.z)]
             else:
-                raise ValueError("camera.look_at requires target_id or position.")
+                raise ValueError("camera_look_at requires target_id or position.")
             _look_at_position(cam, target_pos, float(distance or 0.0), float(height or 0.0))
             _try_set_scene_main_camera(int(cam.id))
             _mark_scene_dirty()
             comp = _find_component(cam, "Camera")
             return {"camera": _camera_snapshot(cam, comp), "target_position": target_pos}
 
-        return main_thread("camera.look_at", _look_at, arguments={"camera_id": camera_id, "target_id": target_id, "position": position})
+        return main_thread("camera_look_at", _look_at, arguments={"camera_id": camera_id, "target_id": target_id, "position": position})
 
-    @mcp.tool(name="camera.attach_to_target")
+    @mcp.tool(name="camera_attach_to_target")
     def camera_attach_to_target(
         camera_id: int,
         target_id: int,
@@ -183,9 +183,9 @@ def register_camera_tools(mcp) -> None:
                 "local_euler_angles": _vec(cam.transform.local_euler_angles),
             }
 
-        return main_thread("camera.attach_to_target", _attach)
+        return main_thread("camera_attach_to_target", _attach)
 
-    @mcp.tool(name="camera.setup_third_person")
+    @mcp.tool(name="camera_setup_third_person")
     def camera_setup_third_person(
         target_id: int,
         camera_id: int = 0,
@@ -221,9 +221,9 @@ def register_camera_tools(mcp) -> None:
                 "field_of_view": float(field_of_view),
             }
 
-        return main_thread("camera.setup_third_person", _setup)
+        return main_thread("camera_setup_third_person", _setup)
 
-    @mcp.tool(name="camera.setup_2d_card_game")
+    @mcp.tool(name="camera_setup_2d_card_game")
     def camera_setup_2d_card_game(
         camera_id: int = 0,
         position: dict | list | tuple = None,
@@ -256,9 +256,9 @@ def register_camera_tools(mcp) -> None:
                 "orthographic_size": float(orthographic_size),
             }
 
-        return main_thread("camera.setup_2d_card_game", _setup)
+        return main_thread("camera_setup_2d_card_game", _setup)
 
-    @mcp.tool(name="lighting.ensure_default")
+    @mcp.tool(name="lighting_ensure_default")
     def lighting_ensure_default() -> dict:
         """Ensure the scene has a usable directional light."""
 
@@ -277,7 +277,7 @@ def register_camera_tools(mcp) -> None:
                 obj.transform.euler_angles = Vector3(50.0, -30.0, 0.0)
             return {"light_id": int(created["id"]), "created": True}
 
-        return main_thread("lighting.ensure_default", _ensure)
+        return main_thread("lighting_ensure_default", _ensure)
 
 
 def _find_cameras() -> list[dict]:
@@ -717,17 +717,17 @@ def _vec(value) -> list[float]:
 
 def _register_metadata() -> None:
     for name, summary in {
-        "camera.find_main": "Find cameras and pick the best main camera candidate.",
-        "camera.ensure_main": "Reuse an existing main camera or create one if missing.",
-        "camera.set_main": "Set Scene.main_camera when the engine binding supports it.",
-        "camera.describe_view": "Describe camera transform, projection, and viewport.",
-        "camera.visibility_report": "Report whether target objects fit inside a camera view.",
-        "camera.frame_targets": "Move or zoom a camera to frame target objects.",
-        "camera.look_at": "Point a camera at a target object or world position.",
-        "camera.attach_to_target": "Parent a camera to a target with local offset.",
-        "camera.setup_third_person": "Configure a third-person camera rig.",
-        "camera.setup_2d_card_game": "Configure an orthographic camera for card/UI games.",
-        "lighting.ensure_default": "Ensure a directional light exists.",
+        "camera_find_main": "Find cameras and pick the best main camera candidate.",
+        "camera_ensure_main": "Reuse an existing main camera or create one if missing.",
+        "camera_set_main": "Set Scene.main_camera when the engine binding supports it.",
+        "camera_describe_view": "Describe camera transform, projection, and viewport.",
+        "camera_visibility_report": "Report whether target objects fit inside a camera view.",
+        "camera_frame_targets": "Move or zoom a camera to frame target objects.",
+        "camera_look_at": "Point a camera at a target object or world position.",
+        "camera_attach_to_target": "Parent a camera to a target with local offset.",
+        "camera_setup_third_person": "Configure a third-person camera rig.",
+        "camera_setup_2d_card_game": "Configure an orthographic camera for card/UI games.",
+        "lighting_ensure_default": "Ensure a directional light exists.",
     }.items():
         category = "scene/lighting" if name.startswith("lighting.") else "camera/framing"
         register_tool_metadata(
@@ -736,5 +736,5 @@ def _register_metadata() -> None:
             category=category,
             tags=["camera", "view", "framing", "visibility"] if name.startswith("camera.") else ["light", "scene"],
             aliases=["frame subject", "fit target", "main camera", "相机", "主体照全"] if name.startswith("camera.") else ["default light"],
-            next_suggested_tools=["scene.query.summary", "scene.query.subjects", "camera.visibility_report", "runtime.read_errors"],
+            next_suggested_tools=["scene_query_summary", "scene_query_subjects", "camera_visibility_report", "runtime_read_errors"],
         )

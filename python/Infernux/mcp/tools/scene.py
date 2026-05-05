@@ -19,7 +19,7 @@ from Infernux.mcp.tools.common import (
 
 
 def register_scene_tools(mcp) -> None:
-    @mcp.tool(name="scene.get_hierarchy")
+    @mcp.tool(name="scene_get_hierarchy")
     def scene_get_hierarchy(
         depth: int = 6,
         include_components: bool = True,
@@ -47,9 +47,9 @@ def register_scene_tools(mcp) -> None:
                 ],
             }
 
-        return main_thread("scene.get_hierarchy", _read)
+        return main_thread("scene_get_hierarchy", _read)
 
-    @mcp.tool(name="scene.save")
+    @mcp.tool(name="scene_save")
     def scene_save(path: str = "") -> dict:
         """Save the active scene. If path is provided, it must be under Assets/."""
 
@@ -81,14 +81,14 @@ def register_scene_tools(mcp) -> None:
                 "status": scene_status(),
             }
 
-        return main_thread("scene.save", _save, arguments={"path": path})
+        return main_thread("scene_save", _save, arguments={"path": path})
 
-    @mcp.tool(name="scene.status")
+    @mcp.tool(name="scene_status")
     def scene_status_tool() -> dict:
         """Return active scene path, dirty state, and suggested save path."""
-        return main_thread("scene.status", scene_status)
+        return main_thread("scene_status", scene_status)
 
-    @mcp.tool(name="scene.open")
+    @mcp.tool(name="scene_open")
     def scene_open(path: str) -> dict:
         """Open a .scene file under Assets/."""
 
@@ -100,7 +100,7 @@ def register_scene_tools(mcp) -> None:
             if sfm is None:
                 raise RuntimeError("SceneFileManager is not available.")
             if getattr(sfm, "is_dirty", False):
-                raise RuntimeError("The active scene is dirty. Call scene.save before scene.open.")
+                raise RuntimeError("The active scene is dirty. Call scene_save before scene.open.")
             current_path = os.path.abspath(str(getattr(sfm, "current_scene_path", "") or ""))
             if current_path and os.path.abspath(scene_path) == current_path:
                 return {
@@ -114,9 +114,9 @@ def register_scene_tools(mcp) -> None:
             accepted = bool(sfm.open_scene(scene_path))
             return {"accepted": accepted, "already_open": False, "path": _project_rel(scene_path), "absolute_path": scene_path, "loading": bool(getattr(sfm, "is_loading", False))}
 
-        return main_thread("scene.open", _open, arguments={"path": path})
+        return main_thread("scene_open", _open, arguments={"path": path})
 
-    @mcp.tool(name="scene.new")
+    @mcp.tool(name="scene_new")
     def scene_new(force: bool = False, reason: str = "") -> dict:
         """Create a new empty scene through SceneFileManager."""
 
@@ -126,17 +126,17 @@ def register_scene_tools(mcp) -> None:
             if sfm is None:
                 raise RuntimeError("SceneFileManager is not available.")
             if not force:
-                raise ValueError("scene.new is destructive. Pass force=true and a short reason to create a new empty scene.")
+                raise ValueError("scene_new is destructive. Pass force=true and a short reason to create a new empty scene.")
             if not reason:
-                raise ValueError("scene.new requires a reason when force=true.")
+                raise ValueError("scene_new requires a reason when force=true.")
             if getattr(sfm, "is_dirty", False):
-                raise RuntimeError("The active scene is dirty. Call scene.save before scene.new.")
+                raise RuntimeError("The active scene is dirty. Call scene_save before scene.new.")
             sfm.new_scene()
             return {"accepted": True, "loading": bool(getattr(sfm, "is_loading", False)), "status": scene_status()}
 
-        return main_thread("scene.new", _new, arguments={"force": force, "reason": reason})
+        return main_thread("scene_new", _new, arguments={"force": force, "reason": reason})
 
-    @mcp.tool(name="scene.serialize")
+    @mcp.tool(name="scene_serialize")
     def scene_serialize() -> dict:
         """Return the active scene JSON."""
 
@@ -145,11 +145,11 @@ def register_scene_tools(mcp) -> None:
             scene = SceneManager.instance().get_active_scene()
             if not scene:
                 raise RuntimeError("No active scene.")
-            return {"scene": getattr(scene, "name", ""), "json": scene.serialize()}
+            return {"scene": getattr(scene, "name", ""), "json": scene_serialize()}
 
-        return main_thread("scene.serialize", _serialize)
+        return main_thread("scene_serialize", _serialize)
 
-    @mcp.tool(name="scene.inspect")
+    @mcp.tool(name="scene_inspect")
     def scene_inspect(depth: int = 2, include_components: bool = True) -> dict:
         """Return a compact scene summary for agents."""
 
@@ -200,9 +200,9 @@ def register_scene_tools(mcp) -> None:
                 ],
             }
 
-        return main_thread("scene.inspect", _inspect)
+        return main_thread("scene_inspect", _inspect)
 
-    @mcp.tool(name="gameobject.add_component")
+    @mcp.tool(name="gameobject_add_component")
     def gameobject_add_component(
         object_id: int,
         component_type: str,
@@ -245,9 +245,9 @@ def register_scene_tools(mcp) -> None:
                 "components": _all_components(obj),
             }
 
-        return main_thread("gameobject.add_component", _add, arguments={"object_id": object_id, "component_type": component_type, "knowledge_token": knowledge_token})
+        return main_thread("gameobject_add_component", _add, arguments={"object_id": object_id, "component_type": component_type, "knowledge_token": knowledge_token})
 
-    @mcp.tool(name="gameobject.get")
+    @mcp.tool(name="gameobject_get")
     def gameobject_get(object_id: int, depth: int = 1, include_components: bool = True) -> dict:
         """Return a GameObject snapshot by id."""
 
@@ -260,9 +260,9 @@ def register_scene_tools(mcp) -> None:
                 include_inactive=True,
             )
 
-        return main_thread("gameobject.get", _get)
+        return main_thread("gameobject_get", _get)
 
-    @mcp.tool(name="gameobject.get_children")
+    @mcp.tool(name="gameobject_get_children")
     def gameobject_get_children(object_id: int = 0, include_components: bool = False) -> dict:
         """Return root objects (object_id=0) or direct children of a GameObject."""
 
@@ -291,9 +291,9 @@ def register_scene_tools(mcp) -> None:
                 ],
             }
 
-        return main_thread("gameobject.get_children", _children)
+        return main_thread("gameobject_get_children", _children)
 
-    @mcp.tool(name="gameobject.find")
+    @mcp.tool(name="gameobject_find")
     def gameobject_find(
         name: str = "",
         path: str = "",
@@ -328,9 +328,9 @@ def register_scene_tools(mcp) -> None:
                     break
             return {"matches": matches}
 
-        return main_thread("gameobject.find", _find)
+        return main_thread("gameobject_find", _find)
 
-    @mcp.tool(name="scene.find")
+    @mcp.tool(name="scene_find")
     def scene_find(query: dict[str, Any], limit: int = 50) -> dict:
         """Search scene objects by name/path/tag/layer/component."""
 
@@ -365,9 +365,9 @@ def register_scene_tools(mcp) -> None:
                     break
             return {"matches": matches}
 
-        return main_thread("scene.find", _scene_find)
+        return main_thread("scene_find", _scene_find)
 
-    @mcp.tool(name="scene.query.objects")
+    @mcp.tool(name="scene_query_objects")
     def scene_query_objects(query: dict[str, Any] | None = None, limit: int = 50, include_components: bool = True) -> dict:
         """Semantic GameObject search by name/path/component/tag/layer/active filters."""
 
@@ -392,9 +392,9 @@ def register_scene_tools(mcp) -> None:
                 result.update(_empty_query_result(criteria, scene))
             return result
 
-        return main_thread("scene.query.objects", _query_objects, arguments={"query": query or {}, "limit": limit})
+        return main_thread("scene_query_objects", _query_objects, arguments={"query": query or {}, "limit": limit})
 
-    @mcp.tool(name="scene.query.summary")
+    @mcp.tool(name="scene_query_summary")
     def scene_query_summary(include_subjects: bool = True, subject_limit: int = 8) -> dict:
         """Return grouped scene semantics: cameras, lights, renderers, UI, scripts, and likely subjects."""
 
@@ -413,9 +413,9 @@ def register_scene_tools(mcp) -> None:
                 "subjects": _rank_subjects(objects, max(int(subject_limit), 1)) if include_subjects else [],
             }
 
-        return main_thread("scene.query.summary", _summary)
+        return main_thread("scene_query_summary", _summary)
 
-    @mcp.tool(name="scene.query.subjects")
+    @mcp.tool(name="scene_query_subjects")
     def scene_query_subjects(query: dict[str, Any] | None = None, limit: int = 8) -> dict:
         """Rank likely primary scene subjects for camera framing or gameplay edits."""
 
@@ -435,9 +435,9 @@ def register_scene_tools(mcp) -> None:
                 result.update(_empty_subject_result(objects, query or {}))
             return result
 
-        return main_thread("scene.query.subjects", _subjects, arguments={"query": query or {}, "limit": limit})
+        return main_thread("scene_query_subjects", _subjects, arguments={"query": query or {}, "limit": limit})
 
-    @mcp.tool(name="gameobject.describe_spatial")
+    @mcp.tool(name="gameobject_describe_spatial")
     def gameobject_describe_spatial(object_id: int, include_descendants: bool = True) -> dict:
         """Return transform, hierarchy path, components, and approximate bounds."""
 
@@ -452,9 +452,9 @@ def register_scene_tools(mcp) -> None:
                 "children_count": len(list(obj.get_children() or [])),
             }
 
-        return main_thread("gameobject.describe_spatial", _describe_spatial, arguments={"object_id": object_id})
+        return main_thread("gameobject_describe_spatial", _describe_spatial, arguments={"object_id": object_id})
 
-    @mcp.tool(name="gameobject.path")
+    @mcp.tool(name="gameobject_path")
     def gameobject_path(object_id: int) -> dict:
         """Return the hierarchy path for a GameObject."""
 
@@ -462,9 +462,9 @@ def register_scene_tools(mcp) -> None:
             obj = find_game_object(object_id)
             return {"object_id": int(obj.id), "path": _object_path(obj)}
 
-        return main_thread("gameobject.path", _path)
+        return main_thread("gameobject_path", _path)
 
-    @mcp.tool(name="gameobject.find_by_path")
+    @mcp.tool(name="gameobject_find_by_path")
     def gameobject_find_by_path(path: str) -> dict:
         """Find a GameObject by exact hierarchy path."""
 
@@ -476,9 +476,9 @@ def register_scene_tools(mcp) -> None:
             data["path"] = _object_path(obj)
             return data
 
-        return main_thread("gameobject.find_by_path", _find_by_path)
+        return main_thread("gameobject_find_by_path", _find_by_path)
 
-    @mcp.tool(name="gameobject.ensure_path")
+    @mcp.tool(name="gameobject_ensure_path")
     def gameobject_ensure_path(path: str, kind: str = "empty", select: bool = False) -> dict:
         """Ensure a slash-separated hierarchy path exists."""
 
@@ -510,9 +510,9 @@ def register_scene_tools(mcp) -> None:
             final = find_game_object(parent_id)
             return {"object_id": parent_id, "path": _object_path(final), "created": created}
 
-        return main_thread("gameobject.ensure_path", _ensure_path)
+        return main_thread("gameobject_ensure_path", _ensure_path)
 
-    @mcp.tool(name="gameobject.set")
+    @mcp.tool(name="gameobject_set")
     def gameobject_set(object_id: int, values: dict[str, Any]) -> dict:
         """Set GameObject fields: name, active, tag, layer, is_static."""
 
@@ -530,9 +530,9 @@ def register_scene_tools(mcp) -> None:
                 changed[key] = serialize_value(getattr(obj, key))
             return {"object_id": int(obj.id), "changed": changed}
 
-        return main_thread("gameobject.set", _set)
+        return main_thread("gameobject_set", _set)
 
-    @mcp.tool(name="gameobject.delete")
+    @mcp.tool(name="gameobject_delete")
     def gameobject_delete(object_id: int) -> dict:
         """Delete a GameObject through the hierarchy undo tracker."""
 
@@ -543,9 +543,9 @@ def register_scene_tools(mcp) -> None:
             HierarchyUndoTracker().record_delete(int(object_id), "MCP Delete GameObject")
             return {"deleted": True, "object_id": int(object_id), "name": name}
 
-        return main_thread("gameobject.delete", _delete)
+        return main_thread("gameobject_delete", _delete)
 
-    @mcp.tool(name="gameobject.batch_delete")
+    @mcp.tool(name="gameobject_batch_delete")
     def gameobject_batch_delete(object_ids: list[int]) -> dict:
         """Delete multiple GameObjects."""
 
@@ -559,9 +559,9 @@ def register_scene_tools(mcp) -> None:
                 tracker.record_delete(int(object_id), "MCP Batch Delete GameObject")
             return {"deleted": deleted}
 
-        return main_thread("gameobject.batch_delete", _batch_delete)
+        return main_thread("gameobject_batch_delete", _batch_delete)
 
-    @mcp.tool(name="gameobject.batch_create")
+    @mcp.tool(name="gameobject_batch_create")
     def gameobject_batch_create(items: list[dict[str, Any]]) -> dict:
         """Create multiple hierarchy objects."""
 
@@ -587,9 +587,9 @@ def register_scene_tools(mcp) -> None:
                 created.append(entry)
             return {"created": created}
 
-        return main_thread("gameobject.batch_create", _batch_create)
+        return main_thread("gameobject_batch_create", _batch_create)
 
-    @mcp.tool(name="gameobject.duplicate")
+    @mcp.tool(name="gameobject_duplicate")
     def gameobject_duplicate(object_id: int, parent_id: int = 0, name: str = "", select: bool = True) -> dict:
         """Duplicate a GameObject using Scene.instantiate_game_object."""
 
@@ -612,9 +612,9 @@ def register_scene_tools(mcp) -> None:
                 SelectionManager.instance().select(int(obj.id))
             return _serialize_object(obj, depth=1, include_components=True, include_inactive=True)
 
-        return main_thread("gameobject.duplicate", _duplicate)
+        return main_thread("gameobject_duplicate", _duplicate)
 
-    @mcp.tool(name="gameobject.set_parent")
+    @mcp.tool(name="gameobject_set_parent")
     def gameobject_set_parent(object_id: int, parent_id: int = 0, world_position_stays: bool = True) -> dict:
         """Set or clear a GameObject parent."""
 
@@ -633,9 +633,9 @@ def register_scene_tools(mcp) -> None:
                 "old_parent_id": int(getattr(old_parent, "id", 0) or 0),
             }
 
-        return main_thread("gameobject.set_parent", _set_parent)
+        return main_thread("gameobject_set_parent", _set_parent)
 
-    @mcp.tool(name="gameobject.set_sibling_index")
+    @mcp.tool(name="gameobject_set_sibling_index")
     def gameobject_set_sibling_index(object_id: int, index: int) -> dict:
         """Move a GameObject within its current sibling list."""
 
@@ -654,9 +654,9 @@ def register_scene_tools(mcp) -> None:
                 "parent_id": int(getattr(obj.get_parent(), "id", 0) or 0),
             }
 
-        return main_thread("gameobject.set_sibling_index", _set_sibling_index)
+        return main_thread("gameobject_set_sibling_index", _set_sibling_index)
 
-    @mcp.tool(name="scene.clear_generated")
+    @mcp.tool(name="scene_clear_generated")
     def scene_clear_generated(name_prefix: str = "MCP", root_path: str = "") -> dict:
         """Delete generated scene objects by root path or name prefix."""
 
@@ -682,9 +682,9 @@ def register_scene_tools(mcp) -> None:
                 tracker.record_delete(int(obj.id), "MCP Clear Generated")
             return {"deleted": deleted}
 
-        return main_thread("scene.clear_generated", _clear)
+        return main_thread("scene_clear_generated", _clear)
 
-    @mcp.tool(name="transform.set")
+    @mcp.tool(name="transform_set")
     def transform_set(object_id: int, values: dict[str, Any]) -> dict:
         """Set Transform fields such as position, euler_angles, or local_scale."""
 
@@ -711,9 +711,9 @@ def register_scene_tools(mcp) -> None:
                 changed[key] = serialize_vector(getattr(trans, key))
             return {"object_id": int(obj.id), "changed": changed}
 
-        return main_thread("transform.set", _set)
+        return main_thread("transform_set", _set)
 
-    @mcp.tool(name="component.set_field")
+    @mcp.tool(name="component_set_field")
     def component_set_field(
         object_id: int,
         component_type: str,
@@ -741,9 +741,9 @@ def register_scene_tools(mcp) -> None:
                 "value": serialize_value(getattr(comp, field)),
             }
 
-        return main_thread("component.set_field", _set, arguments={"object_id": object_id, "component_type": component_type, "field": field, "knowledge_token": knowledge_token})
+        return main_thread("component_set_field", _set, arguments={"object_id": object_id, "component_type": component_type, "field": field, "knowledge_token": knowledge_token})
 
-    @mcp.tool(name="component.set_fields")
+    @mcp.tool(name="component_set_fields")
     def component_set_fields(object_id: int, component_type: str, values: dict[str, Any], ordinal: int = 0, knowledge_token: str = "") -> dict:
         """Set multiple fields/properties on a component."""
 
@@ -762,9 +762,9 @@ def register_scene_tools(mcp) -> None:
                 changed[field] = serialize_value(getattr(comp, field))
             return {"object_id": int(obj.id), "component": serialize_component(comp), "changed": changed}
 
-        return main_thread("component.set_fields", _set_fields, arguments={"object_id": object_id, "component_type": component_type, "knowledge_token": knowledge_token})
+        return main_thread("component_set_fields", _set_fields, arguments={"object_id": object_id, "component_type": component_type, "knowledge_token": knowledge_token})
 
-    @mcp.tool(name="component.ensure")
+    @mcp.tool(name="component_ensure")
     def component_ensure(
         object_id: int,
         component_type: str,
@@ -801,9 +801,9 @@ def register_scene_tools(mcp) -> None:
                 setattr(comp, key, _coerce_property_value(key, value))
             return {"object_id": int(obj.id), "created": created, "component": serialize_component(comp), "components": _all_components(obj)}
 
-        return main_thread("component.ensure", _ensure, arguments={"object_id": object_id, "component_type": component_type, "knowledge_token": knowledge_token})
+        return main_thread("component_ensure", _ensure, arguments={"object_id": object_id, "component_type": component_type, "knowledge_token": knowledge_token})
 
-    @mcp.tool(name="component.list_on_object")
+    @mcp.tool(name="component_list_on_object")
     def component_list_on_object(object_id: int) -> dict:
         """List components attached to a GameObject."""
 
@@ -811,9 +811,9 @@ def register_scene_tools(mcp) -> None:
             obj = find_game_object(object_id)
             return {"object_id": int(obj.id), "components": _all_components(obj)}
 
-        return main_thread("component.list_on_object", _list_on_object)
+        return main_thread("component_list_on_object", _list_on_object)
 
-    @mcp.tool(name="component.get_field")
+    @mcp.tool(name="component_get_field")
     def component_get_field(object_id: int, component_type: str, field: str, ordinal: int = 0) -> dict:
         """Read a field/property from a component attached to a GameObject."""
 
@@ -829,9 +829,9 @@ def register_scene_tools(mcp) -> None:
                 "value": serialize_value(getattr(comp, field)),
             }
 
-        return main_thread("component.get_field", _get)
+        return main_thread("component_get_field", _get)
 
-    @mcp.tool(name="component.get")
+    @mcp.tool(name="component_get")
     def component_get(object_id: int, component_type: str, ordinal: int = 0) -> dict:
         """Return component metadata and serializable field values."""
 
@@ -842,9 +842,9 @@ def register_scene_tools(mcp) -> None:
                 raise FileNotFoundError(f"Component '{component_type}' was not found on GameObject {object_id}.")
             return _component_snapshot(obj, comp)
 
-        return main_thread("component.get", _get_component)
+        return main_thread("component_get", _get_component)
 
-    @mcp.tool(name="component.remove")
+    @mcp.tool(name="component_remove")
     def component_remove(object_id: int, component_type: str, ordinal: int = 0) -> dict:
         """Remove a native or Python component from a GameObject."""
 
@@ -870,9 +870,9 @@ def register_scene_tools(mcp) -> None:
                 obj.remove_component(comp)
             return {"object_id": int(obj.id), "removed": str(type_name), "components": _all_components(obj)}
 
-        return main_thread("component.remove", _remove)
+        return main_thread("component_remove", _remove)
 
-    @mcp.tool(name="component.list_types")
+    @mcp.tool(name="component_list_types")
     def component_list_types() -> dict:
         """List known built-in and Python component types."""
 
@@ -891,9 +891,9 @@ def register_scene_tools(mcp) -> None:
             ]
             return {"builtin": builtin, "scripts": scripts}
 
-        return main_thread("component.list_types", _list)
+        return main_thread("component_list_types", _list)
 
-    @mcp.tool(name="component.describe_type")
+    @mcp.tool(name="component_describe_type")
     def component_describe_type(component_type: str) -> dict:
         """Describe serialized/inspector fields for a component type."""
 
@@ -903,9 +903,9 @@ def register_scene_tools(mcp) -> None:
                 raise FileNotFoundError(f"Component type '{component_type}' was not found.")
             return _component_type_entry(component_type, cls, builtin=_is_builtin_component_class(cls), include_fields=True)
 
-        return main_thread("component.describe_type", _describe)
+        return main_thread("component_describe_type", _describe)
 
-    @mcp.tool(name="component.describe_field")
+    @mcp.tool(name="component_describe_field")
     def component_describe_field(component_type: str, field: str) -> dict:
         """Describe one field on a component type."""
 
@@ -918,9 +918,9 @@ def register_scene_tools(mcp) -> None:
                     return {"component_type": component_type, "field": item}
             raise FileNotFoundError(f"Field '{field}' was not found on component type '{component_type}'.")
 
-        return main_thread("component.describe_field", _describe_field)
+        return main_thread("component_describe_field", _describe_field)
 
-    @mcp.tool(name="component.get_snapshot")
+    @mcp.tool(name="component_get_snapshot")
     def component_get_snapshot(object_id: int, component_type: str, ordinal: int = 0) -> dict:
         """Serialize a component snapshot for restore_snapshot."""
 
@@ -937,9 +937,9 @@ def register_scene_tools(mcp) -> None:
                     payload = ""
             return {**_component_snapshot(obj, comp), "serialized": payload}
 
-        return main_thread("component.get_snapshot", _snapshot)
+        return main_thread("component_get_snapshot", _snapshot)
 
-    @mcp.tool(name="component.restore_snapshot")
+    @mcp.tool(name="component_restore_snapshot")
     def component_restore_snapshot(object_id: int, component_type: str, serialized: str, ordinal: int = 0) -> dict:
         """Restore a component from a serialized component JSON snapshot."""
 
@@ -957,7 +957,7 @@ def register_scene_tools(mcp) -> None:
                 sfm.mark_dirty()
             return _component_snapshot(obj, comp)
 
-        return main_thread("component.restore_snapshot", _restore)
+        return main_thread("component_restore_snapshot", _restore)
 
 
 def _serialize_object(obj, *, depth: int, include_components: bool, include_inactive: bool) -> dict[str, Any]:
@@ -1180,9 +1180,9 @@ def _require_component_knowledge(component_type: str, token: str) -> None:
     audio_types = {"AudioSource", "AudioListener"}
     ui_types = {"UICanvas", "UIText", "UIButton", "UIImage", "UISelectable", "InxUIScreenComponent", "InxUIComponent"}
     if type_name in audio_types:
-        require_knowledge_token("audio", token, required_tool="audio.guide")
+        require_knowledge_token("audio", token, required_tool="audio_guide")
     elif type_name in ui_types:
-        require_knowledge_token("ui", token, required_tool="api.get")
+        require_knowledge_token("ui", token, required_tool="api_get")
 
 
 def _matches_scene_query(obj, criteria: dict[str, Any]) -> bool:
@@ -1241,8 +1241,8 @@ def _empty_query_result(criteria: dict[str, Any], scene) -> dict[str, Any]:
         },
         "scene_object_count": len(list(scene.get_all_objects() or [])),
         "recommended_next_tools": [
-            {"tool": "scene.query.summary", "arguments": {"include_subjects": True, "subject_limit": 8}},
-            {"tool": "scene.query.objects", "arguments": {"query": {}, "limit": 20}},
+            {"tool": "scene_query_summary", "arguments": {"include_subjects": True, "subject_limit": 8}},
+            {"tool": "scene_query_objects", "arguments": {"query": {}, "limit": 20}},
         ],
     }
 
@@ -1255,7 +1255,7 @@ def _empty_subject_result(objects: list[Any], criteria: dict[str, Any]) -> dict[
         "reason": reason,
         "stop_repeating": True,
         "message": (
-            "No likely camera/gameplay subjects were found. Do not repeat scene.query.subjects with the same query. "
+            "No likely camera/gameplay subjects were found. Do not repeat scene_query_subjects with the same query. "
             "If this is a new/bootstrap scene, create or locate a renderable/gameplay object first."
         ),
         "scene_contains_only": {
@@ -1266,9 +1266,9 @@ def _empty_subject_result(objects: list[Any], criteria: dict[str, Any]) -> dict[
             "scripts": groups.get("scripts", []),
         },
         "recommended_next_tools": [
-            {"tool": "scene.query.summary", "arguments": {"include_subjects": True, "subject_limit": 8}},
-            {"tool": "hierarchy.create_object", "arguments": {"kind": "primitive.cube", "name": "Subject"}},
-            {"tool": "camera.find_main", "arguments": {}},
+            {"tool": "scene_query_summary", "arguments": {"include_subjects": True, "subject_limit": 8}},
+            {"tool": "hierarchy_create_object", "arguments": {"kind": "primitive.cube", "name": "Subject"}},
+            {"tool": "camera_find_main", "arguments": {}},
         ],
     }
 

@@ -10,7 +10,7 @@ from Infernux.mcp.tools.common import main_thread, register_tool_metadata, seria
 def register_renderstack_tools(mcp) -> None:
     _register_metadata()
 
-    @mcp.tool(name="renderstack.find_or_create")
+    @mcp.tool(name="renderstack_find_or_create")
     def renderstack_find_or_create(name: str = "RenderStack", create_if_missing: bool = True) -> dict:
         """Find the active RenderStack or create one."""
 
@@ -27,9 +27,9 @@ def register_renderstack_tools(mcp) -> None:
                 raise FileNotFoundError("No RenderStack found and create_if_missing is false.")
             return {"created": created, "stack": _stack_snapshot(stack)}
 
-        return main_thread("renderstack.find_or_create", _find_or_create, arguments={"name": name, "create_if_missing": create_if_missing})
+        return main_thread("renderstack_find_or_create", _find_or_create, arguments={"name": name, "create_if_missing": create_if_missing})
 
-    @mcp.tool(name="renderstack.inspect")
+    @mcp.tool(name="renderstack_inspect")
     def renderstack_inspect() -> dict:
         """Inspect the active RenderStack, pipeline, injection points, and mounted passes."""
 
@@ -39,23 +39,23 @@ def register_renderstack_tools(mcp) -> None:
                 return {
                     "exists": False,
                     "reason": "no_renderstack_in_active_scene",
-                    "message": "No RenderStack exists in the active scene. Do not repeat renderstack.inspect; call renderstack.find_or_create if rendering stack control is needed.",
+                    "message": "No RenderStack exists in the active scene. Do not repeat renderstack_inspect; call renderstack_find_or_create if rendering stack control is needed.",
                     "next_suggested_tools": [
                         {
-                            "tool": "renderstack.find_or_create",
+                            "tool": "renderstack_find_or_create",
                             "arguments": {"name": "RenderStack", "create_if_missing": True},
                         },
                         {
-                            "tool": "hierarchy.create_object",
+                            "tool": "hierarchy_create_object",
                             "arguments": {"kind": "rendering.render_stack", "name": "RenderStack"},
                         },
                     ],
                 }
             return _stack_snapshot(stack, include_catalog=True)
 
-        return main_thread("renderstack.inspect", _inspect)
+        return main_thread("renderstack_inspect", _inspect)
 
-    @mcp.tool(name="renderstack.list_pipelines")
+    @mcp.tool(name="renderstack_list_pipelines")
     def renderstack_list_pipelines() -> dict:
         """List discovered RenderPipeline classes."""
 
@@ -63,9 +63,9 @@ def register_renderstack_tools(mcp) -> None:
             from Infernux.renderstack.discovery import discover_pipelines
             return {"pipelines": [_pipeline_entry(name, cls) for name, cls in sorted(discover_pipelines().items())]}
 
-        return main_thread("renderstack.list_pipelines", _list)
+        return main_thread("renderstack_list_pipelines", _list)
 
-    @mcp.tool(name="renderstack.set_pipeline")
+    @mcp.tool(name="renderstack_set_pipeline")
     def renderstack_set_pipeline(pipeline: str = "") -> dict:
         """Set the active RenderStack pipeline. Empty string means default forward pipeline."""
 
@@ -75,9 +75,9 @@ def register_renderstack_tools(mcp) -> None:
             _mark_scene_dirty()
             return _stack_snapshot(stack)
 
-        return main_thread("renderstack.set_pipeline", _set, arguments={"pipeline": pipeline})
+        return main_thread("renderstack_set_pipeline", _set, arguments={"pipeline": pipeline})
 
-    @mcp.tool(name="renderstack.list_passes")
+    @mcp.tool(name="renderstack_list_passes")
     def renderstack_list_passes(include_mounted: bool = True, include_available: bool = True) -> dict:
         """List mounted and/or available RenderPass effects."""
 
@@ -91,9 +91,9 @@ def register_renderstack_tools(mcp) -> None:
                 result["available"] = _available_passes()
             return result
 
-        return main_thread("renderstack.list_passes", _list)
+        return main_thread("renderstack_list_passes", _list)
 
-    @mcp.tool(name="renderstack.add_pass")
+    @mcp.tool(name="renderstack_add_pass")
     def renderstack_add_pass(pass_name: str, enabled: bool = True, params: dict[str, Any] | None = None) -> dict:
         """Add a discovered RenderPass or FullScreenEffect to the active RenderStack."""
 
@@ -109,9 +109,9 @@ def register_renderstack_tools(mcp) -> None:
             _mark_scene_dirty()
             return _stack_snapshot(stack)
 
-        return main_thread("renderstack.add_pass", _add, arguments={"pass_name": pass_name, "enabled": enabled, "params": params or {}})
+        return main_thread("renderstack_add_pass", _add, arguments={"pass_name": pass_name, "enabled": enabled, "params": params or {}})
 
-    @mcp.tool(name="renderstack.remove_pass")
+    @mcp.tool(name="renderstack_remove_pass")
     def renderstack_remove_pass(pass_name: str) -> dict:
         """Remove a mounted pass from the active RenderStack."""
 
@@ -123,9 +123,9 @@ def register_renderstack_tools(mcp) -> None:
             _mark_scene_dirty()
             return _stack_snapshot(stack)
 
-        return main_thread("renderstack.remove_pass", _remove, arguments={"pass_name": pass_name})
+        return main_thread("renderstack_remove_pass", _remove, arguments={"pass_name": pass_name})
 
-    @mcp.tool(name="renderstack.set_pass_enabled")
+    @mcp.tool(name="renderstack_set_pass_enabled")
     def renderstack_set_pass_enabled(pass_name: str, enabled: bool) -> dict:
         """Enable or disable a mounted pass."""
 
@@ -136,9 +136,9 @@ def register_renderstack_tools(mcp) -> None:
             _mark_scene_dirty()
             return _stack_snapshot(stack)
 
-        return main_thread("renderstack.set_pass_enabled", _set_enabled, arguments={"pass_name": pass_name, "enabled": enabled})
+        return main_thread("renderstack_set_pass_enabled", _set_enabled, arguments={"pass_name": pass_name, "enabled": enabled})
 
-    @mcp.tool(name="renderstack.set_pass_params")
+    @mcp.tool(name="renderstack_set_pass_params")
     def renderstack_set_pass_params(pass_name: str, params: dict[str, Any]) -> dict:
         """Set serialized parameters on a mounted pass/effect."""
 
@@ -150,7 +150,7 @@ def register_renderstack_tools(mcp) -> None:
             _mark_scene_dirty()
             return _stack_snapshot(stack)
 
-        return main_thread("renderstack.set_pass_params", _set_params, arguments={"pass_name": pass_name, "params": params or {}})
+        return main_thread("renderstack_set_pass_params", _set_params, arguments={"pass_name": pass_name, "params": params or {}})
 
 
 def _find_stack():
@@ -338,15 +338,15 @@ def _mark_scene_dirty() -> None:
 
 def _register_metadata() -> None:
     for name, summary in {
-        "renderstack.find_or_create": "Find or create the active scene RenderStack.",
-        "renderstack.inspect": "Inspect the active RenderStack pipeline and mounted passes.",
-        "renderstack.list_pipelines": "List discovered RenderPipeline classes.",
-        "renderstack.set_pipeline": "Switch the active RenderStack pipeline.",
-        "renderstack.list_passes": "List mounted and available RenderStack passes.",
-        "renderstack.add_pass": "Mount a post-process or render pass on the active RenderStack.",
-        "renderstack.remove_pass": "Remove a mounted RenderStack pass.",
-        "renderstack.set_pass_enabled": "Enable or disable a mounted RenderStack pass.",
-        "renderstack.set_pass_params": "Edit serialized parameters on a mounted RenderStack pass.",
+        "renderstack_find_or_create": "Find or create the active scene RenderStack.",
+        "renderstack_inspect": "Inspect the active RenderStack pipeline and mounted passes.",
+        "renderstack_list_pipelines": "List discovered RenderPipeline classes.",
+        "renderstack_set_pipeline": "Switch the active RenderStack pipeline.",
+        "renderstack_list_passes": "List mounted and available RenderStack passes.",
+        "renderstack_add_pass": "Mount a post-process or render pass on the active RenderStack.",
+        "renderstack_remove_pass": "Remove a mounted RenderStack pass.",
+        "renderstack_set_pass_enabled": "Enable or disable a mounted RenderStack pass.",
+        "renderstack_set_pass_params": "Edit serialized parameters on a mounted RenderStack pass.",
     }.items():
         category = "renderstack/pipeline" if "pipeline" in name or name.endswith(("inspect", "find_or_create")) else "renderstack/effects"
         register_tool_metadata(
@@ -356,8 +356,8 @@ def _register_metadata() -> None:
             tags=["renderstack", "rendering", "pipeline", "postprocess"],
             aliases=["render stack", "post processing", "effects"],
             recovery=[
-                "If renderstack.inspect returns exists=false, do not repeat it.",
-                "Call renderstack.find_or_create(name='RenderStack', create_if_missing=true) before editing the stack.",
+                "If renderstack_inspect returns exists=false, do not repeat it.",
+                "Call renderstack_find_or_create(name='RenderStack', create_if_missing=true) before editing the stack.",
             ],
-            next_suggested_tools=["renderstack.find_or_create", "renderstack.inspect", "runtime.read_errors"],
+            next_suggested_tools=["renderstack_find_or_create", "renderstack_inspect", "runtime_read_errors"],
         )

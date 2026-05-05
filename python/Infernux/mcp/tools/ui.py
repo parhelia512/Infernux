@@ -10,7 +10,7 @@ from Infernux.mcp.tools.common import main_thread, register_tool_metadata, seria
 def register_ui_tools(mcp) -> None:
     _register_metadata()
 
-    @mcp.tool(name="ui.create_canvas")
+    @mcp.tool(name="ui_create_canvas")
     def ui_create_canvas(name: str = "Canvas", reference_width: int = 1920, reference_height: int = 1080, select: bool = False) -> dict:
         """Create a UI Canvas."""
 
@@ -21,9 +21,9 @@ def register_ui_tools(mcp) -> None:
             _select_if(obj, select)
             return _ui_snapshot(obj, comp)
 
-        return main_thread("ui.create_canvas", _create)
+        return main_thread("ui_create_canvas", _create)
 
-    @mcp.tool(name="ui.create_text")
+    @mcp.tool(name="ui_create_text")
     def ui_create_text(name: str = "Text", parent_id: int = 0, text: str = "New Text", rect: dict[str, Any] | None = None) -> dict:
         """Create a UIText element."""
 
@@ -33,9 +33,9 @@ def register_ui_tools(mcp) -> None:
             _apply_rect(comp, rect or {})
             return _ui_snapshot(obj, comp)
 
-        return main_thread("ui.create_text", _create)
+        return main_thread("ui_create_text", _create)
 
-    @mcp.tool(name="ui.create_button")
+    @mcp.tool(name="ui_create_button")
     def ui_create_button(name: str = "Button", parent_id: int = 0, label: str = "Button", rect: dict[str, Any] | None = None) -> dict:
         """Create a UIButton element."""
 
@@ -45,9 +45,9 @@ def register_ui_tools(mcp) -> None:
             _apply_rect(comp, rect or {})
             return _ui_snapshot(obj, comp)
 
-        return main_thread("ui.create_button", _create)
+        return main_thread("ui_create_button", _create)
 
-    @mcp.tool(name="ui.create_image")
+    @mcp.tool(name="ui_create_image")
     def ui_create_image(name: str = "Image", parent_id: int = 0, texture_path: str = "", rect: dict[str, Any] | None = None) -> dict:
         """Create a UIImage element."""
 
@@ -57,9 +57,9 @@ def register_ui_tools(mcp) -> None:
             _apply_rect(comp, rect or {})
             return _ui_snapshot(obj, comp)
 
-        return main_thread("ui.create_image", _create)
+        return main_thread("ui_create_image", _create)
 
-    @mcp.tool(name="ui.create_panel")
+    @mcp.tool(name="ui_create_panel")
     def ui_create_panel(name: str = "Panel", parent_id: int = 0, color: list | None = None, rect: dict[str, Any] | None = None) -> dict:
         """Create a solid-color panel using UIImage."""
 
@@ -70,9 +70,9 @@ def register_ui_tools(mcp) -> None:
             _apply_rect(comp, rect or {})
             return _ui_snapshot(obj, comp)
 
-        return main_thread("ui.create_panel", _create)
+        return main_thread("ui_create_panel", _create)
 
-    @mcp.tool(name="ui.set_rect")
+    @mcp.tool(name="ui_set_rect")
     def ui_set_rect(object_id: int, rect: dict[str, Any]) -> dict:
         """Set x/y/width/height/rotation on a UI screen component."""
 
@@ -85,9 +85,9 @@ def register_ui_tools(mcp) -> None:
             _mark_ui_dirty()
             return _ui_snapshot(obj, comp)
 
-        return main_thread("ui.set_rect", _set_rect)
+        return main_thread("ui_set_rect", _set_rect)
 
-    @mcp.tool(name="ui.set_text")
+    @mcp.tool(name="ui_set_text")
     def ui_set_text(object_id: int, text: str) -> dict:
         """Set text/label on UIText or UIButton."""
 
@@ -103,9 +103,9 @@ def register_ui_tools(mcp) -> None:
             _mark_ui_dirty()
             return _ui_snapshot(obj, comp)
 
-        return main_thread("ui.set_text", _set_text)
+        return main_thread("ui_set_text", _set_text)
 
-    @mcp.tool(name="ui.inspect")
+    @mcp.tool(name="ui_inspect")
     def ui_inspect() -> dict:
         """Return a compact snapshot of UI canvases and elements."""
 
@@ -121,9 +121,9 @@ def register_ui_tools(mcp) -> None:
                     elements.append(_ui_snapshot(obj, comp))
             return {"elements": elements}
 
-        return main_thread("ui.inspect", _inspect)
+        return main_thread("ui_inspect", _inspect)
 
-    @mcp.tool(name="ui.find_by_text")
+    @mcp.tool(name="ui_find_by_text")
     def ui_find_by_text(text: str) -> dict:
         """Find UIText/UIButton elements by visible text."""
 
@@ -143,7 +143,7 @@ def register_ui_tools(mcp) -> None:
                     matches.append(_ui_snapshot(obj, comp))
             return {"matches": matches}
 
-        return main_thread("ui.find_by_text", _find)
+        return main_thread("ui_find_by_text", _find)
 
 
 def _create_ui_object(kind: str, name: str, parent_id: int):
@@ -260,14 +260,14 @@ def _select_if(obj, select: bool) -> None:
 
 def _register_metadata() -> None:
     for name, summary in {
-        "ui.create_canvas": "Create a UICanvas root.",
-        "ui.create_text": "Create a UIText element.",
-        "ui.create_button": "Create a UIButton element.",
-        "ui.create_panel": "Create a solid-color panel.",
-        "ui.create_image": "Create a UIImage element.",
-        "ui.set_rect": "Set UI element rectangle.",
-        "ui.set_text": "Set text/label on a UI element.",
-        "ui.inspect": "Inspect UI elements.",
-        "ui.find_by_text": "Find UI elements by visible text.",
+        "ui_create_canvas": "Create a UICanvas root.",
+        "ui_create_text": "Create a UIText element.",
+        "ui_create_button": "Create a UIButton element.",
+        "ui_create_panel": "Create a solid-color panel.",
+        "ui_create_image": "Create a UIImage element.",
+        "ui_set_rect": "Set UI element rectangle.",
+        "ui_set_text": "Set text/label on a UI element.",
+        "ui_inspect": "Inspect UI elements.",
+        "ui_find_by_text": "Find UI elements by visible text.",
     }.items():
         register_tool_metadata(name, summary=summary)

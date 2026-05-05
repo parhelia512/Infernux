@@ -19,7 +19,7 @@ from Infernux.mcp.tools.common import (
 
 
 def register_asset_tools(mcp, project_path: str) -> None:
-    @mcp.tool(name="asset.create_builtin_resource")
+    @mcp.tool(name="asset_create_builtin_resource")
     def asset_create_builtin_resource(
         kind: str,
         name: str,
@@ -31,16 +31,16 @@ def register_asset_tools(mcp, project_path: str) -> None:
 
         def _create():
             if str(kind or "").strip().lower() in {"shader", "material"}:
-                require_knowledge_token("shader", knowledge_token, required_tool="shader.guide")
+                require_knowledge_token("shader", knowledge_token, required_tool="shader_guide")
             return _create_builtin(project_path, kind, name, directory, shader_type)
 
         return main_thread(
-            "asset.create_builtin_resource",
+            "asset_create_builtin_resource",
             _create,
             arguments={"kind": kind, "name": name, "directory": directory, "shader_type": shader_type, "knowledge_token": knowledge_token},
         )
 
-    @mcp.tool(name="asset.ensure_folder")
+    @mcp.tool(name="asset_ensure_folder")
     def asset_ensure_folder(path: str) -> dict:
         """Ensure a project folder exists; succeeds if it already exists."""
 
@@ -59,30 +59,30 @@ def register_asset_tools(mcp, project_path: str) -> None:
                 "existed": existed,
             }
 
-        return main_thread("asset.ensure_folder", _ensure_folder, arguments={"path": path})
+        return main_thread("asset_ensure_folder", _ensure_folder, arguments={"path": path})
 
-    @mcp.tool(name="asset.create_script")
+    @mcp.tool(name="asset_create_script")
     def asset_create_script(name: str, directory: str = "Assets") -> dict:
         """Create a Python component script resource from the editor template."""
         return main_thread(
-            "asset.create_script",
+            "asset_create_script",
             lambda: _create_builtin(project_path, "script", name, directory, "frag"),
             arguments={"name": name, "directory": directory},
         )
 
-    @mcp.tool(name="asset.create_material")
+    @mcp.tool(name="asset_create_material")
     def asset_create_material(name: str, directory: str = "Assets", knowledge_token: str = "") -> dict:
         """Create a material resource from the editor template."""
         return main_thread(
-            "asset.create_material",
+            "asset_create_material",
             lambda: (
-                require_knowledge_token("shader", knowledge_token, required_tool="shader.guide")
+                require_knowledge_token("shader", knowledge_token, required_tool="shader_guide")
                 or _create_builtin(project_path, "material", name, directory, "frag")
             ),
             arguments={"name": name, "directory": directory, "knowledge_token": knowledge_token},
         )
 
-    @mcp.tool(name="asset.list")
+    @mcp.tool(name="asset_list")
     def asset_list(
         directory: str = "Assets",
         recursive: bool = True,
@@ -125,9 +125,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
                         break
             return {"root": os.path.relpath(root, project_path).replace("\\", "/"), "entries": entries}
 
-        return main_thread("asset.list", _list, arguments={"directory": directory, "recursive": recursive, "include_meta": include_meta, "limit": limit})
+        return main_thread("asset_list", _list, arguments={"directory": directory, "recursive": recursive, "include_meta": include_meta, "limit": limit})
 
-    @mcp.tool(name="asset.search")
+    @mcp.tool(name="asset_search")
     def asset_search(query: str, directory: str = "Assets", extensions: list[str] | None = None, limit: int = 100) -> dict:
         """Search asset paths by filename substring and optional extensions."""
 
@@ -149,9 +149,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
                         return {"matches": matches}
             return {"matches": matches}
 
-        return main_thread("asset.search", _search, arguments={"query": query, "directory": directory, "extensions": extensions or [], "limit": limit})
+        return main_thread("asset_search", _search, arguments={"query": query, "directory": directory, "extensions": extensions or [], "limit": limit})
 
-    @mcp.tool(name="asset.read_text")
+    @mcp.tool(name="asset_read_text")
     def asset_read_text(path: str, max_bytes: int = 262144) -> dict:
         """Read a UTF-8 text file inside the project."""
 
@@ -170,9 +170,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
                 "text": text,
             }
 
-        return main_thread("asset.read_text", _read)
+        return main_thread("asset_read_text", _read)
 
-    @mcp.tool(name="asset.write_text")
+    @mcp.tool(name="asset_write_text")
     def asset_write_text(path: str, text: str, overwrite: bool = True) -> dict:
         """Write a UTF-8 text file inside the project and notify AssetDatabase."""
 
@@ -193,9 +193,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
                 "created": not existed,
             }
 
-        return main_thread("asset.write_text", _write, arguments={"path": path, "text_bytes": len((text or "").encode("utf-8")), "overwrite": overwrite})
+        return main_thread("asset_write_text", _write, arguments={"path": path, "text_bytes": len((text or "").encode("utf-8")), "overwrite": overwrite})
 
-    @mcp.tool(name="asset.edit_text")
+    @mcp.tool(name="asset_edit_text")
     def asset_edit_text(path: str, old_text: str, new_text: str, count: int = 1) -> dict:
         """Replace text in a UTF-8 file inside the project."""
 
@@ -222,9 +222,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
                 "bytes": os.path.getsize(file_path),
             }
 
-        return main_thread("asset.edit_text", _edit)
+        return main_thread("asset_edit_text", _edit)
 
-    @mcp.tool(name="asset.delete")
+    @mcp.tool(name="asset_delete")
     def asset_delete(path: str) -> dict:
         """Delete a file or directory inside the project."""
 
@@ -248,9 +248,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
                 notify_asset_changed(target, "deleted")
             return {"deleted": True, "path": os.path.relpath(target, project_path).replace("\\", "/"), "directory": is_dir}
 
-        return main_thread("asset.delete", _delete)
+        return main_thread("asset_delete", _delete)
 
-    @mcp.tool(name="asset.refresh")
+    @mcp.tool(name="asset_refresh")
     def asset_refresh() -> dict:
         """Refresh the AssetDatabase."""
 
@@ -261,9 +261,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
             adb.refresh()
             return {"refreshed": True}
 
-        return main_thread("asset.refresh", _refresh)
+        return main_thread("asset_refresh", _refresh)
 
-    @mcp.tool(name="asset.resolve")
+    @mcp.tool(name="asset_resolve")
     def asset_resolve(path: str = "", guid: str = "") -> dict:
         """Resolve between asset path and GUID."""
 
@@ -287,9 +287,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
                 "guid": resolved_guid,
             }
 
-        return main_thread("asset.resolve", _resolve)
+        return main_thread("asset_resolve", _resolve)
 
-    @mcp.tool(name="asset.import")
+    @mcp.tool(name="asset_import")
     def asset_import(path: str) -> dict:
         """Import or re-import one asset path."""
 
@@ -300,9 +300,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
             notify_asset_changed(file_path, "modified")
             return {"path": os.path.relpath(file_path, project_path).replace("\\", "/"), "imported": True}
 
-        return main_thread("asset.import", _import)
+        return main_thread("asset_import", _import)
 
-    @mcp.tool(name="asset.move")
+    @mcp.tool(name="asset_move")
     def asset_move(path: str, new_path: str, overwrite: bool = False) -> dict:
         """Move a file or directory inside the project."""
 
@@ -345,9 +345,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
                 "path": os.path.relpath(dst, project_path).replace("\\", "/"),
             }
 
-        return main_thread("asset.move", _move)
+        return main_thread("asset_move", _move)
 
-    @mcp.tool(name="asset.rename")
+    @mcp.tool(name="asset_rename")
     def asset_rename(path: str, new_name: str) -> dict:
         """Rename a file or directory in place."""
 
@@ -373,9 +373,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
             notify_asset_changed(dst, "modified")
             return {"path": os.path.relpath(dst, project_path).replace("\\", "/")}
 
-        return main_thread("asset.rename", _rename)
+        return main_thread("asset_rename", _rename)
 
-    @mcp.tool(name="asset.copy")
+    @mcp.tool(name="asset_copy")
     def asset_copy(path: str, new_path: str, overwrite: bool = False) -> dict:
         """Copy a file or directory inside the project."""
 
@@ -407,9 +407,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
                 "path": os.path.relpath(dst, project_path).replace("\\", "/"),
             }
 
-        return main_thread("asset.copy", _copy)
+        return main_thread("asset_copy", _copy)
 
-    @mcp.tool(name="asset.get_meta")
+    @mcp.tool(name="asset_get_meta")
     def asset_get_meta(path: str = "", guid: str = "") -> dict:
         """Return AssetDatabase metadata when available."""
 
@@ -432,9 +432,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
                 "type": str(getattr(getattr(meta, "type", None), "name", getattr(meta, "type", ""))),
             }
 
-        return main_thread("asset.get_meta", _meta)
+        return main_thread("asset_get_meta", _meta)
 
-    @mcp.tool(name="asset.list_by_type")
+    @mcp.tool(name="asset_list_by_type")
     def asset_list_by_type(asset_type: str, limit: int = 500) -> dict:
         """List AssetDatabase resources by resource type name."""
 
@@ -457,9 +457,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
                     break
             return {"assets": matches}
 
-        return main_thread("asset.list_by_type", _list_by_type)
+        return main_thread("asset_list_by_type", _list_by_type)
 
-    @mcp.tool(name="asset.read_json")
+    @mcp.tool(name="asset_read_json")
     def asset_read_json(path: str, max_bytes: int = 262144) -> dict:
         """Read and parse a JSON text asset."""
 
@@ -472,9 +472,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
             with open(file_path, "r", encoding="utf-8") as f:
                 return {"path": os.path.relpath(file_path, project_path).replace("\\", "/"), "json": json.load(f)}
 
-        return main_thread("asset.read_json", _read_json)
+        return main_thread("asset_read_json", _read_json)
 
-    @mcp.tool(name="asset.write_json")
+    @mcp.tool(name="asset_write_json")
     def asset_write_json(path: str, value: dict | list, overwrite: bool = True, indent: int = 2) -> dict:
         """Write a JSON text asset."""
 
@@ -492,9 +492,9 @@ def register_asset_tools(mcp, project_path: str) -> None:
             notify_asset_changed(file_path, "modified" if existed else "created")
             return {"path": os.path.relpath(file_path, project_path).replace("\\", "/"), "bytes": os.path.getsize(file_path), "created": not existed}
 
-        return main_thread("asset.write_json", _write_json, arguments={"path": path, "overwrite": overwrite, "indent": indent})
+        return main_thread("asset_write_json", _write_json, arguments={"path": path, "overwrite": overwrite, "indent": indent})
 
-    @mcp.tool(name="asset.patch_text")
+    @mcp.tool(name="asset_patch_text")
     def asset_patch_text(path: str, replacements: list[dict[str, str]]) -> dict:
         """Apply a sequence of exact text replacements to a file."""
 
@@ -521,7 +521,7 @@ def register_asset_tools(mcp, project_path: str) -> None:
             notify_asset_changed(file_path, "modified")
             return {"path": os.path.relpath(file_path, project_path).replace("\\", "/"), "replacements": trace}
 
-        return main_thread("asset.patch_text", _patch_text)
+        return main_thread("asset_patch_text", _patch_text)
 
 
 
@@ -566,7 +566,7 @@ def _create_builtin(project_path: str, kind: str, name: str, directory: str, sha
         path = os.path.join(target_dir, base + "." + shader_type)
         existed = False
     elif normalized == "scene":
-        raise ValueError("MCP agents must manage .scene files through scene.save/open/new, not asset.create_builtin_resource(kind='scene').")
+        raise ValueError("MCP agents must manage .scene files through scene_save/open/new, not asset_create_builtin_resource(kind='scene').")
     else:
         raise ValueError("kind must be one of: folder, script, material, shader, scene")
 

@@ -13,7 +13,7 @@ from Infernux.mcp.tools.common import get_tool_metadata, list_tool_metadata, ok,
 def register_research_tools(mcp, project_path: str) -> None:
     _register_metadata()
 
-    @mcp.tool(name="mcp.config.get")
+    @mcp.tool(name="mcp_config_get")
     def mcp_config_get() -> dict:
         """Return the active configurable MCP capability profile."""
         return ok({
@@ -22,13 +22,13 @@ def register_research_tools(mcp, project_path: str) -> None:
             "restart_required_for_registration_changes": True,
         })
 
-    @mcp.tool(name="mcp.config.write_default")
+    @mcp.tool(name="mcp_config_write_default")
     def mcp_config_write_default() -> dict:
         """Materialize the default-on MCP capability config file."""
         path = capabilities.write_default_config(project_path)
         return ok({"path": _rel(project_path, path), "written_or_existing": bool(path)})
 
-    @mcp.tool(name="mcp.config.set_feature")
+    @mcp.tool(name="mcp_config_set_feature")
     def mcp_config_set_feature(name: str, enabled: bool, persist: bool = True) -> dict:
         """Enable or disable one MCP feature flag."""
         config = capabilities.set_feature(name, enabled)
@@ -39,7 +39,7 @@ def register_research_tools(mcp, project_path: str) -> None:
             "restart_required_for_registration_changes": True,
         })
 
-    @mcp.tool(name="mcp.config.set_tool_group")
+    @mcp.tool(name="mcp_config_set_tool_group")
     def mcp_config_set_tool_group(name: str, enabled: bool, persist: bool = True) -> dict:
         """Enable or disable one MCP tool group for the next server registration."""
         config = capabilities.set_tool_group(name, enabled)
@@ -50,7 +50,7 @@ def register_research_tools(mcp, project_path: str) -> None:
             "restart_required_for_registration_changes": True,
         })
 
-    @mcp.tool(name="mcp.config.set_tool")
+    @mcp.tool(name="mcp_config_set_tool")
     def mcp_config_set_tool(name: str, enabled: bool, persist: bool = True) -> dict:
         """Enable or disable one specific tool name in config metadata."""
         config = capabilities.set_tool_enabled(name, enabled)
@@ -61,17 +61,17 @@ def register_research_tools(mcp, project_path: str) -> None:
             "restart_required_for_registration_changes": True,
         })
 
-    @mcp.tool(name="mcp.contracts.list")
+    @mcp.tool(name="mcp_contracts_list")
     def mcp_contracts_list() -> dict:
         """Return executable contract metadata for every known tool."""
         return ok({"contracts": [_contract(meta) for meta in _visible_metadata()]})
 
-    @mcp.tool(name="mcp.contracts.get")
+    @mcp.tool(name="mcp_contracts_get")
     def mcp_contracts_get(tool_name: str) -> dict:
         """Return the executable contract metadata for one tool."""
         return ok({"contract": _contract(get_tool_metadata(tool_name))})
 
-    @mcp.tool(name="mcp.contracts.validate")
+    @mcp.tool(name="mcp_contracts_validate")
     def mcp_contracts_validate() -> dict:
         """Grade tool metadata for self-description and recovery quality."""
         contracts = [_contract(meta) for meta in _visible_metadata()]
@@ -89,7 +89,7 @@ def register_research_tools(mcp, project_path: str) -> None:
             },
         })
 
-    @mcp.tool(name="mcp.evolution.suggest_tools")
+    @mcp.tool(name="mcp_evolution_suggest_tools")
     def mcp_evolution_suggest_tools(use_last_trace: bool = True, min_sequence_length: int = 3) -> dict:
         """Suggest project-defined tools from failed or repetitive trace patterns."""
         if not capabilities.feature_enabled("trace_to_tool_evolution"):
@@ -104,7 +104,7 @@ def register_research_tools(mcp, project_path: str) -> None:
             "saved_traces": list_traces(project_path, limit=10),
         })
 
-    @mcp.tool(name="mcp.research.profile")
+    @mcp.tool(name="mcp_research_profile")
     def mcp_research_profile() -> dict:
         """Return the research claims this MCP configuration is designed to support."""
         return ok({
@@ -221,23 +221,23 @@ def _rel(project_path: str, path: str) -> str:
 
 def _register_metadata() -> None:
     for name, summary in {
-        "mcp.config.get": "Return active MCP capability toggles.",
-        "mcp.config.write_default": "Write the default-on MCP capability config.",
-        "mcp.config.set_feature": "Toggle one MCP feature flag.",
-        "mcp.config.set_tool_group": "Toggle one MCP tool group.",
-        "mcp.config.set_tool": "Enable or disable one tool by name.",
-        "mcp.contracts.list": "List executable/self-description contracts for tools.",
-        "mcp.contracts.get": "Inspect one tool contract.",
-        "mcp.contracts.validate": "Grade MCP tool contract completeness.",
-        "mcp.evolution.suggest_tools": "Suggest project tools from trace failure/repetition patterns.",
-        "mcp.research.profile": "Return research claims and ablation plan for this MCP layer.",
+        "mcp_config_get": "Return active MCP capability toggles.",
+        "mcp_config_write_default": "Write the default-on MCP capability config.",
+        "mcp_config_set_feature": "Toggle one MCP feature flag.",
+        "mcp_config_set_tool_group": "Toggle one MCP tool group.",
+        "mcp_config_set_tool": "Enable or disable one tool by name.",
+        "mcp_contracts_list": "List executable/self-description contracts for tools.",
+        "mcp_contracts_get": "Inspect one tool contract.",
+        "mcp_contracts_validate": "Grade MCP tool contract completeness.",
+        "mcp_evolution_suggest_tools": "Suggest project tools from trace failure/repetition patterns.",
+        "mcp_research_profile": "Return research claims and ablation plan for this MCP layer.",
     }.items():
         register_tool_metadata(
             name,
             summary=summary,
             side_effects=["May read or update ProjectSettings/mcp_capabilities.json." if name.startswith("mcp.config.") else "No editor-scene mutation."],
-            recovery=["Use mcp.config.get to inspect current toggles.", "Restart the MCP server after changing registration-level tool groups."],
+            recovery=["Use mcp_config_get to inspect current toggles.", "Restart the MCP server after changing registration-level tool groups."],
             concepts={"MCP Capability": "A feature or tool group that can be enabled or disabled through project config."},
-            next_suggested_tools=["mcp.config.get", "mcp.capabilities"],
+            next_suggested_tools=["mcp_config_get", "mcp_capabilities"],
             feature="executable_contracts",
         )

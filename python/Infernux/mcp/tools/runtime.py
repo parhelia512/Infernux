@@ -19,7 +19,7 @@ from Infernux.mcp.tools.common import (
 def register_runtime_tools(mcp) -> None:
     _register_metadata()
 
-    @mcp.tool(name="runtime.wait")
+    @mcp.tool(name="runtime_wait")
     def runtime_wait(
         play_state: str = "",
         deferred_idle: bool = True,
@@ -40,11 +40,11 @@ def register_runtime_tools(mcp) -> None:
         return fail(
             "error.timeout",
             "Timed out waiting for runtime condition.",
-            hint="Use editor.get_state, console.read, or runtime.read_errors to diagnose why the condition did not become true.",
-            explain={"tool": "runtime.wait", "summary": "Wait for Play Mode/deferred task conditions."},
+            hint="Use editor_get_state, console_read, or runtime_read_errors to diagnose why the condition did not become true.",
+            explain={"tool": "runtime_wait", "summary": "Wait for Play Mode/deferred task conditions."},
         ) | {"data": {"ready": False, "state": last_state}}
 
-    @mcp.tool(name="runtime.run_for")
+    @mcp.tool(name="runtime_run_for")
     def runtime_run_for(seconds: float = 1.0, stop_on_error: bool = True, poll_interval: float = 0.25) -> dict:
         """Let Play Mode run for a duration while polling for errors."""
         duration = max(float(seconds), 0.0)
@@ -65,7 +65,7 @@ def register_runtime_tools(mcp) -> None:
             "errors": errors,
         })
 
-    @mcp.tool(name="runtime.get_object_state")
+    @mcp.tool(name="runtime_get_object_state")
     def runtime_get_object_state(object_id: int) -> dict:
         """Read runtime GameObject transform and component summary."""
 
@@ -88,9 +88,9 @@ def register_runtime_tools(mcp) -> None:
                 "child_count": int(obj.get_child_count()),
             }
 
-        return ok(_run_on_main("runtime.get_object_state", _read))
+        return ok(_run_on_main("runtime_get_object_state", _read))
 
-    @mcp.tool(name="runtime.get_component_state")
+    @mcp.tool(name="runtime_get_component_state")
     def runtime_get_component_state(object_id: int, component_type: str, ordinal: int = 0) -> dict:
         """Read a component snapshot at runtime."""
 
@@ -113,16 +113,16 @@ def register_runtime_tools(mcp) -> None:
             return {"object_id": int(obj.id), "component": data, "fields": fields}
 
         try:
-            return ok(_run_on_main("runtime.get_component_state", _read))
+            return ok(_run_on_main("runtime_get_component_state", _read))
         except FileNotFoundError as exc:
-            return fail("error.not_found", str(exc), hint="Use component.list_on_object or gameobject.get first.")
+            return fail("error.not_found", str(exc), hint="Use component_list_on_object or gameobject_get first.")
 
-    @mcp.tool(name="runtime.read_errors")
+    @mcp.tool(name="runtime_read_errors")
     def runtime_read_errors(include_warnings: bool = False, limit: int = 100) -> dict:
         """Read console errors and script loader errors."""
-        return ok(_run_on_main("runtime.read_errors", lambda: _read_errors(include_warnings=include_warnings, limit=limit)))
+        return ok(_run_on_main("runtime_read_errors", lambda: _read_errors(include_warnings=include_warnings, limit=limit)))
 
-    @mcp.tool(name="runtime.assert")
+    @mcp.tool(name="runtime_assert")
     def runtime_assert(assertions: list[dict[str, Any]]) -> dict:
         """Evaluate simple runtime assertions."""
 
@@ -155,7 +155,7 @@ def register_runtime_tools(mcp) -> None:
                 results.append({"assertion": item, "passed": passed, "message": message})
             return {"passed": all(r["passed"] for r in results), "results": results}
 
-        return ok(_run_on_main("runtime.assert", _assert))
+        return ok(_run_on_main("runtime_assert", _assert))
 
 
 def _run_on_main(name: str, fn):
@@ -252,11 +252,11 @@ def _vec(value) -> list[float]:
 
 def _register_metadata() -> None:
     for name, summary in {
-        "runtime.wait": "Wait for Play Mode/deferred task state.",
-        "runtime.run_for": "Let runtime advance while polling errors.",
-        "runtime.get_object_state": "Read object transform and component state at runtime.",
-        "runtime.get_component_state": "Read one component state at runtime.",
-        "runtime.read_errors": "Read console and script loader errors.",
-        "runtime.assert": "Evaluate simple runtime assertions.",
+        "runtime_wait": "Wait for Play Mode/deferred task state.",
+        "runtime_run_for": "Let runtime advance while polling errors.",
+        "runtime_get_object_state": "Read object transform and component state at runtime.",
+        "runtime_get_component_state": "Read one component state at runtime.",
+        "runtime_read_errors": "Read console and script loader errors.",
+        "runtime_assert": "Evaluate simple runtime assertions.",
     }.items():
-        register_tool_metadata(name, summary=summary, next_suggested_tools=["runtime.read_errors", "console.read"])
+        register_tool_metadata(name, summary=summary, next_suggested_tools=["runtime_read_errors", "console_read"])

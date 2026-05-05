@@ -115,7 +115,7 @@ def get_tool_metadata(name: str) -> dict[str, Any]:
             "postconditions": [],
             "side_effects": [],
             "next_suggested_tools": [],
-            "recovery": ["Use mcp.capabilities or mcp.list_tools_verbose to inspect available tools."],
+            "recovery": ["Use mcp_capabilities or mcp_list_tools_verbose to inspect available tools."],
             "examples": [],
             "concepts": {},
             "invariants": [],
@@ -231,8 +231,7 @@ def _placeholder_for_annotation(annotation: str, name: str) -> Any:
 
 
 def _default_tool_category(name: str) -> str:
-    prefix = str(name).split(".", 1)[0]
-    return {
+    categories = {
         "mcp": "foundation/discovery",
         "engine": "foundation/concepts",
         "workflow": "foundation/workflows",
@@ -253,7 +252,12 @@ def _default_tool_category(name: str) -> str:
         "ui": "ui/screen",
         "material": "assets/materials",
         "renderstack": "renderstack/pipeline",
-    }.get(prefix, "misc/other")
+    }
+    tool_name = str(name or "")
+    for prefix in sorted(categories, key=len, reverse=True):
+        if tool_name == prefix or tool_name.startswith(prefix + "_"):
+            return categories[prefix]
+    return "misc/other"
 
 
 def _normalized_string_list(values: list[str] | None) -> list[str]:
@@ -346,15 +350,15 @@ def main_thread(
         _record_trace(name, False, started, str(exc), arguments=arguments, result=result)
         return result
     except ValueError as exc:
-        result = fail("error.invalid_argument", str(exc), hint="Check parameter schema with mcp.help or component.describe_type.", explain=response_explain)
+        result = fail("error.invalid_argument", str(exc), hint="Check parameter schema with mcp_help or component.describe_type.", explain=response_explain)
         _record_trace(name, False, started, str(exc), arguments=arguments, result=result)
         return result
     except FileExistsError as exc:
-        result = fail("error.exists", str(exc), hint="Treat existing folders as reusable. Use asset.ensure_folder, asset.list, or overwrite=true for files when appropriate.", explain=response_explain)
+        result = fail("error.exists", str(exc), hint="Treat existing folders as reusable. Use asset_ensure_folder, asset_list, or overwrite=true for files when appropriate.", explain=response_explain)
         _record_trace(name, False, started, str(exc), arguments=arguments, result=result)
         return result
     except FileNotFoundError as exc:
-        result = fail("error.not_found", str(exc), hint="Use scene.inspect, gameobject.find, or asset.search to locate valid targets.", explain=response_explain)
+        result = fail("error.not_found", str(exc), hint="Use scene_inspect, gameobject_find, or asset_search to locate valid targets.", explain=response_explain)
         _record_trace(name, False, started, str(exc), arguments=arguments, result=result)
         return result
     except KnowledgeTokenError as exc:
@@ -369,7 +373,7 @@ def main_thread(
                     "Copy data.knowledge_lock.token from the guide response.",
                     "Retry this tool with knowledge_token set to that token.",
                 ],
-                "next_suggested_tools": [exc.required_tool, "api.search", "mcp.catalog.search"],
+                "next_suggested_tools": [exc.required_tool, "api_search", "mcp_catalog_search"],
             },
         )
         result["data"] = {
@@ -380,7 +384,7 @@ def main_thread(
         _record_trace(name, False, started, str(exc), arguments=arguments, result=result)
         return result
     except Exception as exc:
-        result = fail("error.internal", str(exc), hint="Read console.read and retry with a smaller operation.", explain=response_explain)
+        result = fail("error.internal", str(exc), hint="Read console_read and retry with a smaller operation.", explain=response_explain)
         _record_trace(name, False, started, str(exc), arguments=arguments, result=result)
         return result
 
@@ -422,14 +426,14 @@ def _scene_guard_failure(name: str, explain: dict[str, Any]) -> dict[str, Any] |
     if sfm is None:
         return None
     status = scene_status()
-    if name in {"scene.open", "scene.new", "scene.save"}:
+    if name in {"scene_open", "scene_new", "scene_save"}:
         if status["play_state"] != "edit":
             return _state_guard_fail(
                 "error.play_mode_active",
                 f"{name} is not allowed while Play Mode is active. Stop Play Mode first.",
                 status,
                 explain,
-                next_tools=["editor.stop", "runtime.wait", "scene.status"],
+                next_tools=["editor_stop", "runtime_wait", "scene_status"],
             )
         if status["loading"]:
             return _state_guard_fail(
@@ -437,15 +441,15 @@ def _scene_guard_failure(name: str, explain: dict[str, Any]) -> dict[str, Any] |
                 f"{name} is not allowed while a scene load/new operation is pending.",
                 status,
                 explain,
-                next_tools=["runtime.wait", "scene.status"],
+                next_tools=["runtime_wait", "scene_status"],
             )
-    if name in {"scene.open", "scene.new"} and status["dirty"]:
+    if name in {"scene_open", "scene_new"} and status["dirty"]:
         return _state_guard_fail(
             "error.scene_dirty",
             "The active scene has unsaved changes. Save it before switching scenes.",
             status,
             explain,
-            next_tools=["scene.save", "scene.status"],
+            next_tools=["scene_save", "scene_status"],
         )
     if _is_edit_mode_mutation(name):
         if status["play_state"] != "edit":
@@ -454,7 +458,7 @@ def _scene_guard_failure(name: str, explain: dict[str, Any]) -> dict[str, Any] |
                 f"{name} mutates the editor scene and is not allowed while Play Mode is active.",
                 status,
                 explain,
-                next_tools=["editor.stop", "runtime.wait", "scene.status"],
+                next_tools=["editor_stop", "runtime_wait", "scene_status"],
             )
         if status["loading"]:
             return _state_guard_fail(
@@ -462,7 +466,7 @@ def _scene_guard_failure(name: str, explain: dict[str, Any]) -> dict[str, Any] |
                 f"{name} mutates the editor scene and is not allowed while a scene load/new operation is pending.",
                 status,
                 explain,
-                next_tools=["runtime.wait", "scene.status"],
+                next_tools=["runtime_wait", "scene_status"],
             )
     if _requires_saved_scene_file(name) and not status["path"]:
         return _state_guard_fail(
@@ -470,7 +474,7 @@ def _scene_guard_failure(name: str, explain: dict[str, Any]) -> dict[str, Any] |
             "The active scene has not been saved to a .scene file yet. Save it before mutating the scene through MCP.",
             status,
             explain,
-            next_tools=["scene.save", "scene.status"],
+            next_tools=["scene_save", "scene_status"],
         )
     return None
 
@@ -490,9 +494,9 @@ def _state_guard_fail(
         explain={
             **explain,
             "recovery": [
-                "Call scene.status to inspect the active scene path and dirty flag.",
-                "If the scene is unsaved, call scene.save with data.suggested_save_path or another path under Assets/.",
-                "If Play Mode is active, call editor.stop before editor-scene mutations.",
+                "Call scene_status to inspect the active scene path and dirty flag.",
+                "If the scene is unsaved, call scene_save with data.suggested_save_path or another path under Assets/.",
+                "If Play Mode is active, call editor_stop before editor-scene mutations.",
                 "If scene loading is pending, wait before retrying.",
                 "Retry the original MCP operation after the save succeeds.",
             ],
@@ -504,47 +508,47 @@ def _state_guard_fail(
 
 
 def _is_edit_mode_mutation(name: str) -> bool:
-    return _requires_saved_scene_file(name) or name in {"scene.open", "scene.new", "scene.save"}
+    return _requires_saved_scene_file(name) or name in {"scene_open", "scene_new", "scene_save"}
 
 
 def _requires_saved_scene_file(name: str) -> bool:
     exact = {
-        "hierarchy.create_object",
-        "gameobject.add_component",
-        "gameobject.delete",
-        "gameobject.batch_delete",
-        "gameobject.batch_create",
-        "gameobject.duplicate",
-        "gameobject.set",
-        "gameobject.set_parent",
-        "gameobject.set_sibling_index",
-        "gameobject.ensure_path",
-        "gameobject.clone_from_json",
-        "gameobject.set_tag_layer",
-        "transform.set",
-        "component.ensure",
-        "component.set_field",
-        "component.set_fields",
-        "component.remove",
-        "component.restore_snapshot",
-        "camera.ensure_main",
-        "camera.set_main",
-        "camera.attach_to_target",
-        "camera.setup_third_person",
-        "camera.setup_2d_card_game",
-        "camera.frame_targets",
-        "camera.look_at",
-        "lighting.ensure_default",
-        "renderstack.find_or_create",
-        "renderstack.set_pipeline",
-        "renderstack.add_pass",
-        "renderstack.remove_pass",
-        "renderstack.set_pass_enabled",
-        "renderstack.set_pass_params",
+        "hierarchy_create_object",
+        "gameobject_add_component",
+        "gameobject_delete",
+        "gameobject_batch_delete",
+        "gameobject_batch_create",
+        "gameobject_duplicate",
+        "gameobject_set",
+        "gameobject_set_parent",
+        "gameobject_set_sibling_index",
+        "gameobject_ensure_path",
+        "gameobject_clone_from_json",
+        "gameobject_set_tag_layer",
+        "transform_set",
+        "component_ensure",
+        "component_set_field",
+        "component_set_fields",
+        "component_remove",
+        "component_restore_snapshot",
+        "camera_ensure_main",
+        "camera_set_main",
+        "camera_attach_to_target",
+        "camera_setup_third_person",
+        "camera_setup_2d_card_game",
+        "camera_frame_targets",
+        "camera_look_at",
+        "lighting_ensure_default",
+        "renderstack_find_or_create",
+        "renderstack_set_pipeline",
+        "renderstack_add_pass",
+        "renderstack_remove_pass",
+        "renderstack_set_pass_enabled",
+        "renderstack_set_pass_params",
     }
     if name in exact:
         return True
-    return name.startswith("ui.") and name not in {"ui.inspect", "ui.find_by_text"}
+    return name.startswith("ui.") and name not in {"ui_inspect", "ui_find_by_text"}
 
 
 def scene_status() -> dict[str, Any]:
@@ -597,7 +601,7 @@ def ensure_not_active_scene_file(project_path: str, file_path: str, operation: s
     if _path_is_or_contains_scene_file(target):
         raise ValueError(
             f"Refusing to {operation} .scene files through generic asset tools. "
-            "Use scene.save for the active scene, scene.open to switch scenes, or close the scene before file-level scene maintenance."
+            "Use scene_save for the active scene, scene_open to switch scenes, or close the scene before file-level scene maintenance."
         )
     try:
         from Infernux.engine.scene_manager import SceneFileManager
@@ -612,7 +616,7 @@ def ensure_not_active_scene_file(project_path: str, file_path: str, operation: s
     if is_active_scene or contains_active_scene:
         raise ValueError(
             f"Refusing to {operation} the active scene file through generic asset tools. "
-            "Use scene.save for the active scene, or save/close the scene before replacing its file."
+            "Use scene_save for the active scene, or save/close the scene before replacing its file."
         )
 
 
