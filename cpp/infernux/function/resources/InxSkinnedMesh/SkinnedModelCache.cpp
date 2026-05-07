@@ -242,7 +242,7 @@ std::shared_ptr<InxSkinnedMesh> SkinnedModelCache::ImportModel(const std::string
     }
 
     auto fsPath = ToFsPath(sourcePath);
-    std::string ext = fsPath.extension().string();
+    std::string ext = FromFsPath(fsPath.extension());
     if (!ext.empty() && ext[0] == '.')
         ext = ext.substr(1);
 

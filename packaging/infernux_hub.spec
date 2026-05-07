@@ -56,6 +56,7 @@ a = Analysis(
         "_hashlib",
         "database",
         "splash_screen",
+        "Infernux.runtime_utf8",
         "style",
         "ui_project_list",
         "model",
@@ -72,7 +73,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[os.path.join(_PACKAGING_DIR, "pyi_rth_infernux_utf8.py")],
     excludes=[
         # Don't bundle the engine itself — it's installed per-project
         "Infernux",

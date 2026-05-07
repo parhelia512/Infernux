@@ -46,7 +46,7 @@ static std::shared_ptr<ShaderAsset> CompileShaderAsset(const std::string &filePa
 
     // Determine shader type from extension
     std::filesystem::path fsPath = ToFsPath(filePath);
-    std::string ext = fsPath.extension().string();
+    std::string ext = FromFsPath(fsPath.extension());
 
     // Read metadata for shader_id
     const InxResourceMeta *meta = adb->GetMetaByGuid(guid);

@@ -1,3 +1,7 @@
+from Infernux.runtime_utf8 import configure_process_utf8
+
+configure_process_utf8()
+
 import atexit
 import json
 import os

@@ -131,6 +131,15 @@ def write_project_lock(project_path: str, pid: int, token: str, mode: str, state
     return lock_path
 
 
+def merge_child_env_utf8(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Environment for subprocesses: inherit current env and prefer UTF-8 on Windows."""
+    merged = {**os.environ, **(extra or {})}
+    if sys.platform == "win32":
+        merged.setdefault("PYTHONUTF8", "1")
+        merged.setdefault("PYTHONIOENCODING", "utf-8")
+    return merged
+
+
 def remove_project_lock(project_path: str, token: str | None = None) -> None:
     """Remove the project lock if it exists and the token matches when provided."""
     lock_path = get_project_lock_path(project_path)

@@ -270,7 +270,7 @@ ShaderDescriptor InxShaderLoader::ParseShaderSource(const std::string &source, c
     // Infer stage from file extension
     if (!filePath.empty()) {
         const std::filesystem::path fsPath = ToFsPath(filePath);
-        desc.fileExtension = fsPath.extension().string();
+        desc.fileExtension = FromFsPath(fsPath.extension());
         desc.isVertexShader = (desc.fileExtension == ".vert");
         desc.isFragmentShader = (desc.fileExtension == ".frag");
         desc.isComputeShader = (desc.fileExtension == ".comp");
@@ -1239,7 +1239,7 @@ std::unordered_map<std::string, std::string> InxShaderLoader::BuildShaderIdMap(c
             if (!entry.is_regular_file())
                 continue;
 
-            auto ext = entry.path().extension().string();
+            auto ext = FromFsPath(entry.path().extension());
             if (ext != ".vert" && ext != ".frag" && ext != ".glsl" && ext != ".shadingmodel")
                 continue;
 

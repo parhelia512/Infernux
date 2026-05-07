@@ -48,7 +48,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[os.path.join(_PACKAGING_DIR, "pyi_rth_infernux_utf8.py")],
     excludes=[],
     noarchive=False,
     optimize=0,

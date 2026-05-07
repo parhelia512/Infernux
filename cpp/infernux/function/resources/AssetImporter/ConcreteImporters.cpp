@@ -133,7 +133,7 @@ bool ModelImporter::Import(const ImportContext &ctx)
 
     // Minimal flags: triangulate so we can count real triangle-indices,
     // but skip heavy post-processing (that happens at load time in MeshLoader).
-    std::string ext = sourcePath.extension().string();
+    std::string ext = FromFsPath(sourcePath.extension());
     if (!ext.empty() && ext[0] == '.')
         ext.erase(0, 1);
     const aiScene *scene = importer.ReadFileFromMemory(fileData.data(), static_cast<size_t>(fileData.size()),

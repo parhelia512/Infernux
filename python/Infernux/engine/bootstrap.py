@@ -472,7 +472,7 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
         need_reset = True
         if os.path.isfile(layout_ver_path):
             try:
-                with open(layout_ver_path, "r") as f:
+                with open(layout_ver_path, "r", encoding="utf-8") as f:
                     if f.read().strip() == str(_LAYOUT_VERSION):
                         need_reset = False
             except OSError as _exc:
@@ -481,7 +481,7 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             if os.path.isfile(imgui_ini_path):
                 os.remove(imgui_ini_path)
             os.makedirs(os.path.dirname(layout_ver_path), exist_ok=True)
-            with open(layout_ver_path, "w") as f:
+            with open(layout_ver_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(str(_LAYOUT_VERSION))
 
     def _persist_editor_state(self):

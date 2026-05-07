@@ -34,7 +34,7 @@ void InxPythonScriptLoader::CreateMeta(const char *content, size_t contentSize, 
     metaData.Init(content, contentSize, filePath, ResourceType::Script);
 
     std::filesystem::path path = ToFsPath(filePath);
-    std::string extension = path.extension().string();
+    std::string extension = FromFsPath(path.extension());
     std::string contentStr;
     if (content && contentSize > 0) {
         contentStr.assign(content, contentSize);

@@ -12,7 +12,7 @@ import zipfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from hub_utils import get_bundle_dir, get_hub_data_dir, is_frozen
+from hub_utils import get_bundle_dir, get_hub_data_dir, is_frozen, merge_child_env_utf8
 from runtime_requirements import runtime_modules, runtime_packages
 import logging
 
@@ -92,7 +92,7 @@ def _run_command(args: list[str], *, timeout: int, raise_on_error: bool = False)
         "text": True,
         "encoding": "utf-8",
         "errors": "replace",
-        "env": {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        "env": merge_child_env_utf8({"PYTHONDONTWRITEBYTECODE": "1"}),
     }
     if sys.platform == "win32":
         kwargs["creationflags"] = _NO_WINDOW
@@ -255,6 +255,7 @@ def _remove_tree(path: str) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=_NO_WINDOW,
+            env=merge_child_env_utf8(),
         )
         if completed.returncode == 0 and not os.path.exists(path):
             return
@@ -294,6 +295,7 @@ def _copy_tree_fast(src: str, dest: str, *, exclude_runtime_artifacts: bool = Fa
         encoding="utf-8",
         errors="replace",
         creationflags=_NO_WINDOW,
+        env=merge_child_env_utf8(),
     )
     if completed.returncode < 8:
         return True

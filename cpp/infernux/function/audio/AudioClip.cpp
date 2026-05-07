@@ -35,7 +35,7 @@ bool DecodeWaveFile(const std::string &filePath, SDL_AudioSpec &spec, std::vecto
 
 bool DecodeAudioFile(const std::string &filePath, SDL_AudioSpec &spec, std::vector<uint8_t> &data)
 {
-    std::string extension = ToFsPath(filePath).extension().string();
+    std::string extension = FromFsPath(ToFsPath(filePath).extension());
     std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
 
     if (extension == ".wav") {

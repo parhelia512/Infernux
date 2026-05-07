@@ -37,6 +37,7 @@ from Infernux.engine.ui import (
     editor_panel,
 )
 from Infernux.engine.ui import panel_state as _panel_state
+from Infernux.engine._bootstrap_trace import bootstrap_checkpoint
 
 
 class BootstrapPanelsMixin:

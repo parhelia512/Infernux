@@ -7,7 +7,7 @@ import shutil
 import glob
 import zipfile
 
-from hub_utils import is_frozen, is_project_open
+from hub_utils import is_frozen, is_project_open, merge_child_env_utf8
 from python_runtime import PythonRuntimeError, PythonRuntimeManager
 import logging
 
@@ -23,7 +23,7 @@ def _popen_kwargs(*, capture_output: bool = False) -> dict:
     """
     kw: dict = {
         "stdin": subprocess.DEVNULL,
-        "env": {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        "env": merge_child_env_utf8({"PYTHONDONTWRITEBYTECODE": "1"}),
     }
     if capture_output:
         kw["stdout"] = subprocess.PIPE
@@ -150,6 +150,7 @@ def _remove_tree(path: str) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=_NO_WINDOW,
+            env=merge_child_env_utf8(),
         )
         if completed.returncode == 0 and not os.path.exists(path):
             return
@@ -265,7 +266,7 @@ class ProjectModel:
 
         # Create a README file in assets
         readme_path = os.path.join(project_dir, "Assets", "README.md")
-        with open(readme_path, "w") as f:
+        with open(readme_path, "w", encoding="utf-8", newline="\n") as f:
             f.write("# Project Assets\n\nThis folder contains all the assets for the project.\n")
 
         # Create default project requirements

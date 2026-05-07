@@ -632,6 +632,8 @@ def _ensure_windows_msvc_environment(env: dict[str, str]) -> dict[str, str]:
 
 
 def _run_python(python_exe: str, args: List[str], *, timeout: int = 60) -> subprocess.CompletedProcess:
+    from Infernux.runtime_utf8 import merge_child_env
+
     kwargs = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.PIPE,
@@ -640,6 +642,7 @@ def _run_python(python_exe: str, args: List[str], *, timeout: int = 60) -> subpr
         "encoding": "utf-8",
         "errors": "replace",
         "timeout": timeout,
+        "env": merge_child_env({"PYTHONDONTWRITEBYTECODE": "1"}),
     }
     if sys.platform == "win32":
         kwargs["creationflags"] = 0x08000000
@@ -1231,6 +1234,10 @@ class NuitkaBuilder:
 
         if sys.platform == "win32":
             env = _ensure_windows_msvc_environment(env)
+
+        from Infernux.runtime_utf8 import apply_utf8_defaults
+
+        env = apply_utf8_defaults(env)
 
         import time as _time
         _nuitka_proc_t0 = _time.perf_counter()

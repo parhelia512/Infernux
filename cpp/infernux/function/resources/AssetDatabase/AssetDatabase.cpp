@@ -383,7 +383,7 @@ std::string AssetDatabase::NormalizePath(const std::string &path) const
 
 bool AssetDatabase::IsMetaFile(const std::filesystem::path &path) const
 {
-    return path.extension().string() == ".meta";
+    return FromFsPath(path.extension()) == ".meta";
 }
 
 void AssetDatabase::UpdateMapping(const std::string &guid, const std::string &path)
@@ -419,7 +419,7 @@ void AssetDatabase::RunImporter(const std::string &guid, const std::string &path
     if (guid.empty() || path.empty())
         return;
 
-    std::string ext = ToFsPath(path).extension().string();
+    std::string ext = FromFsPath(ToFsPath(path).extension());
     if (ext.empty())
         return;
 
@@ -516,7 +516,7 @@ bool AssetDatabase::ReadFile(const std::string &filePath, std::vector<char> &con
 bool AssetDatabase::IsBinaryFile(const std::string &filePath) const
 {
     std::filesystem::path path = ToFsPath(filePath);
-    std::string extension = path.extension().string();
+    std::string extension = FromFsPath(path.extension());
 
     std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
 
@@ -626,7 +626,7 @@ ResourceType AssetDatabase::GetResourcesType(const std::string &extensionName) c
 ResourceType AssetDatabase::GetResourceTypeForPath(const std::string &filePath) const
 {
     std::filesystem::path path = ToFsPath(filePath);
-    std::string ext = path.extension().string();
+    std::string ext = FromFsPath(path.extension());
     return GetResourcesType(ext);
 }
 
@@ -805,7 +805,7 @@ void AssetDatabase::MoveResource(const std::string &oldPath, const std::string &
 
         INXLOG_INFO("MoveResource: ", oldPath, " -> ", newPath, " (guid preserved: ", existingGuid, ")");
     } else {
-        std::string ext = ToFsPath(newPath).extension().string();
+        std::string ext = FromFsPath(ToFsPath(newPath).extension());
         ResourceType type = GetResourcesType(ext);
 
         if (type != ResourceType::Meta) {
