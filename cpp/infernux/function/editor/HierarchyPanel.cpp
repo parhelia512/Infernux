@@ -1575,6 +1575,16 @@ void HierarchyPanel::OnRenderContent(InxGUIContext *ctx)
         return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
     };
 
+    // ── Focus transition detection ──────────────────────────────
+    {
+        bool focused = ctx->IsWindowFocused(0);
+        if (focused != m_wasFocused) {
+            m_wasFocused = focused;
+            if (onHierarchyPanelFocused)
+                onHierarchyPanelFocused(focused);
+        }
+    }
+
     HandleClipboardShortcuts(ctx);
 
     // ── Header: scene name / prefab mode / ui mode ──────────────

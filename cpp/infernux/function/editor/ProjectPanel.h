@@ -59,6 +59,10 @@ class ProjectPanel : public EditorPanel
     }
     void SetCurrentPath(const std::string &path);
 
+    // ── Focus callback ──────────────────────────────────────────────
+
+    std::function<void(bool)> onProjectPanelFocused;
+
     // ── Notification callbacks ───────────────────────────────────────
 
     /// Called when file selection changes (receives single path or empty).
@@ -310,6 +314,9 @@ class ProjectPanel : public EditorPanel
     std::vector<std::string> m_clipboardPaths;
     bool m_clipboardIsCut = false;
 
+    // ── Focus tracking ───────────────────────────────────────────────
+    bool m_wasFocused = false;
+    
     // Model expansion
     std::unordered_set<std::string> m_expandedModels;
 

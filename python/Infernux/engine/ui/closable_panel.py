@@ -266,6 +266,10 @@ class ClosablePanel(InxGUIRenderable):
             focused = ctx.is_window_focused(0)
             if focused and not self._panel_was_focused:
                 self._activate_panel(ctx)
+            # Focus lost
+            elif not focused and self._panel_was_focused:
+                if ClosablePanel._active_panel_id == self._window_id:
+                    ClosablePanel._active_panel_id = None
             self._panel_was_focused = focused
         
         return visible and self._is_open

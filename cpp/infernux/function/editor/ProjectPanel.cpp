@@ -1790,6 +1790,16 @@ void ProjectPanel::PreRender(InxGUIContext *ctx)
 
 void ProjectPanel::OnRenderContent(InxGUIContext *ctx)
 {
+    // ── Focus transition detection ──────────────────────────────
+    {
+        bool focused = ctx->IsWindowFocused(0);
+        if (focused != m_wasFocused) {
+            m_wasFocused = focused;
+            if (onProjectPanelFocused)
+                onProjectPanelFocused(focused);
+        }
+    }
+
     // Process any deferred cache invalidation from the previous frame
     // (CommitRename, Delete, Paste, Move set this flag to avoid invalidating
     // the items pointer mid-iteration in RenderFileGrid).
