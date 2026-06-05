@@ -319,6 +319,16 @@ def wire_hierarchy_callbacks(bs: EditorBootstrap) -> None:
     hp.is_selection_empty = lambda: sel.is_empty()
     hp.set_ordered_ids = lambda ids: sel.set_ordered_ids(ids)
 
+    # -- Panel focus sync --
+    def _on_hierarchy_focus_changed(focused: bool):
+        from Infernux.engine.ui.closable_panel import ClosablePanel
+        if focused:
+            ClosablePanel._active_panel_id = "hierarchy"
+        elif ClosablePanel._active_panel_id == "hierarchy":
+            ClosablePanel._active_panel_id = None
+
+    hp.on_hierarchy_panel_focused = _on_hierarchy_focus_changed
+
     # -- Translation & warning --
     hp.translate = _t
     hp.show_warning = lambda msg: Debug.log_warning(msg)

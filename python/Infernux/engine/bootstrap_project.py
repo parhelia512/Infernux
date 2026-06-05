@@ -315,3 +315,13 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
 
     bs._external_drop_forwarder = _ExternalDropForwarder()
     bs.engine.register_gui("project_drop_forwarder", bs._external_drop_forwarder)
+
+    # -- Panel focus sync --
+    def _on_project_focus_changed(focused: bool):
+        from Infernux.engine.ui.closable_panel import ClosablePanel
+        if focused:
+            ClosablePanel._active_panel_id = "project"
+        elif ClosablePanel._active_panel_id == "project":
+            ClosablePanel._active_panel_id = None
+
+    pp.on_project_panel_focused = _on_project_focus_changed

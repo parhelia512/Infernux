@@ -924,6 +924,8 @@ void RegisterGUIBindings(py::module_ &m)
         .def_readwrite("prefab_apply_overrides", &HierarchyPanel::prefabApplyOverrides)
         .def_readwrite("prefab_revert_overrides", &HierarchyPanel::prefabRevertOverrides)
         .def_readwrite("prefab_unpack", &HierarchyPanel::prefabUnpack)
+        // Hierarchy panel focus callback
+        .def_readwrite("on_hierarchy_panel_focused", &HierarchyPanel::onHierarchyPanelFocused)
         // Clipboard callbacks
         .def_readwrite("copy_selected", &HierarchyPanel::copySelected)
         .def_readwrite("paste_clipboard", &HierarchyPanel::pasteClipboard)
@@ -960,6 +962,8 @@ void RegisterGUIBindings(py::module_ &m)
         .def("receive_dropped_files", &ProjectPanel::ReceiveDroppedFiles, py::arg("paths"))
         .def("get_current_path", &ProjectPanel::GetCurrentPath)
         .def("set_current_path", &ProjectPanel::SetCurrentPath, py::arg("path"))
+        // Project panel focus callback
+        .def_readwrite("on_project_panel_focused", &ProjectPanel::onProjectPanelFocused)
         // Notification callbacks
         .def_readwrite("on_file_selected", &ProjectPanel::onFileSelected)
         .def_readwrite("on_empty_area_clicked", &ProjectPanel::onEmptyAreaClicked)

@@ -123,6 +123,10 @@ class HierarchyPanel : public EditorPanel
     std::function<void(uint64_t)> prefabRevertOverrides;
     std::function<void(uint64_t)> prefabUnpack;
 
+    // ── Focus callback ──────────────────────────────────────────────
+
+    std::function<void(bool)> onHierarchyPanelFocused;
+
     // ── Clipboard callbacks ──────────────────────────────────────────
 
     std::function<bool(bool)> copySelected; // (cut) → success
@@ -230,6 +234,9 @@ class HierarchyPanel : public EditorPanel
 
     // ── Right-click tracking ─────────────────────────────────────────
     uint64_t m_rightClickedObjId = 0;
+
+    // ── Focus tracking ───────────────────────────────────────────────
+    bool m_wasFocused = false;
 
     // ── Split sub-timings (accumulated ms, consumed by profile) ────
     double m_subPreHidden = 0.0;
