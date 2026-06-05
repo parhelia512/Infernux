@@ -22,6 +22,14 @@ import logging
 _RUNTIME_PACKAGES = runtime_packages()
 _RUNTIME_MODULES = runtime_modules()
 _RUNTIME_PROFILE_FILENAME = ".infernux-runtime-profile.json"
+
+
+def _child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    env = {**os.environ, **(extra or {})}
+    if sys.platform == "win32":
+        env.setdefault("PYTHONUTF8", "1")
+        env.setdefault("PYTHONIOENCODING", "utf-8")
+    return env
 _RUNTIME_PRUNE_DIR_NAMES = {"__pycache__", ".pytest_cache", "test", "tests"}
 _RUNTIME_PRUNE_FILE_SUFFIXES = (".pyc", ".pyo")
 if sys.platform == "win32":
@@ -46,7 +54,7 @@ def _run(args: list[str], *, timeout: int = 20) -> subprocess.CompletedProcess:
         "encoding": "utf-8",
         "errors": "replace",
         "timeout": timeout,
-        "env": {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        "env": _child_env({"PYTHONDONTWRITEBYTECODE": "1"}),
     }
     if sys.platform == "win32":
         kwargs["creationflags"] = 0x08000000
@@ -579,7 +587,10 @@ def main() -> int:
                 continue
             if os.path.normcase(os.path.abspath(candidate)) == current:
                 continue
-            completed = subprocess.run([candidate, __file__, *sys.argv[1:]])
+            completed = subprocess.run(
+                [candidate, __file__, *sys.argv[1:]],
+                env=_child_env(),
+            )
             return completed.returncode
         raise SystemExit(
             f"This staging script must run under Python 3.12, but got {sys.version.split()[0]} from {sys.executable}."

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout, QGraph
 from PySide6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPixmap, QFont, QPainter, QColor, QPen, QBrush
 
-from hub_utils import get_project_lock_path, remove_project_lock, write_project_lock
+from hub_utils import get_project_lock_path, merge_child_env_utf8, remove_project_lock, write_project_lock
 
 
 _WIN_CRASH_CODES = {
@@ -251,6 +251,7 @@ class EngineSplashScreen(QWidget):
         env["_INFERNUX_PROJECT_LOCK_TOKEN"] = self._lock_token
         if extra_env:
             env.update(extra_env)
+        env = merge_child_env_utf8(env)
         write_project_lock(project_path, os.getpid(), self._lock_token, "editor", "launching")
 
         popen_kwargs: dict = {"cwd": project_path, "env": env}

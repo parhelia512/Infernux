@@ -467,7 +467,7 @@ bool BuildPrefabPreviewMesh(const std::string &prefabFilePath, std::shared_ptr<I
     if (aggregate.vertices.empty() || aggregate.indices.empty() || aggregate.subMeshes.empty())
         return false;
 
-    auto mesh = std::make_shared<InxMesh>(ToFsPath(prefabFilePath).stem().string());
+    auto mesh = std::make_shared<InxMesh>(FromFsPath(ToFsPath(prefabFilePath).stem()));
     mesh->SetFilePath(prefabFilePath);
     mesh->SetData(std::move(aggregate.vertices), std::move(aggregate.indices), std::move(aggregate.subMeshes));
 
@@ -498,7 +498,7 @@ std::vector<std::shared_ptr<InxMaterial>> BuildDefaultPreviewMaterialsForMesh(co
 
 bool IsPrefabPreviewPath(const std::string &filePath)
 {
-    std::string ext = ToFsPath(filePath).extension().string();
+    std::string ext = FromFsPath(ToFsPath(filePath).extension());
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     return ext == ".prefab";
@@ -2014,7 +2014,7 @@ void Infernux::LoadAndRegisterShaders(const std::string &dir, bool recursive)
         if (!entry.is_regular_file())
             return;
         fs::path file = entry.path();
-        std::string ext = file.extension().string();
+        std::string ext = FromFsPath(file.extension());
 
         if (ext != ".vert" && ext != ".frag")
             return;
@@ -2166,7 +2166,7 @@ std::string Infernux::ReloadShader(const std::string &shaderPath)
     }
 
     std::filesystem::path path = ToFsPath(shaderPath);
-    std::string ext = path.extension().string();
+    std::string ext = FromFsPath(path.extension());
 
     if (ext != ".vert" && ext != ".frag") {
         INXLOG_ERROR("Infernux::ReloadShader: unsupported shader extension: ", ext);

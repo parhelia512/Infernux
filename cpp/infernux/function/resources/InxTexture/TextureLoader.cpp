@@ -36,7 +36,7 @@ void TextureLoader::CreateMeta(const char *content, size_t contentSize, const st
     metaData.Init(content, contentSize, filePath, ResourceType::Texture);
 
     std::filesystem::path path = ToFsPath(filePath);
-    std::string extension = path.extension().string();
+    std::string extension = FromFsPath(path.extension());
     std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
 
     // Get image dimensions without fully loading the pixel data

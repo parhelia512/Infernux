@@ -118,6 +118,9 @@ def _create_start_menu_shortcut(install_dir: str) -> None:
             f'$s.Save()'
         )
         import subprocess
+
+        from hub_utils import merge_child_env_utf8
+
         subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps_script],
             stdin=subprocess.DEVNULL,
@@ -125,6 +128,7 @@ def _create_start_menu_shortcut(install_dir: str) -> None:
             stderr=subprocess.DEVNULL,
             timeout=15,
             creationflags=0x08000000,
+            env=merge_child_env_utf8(),
         )
     except Exception as _exc:
         logging.getLogger(__name__).debug("[Suppressed] %s: %s", type(_exc).__name__, _exc)

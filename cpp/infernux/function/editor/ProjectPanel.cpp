@@ -366,11 +366,14 @@ std::string ProjectPanel::NormalizePath(const std::string &path)
     auto canonical = fs::weakly_canonical(fs::u8path(path), ec);
     if (ec)
         return path;
-    auto str = canonical.string();
-    // Lowercase on Windows for case-insensitive comparison
+    std::string str = infernux::FromFsPath(canonical);
+    // Case-fold ASCII letters only — UTF-8 multibyte sequences must stay intact.
 #ifdef _WIN32
-    for (auto &c : str)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (auto &c : str) {
+        unsigned char uc = static_cast<unsigned char>(c);
+        if (uc >= 'A' && uc <= 'Z')
+            c = static_cast<char>(uc + 32);
+    }
 #endif
     return str;
 }
@@ -437,10 +440,10 @@ void ProjectPanel::SetRootPath(const std::string &path)
 {
     m_rootPath = path;
     InvalidateDirCache();
-    auto assetsPath = (fs::u8path(path) / "Assets").string();
+    fs::path assetsPath = fs::u8path(path) / "Assets";
     std::error_code ec;
     if (fs::is_directory(assetsPath, ec))
-        m_currentPath = assetsPath;
+        m_currentPath = infernux::FromFsPath(assetsPath);
     else
         m_currentPath = path;
 }
@@ -474,7 +477,7 @@ void ProjectPanel::SetIconsDirectory(const std::string &dir)
 void ProjectPanel::SetCurrentPath(const std::string &path)
 {
     std::error_code ec;
-    if (!path.empty() && fs::is_directory(path, ec))
+    if (!path.empty() && fs::is_directory(fs::u8path(path), ec))
         m_currentPath = path;
 }
 
@@ -499,7 +502,7 @@ void ProjectPanel::SetSelectedFile(const std::string &path)
     fs::path selectedPath = fs::u8path(path);
     fs::path parent = selectedPath.parent_path();
     if (!parent.empty() && fs::is_directory(parent, ec))
-        m_currentPath = parent.string();
+        m_currentPath = infernux::FromFsPath(parent);
 
     m_selectedFile = path;
     m_selectedFiles = {path};
@@ -623,7 +626,7 @@ ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot(const std::string &path)
     for (auto &entry : fs::directory_iterator(fs::u8path(path), ec)) {
         if (ec)
             break;
-        auto name = entry.path().filename().string();
+        auto name = infernux::FromFsPath(entry.path().filename());
         if (!ShouldShow(name))
             continue;
 
@@ -635,14 +638,14 @@ ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot(const std::string &path)
 
         FileItem item;
         item.name = std::move(name);
-        item.path = entry.path().string();
+        item.path = infernux::FromFsPath(entry.path());
 
         if (isDir) {
             item.type = FileItem::Dir;
             snap.dirs.push_back(std::move(item));
         } else {
             item.type = FileItem::File;
-            auto ext = entry.path().extension().string();
+            auto ext = infernux::FromFsPath(entry.path().extension());
             for (auto &c : ext)
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             item.ext = std::move(ext);
@@ -659,14 +662,17 @@ ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot(const std::string &path)
         }
     }
 
-    // Sort case-insensitive
+    // Sort: ASCII case-insensitive; leave UTF-8 bytes unchanged outside ASCII letters.
     auto cmpName = [](const FileItem &a, const FileItem &b) {
-        auto la = a.name, lb = b.name;
-        for (auto &c : la)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        for (auto &c : lb)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        return la < lb;
+        auto asciiLowerCopy = [](std::string s) {
+            for (auto &c : s) {
+                unsigned char uc = static_cast<unsigned char>(c);
+                if (uc >= 'A' && uc <= 'Z')
+                    c = static_cast<char>(uc + 32);
+            }
+            return s;
+        };
+        return asciiLowerCopy(a.name) < asciiLowerCopy(b.name);
     };
     std::sort(snap.dirs.begin(), snap.dirs.end(), cmpName);
     std::sort(snap.files.begin(), snap.files.end(), cmpName);
@@ -696,7 +702,7 @@ ProjectPanel::DirTreeMeta *ProjectPanel::GetDirTreeMeta(const std::string &path)
     for (auto &entry : fs::directory_iterator(fs::u8path(path), ec)) {
         if (ec)
             break;
-        auto name = entry.path().filename().string();
+        auto name = infernux::FromFsPath(entry.path().filename());
         if (!ShouldShow(name))
             continue;
         if (entry.is_directory(ec) && !ec) {
@@ -1048,10 +1054,11 @@ void ProjectPanel::EnsureTypeIconsLoaded()
             continue;
         }
 
-        auto iconPath = (fs::u8path(m_iconsDir) / (iconKey + ".png")).string();
-        if (!fs::is_regular_file(iconPath, ec))
+        fs::path iconFs = fs::u8path(m_iconsDir) / (iconKey + ".png");
+        if (!fs::is_regular_file(iconFs, ec))
             continue;
 
+        auto iconPath = infernux::FromFsPath(iconFs);
         auto texData = InxTextureLoader::LoadFromFile(iconPath);
         if (!texData.IsValid())
             continue;
@@ -1421,10 +1428,10 @@ void ProjectPanel::BeginRename(const std::string &path)
         return;
 
     m_renamingPath = path;
-    auto name = fs::u8path(path).filename().string();
+    auto name = infernux::FromFsPath(fs::u8path(path).filename());
     std::error_code ec;
-    if (fs::is_regular_file(path, ec)) {
-        auto stem = fs::u8path(path).stem().string();
+    if (fs::is_regular_file(fs::u8path(path), ec)) {
+        auto stem = infernux::FromFsPath(fs::u8path(path).stem());
         if (!stem.empty())
             name = stem;
     }
@@ -1479,7 +1486,7 @@ void ProjectPanel::CreateAndRename(const std::string &baseName, const std::strin
     std::string fileName = name;
     if (!extension.empty() && fileName.find(extension) == std::string::npos)
         fileName += extension;
-    auto newPath = (fs::u8path(m_currentPath) / fileName).string();
+    auto newPath = infernux::FromFsPath(fs::u8path(m_currentPath) / fileName);
 
     m_selectedFile = newPath;
     m_selectedFiles = {newPath};
@@ -1727,7 +1734,7 @@ void ProjectPanel::MoveProjectItemsToFolder(const std::string &targetDir, const 
                                             const std::string &payload)
 {
     std::error_code ec;
-    if (targetDir.empty() || !fs::is_directory(targetDir, ec))
+    if (targetDir.empty() || !fs::is_directory(fs::u8path(targetDir), ec))
         return;
 
     auto draggedPath = ResolveMovePayloadPath(payloadType, payload);
@@ -1745,7 +1752,7 @@ void ProjectPanel::MoveProjectItemsToFolder(const std::string &targetDir, const 
 
     std::vector<std::string> movedPaths;
     for (auto &source : sources) {
-        if (fs::is_directory(source, ec) && IsPathWithin(targetDir, source))
+        if (fs::is_directory(fs::u8path(source), ec) && IsPathWithin(targetDir, source))
             continue; // Can't move folder into itself
 
         if (moveItemToDirectory) {
@@ -1838,9 +1845,9 @@ void ProjectPanel::RenderBreadcrumb(InxGUIContext *ctx)
         m_breadcrumbPath = m_currentPath;
         if (!m_rootPath.empty()) {
             auto rel = fs::relative(fs::u8path(m_currentPath), fs::u8path(m_rootPath));
-            auto relStr = rel.string();
+            auto relStr = infernux::FromFsPath(rel);
             if (relStr == ".")
-                relStr = fs::u8path(m_rootPath).filename().string();
+                relStr = infernux::FromFsPath(fs::u8path(m_rootPath).filename());
             m_breadcrumbText = "Path: " + relStr;
         } else {
             m_breadcrumbText = "Path: " + m_currentPath;
@@ -1857,7 +1864,7 @@ void ProjectPanel::RenderFolderTree(InxGUIContext *ctx)
 {
     auto *rootSnap = m_rootPath.empty() ? nullptr : GetDirSnapshot(m_rootPath);
     if (rootSnap) {
-        auto projectName = fs::u8path(m_rootPath).filename().string();
+        auto projectName = infernux::FromFsPath(fs::u8path(m_rootPath).filename());
         int rootFlags =
             ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_FramePadding;
         if (m_currentPath == m_rootPath)
@@ -1934,7 +1941,7 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
         return;
 
     // Back button
-    auto parent = fs::u8path(m_currentPath).parent_path().string();
+    auto parent = infernux::FromFsPath(fs::u8path(m_currentPath).parent_path());
     if (m_currentPath != m_rootPath && parent != m_rootPath) {
         if (ctx->Selectable("[..]", false))
             m_currentPath = parent;
@@ -2331,7 +2338,7 @@ void ProjectPanel::RenderDragDropSource(InxGUIContext *ctx, const FileItem &item
         }
 
         // Other embedded FBX sub-entries: parent model asset (GUID when possible).
-        std::string ext = fs::u8path(item.parentPath).extension().string();
+        std::string ext = infernux::FromFsPath(fs::u8path(item.parentPath).extension());
         for (auto &c : ext)
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 

@@ -1,5 +1,21 @@
 import os
 import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_PYTHON_DIR = _REPO_ROOT / "python"
+if str(_PYTHON_DIR) not in sys.path:
+    sys.path.insert(0, str(_PYTHON_DIR))
+
+try:
+    from Infernux.runtime_utf8 import configure_process_utf8
+
+    configure_process_utf8()
+except Exception:
+    if sys.platform == "win32":
+        os.environ.setdefault("PYTHONUTF8", "1")
+        os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
 sys.dont_write_bytecode = True
 
 from PySide6.QtWidgets import (

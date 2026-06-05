@@ -405,7 +405,7 @@ std::shared_ptr<void> MeshLoader::Load(const std::string &filePath, const std::s
     unsigned int flags = BuildAssimpFlags(settings);
 
     // Derive extension hint for Assimp (e.g. "fbx")
-    std::string ext = fsPath.extension().string();
+    std::string ext = FromFsPath(fsPath.extension());
     if (!ext.empty() && ext[0] == '.')
         ext = ext.substr(1);
 
@@ -472,7 +472,7 @@ void MeshLoader::CreateMeta(const char *content, size_t contentSize, const std::
     metaData.Init(content, contentSize, filePath, ResourceType::Mesh);
 
     std::filesystem::path path = ToFsPath(filePath);
-    std::string extension = path.extension().string();
+    std::string extension = FromFsPath(path.extension());
 
     metaData.AddMetadata("file_type", std::string("mesh"));
     metaData.AddMetadata("file_extension", extension);

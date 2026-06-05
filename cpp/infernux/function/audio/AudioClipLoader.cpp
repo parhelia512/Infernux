@@ -99,13 +99,13 @@ void AudioClipLoader::CreateMeta(const char *content, size_t contentSize, const 
 {
     metaData.Init(content, contentSize, filePath, ResourceType::Audio);
 
-    std::filesystem::path path(filePath);
-    std::string resourceName = path.stem().string();
+    std::filesystem::path path = ToFsPath(filePath);
+    std::string resourceName = FromFsPath(path.stem());
 
     metaData.AddMetadata("resource_name", resourceName);
     metaData.AddMetadata("file_size", static_cast<int>(contentSize));
     metaData.AddMetadata("file_type", std::string("audio"));
-    metaData.AddMetadata("extension", path.extension().string());
+    metaData.AddMetadata("extension", FromFsPath(path.extension()));
 }
 
 } // namespace infernux

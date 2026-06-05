@@ -167,7 +167,7 @@ void ShaderCache::PrecompileShaders(
             continue;
         }
 
-        std::string ext = entry.path().extension().string();
+        std::string ext = FromFsPath(entry.path().extension());
         bool isShader = false;
         for (const auto &shaderExt : shaderExtensions) {
             if (ext == shaderExt) {

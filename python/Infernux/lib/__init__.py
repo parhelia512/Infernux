@@ -75,8 +75,6 @@ _SYSTEM_DLL_CHECKS = (
 _ENGINE_DLLS = (
     "SDL3.dll",
     "assimp-vc143-mt.dll",
-    "glslang.dll",
-    "SPIRV.dll",
     "Jolt.dll",
 )
 

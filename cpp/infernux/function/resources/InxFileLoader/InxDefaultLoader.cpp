@@ -28,7 +28,7 @@ void InxDefaultTextLoader::CreateMeta(const char *content, size_t contentSize, c
     metaData.Init(content, contentSize, filePath, ResourceType::DefaultText);
 
     std::filesystem::path path = ToFsPath(filePath);
-    std::string extension = path.extension().string();
+    std::string extension = FromFsPath(path.extension());
 
     // For text files, analyze content
     std::string contentStr;
@@ -79,7 +79,7 @@ void InxDefaultBinaryLoader::CreateMeta(const char *content, size_t contentSize,
     metaData.Init(content, contentSize, filePath, ResourceType::DefaultBinary);
 
     std::filesystem::path path = ToFsPath(filePath);
-    std::string extension = path.extension().string();
+    std::string extension = FromFsPath(path.extension());
 
     // Add basic metadata for binary files
     metaData.AddMetadata("file_type", std::string("binary"));

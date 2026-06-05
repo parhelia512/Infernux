@@ -79,7 +79,13 @@ add_subdirectory(assimp)
 add_library(assimp::assimp ALIAS assimp)
 
 # glslang
+# Keep glslang static even though most runtime dependencies are shared.
+# Its C++ API exposes some inline/non-exported helpers that are fragile when
+# consumed through a Windows DLL import library with MSVC.
+set(_saved_shared_for_glslang "${BUILD_SHARED_LIBS}")
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(glslang)
+set(BUILD_SHARED_LIBS "${_saved_shared_for_glslang}" CACHE BOOL "" FORCE)
 add_library(glslang::glslang ALIAS glslang)
 
 # glm (header-only library)
