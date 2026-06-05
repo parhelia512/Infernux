@@ -252,6 +252,7 @@ class InstallEditorDialog(QDialog):
         # Progress bar (hidden until download starts)
         self._progress_bar = QProgressBar()
         self._progress_bar.setFixedHeight(6)
+        self._progress_bar.setTextVisible(False)
         self._progress_bar.hide()
         layout.addWidget(self._progress_bar)
 
