@@ -6,6 +6,7 @@ import subprocess
 import shutil
 import glob
 import zipfile
+import sysconfig
 
 from hub_utils import is_frozen, is_project_open, merge_child_env_utf8
 from python_runtime import PythonRuntimeError, PythonRuntimeManager
@@ -72,17 +73,137 @@ _NATIVE_IMPORT_SMOKE_TEST = (
 )
 
 
-def _find_dev_wheel() -> str:
+def _python_cp_tag(python_exe: str = "") -> str:
+    if python_exe:
+        try:
+            completed = subprocess.run(
+                [python_exe, "-c", "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')"],
+                timeout=30,
+                **_popen_kwargs(capture_output=True),
+            )
+            if completed.returncode == 0:
+                tag = (completed.stdout or "").strip()
+                if tag.startswith("cp"):
+                    return tag
+        except (OSError, subprocess.SubprocessError) as _exc:
+            logging.getLogger(__name__).debug("[Suppressed] %s: %s", type(_exc).__name__, _exc)
+    return f"cp{sys.version_info.major}{sys.version_info.minor}"
+
+
+def _engine_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _iter_cmake_python_cache_entries() -> list[str]:
+    cache_path = os.path.join(_engine_root(), "out", "build", "CMakeCache.txt")
+    if not os.path.isfile(cache_path):
+        return []
+
+    keys = (
+        "Python3_EXECUTABLE",
+        "_Python3_EXECUTABLE",
+        "PYBIND11_PYTHON_EXECUTABLE_LAST",
+    )
+    out: list[str] = []
+    try:
+        with open(cache_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if "=" not in line:
+                    continue
+                key_part, value = line.rstrip("\n").split("=", 1)
+                key = key_part.split(":", 1)[0]
+                if key in keys and value:
+                    out.append(os.path.normpath(value.strip()))
+    except OSError as _exc:
+        logging.getLogger(__name__).debug("[Suppressed] %s: %s", type(_exc).__name__, _exc)
+    return out
+
+
+def _iter_dev_project_python_candidates() -> list[str]:
+    candidates: list[str] = []
+
+    override = os.environ.get("INFERNUX_PROJECT_PYTHON", "").strip()
+    if override:
+        candidates.append(os.path.normpath(override))
+
+    candidates.extend(_iter_cmake_python_cache_entries())
+    candidates.append(sys.executable)
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        norm = os.path.normcase(os.path.abspath(candidate))
+        if norm in seen:
+            continue
+        seen.add(norm)
+        unique.append(candidate)
+    return unique
+
+
+def _select_dev_project_python() -> str:
+    """Choose the interpreter used to create project .venv in dev mode.
+
+    Prefer the Python that CMake used to build the native wheel.  Launching the
+    Hub from a different Python should not silently create an incompatible
+    project virtual environment.
+    """
+    fallback = sys.executable
+    for candidate in _iter_dev_project_python_candidates():
+        if not os.path.isfile(candidate):
+            continue
+        if _find_dev_wheel(candidate):
+            return candidate
+        if os.path.normcase(os.path.abspath(candidate)) == os.path.normcase(os.path.abspath(sys.executable)):
+            fallback = candidate
+    return fallback
+
+
+def _wheel_tag_parts(wheel_path: str) -> tuple[set[str], set[str], set[str]]:
+    name = os.path.basename(wheel_path or "")
+    if not name.lower().endswith(".whl"):
+        return set(), set(), set()
+    parts = name[:-4].split("-")
+    if len(parts) < 5:
+        return set(), set(), set()
+    return set(parts[-3].split(".")), set(parts[-2].split(".")), set(parts[-1].split("."))
+
+
+def _wheel_matches_python(wheel_path: str, python_tag: str) -> bool:
+    python_tags, abi_tags, platform_tags = _wheel_tag_parts(wheel_path)
+    if not python_tags or not abi_tags or not platform_tags:
+        return False
+
+    major_tag = f"py{python_tag[2]}" if python_tag.startswith("cp") and len(python_tag) >= 3 else "py3"
+    platform_tag = sysconfig.get_platform().replace("-", "_").replace(".", "_")
+    return (
+        (python_tag in python_tags or major_tag in python_tags or "py3" in python_tags)
+        and (python_tag in abi_tags or "abi3" in abi_tags or "none" in abi_tags)
+        and (platform_tag in platform_tags or "any" in platform_tags)
+    )
+
+
+def _find_dev_wheel(python_exe: str = "", *, strict: bool = False) -> str:
     """Find the Infernux wheel in the dist/ directory next to the engine source.
 
     Only used in dev mode (non-frozen).
     """
-    engine_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    engine_root = _engine_root()
     dist_dir = os.path.join(engine_root, "dist")
     wheels = glob.glob(os.path.join(dist_dir, "infernux-*.whl"))
     if wheels:
-        wheels.sort(key=os.path.getmtime, reverse=True)
-        return wheels[0]
+        python_tag = _python_cp_tag(python_exe)
+        compatible = [wheel for wheel in wheels if _wheel_matches_python(wheel, python_tag)]
+        if compatible:
+            compatible.sort(key=os.path.getmtime, reverse=True)
+            return compatible[0]
+        if strict:
+            available = ", ".join(os.path.basename(wheel) for wheel in sorted(wheels))
+            raise RuntimeError(
+                f"No prebuilt Infernux wheel compatible with Python {python_tag} was found in dist/.\n"
+                f"Available wheels: {available}"
+            )
     return ""
 
 
@@ -296,6 +417,7 @@ class ProjectModel:
             self._install_infernux_in_runtime(project_dir, engine_version, on_status=on_status)
         except Exception:
             shutil.rmtree(os.path.join(project_dir, ".runtime"), ignore_errors=True)
+            shutil.rmtree(os.path.join(project_dir, ".venv"), ignore_errors=True)
             raise
 
         # ── Create VS Code workspace configuration ─────────────────────
@@ -372,9 +494,12 @@ class ProjectModel:
 
         # Dev mode: create a classic .venv
         venv_path = os.path.join(project_dir, ".venv")
+        if os.path.exists(venv_path):
+            _remove_tree(venv_path)
+        source_python = _select_dev_project_python()
         if on_status:
-            on_status("Creating project virtual environment...")
-        _run_hidden([sys.executable, "-m", "venv", "--copies", venv_path], timeout=600)
+            on_status(f"Creating project virtual environment with {os.path.basename(source_python)}...")
+        _run_hidden([source_python, "-m", "venv", "--copies", "--system-site-packages", venv_path], timeout=600)
 
     def _install_infernux_in_runtime(self, project_dir: str, engine_version: str = "", *, on_status=None):
         """Install the Infernux wheel into the project's Python environment.
@@ -399,7 +524,7 @@ class ProjectModel:
             wheel = self.version_manager.get_wheel_path(engine_version) or ""
 
         if not wheel and not is_frozen():
-            wheel = _find_dev_wheel()
+            wheel = _find_dev_wheel(project_python, strict=True)
 
         if not wheel:
             if is_frozen():
@@ -441,6 +566,7 @@ class ProjectModel:
             "--prefer-binary",
             "--only-binary=:all:",
             "--no-cache-dir",
+            "--no-deps",
         ]
 
         pip_args = [project_python, "-m", "pip", "install", *_PIP_FLAGS]
