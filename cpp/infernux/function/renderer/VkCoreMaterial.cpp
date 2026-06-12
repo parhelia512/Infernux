@@ -81,9 +81,8 @@ std::pair<VkImageView, VkSampler> InxVkCoreModular::ResolveTextureForMaterial(co
     }
 
     if (texturePath.empty()) {
-        INXLOG_WARN("TextureResolver: texture reference '", textureRef,
-                    "' is not a resolvable asset GUID (binding='", bindingName,
-                    "'). Texture properties must hold GUIDs.");
+        INXLOG_WARN("TextureResolver: texture reference '", textureRef, "' is not a resolvable asset GUID (binding='",
+                    bindingName, "'). Texture properties must hold GUIDs.");
         return {VK_NULL_HANDLE, VK_NULL_HANDLE};
     }
 
@@ -423,12 +422,11 @@ void InxVkCoreModular::InitializeMaterialSystem()
         const auto *fragCode = m_shaderCache.FindFragCode(fragId);
 
         if (vertCode && fragCode) {
-            VkBuffer lightingBuffer =
-                m_lightingUbo ? m_lightingUbo->GetBuffer() : VK_NULL_HANDLE;
+            VkBuffer lightingBuffer = m_lightingUbo ? m_lightingUbo->GetBuffer() : VK_NULL_HANDLE;
             m_materialPipelineManager.GetOrCreateRenderDataWithReflection(
                 defaultMaterial, *vertCode, *fragCode, defaultMaterial->GetShaderId(),
-                m_sceneUbo ? m_sceneUbo->GetBuffer() : VK_NULL_HANDLE,
-                sizeof(UniformBufferObject), lightingBuffer, sizeof(ShaderLightingUBO));
+                m_sceneUbo ? m_sceneUbo->GetBuffer() : VK_NULL_HANDLE, sizeof(UniformBufferObject), lightingBuffer,
+                sizeof(ShaderLightingUBO));
         } else {
             INXLOG_ERROR("InitializeMaterialSystem: SPIR-V shader codes not found for default material "
                          "(vert='",
@@ -446,12 +444,11 @@ void InxVkCoreModular::InitializeMaterialSystem()
         const auto *errFragCode = m_shaderCache.FindFragCode(errFragId);
 
         if (errVertCode && errFragCode) {
-            VkBuffer lightingBuffer =
-                m_lightingUbo ? m_lightingUbo->GetBuffer() : VK_NULL_HANDLE;
+            VkBuffer lightingBuffer = m_lightingUbo ? m_lightingUbo->GetBuffer() : VK_NULL_HANDLE;
             auto *renderData = m_materialPipelineManager.GetOrCreateRenderDataWithReflection(
                 errorMaterial, *errVertCode, *errFragCode, errorMaterial->GetShaderId(),
-                m_sceneUbo ? m_sceneUbo->GetBuffer() : VK_NULL_HANDLE,
-                sizeof(UniformBufferObject), lightingBuffer, sizeof(ShaderLightingUBO));
+                m_sceneUbo ? m_sceneUbo->GetBuffer() : VK_NULL_HANDLE, sizeof(UniformBufferObject), lightingBuffer,
+                sizeof(ShaderLightingUBO));
             if (renderData && renderData->isValid) {
                 INXLOG_INFO("Error material pipeline created successfully (shaders: ", errVertId, "/", errFragId, ")");
             } else {

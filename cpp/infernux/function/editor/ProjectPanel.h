@@ -316,7 +316,7 @@ class ProjectPanel : public EditorPanel
 
     // ── Focus tracking ───────────────────────────────────────────────
     bool m_wasFocused = false;
-    
+
     // Model expansion
     std::unordered_set<std::string> m_expandedModels;
 

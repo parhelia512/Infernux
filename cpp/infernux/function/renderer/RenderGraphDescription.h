@@ -104,7 +104,7 @@ struct GraphPassDesc
     uint32_t dispatchZ = 1;        ///< Compute dispatch group count Z
 
     // DrawShadowCasters parameters
-    int32_t lightIndex = 0;          ///< Index of the shadow-casting light (0 = first directional)
+    int32_t lightIndex = 0; ///< Index of the shadow-casting light (0 = first directional)
 
     // DrawScreenUI parameters
     int screenUIList = 0; ///< 0 = Camera list (before post-process), 1 = Overlay list (after post-process)
