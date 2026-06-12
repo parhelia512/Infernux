@@ -1,0 +1,57 @@
+{
+    "meta_version": 2,
+    "metadata": {
+        "character_count": {
+            "type": "size_t",
+            "value": 9526
+        },
+        "content_hash": {
+            "type": "string",
+            "value": "ac8f836a049bb3fa"
+        },
+        "encoding": {
+            "type": "string",
+            "value": "utf-8"
+        },
+        "file_extension": {
+            "type": "string",
+            "value": ".glsl"
+        },
+        "file_path": {
+            "type": "string",
+            "value": "E:/project/InfEngine/python/Infernux/resources/shaders/pbr.glsl"
+        },
+        "file_size": {
+            "type": "size_t",
+            "value": 9739
+        },
+        "file_type": {
+            "type": "string",
+            "value": "text"
+        },
+        "guid": {
+            "type": "string",
+            "value": "f1ce749e4675fd71413a42881102ba1a"
+        },
+        "importer_version": {
+            "type": "int",
+            "value": 1
+        },
+        "is_readable": {
+            "type": "bool",
+            "value": true
+        },
+        "last_modified": {
+            "type": "string",
+            "value": "1777480911"
+        },
+        "line_count": {
+            "type": "size_t",
+            "value": 214
+        },
+        "resource_type": {
+            "type": "enum infernux::ResourceType",
+            "value": "DefaultText"
+        }
+    }
+}

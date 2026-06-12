@@ -1,0 +1,33 @@
+{
+    "meta_version": 2,
+    "metadata": {
+        "content_hash": {
+            "type": "string",
+            "value": "63bc74d64a296b26"
+        },
+        "file_path": {
+            "type": "string",
+            "value": "E:/project/InfEngine/python/Infernux/resources/materials/default_unlit.mat"
+        },
+        "guid": {
+            "type": "string",
+            "value": "87f6b68abaab16087451ab10a4de8c15"
+        },
+        "importer_version": {
+            "type": "int",
+            "value": 1
+        },
+        "last_modified": {
+            "type": "string",
+            "value": "1774891199"
+        },
+        "material_name": {
+            "type": "string",
+            "value": "default_unlit"
+        },
+        "resource_type": {
+            "type": "enum infernux::ResourceType",
+            "value": "Material"
+        }
+    }
+}

@@ -11,7 +11,7 @@
 struct DirectionalLightData {
     vec4 direction;      // xyz = direction, w = unused
     vec4 color;          // xyz = color, w = intensity
-    vec4 shadowParams;   // x = shadow strength, y = shadow bias, zw = unused
+    vec4 shadowParams;   // x = strength, y = bias, z = normal bias, w = type (0=off, 1=hard, 2=soft PCF)
 };
 
 struct PointLightData {

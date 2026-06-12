@@ -102,10 +102,23 @@ def _collect_windows_native_load_hints():
             try:
                 ctypes.WinDLL(full)
             except OSError as e:
-                hints.append(
+                hint = (
                     f"Engine DLL present but failed to load: {dll_name} ({e}). "
                     f"A dependency of this DLL may be missing."
                 )
+                # WinError 1114 = "A dynamic link library initialization
+                # routine failed". For engine DLLs the dominant real-world
+                # cause is a CPU without AVX executing AVX instructions in a
+                # static initializer (issue #47, Pentium/Celeron + UHD 610).
+                # Builds from 0.1.7 on use an SSE4.2 baseline; older wheels
+                # need an upgrade.
+                if getattr(e, "winerror", None) == 1114:
+                    hint += (
+                        " (WinError 1114 on older wheels usually means this "
+                        "CPU lacks AVX support — upgrade to Infernux >= 0.1.7, "
+                        "which uses an SSE4.2 baseline.)"
+                    )
+                hints.append(hint)
 
     return hints
 

@@ -74,8 +74,11 @@ class SkinnedMeshRenderer : public MeshRenderer
     }
 
     /// Optional second clip for cross-fade / pose blending. Runtime-only.
+    /// An empty takeName renders the bind pose (mesh stays visible).
+    /// loop=false clamps sampling time so a finished clip holds its end pose.
     void SubmitAnimationPose(const std::string &takeName, float timeSeconds, float normalizedTime,
-                             const std::string &blendTakeName, float blendTimeSeconds, float blendWeight);
+                             const std::string &blendTakeName, float blendTimeSeconds, float blendWeight,
+                             bool loop = true);
     void SetBlendTakeName(const std::string &name);
     [[nodiscard]] const std::string &GetBlendTakeName() const
     {
@@ -138,6 +141,7 @@ class SkinnedMeshRenderer : public MeshRenderer
     std::string m_blendTakeName;
     float m_blendAnimationTime = 0.0f;
     float m_blendWeight = 0.0f;
+    bool m_runtimeAnimationLoop = true;
     std::vector<Vertex> m_runtimeSkinnedVertices;
     std::vector<uint32_t> m_runtimeSkinnedIndices;
     std::vector<SubMesh> m_runtimeSkinnedSubMeshes;

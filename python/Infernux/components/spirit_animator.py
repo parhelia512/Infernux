@@ -153,12 +153,16 @@ class SpiritAnimator(InxComponent):
                 self._try_auto_transition()
                 return
 
-        # Compute and apply frame index
+        # Compute and apply frame index. Only touch the renderer when the
+        # frame actually changed — sync_visual() walks the material-sync
+        # chain and is wasteful to run every tick for unchanged frames.
         raw_frame = int(self._elapsed * clip.fps)
         raw_frame = min(raw_frame, clip.frame_count - 1)
         sprite_frame = clip.frame_indices[raw_frame]
-        self._sprite_renderer.frame_index = sprite_frame
-        self._sprite_renderer.sync_visual()
+        if sprite_frame != getattr(self, "_last_applied_frame", None):
+            self._sprite_renderer.frame_index = sprite_frame
+            self._sprite_renderer.sync_visual()
+            self._last_applied_frame = sprite_frame
 
         # Check transitions every frame (for condition-driven transitions)
         self._try_auto_transition()
@@ -380,7 +384,13 @@ class SpiritAnimator(InxComponent):
             return False
 
     def _consume_triggers(self, condition: str):
-        """Reset any trigger parameters that were used in the condition."""
+        """Reset trigger parameters referenced (as identifiers) in the condition.
+
+        Identifier-boundary matching prevents a trigger named ``attack`` from
+        being consumed by a condition that only references ``is_attacking``.
+        """
+        import re
+        identifiers = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", condition or ""))
         for name, val in list(self._parameters.items()):
-            if val is True and name in condition:
+            if val is True and name in identifiers:
                 self._parameters[name] = False

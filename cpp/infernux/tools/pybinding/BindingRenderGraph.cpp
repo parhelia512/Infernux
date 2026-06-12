@@ -89,7 +89,6 @@ void RegisterRenderGraphBindings(py::module_ &m)
         .def_readwrite("dispatch_y", &GraphPassDesc::dispatchY, "Compute dispatch group count Y")
         .def_readwrite("dispatch_z", &GraphPassDesc::dispatchZ, "Compute dispatch group count Z")
         .def_readwrite("light_index", &GraphPassDesc::lightIndex, "Shadow-casting light index (0 = first directional)")
-        .def_readwrite("shadow_type", &GraphPassDesc::shadowType, "Shadow quality: 'hard', 'soft'")
         .def_readwrite("screen_ui_list", &GraphPassDesc::screenUIList,
                        "Screen UI list: 0 = Camera (before post-process), 1 = Overlay (after post-process)")
         .def_readwrite("shader_name", &GraphPassDesc::shaderName, "Shader id for FullscreenQuad action")

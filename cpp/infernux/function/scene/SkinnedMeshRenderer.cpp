@@ -74,7 +74,7 @@ void SkinnedMeshRenderer::SetRuntimeAnimationTime(float t)
 
 void SkinnedMeshRenderer::SubmitAnimationPose(const std::string &takeName, float timeSeconds, float normalizedTime,
                                               const std::string &blendTakeName, float blendTimeSeconds,
-                                              float blendWeight)
+                                              float blendWeight, bool loop)
 {
     m_activeTakeName = takeName;
     m_runtimeAnimationTime = timeSeconds;
@@ -82,6 +82,7 @@ void SkinnedMeshRenderer::SubmitAnimationPose(const std::string &takeName, float
     m_blendTakeName = blendTakeName;
     m_blendAnimationTime = blendTimeSeconds;
     m_blendWeight = std::clamp(blendWeight, 0.0f, 1.0f);
+    m_runtimeAnimationLoop = loop;
     RefreshRuntimeSkinnedMesh();
 }
 
@@ -160,10 +161,11 @@ void SkinnedMeshRenderer::RefreshRuntimeSkinnedMesh()
         ClearRuntimeSkinnedMesh();
         return;
     }
-    if (m_activeTakeName.empty()) {
-        ClearRuntimeSkinnedMesh();
-        return;
-    }
+    // NOTE: an empty m_activeTakeName is a valid state — it renders the bind
+    // pose (FindAnimation("") → nullptr → SampleNodePose falls back to the
+    // node's bind-local TRS). The old behavior of clearing the mesh made
+    // characters invisible before the Animator's first play() and after
+    // stop(), which was a P0 correctness bug.
 
     auto model = GetOrLoadRuntimeModel();
     if (!model || !model->IsValid()) {
@@ -174,6 +176,7 @@ void SkinnedMeshRenderer::RefreshRuntimeSkinnedMesh()
     SkinnedSampleRequest request;
     request.takeName = m_activeTakeName;
     request.timeSeconds = m_runtimeAnimationTime;
+    request.loop = m_runtimeAnimationLoop;
     request.blendTakeName = m_blendTakeName;
     request.blendTimeSeconds = m_blendAnimationTime;
     request.blendWeight = m_blendWeight;

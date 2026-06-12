@@ -16,6 +16,7 @@
 #include "vk/VkRenderUtils.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <core/config/EngineConfig.h>
 #include <core/error/InxError.h>
 #include <function/resources/InxMaterial/InxMaterial.h>
 #include <function/scene/Camera.h>
@@ -42,7 +43,7 @@ bool PassDescEquals(const GraphPassDesc &a, const GraphPassDesc &b)
            a.queueMin == b.queueMin && a.queueMax == b.queueMax && a.sortMode == b.sortMode && a.passTag == b.passTag &&
            a.overrideMaterial == b.overrideMaterial && a.computeShaderName == b.computeShaderName &&
            a.dispatchX == b.dispatchX && a.dispatchY == b.dispatchY && a.dispatchZ == b.dispatchZ &&
-           a.lightIndex == b.lightIndex && a.shadowType == b.shadowType && a.screenUIList == b.screenUIList &&
+           a.lightIndex == b.lightIndex && a.screenUIList == b.screenUIList &&
            a.shaderName == b.shaderName && a.pushConstants == b.pushConstants && a.inputBindings == b.inputBindings;
 }
 
@@ -343,7 +344,6 @@ void SceneRenderGraph::ApplyPythonGraph(const RenderGraphDescription &desc)
         const uint32_t dispatchZ = std::max(passDesc.dispatchZ, 1u);
         const int screenUIListIndex = passDesc.screenUIList;
         const int lightIndex = passDesc.lightIndex;
-        const std::string shadowType = passDesc.shadowType;
         const std::string sortMode = passDesc.sortMode;
         const std::string overrideMaterial = passDesc.overrideMaterial;
         const std::string passTag = passDesc.passTag;
@@ -357,16 +357,18 @@ void SceneRenderGraph::ApplyPythonGraph(const RenderGraphDescription &desc)
 
         m_pythonCallbacks[passDesc.name] = [vkCore, graphPassAction, queueMin, queueMax, computeShaderName, dispatchX,
                                             dispatchY, dispatchZ, screenUIRenderer, screenUIListIndex, inputBindings,
-                                            lightIndex, shadowType, sortMode, overrideMaterial,
+                                            lightIndex, sortMode, overrideMaterial,
                                             passTag](vk::RenderContext &ctx, uint32_t w, uint32_t h) {
             switch (graphPassAction) {
             case GraphPassActionType::DrawRenderers:
                 vkCore->DrawSceneFiltered(ctx.GetCommandBuffer(), w, h, queueMin, queueMax, sortMode, overrideMaterial,
                                           passTag);
                 break;
-            case GraphPassActionType::DrawSkybox:
-                vkCore->DrawSceneFiltered(ctx.GetCommandBuffer(), w, h, 32767, 32767);
+            case GraphPassActionType::DrawSkybox: {
+                const int32_t skyboxQueue = EngineConfig::Get().skyboxQueue;
+                vkCore->DrawSceneFiltered(ctx.GetCommandBuffer(), w, h, skyboxQueue, skyboxQueue);
                 break;
+            }
             case GraphPassActionType::Compute:
                 vkCmdDispatch(ctx.GetCommandBuffer(), dispatchX, dispatchY, dispatchZ);
                 break;
@@ -374,7 +376,7 @@ void SceneRenderGraph::ApplyPythonGraph(const RenderGraphDescription &desc)
                 // Shadow caster pass: draw filtered objects using shadow pipeline
                 // with lightVP from SceneLightCollector. The shadow pipeline is
                 // lazily created inside DrawShadowCasters().
-                vkCore->DrawShadowCasters(ctx.GetCommandBuffer(), w, h, queueMin, queueMax, lightIndex, shadowType);
+                vkCore->DrawShadowCasters(ctx.GetCommandBuffer(), w, h, queueMin, queueMax, lightIndex);
                 break;
             case GraphPassActionType::DrawScreenUI:
                 if (screenUIRenderer) {

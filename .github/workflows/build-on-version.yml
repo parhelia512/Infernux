@@ -1,0 +1,153 @@
+name: Build on Version Bump
+
+# Builds the native module + wheel whenever the project version in
+# pyproject.toml changes on master/main (plus manual dispatch).
+#
+# Outputs: platform wheels uploaded as workflow artifacts
+# (infernux-<version>-cp312-win_amd64 / linux_x86_64).
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "pyproject.toml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: build-on-version-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect-version-change:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Compare project version with parent commit
+        id: check
+        shell: bash
+        run: |
+          get_ver() { python3 -c "import tomllib,sys; print(tomllib.load(open(sys.argv[1],'rb'))['project']['version'])" "$1"; }
+          NEW_VER=$(get_ver pyproject.toml)
+          OLD_VER=""
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            git show HEAD^:pyproject.toml > /tmp/old_pyproject.toml 2>/dev/null && \
+              OLD_VER=$(get_ver /tmp/old_pyproject.toml) || OLD_VER=""
+          fi
+          echo "version=$NEW_VER" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$NEW_VER" != "$OLD_VER" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version change detected: '$OLD_VER' -> '$NEW_VER'"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Version unchanged ($NEW_VER); skipping build."
+          fi
+
+  build-windows:
+    needs: detect-version-change
+    if: needs.detect-version-change.outputs.changed == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      VULKAN_SDK_VERSION: "1.3.296.0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache Vulkan SDK
+        id: cache-vulkan
+        uses: actions/cache@v4
+        with:
+          path: C:\VulkanSDK\${{ env.VULKAN_SDK_VERSION }}
+          key: vulkan-sdk-${{ env.VULKAN_SDK_VERSION }}-windows
+
+      - name: Install Vulkan SDK (silent, with SPIRV-Cross)
+        if: steps.cache-vulkan.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = "https://sdk.lunarg.com/sdk/download/$env:VULKAN_SDK_VERSION/windows/VulkanSDK-$env:VULKAN_SDK_VERSION-Installer.exe"
+          Invoke-WebRequest -Uri $url -OutFile vulkan_sdk.exe
+          Start-Process -Wait -FilePath .\vulkan_sdk.exe -ArgumentList `
+            "--accept-licenses","--default-answer","--confirm-command","install"
+
+      - name: Install Python build dependencies
+        run: pip install pybind11>=2.11 numpy build wheel setuptools
+
+      - name: Configure (CMake preset release)
+        shell: pwsh
+        run: |
+          $env:VULKAN_SDK = "C:\VulkanSDK\$env:VULKAN_SDK_VERSION"
+          cmake --preset release
+
+      - name: Build native module
+        shell: pwsh
+        run: |
+          $env:VULKAN_SDK = "C:\VulkanSDK\$env:VULKAN_SDK_VERSION"
+          cmake --build --preset release --target _Infernux --parallel
+
+      - name: Build wheel
+        env:
+          INFERNUX_SOURCE_DIR: ${{ github.workspace }}
+        run: python -m build --wheel --no-isolation --outdir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: infernux-${{ needs.detect-version-change.outputs.version }}-windows
+          path: dist/*.whl
+          if-no-files-found: error
+
+  build-linux:
+    needs: detect-version-change
+    if: needs.detect-version-change.outputs.changed == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies (toolchain + SDL/X11 + Vulkan SDK)
+        run: |
+          sudo wget -qO /etc/apt/trusted.gpg.d/lunarg.asc https://packages.lunarg.com/lunarg-signing-key-pub.asc
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config zlib1g-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libdrm-dev libgbm-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libdbus-1-dev libudev-dev \
+            libwayland-dev libdecor-0-dev libasound2-dev libpulse-dev \
+            vulkan-sdk
+
+      - name: Install Python build dependencies
+        run: pip install pybind11>=2.11 numpy build wheel setuptools
+
+      - name: Configure (CMake preset release-linux)
+        run: cmake --preset release-linux
+
+      - name: Build native module
+        run: cmake --build --preset release-linux --target _Infernux --parallel
+
+      - name: Build wheel
+        env:
+          INFERNUX_SOURCE_DIR: ${{ github.workspace }}
+        run: python -m build --wheel --no-isolation --outdir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: infernux-${{ needs.detect-version-change.outputs.version }}-linux
+          path: dist/*.whl
+          if-no-files-found: error

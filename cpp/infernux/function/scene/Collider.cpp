@@ -379,21 +379,27 @@ void Collider::UnregisterBody()
     if (replacement) {
         PhysicsWorld::Instance().RebindBodyCollider(d.bodyId, replacement);
 
-        bool hasOtherEnabledSibling = false;
-        if (go) {
-            auto colliders = go->GetComponents<Collider>();
-            for (auto *col : colliders) {
-                if (!col || col == this || !col->IsEnabled())
-                    continue;
-                if (col->GetBodyId() == d.bodyId) {
-                    hasOtherEnabledSibling = true;
-                    break;
+        // Teardown fast path: when this collider dies as part of GameObject /
+        // scene destruction, every sibling is about to die too. Rebuilding the
+        // compound shape per destroyed collider is O(n²) churn with no
+        // observable effect — skip it and let the last sibling destroy the body.
+        if (!IsBeingDestroyed()) {
+            bool hasOtherEnabledSibling = false;
+            if (go) {
+                auto colliders = go->GetComponents<Collider>();
+                for (auto *col : colliders) {
+                    if (!col || col == this || !col->IsEnabled())
+                        continue;
+                    if (col->GetBodyId() == d.bodyId) {
+                        hasOtherEnabledSibling = true;
+                        break;
+                    }
                 }
             }
-        }
 
-        if (hasOtherEnabledSibling) {
-            PhysicsWorld::Instance().UpdateBodyShape(replacement, this);
+            if (hasOtherEnabledSibling) {
+                PhysicsWorld::Instance().UpdateBodyShape(replacement, this);
+            }
         }
     } else {
         RemoveFromBroadphase();

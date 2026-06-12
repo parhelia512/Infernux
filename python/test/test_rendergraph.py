@@ -92,7 +92,7 @@ class TestRenderPassBuilder:
         with graph.add_pass("Shadow") as p:
             p.write_depth("shadow")
             p.set_clear(depth=1.0)
-            p.draw_shadow_casters(light_index=0, shadow_type="hard")
+            p.draw_shadow_casters(light_index=0)
         assert p._action == "draw_shadow_casters"
         assert p._light_index == 0
 
@@ -337,7 +337,7 @@ class TestBuild:
         with graph.add_pass("ShadowCaster") as p:
             p.write_depth("shadow_map")
             p.set_clear(depth=1.0)
-            p.draw_shadow_casters(light_index=0, shadow_type="hard")
+            p.draw_shadow_casters(light_index=0)
         with graph.add_pass("Opaque") as p:
             p.write_color("color")
             p.write_depth("depth")
@@ -346,7 +346,9 @@ class TestBuild:
         desc = graph.build()
         shadow_pass = next(p for p in desc.passes if p.name == "ShadowCaster")
         assert shadow_pass.light_index == 0
-        assert shadow_pass.shadow_type == "hard"
+        # hard/soft shadow selection lives on the Light component, not the
+        # graph pass (the former shadow_type parameter was a dead end and
+        # has been removed from the API).
 
     def test_fullscreen_quad_push_constants(self):
         graph = _make_graph()

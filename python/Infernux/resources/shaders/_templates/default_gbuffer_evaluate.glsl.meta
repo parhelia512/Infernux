@@ -1,0 +1,57 @@
+{
+    "meta_version": 2,
+    "metadata": {
+        "character_count": {
+            "type": "size_t",
+            "value": 3620
+        },
+        "content_hash": {
+            "type": "string",
+            "value": "bfb3916cccccc0f7"
+        },
+        "encoding": {
+            "type": "string",
+            "value": "utf-8"
+        },
+        "file_extension": {
+            "type": "string",
+            "value": ".glsl"
+        },
+        "file_path": {
+            "type": "string",
+            "value": "E:/project/InfEngine/python/Infernux/resources/shaders/_templates/default_gbuffer_evaluate.glsl"
+        },
+        "file_size": {
+            "type": "size_t",
+            "value": 3694
+        },
+        "file_type": {
+            "type": "string",
+            "value": "text"
+        },
+        "guid": {
+            "type": "string",
+            "value": "ce61b0901e4c5bcdb34a1e7ef3cef4d7"
+        },
+        "importer_version": {
+            "type": "int",
+            "value": 1
+        },
+        "is_readable": {
+            "type": "bool",
+            "value": true
+        },
+        "last_modified": {
+            "type": "string",
+            "value": "1774891199"
+        },
+        "line_count": {
+            "type": "size_t",
+            "value": 75
+        },
+        "resource_type": {
+            "type": "enum infernux::ResourceType",
+            "value": "DefaultText"
+        }
+    }
+}

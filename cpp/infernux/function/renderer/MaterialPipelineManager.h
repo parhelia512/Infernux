@@ -179,11 +179,13 @@ class MaterialPipelineManager
      * VkSampler handles are about to be destroyed. It also covers runtime-only
      * material instances that are not tracked by the asset dependency graph.
      *
-     * @param textureRef GUID-style texture reference when available
-     * @param texturePath Path-style texture reference for fallback matching
+     * GUID-only contract: material Texture2D values are normalized to GUIDs
+     * at the setter boundary, so matching is plain GUID equality.
+     *
+     * @param textureGuid The texture asset GUID
      * @return Number of materials invalidated
      */
-    uint32_t InvalidateMaterialsUsingTexture(const std::string &textureRef, const std::string &texturePath);
+    uint32_t InvalidateMaterialsUsingTexture(const std::string &textureGuid);
 
     /**
      * @brief Mark ALL cached material pipelines as dirty.

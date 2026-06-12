@@ -694,17 +694,12 @@ void MaterialPipelineManager::InvalidateMaterialsUsingShader(const std::string &
     INXLOG_INFO("Invalidated ", materialsToRemove.size(), " materials using shader '", shaderId, "'");
 }
 
-uint32_t MaterialPipelineManager::InvalidateMaterialsUsingTexture(const std::string &textureRef,
-                                                                  const std::string &texturePath)
+uint32_t MaterialPipelineManager::InvalidateMaterialsUsingTexture(const std::string &textureGuid)
 {
-    auto normalize = [](std::string value) {
-        std::replace(value.begin(), value.end(), '\\', '/');
-        return value;
-    };
-
-    const std::string normalizedRef = normalize(textureRef);
-    const std::string normalizedPath = normalize(texturePath);
-    if (normalizedRef.empty() && normalizedPath.empty()) {
+    // GUID-only contract: material Texture2D property values are always GUIDs
+    // (enforced by InxMaterial::SetTextureGuid normalization), so a simple
+    // equality match is sufficient.
+    if (textureGuid.empty()) {
         return 0;
     }
 
@@ -724,13 +719,7 @@ uint32_t MaterialPipelineManager::InvalidateMaterialsUsingTexture(const std::str
             }
 
             const auto *value = std::get_if<std::string>(&prop.value);
-            if (!value || value->empty()) {
-                continue;
-            }
-
-            const std::string normalizedValue = normalize(*value);
-            if ((!normalizedRef.empty() && normalizedValue == normalizedRef) ||
-                (!normalizedPath.empty() && normalizedValue == normalizedPath)) {
+            if (value && *value == textureGuid) {
                 matches = true;
                 break;
             }
@@ -746,8 +735,7 @@ uint32_t MaterialPipelineManager::InvalidateMaterialsUsingTexture(const std::str
     }
 
     if (!materialsToRemove.empty()) {
-        INXLOG_INFO("Invalidated ", materialsToRemove.size(), " materials using texture ref '", normalizedRef,
-                    "' path '", normalizedPath, "'");
+        INXLOG_INFO("Invalidated ", materialsToRemove.size(), " materials using texture GUID '", textureGuid, "'");
     }
 
     return static_cast<uint32_t>(materialsToRemove.size());

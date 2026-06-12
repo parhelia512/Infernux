@@ -1450,7 +1450,6 @@ class GraphPassDesc:
     dispatch_y: int
     dispatch_z: int
     light_index: int
-    shadow_type: str
     screen_ui_list: int
     shader_name: str
     push_constants: List[Tuple[str, float]]
@@ -2841,6 +2840,9 @@ def inflog_internal(msg: str) -> None: ...
 
 
 def get_registered_component_types() -> List[str]: ...
+def get_editor_theme_colors() -> Dict[str, Tuple[float, float, float, float]]: ...
+def get_editor_theme_vec2s() -> Dict[str, Tuple[float, float]]: ...
+def get_editor_theme_floats() -> Dict[str, float]: ...
 
 
 def generate_wire_sphere(

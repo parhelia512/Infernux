@@ -137,11 +137,11 @@ InxVkCoreModular::~InxVkCoreModular()
     m_textureCache.Clear();
     m_shaderCache.Clear();
 
-    m_lightingUboBuffers.clear();
-    m_lightingUboMapped.clear();
-    m_materialUboBuffers.clear();
-    m_materialUboMapped.clear();
-    m_uniformBuffers.clear();
+    m_lightingUbo.reset();
+    m_lightingUboMapped = nullptr;
+    m_materialUbo.reset();
+    m_materialUboMapped = nullptr;
+    m_sceneUbo.reset();
     m_globalsBuffers.clear();
     m_gpuMaterialPreview.reset();
 
@@ -392,33 +392,25 @@ void InxVkCoreModular::InvalidateShaderCache(const std::string &shaderId)
     INXLOG_INFO("Shader cache invalidated for: ", shaderId);
 }
 
-void InxVkCoreModular::InvalidateTextureCache(const std::string &textureIdentifier)
+void InxVkCoreModular::InvalidateTextureCache(const std::string &textureGuid)
 {
-    // The identifier may be a GUID or a file path.
-    // Cache keys are GUID-based ("GUID::srgb" or "GUID::unorm").
-    // Resolve the identifier to a GUID for matching against cache keys.
-    std::string matchKey = textureIdentifier;
-    std::string matchPath = textureIdentifier;
-    std::replace(matchKey.begin(), matchKey.end(), '\\', '/');
-    std::replace(matchPath.begin(), matchPath.end(), '\\', '/');
-
-    auto *adb = AssetRegistry::Instance().GetAssetDatabase();
-    if (adb) {
-        // If the identifier looks like a path, resolve it to a GUID
-        std::string guid = adb->GetGuidFromPath(textureIdentifier);
-        if (!guid.empty()) {
-            matchKey = guid;
-        } else {
-            std::string resolvedPath = adb->GetPathFromGuid(textureIdentifier);
-            if (!resolvedPath.empty()) {
-                matchPath = resolvedPath;
-                std::replace(matchPath.begin(), matchPath.end(), '\\', '/');
-            }
-        }
-        // If it was already a GUID, GetGuidFromPath returns empty → keep as-is
+    // GUID-only contract: cache keys and material texture properties are
+    // GUID-based ("GUID::srgb::…"). Path→GUID resolution happens at the
+    // engine boundary (Infernux::ReloadTexture / material setters), never here.
+    if (textureGuid.empty()) {
+        return;
     }
 
-    INXLOG_INFO("Invalidating texture cache for: ", matchKey);
+#ifndef NDEBUG
+    // Catch contract violations early in debug builds: a path slipping in
+    // means some caller skipped boundary normalization.
+    if (textureGuid.find('/') != std::string::npos || textureGuid.find('\\') != std::string::npos) {
+        INXLOG_WARN("InvalidateTextureCache: received a path-like identifier '", textureGuid,
+                    "' — callers must resolve to a GUID first.");
+    }
+#endif
+
+    INXLOG_INFO("Invalidating texture cache for GUID: ", textureGuid);
 
     // Wait for GPU to finish using the texture
     m_deviceContext.WaitIdle();
@@ -428,14 +420,14 @@ void InxVkCoreModular::InvalidateTextureCache(const std::string &textureIdentifi
     // raw VkImageView/VkSampler handles for this texture. Remove those render
     // data entries before destroying the cached VkTexture objects.
     if (m_materialPipelineManagerInitialized) {
-        m_materialPipelineManager.InvalidateMaterialsUsingTexture(matchKey, matchPath);
+        m_materialPipelineManager.InvalidateMaterialsUsingTexture(textureGuid);
     }
 
-    // Evict all cached variants for this GUID/path
-    size_t evicted = m_textureCache.EvictByPrefix(matchKey);
+    // Evict all cached variants for this GUID
+    size_t evicted = m_textureCache.EvictByPrefix(textureGuid);
     (void)evicted;
 
-    INXLOG_INFO("Texture cache invalidated for: ", matchKey);
+    INXLOG_INFO("Texture cache invalidated for GUID: ", textureGuid);
 }
 
 void InxVkCoreModular::RemoveMaterialPipeline(const std::string &materialName)
@@ -526,48 +518,38 @@ void InxVkCoreModular::CreateDepthResources()
 
 void InxVkCoreModular::CreateUniformBuffers()
 {
-    VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+    // Scene UBO (binding 0). Single buffer: all material descriptor sets
+    // reference it, and updates are recorded inline in the command buffer
+    // (CmdUpdateUniformBuffer) so the GPU never races a CPU write.
+    m_sceneUbo = m_resourceManager.CreateUniformBuffer(sizeof(UniformBufferObject));
 
-    m_uniformBuffers.resize(m_maxFramesInFlight);
-    for (size_t i = 0; i < m_maxFramesInFlight; ++i) {
-        m_uniformBuffers[i] = m_resourceManager.CreateUniformBuffer(bufferSize);
-    }
-
-    // Create lighting UBO buffers (binding 1)
+    // Lighting UBO (binding 1) — single buffer, persistently mapped.
     VkDeviceSize lightingUboSize = sizeof(ShaderLightingUBO);
-    m_lightingUboBuffers.resize(m_maxFramesInFlight);
-    m_lightingUboMapped.resize(m_maxFramesInFlight, nullptr);
-
-    for (size_t i = 0; i < m_maxFramesInFlight; ++i) {
-        m_lightingUboBuffers[i] = m_resourceManager.CreateUniformBuffer(lightingUboSize);
-        if (m_lightingUboBuffers[i]) {
-            m_lightingUboMapped[i] = m_lightingUboBuffers[i]->Map(0, lightingUboSize);
-            if (m_lightingUboMapped[i]) {
-                // Initialize with default ambient lighting (neutral white)
-                ShaderLightingUBO defaultLighting{};
-                defaultLighting.lightCounts = glm::ivec4(0, 0, 0, 0);
-                defaultLighting.ambientColor = glm::vec4(1.0f, 1.0f, 1.0f, 0.3f); // White ambient, low intensity
-                defaultLighting.cameraPos = glm::vec4(0.0f, 0.0f, 5.0f, 1.0f);
-                std::memcpy(m_lightingUboMapped[i], &defaultLighting, lightingUboSize);
-            }
+    m_lightingUbo = m_resourceManager.CreateUniformBuffer(lightingUboSize);
+    m_lightingUboMapped = nullptr;
+    if (m_lightingUbo) {
+        m_lightingUboMapped = m_lightingUbo->Map(0, lightingUboSize);
+        if (m_lightingUboMapped) {
+            // Initialize with default ambient lighting (neutral white)
+            ShaderLightingUBO defaultLighting{};
+            defaultLighting.lightCounts = glm::ivec4(0, 0, 0, 0);
+            defaultLighting.ambientColor = glm::vec4(1.0f, 1.0f, 1.0f, 0.3f); // White ambient, low intensity
+            defaultLighting.cameraPos = glm::vec4(0.0f, 0.0f, 5.0f, 1.0f);
+            std::memcpy(m_lightingUboMapped, &defaultLighting, lightingUboSize);
         }
     }
-    INXLOG_INFO("Created lighting UBO buffers: ", lightingUboSize, " bytes x ", m_maxFramesInFlight, " frames");
+    INXLOG_INFO("Created lighting UBO: ", lightingUboSize, " bytes (single buffer)");
 
-    // Create default material UBO buffers (binding 2)
-    // 256 bytes is a safe default for the fallback per-frame material UBO.
-    // Per-material UBOs use reflection-derived sizes via MaterialDescriptorManager.
+    // Default material UBO (binding 2) — single buffer, persistently mapped.
+    // 256 bytes is a safe default for the fallback material UBO; per-material
+    // UBOs use reflection-derived sizes via MaterialDescriptorManager.
     constexpr size_t materialUboSize = 256;
-    m_materialUboBuffers.resize(m_maxFramesInFlight);
-    m_materialUboMapped.resize(m_maxFramesInFlight, nullptr);
-
-    for (size_t i = 0; i < m_maxFramesInFlight; ++i) {
-        m_materialUboBuffers[i] = m_resourceManager.CreateUniformBuffer(materialUboSize);
-        if (m_materialUboBuffers[i]) {
-            m_materialUboMapped[i] = m_materialUboBuffers[i]->Map(0, materialUboSize);
-            if (m_materialUboMapped[i]) {
-                std::memset(m_materialUboMapped[i], 0, materialUboSize);
-            }
+    m_materialUbo = m_resourceManager.CreateUniformBuffer(materialUboSize);
+    m_materialUboMapped = nullptr;
+    if (m_materialUbo) {
+        m_materialUboMapped = m_materialUbo->Map(0, materialUboSize);
+        if (m_materialUboMapped) {
+            std::memset(m_materialUboMapped, 0, materialUboSize);
         }
     }
 
@@ -729,7 +711,7 @@ void InxVkCoreModular::UpdateUniformBuffer(uint32_t currentImage, const float *v
 
     // Stage the UBO data — the actual GPU write happens inline in the
     // command buffer via CmdUpdateUniformBuffer() during RecordCommandBuffer().
-    // This eliminates the CPU→GPU race on m_uniformBuffers[0] that previously
+    // This eliminates the CPU→GPU race on the scene UBO that previously
     // required vkDeviceWaitIdle() for correctness.
     m_stagedUBO = ubo;
     m_uboDirty = true;

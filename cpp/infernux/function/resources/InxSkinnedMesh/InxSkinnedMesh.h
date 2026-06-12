@@ -67,8 +67,9 @@ struct SkinnedNodePose
 
 struct SkinnedSampleRequest
 {
-    std::string takeName;
+    std::string takeName; ///< Empty = bind pose (no animation applied)
     float timeSeconds = 0.0f;
+    bool loop = true; ///< Loop wraps time (fmod); non-loop clamps so the end pose holds
     std::string blendTakeName;
     float blendTimeSeconds = 0.0f;
     float blendWeight = 0.0f;
@@ -110,14 +111,16 @@ class InxSkinnedMesh
     {
         std::string takeName;
         int64_t timeMicros = 0;
+        bool loop = true;
         std::string blendTakeName;
         int64_t blendTimeMicros = 0;
         int32_t blendWeightMicros = 0;
 
         bool operator==(const PaletteCacheKey &rhs) const
         {
-            return takeName == rhs.takeName && timeMicros == rhs.timeMicros && blendTakeName == rhs.blendTakeName &&
-                   blendTimeMicros == rhs.blendTimeMicros && blendWeightMicros == rhs.blendWeightMicros;
+            return takeName == rhs.takeName && timeMicros == rhs.timeMicros && loop == rhs.loop &&
+                   blendTakeName == rhs.blendTakeName && blendTimeMicros == rhs.blendTimeMicros &&
+                   blendWeightMicros == rhs.blendWeightMicros;
         }
     };
 

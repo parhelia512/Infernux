@@ -833,3 +833,49 @@ class Theme:
             if idx + 1 < len(entries):
                 ctx.same_line(0, spacing)
         return clicked[0]
+
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  4. C++ single source of truth override                                  ║
+# ║                                                                          ║
+# ║  The authoritative theme values live in C++                              ║
+# ║  (cpp/infernux/function/editor/EditorThemeTable.inl). At import time we  ║
+# ║  overwrite every matching class attribute above with the native value,   ║
+# ║  so editing this Python file cannot change the engine's look — restyle   ║
+# ║  in EditorThemeTable.inl instead. The Python literals above remain only  ║
+# ║  as documented fallbacks for tooling that imports this module without    ║
+# ║  the native engine (docs generation, pure-logic tests).                  ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+def _apply_native_theme_overrides() -> None:
+    try:
+        from Infernux.lib import (
+            get_editor_theme_colors,
+            get_editor_theme_floats,
+            get_editor_theme_vec2s,
+        )
+    except Exception:
+        return  # native module unavailable — keep Python fallbacks
+
+    try:
+        applied = 0
+        for name, value in get_editor_theme_colors().items():
+            if hasattr(Theme, name):
+                setattr(Theme, name, tuple(value))
+                applied += 1
+        for name, value in get_editor_theme_vec2s().items():
+            if hasattr(Theme, name):
+                setattr(Theme, name, tuple(value))
+                applied += 1
+        for name, value in get_editor_theme_floats().items():
+            if hasattr(Theme, name):
+                setattr(Theme, name, float(value))
+                applied += 1
+        Theme._NATIVE_OVERRIDES_APPLIED = applied
+    except Exception:
+        # Defensive: a registry mismatch must never break editor startup.
+        Theme._NATIVE_OVERRIDES_APPLIED = -1
+
+
+Theme._NATIVE_OVERRIDES_APPLIED = 0
+_apply_native_theme_overrides()

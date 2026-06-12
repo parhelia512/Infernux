@@ -7,8 +7,10 @@ namespace infernux
 
 AssetDependencyGraph &AssetDependencyGraph::Instance()
 {
-    static AssetDependencyGraph instance;
-    return instance;
+    // Intentionally leaked — asset/material destructors may notify the graph
+    // during explicit Cleanup; static teardown order must not matter.
+    static AssetDependencyGraph *instance = new AssetDependencyGraph();
+    return *instance;
 }
 
 // ============================================================================

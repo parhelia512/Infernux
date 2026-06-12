@@ -1,6 +1,7 @@
 #include "InxSkinnedMesh.h"
 
 #include <core/config/MathConstants.h>
+#include <core/log/InxLog.h>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/matrix_transform.hpp>
@@ -97,13 +98,22 @@ static SkinnedNodePose BindNodePose(const SkinnedRuntimeNode &node)
     return pose;
 }
 
-static double ToAnimationTicks(const SkinnedRuntimeAnimation *anim, float seconds)
+static double ToAnimationTicks(const SkinnedRuntimeAnimation *anim, float seconds, bool loop)
 {
     if (!anim)
         return 0.0;
     double tTicks = static_cast<double>(seconds) * anim->ticksPerSecond;
-    if (anim->durationTicks > 0.0)
-        tTicks = std::fmod(tTicks, anim->durationTicks);
+    if (anim->durationTicks > 0.0) {
+        if (loop) {
+            tTicks = std::fmod(tTicks, anim->durationTicks);
+            if (tTicks < 0.0)
+                tTicks += anim->durationTicks;
+        } else {
+            // Clamp so a finished non-looping clip holds its end pose instead
+            // of wrapping back to frame 0 (fmod(duration, duration) == 0).
+            tTicks = std::clamp(tTicks, 0.0, anim->durationTicks);
+        }
+    }
     return tTicks;
 }
 
@@ -130,12 +140,20 @@ const SkinnedRuntimeAnimation *InxSkinnedMesh::FindAnimation(const std::string &
 {
     if (animations.empty())
         return nullptr;
-    if (!takeName.empty()) {
-        for (const auto &anim : animations)
-            if (anim.name == takeName)
-                return &anim;
-    }
-    return &animations.front();
+
+    // Empty take = explicit bind pose request (no animation sampled).
+    if (takeName.empty())
+        return nullptr;
+
+    for (const auto &anim : animations)
+        if (anim.name == takeName)
+            return &anim;
+
+    // Unknown name: warn loudly instead of silently playing the first take —
+    // playing the wrong animation is much harder to debug than a bind pose.
+    INXLOG_WARN("InxSkinnedMesh: animation take '", takeName, "' not found in '", sourcePath,
+                "' — rendering bind pose. Available takes: ", animations.size());
+    return nullptr;
 }
 
 float InxSkinnedMesh::GetAnimationDurationSeconds(const std::string &takeName) const
@@ -148,6 +166,7 @@ size_t InxSkinnedMesh::PaletteCacheKeyHash::operator()(const PaletteCacheKey &ke
 {
     size_t seed = std::hash<std::string>{}(key.takeName);
     HashCombine(seed, std::hash<int64_t>{}(key.timeMicros));
+    HashCombine(seed, std::hash<bool>{}(key.loop));
     HashCombine(seed, std::hash<std::string>{}(key.blendTakeName));
     HashCombine(seed, std::hash<int64_t>{}(key.blendTimeMicros));
     HashCombine(seed, std::hash<int32_t>{}(key.blendWeightMicros));
@@ -159,6 +178,7 @@ InxSkinnedMesh::PaletteCacheKey InxSkinnedMesh::MakePaletteCacheKey(const Skinne
     PaletteCacheKey key;
     key.takeName = request.takeName;
     key.timeMicros = QuantizeSeconds(request.timeSeconds);
+    key.loop = request.loop;
     key.blendTakeName = request.blendTakeName;
     key.blendTimeMicros = QuantizeSeconds(request.blendTimeSeconds);
     key.blendWeightMicros = QuantizeUnitFloat(request.blendWeight);
@@ -208,9 +228,12 @@ std::vector<glm::mat4> InxSkinnedMesh::BuildBoneMatrices(const SkinnedSampleRequ
     const SkinnedRuntimeAnimation *anim = FindAnimation(request.takeName);
     const SkinnedRuntimeAnimation *blendAnim =
         (request.blendWeight > 0.0f && !request.blendTakeName.empty()) ? FindAnimation(request.blendTakeName) : nullptr;
-    const double tTicks = ToAnimationTicks(anim, request.timeSeconds);
-    const double blendTicks = ToAnimationTicks(blendAnim, request.blendTimeSeconds);
-    const float w = (blendAnim && blendAnim != anim) ? glm::clamp(request.blendWeight, 0.0f, 1.0f) : 0.0f;
+    const double tTicks = ToAnimationTicks(anim, request.timeSeconds, request.loop);
+    // Blend source always loops: it represents the outgoing state mid-fade.
+    const double blendTicks = ToAnimationTicks(blendAnim, request.blendTimeSeconds, true);
+    // Same-take cross-fades at different times are valid (e.g. restarting a
+    // clip with a fade) — only a missing blend animation disables blending.
+    const float w = blendAnim ? glm::clamp(request.blendWeight, 0.0f, 1.0f) : 0.0f;
 
     std::vector<glm::mat4> globals(nodes.size(), glm::mat4(1.0f));
     for (size_t ni = 0; ni < nodes.size(); ++ni) {

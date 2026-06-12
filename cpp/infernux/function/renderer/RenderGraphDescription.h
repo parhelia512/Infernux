@@ -105,7 +105,6 @@ struct GraphPassDesc
 
     // DrawShadowCasters parameters
     int32_t lightIndex = 0;          ///< Index of the shadow-casting light (0 = first directional)
-    std::string shadowType = "hard"; ///< Shadow quality: "hard", "soft"
 
     // DrawScreenUI parameters
     int screenUIList = 0; ///< 0 = Camera list (before post-process), 1 = Overlay list (after post-process)

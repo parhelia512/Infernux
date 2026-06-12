@@ -55,26 +55,6 @@ static bool IsLinearMaterialTextureBinding(const std::string &bindingName)
            lower.find("mask") != std::string::npos || lower.find("height") != std::string::npos;
 }
 
-static std::string ResolveTexturePathFromShaderRoots(const std::string &textureRef)
-{
-    namespace fs = std::filesystem;
-
-    fs::path relative = ToFsPath(textureRef);
-    std::error_code ec;
-    for (const auto &searchPathStr : InxShaderLoader::GetShaderSearchPaths()) {
-        fs::path current = ToFsPath(searchPathStr);
-        for (int depth = 0; depth < 8 && !current.empty(); ++depth) {
-            fs::path candidate = current / relative;
-            if (fs::exists(candidate, ec) && !ec) {
-                return FromFsPath(fs::weakly_canonical(candidate, ec));
-            }
-            current = current.parent_path();
-        }
-    }
-
-    return "";
-}
-
 // ============================================================================
 // Shared texture resolution for material Texture2D properties
 // ============================================================================
@@ -82,30 +62,29 @@ static std::string ResolveTexturePathFromShaderRoots(const std::string &textureR
 std::pair<VkImageView, VkSampler> InxVkCoreModular::ResolveTextureForMaterial(const std::string &textureRef,
                                                                               const std::string &bindingName)
 {
-    // Resolve texture GUID → file path via AssetDatabase.
+    // GUID-only contract: textureRef must be an asset GUID. Resolve GUID →
+    // file path via the AssetDatabase; lazily heal legacy refs created before
+    // the database existed (builtin materials) through the single normalizer.
     std::string textureGuid = textureRef;
     std::string texturePath;
     auto &registry = AssetRegistry::Instance();
     auto *adb = registry.GetAssetDatabase();
     if (adb) {
-        std::string resolved = adb->GetPathFromGuid(textureRef);
-        if (!resolved.empty()) {
-            texturePath = resolved;
+        texturePath = adb->GetPathFromGuid(textureGuid);
+        if (texturePath.empty()) {
+            std::string healed = InxMaterial::ResolveToTextureGuid(textureRef);
+            if (!healed.empty() && healed != textureGuid) {
+                textureGuid = healed;
+                texturePath = adb->GetPathFromGuid(textureGuid);
+            }
         }
     }
 
     if (texturePath.empty()) {
-        std::filesystem::path directPath = ToFsPath(textureRef);
-        if (std::filesystem::exists(directPath)) {
-            texturePath = FromFsPath(directPath);
-        } else {
-            texturePath = ResolveTexturePathFromShaderRoots(textureRef);
-            if (texturePath.empty()) {
-                INXLOG_WARN("TextureResolver: cannot resolve texture reference '", textureRef,
-                            "' to a file path (binding='", bindingName, "')");
-                return {VK_NULL_HANDLE, VK_NULL_HANDLE};
-            }
-        }
+        INXLOG_WARN("TextureResolver: texture reference '", textureRef,
+                    "' is not a resolvable asset GUID (binding='", bindingName,
+                    "'). Texture properties must hold GUIDs.");
+        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
     }
 
     // ── Load InxTexture via AssetRegistry (caches import settings) ──────────
@@ -313,12 +292,8 @@ void InxVkCoreModular::UpdateMaterialUBO(InxMaterial &material)
         if (matMappedData) {
             std::memcpy(matMappedData, uboData.data(), uboSize);
         }
-    } else {
-        for (size_t i = 0; i < m_materialUboMapped.size(); ++i) {
-            if (m_materialUboMapped[i]) {
-                std::memcpy(m_materialUboMapped[i], uboData.data(), uboSize);
-            }
-        }
+    } else if (m_materialUboMapped) {
+        std::memcpy(m_materialUboMapped, uboData.data(), uboSize);
     }
 
     material.ClearPropertiesDirty();
@@ -449,10 +424,10 @@ void InxVkCoreModular::InitializeMaterialSystem()
 
         if (vertCode && fragCode) {
             VkBuffer lightingBuffer =
-                m_lightingUboBuffers.empty() ? VK_NULL_HANDLE : m_lightingUboBuffers[0]->GetBuffer();
+                m_lightingUbo ? m_lightingUbo->GetBuffer() : VK_NULL_HANDLE;
             m_materialPipelineManager.GetOrCreateRenderDataWithReflection(
                 defaultMaterial, *vertCode, *fragCode, defaultMaterial->GetShaderId(),
-                m_uniformBuffers.empty() ? VK_NULL_HANDLE : m_uniformBuffers[0]->GetBuffer(),
+                m_sceneUbo ? m_sceneUbo->GetBuffer() : VK_NULL_HANDLE,
                 sizeof(UniformBufferObject), lightingBuffer, sizeof(ShaderLightingUBO));
         } else {
             INXLOG_ERROR("InitializeMaterialSystem: SPIR-V shader codes not found for default material "
@@ -472,10 +447,10 @@ void InxVkCoreModular::InitializeMaterialSystem()
 
         if (errVertCode && errFragCode) {
             VkBuffer lightingBuffer =
-                m_lightingUboBuffers.empty() ? VK_NULL_HANDLE : m_lightingUboBuffers[0]->GetBuffer();
+                m_lightingUbo ? m_lightingUbo->GetBuffer() : VK_NULL_HANDLE;
             auto *renderData = m_materialPipelineManager.GetOrCreateRenderDataWithReflection(
                 errorMaterial, *errVertCode, *errFragCode, errorMaterial->GetShaderId(),
-                m_uniformBuffers.empty() ? VK_NULL_HANDLE : m_uniformBuffers[0]->GetBuffer(),
+                m_sceneUbo ? m_sceneUbo->GetBuffer() : VK_NULL_HANDLE,
                 sizeof(UniformBufferObject), lightingBuffer, sizeof(ShaderLightingUBO));
             if (renderData && renderData->isValid) {
                 INXLOG_INFO("Error material pipeline created successfully (shaders: ", errVertId, "/", errFragId, ")");
@@ -552,9 +527,9 @@ bool InxVkCoreModular::RefreshMaterialPipeline(std::shared_ptr<InxMaterial> mate
     const auto *fragCode = m_shaderCache.FindFragCode(fragShaderName);
 
     if (vertCode && fragCode && m_materialPipelineManagerInitialized) {
-        VkBuffer sceneUbo = m_uniformBuffers.empty() ? VK_NULL_HANDLE : m_uniformBuffers[0]->GetBuffer();
+        VkBuffer sceneUbo = m_sceneUbo ? m_sceneUbo->GetBuffer() : VK_NULL_HANDLE;
         VkDeviceSize sceneUboSize = sizeof(UniformBufferObject);
-        VkBuffer lightingUbo = m_lightingUboBuffers.empty() ? VK_NULL_HANDLE : m_lightingUboBuffers[0]->GetBuffer();
+        VkBuffer lightingUbo = m_lightingUbo ? m_lightingUbo->GetBuffer() : VK_NULL_HANDLE;
         VkDeviceSize lightingUboSize = sizeof(ShaderLightingUBO);
         auto *renderData = m_materialPipelineManager.GetOrCreateRenderDataWithReflection(
             material, *vertCode, *fragCode, material->GetShaderId(), sceneUbo, sceneUboSize, lightingUbo,
@@ -644,10 +619,10 @@ void InxVkCoreModular::StageLightingUBO(const glm::vec3 &cameraPosition)
 
 void InxVkCoreModular::CmdUpdateLightingCameraPos(VkCommandBuffer cmdBuf, const glm::vec3 &cameraPos)
 {
-    if (m_lightingUboBuffers.empty() || !m_lightingUboBuffers[0])
+    if (!m_lightingUbo)
         return;
 
-    VkBuffer buffer = m_lightingUboBuffers[0]->GetBuffer();
+    VkBuffer buffer = m_lightingUbo->GetBuffer();
 
     // cameraPos sits at offset 32 in ShaderLightingUBO (after lightCounts + ambientColor).
     constexpr VkDeviceSize cameraPosOffset = offsetof(ShaderLightingUBO, cameraPos);
@@ -662,12 +637,10 @@ void InxVkCoreModular::CmdUpdateLightingCameraPos(VkCommandBuffer cmdBuf, const 
 
 void InxVkCoreModular::CmdUpdateLightingUBO(VkCommandBuffer cmdBuf)
 {
-    if (!m_lightingUBODirty)
-        return;
-    if (m_lightingUboBuffers.empty() || !m_lightingUboBuffers[0])
+    if (!m_lightingUBODirty || !m_lightingUbo)
         return;
 
-    VkBuffer buffer = m_lightingUboBuffers[0]->GetBuffer();
+    VkBuffer buffer = m_lightingUbo->GetBuffer();
 
     // Barrier: ensure previous shader reads from the lighting UBO are complete
     vkrender::CmdBarrierUniformReadToTransferWrite(cmdBuf);
@@ -686,10 +659,10 @@ void InxVkCoreModular::CmdUpdateShadowDataForCamera(VkCommandBuffer cmdBuf, cons
                                                     uint32_t cascadeCount, const float *cascadeSplits,
                                                     float mapResolution)
 {
-    if (m_lightingUboBuffers.empty() || !m_lightingUboBuffers[0])
+    if (!m_lightingUbo)
         return;
 
-    VkBuffer buffer = m_lightingUboBuffers[0]->GetBuffer();
+    VkBuffer buffer = m_lightingUbo->GetBuffer();
 
     // Build the shadow portion we need to patch
     glm::mat4 vpData[NUM_SHADOW_CASCADES];
@@ -737,10 +710,10 @@ void InxVkCoreModular::CmdUpdateShadowDataForCamera(VkCommandBuffer cmdBuf, cons
 
 void InxVkCoreModular::CmdRestoreEditorShadowData(VkCommandBuffer cmdBuf)
 {
-    if (m_lightingUboBuffers.empty() || !m_lightingUboBuffers[0])
+    if (!m_lightingUbo)
         return;
 
-    VkBuffer buffer = m_lightingUboBuffers[0]->GetBuffer();
+    VkBuffer buffer = m_lightingUbo->GetBuffer();
 
     // Restore lightVP, cascade splits, and shadow params from the staged
     // editor lighting UBO that was prepared at the start of this frame.
@@ -795,18 +768,14 @@ VkBuffer InxVkCoreModular::GetObjectIndexBuffer(uint64_t objectId) const
     return VK_NULL_HANDLE;
 }
 
-VkBuffer InxVkCoreModular::GetUniformBuffer(size_t index) const
+VkBuffer InxVkCoreModular::GetSceneUbo() const
 {
-    if (index < m_uniformBuffers.size() && m_uniformBuffers[index])
-        return m_uniformBuffers[index]->GetBuffer();
-    return VK_NULL_HANDLE;
+    return m_sceneUbo ? m_sceneUbo->GetBuffer() : VK_NULL_HANDLE;
 }
 
-VkBuffer InxVkCoreModular::GetLightingUBO(size_t index) const
+VkBuffer InxVkCoreModular::GetLightingUbo() const
 {
-    if (index < m_lightingUboBuffers.size() && m_lightingUboBuffers[index])
-        return m_lightingUboBuffers[index]->GetBuffer();
-    return VK_NULL_HANDLE;
+    return m_lightingUbo ? m_lightingUbo->GetBuffer() : VK_NULL_HANDLE;
 }
 
 VkBuffer InxVkCoreModular::GetInstanceSSBO(size_t index) const
@@ -835,7 +804,7 @@ bool InxVkCoreModular::EnsureShadowMaterialDummyDescriptorSet()
     auto *defaultTex = m_textureCache.Find("white");
     if (!defaultTex || defaultTex->GetView() == VK_NULL_HANDLE || defaultTex->GetSampler() == VK_NULL_HANDLE)
         return false;
-    if (m_uniformBuffers.empty() || !m_uniformBuffers[0])
+    if (!m_sceneUbo)
         return false;
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -863,7 +832,7 @@ bool InxVkCoreModular::EnsureShadowMaterialDummyDescriptorSet()
         writes.push_back(w);
     }
     VkDescriptorBufferInfo fragBi{};
-    fragBi.buffer = m_uniformBuffers[0]->GetBuffer();
+    fragBi.buffer = m_sceneUbo->GetBuffer();
     fragBi.offset = 0;
     fragBi.range = 16;
     VkWriteDescriptorSet wf{};
@@ -874,7 +843,7 @@ bool InxVkCoreModular::EnsureShadowMaterialDummyDescriptorSet()
     wf.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     wf.pBufferInfo = &fragBi;
     VkDescriptorBufferInfo vtxBi{};
-    vtxBi.buffer = m_uniformBuffers[0]->GetBuffer();
+    vtxBi.buffer = m_sceneUbo->GetBuffer();
     vtxBi.offset = 0;
     vtxBi.range = 16;
     VkWriteDescriptorSet wv{};
@@ -1100,10 +1069,10 @@ void InxVkCoreModular::CreateMaterialShadowPipeline(std::shared_ptr<InxMaterial>
             w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             w.pBufferInfo = &bufferInfos.back();
             writes.push_back(w);
-        } else if (fragUboInfoIdx == SIZE_MAX && !m_uniformBuffers.empty() && m_uniformBuffers[0]) {
+        } else if (fragUboInfoIdx == SIZE_MAX && m_sceneUbo) {
             // Fallback: use scene UBO as a valid placeholder
             VkDescriptorBufferInfo dummyBi{};
-            dummyBi.buffer = m_uniformBuffers[0]->GetBuffer();
+            dummyBi.buffer = m_sceneUbo->GetBuffer();
             dummyBi.offset = 0;
             dummyBi.range = 16; // minimum valid range
             bufferInfos.push_back(dummyBi);
@@ -1125,8 +1094,8 @@ void InxVkCoreModular::CreateMaterialShadowPipeline(std::shared_ptr<InxMaterial>
             if (fragUboInfoIdx != SIZE_MAX) {
                 dummyBuf = bufferInfos[fragUboInfoIdx].buffer;
                 dummyRange = bufferInfos[fragUboInfoIdx].range;
-            } else if (!m_uniformBuffers.empty() && m_uniformBuffers[0]) {
-                dummyBuf = m_uniformBuffers[0]->GetBuffer();
+            } else if (m_sceneUbo) {
+                dummyBuf = m_sceneUbo->GetBuffer();
             }
             if (dummyBuf != VK_NULL_HANDLE) {
                 VkDescriptorBufferInfo dummyBi{};

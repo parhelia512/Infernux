@@ -44,10 +44,14 @@ def engine():
     eng.set_log_level(LogLevel.Warn)
     eng.init_renderer(64, 64, project, resources_path)
     yield eng
-    # NOTE: eng.cleanup() is intentionally omitted.  The native Cleanup()
-    # path triggers heap corruption when Jolt bodies are destroyed en-masse
-    # during scene teardown (known engine bug).  Since the test process is
-    # about to exit, the OS reclaims all resources anyway.
+    # Full native cleanup. The historical heap corruption here was fixed by
+    # (a) SceneManager::Shutdown() destroying all scenes inside Cleanup()
+    #     before PhysicsWorld::Shutdown(), and
+    # (b) leaking the scene/physics/asset singletons so no engine teardown
+    #     ever runs during C++ static destruction.
+    # Running cleanup in CI is intentional: it is the regression test for
+    # that fix.
+    eng.cleanup()
 
 
 @pytest.fixture()
@@ -90,9 +94,11 @@ def _reset_input_state():
 def pytest_sessionfinish(session, exitstatus):
     """Clean up after the test session.
 
-    1. Remove all .meta files under the project directory.
-    2. Hard-exit the process to avoid native heap corruption during C++
-       static-singleton destruction (PhysicsECSStore vs SceneManager ordering).
+    Removes all .meta files created under the repository during the run.
+    Normal interpreter shutdown is used — the engine singletons are
+    intentionally leaked on the C++ side and `engine` fixture teardown runs
+    a full `cleanup()`, so no native code executes during static destruction
+    anymore (the old `os._exit()` workaround is gone on purpose).
     """
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     for meta in glob.glob(os.path.join(root, "**", "*.meta"), recursive=True):
@@ -100,11 +106,3 @@ def pytest_sessionfinish(session, exitstatus):
             os.remove(meta)
         except OSError:
             pass
-    # Redirect faulthandler output to devnull so the spurious "access
-    # violation" message from DLL unload during _exit() is suppressed,
-    # while still letting faulthandler catch the SEH exception (which
-    # preserves exit code 0 instead of 0xC0000409).
-    import faulthandler
-    _devnull = open(os.devnull, "w")               # noqa: SIM115
-    faulthandler.enable(file=_devnull)
-    os._exit(exitstatus)

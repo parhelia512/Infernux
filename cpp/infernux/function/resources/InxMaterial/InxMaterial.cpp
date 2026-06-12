@@ -1,6 +1,7 @@
 #include "InxMaterial.h"
 #include <algorithm>
 #include <atomic>
+#include <core/config/EngineConfig.h>
 #include <core/log/InxLog.h>
 #include <cstring>
 #include <filesystem>
@@ -8,6 +9,7 @@
 #include <function/resources/AssetDatabase/AssetDatabase.h>
 #include <function/resources/AssetDependencyGraph.h>
 #include <function/resources/AssetRegistry/AssetRegistry.h>
+#include <function/resources/InxFileLoader/InxShaderLoader.hpp>
 #include <function/scene/MeshRenderer.h>
 #include <functional>
 #include <nlohmann/json.hpp>
@@ -389,23 +391,89 @@ void InxMaterial::SetMatrix(const std::string &name, const glm::mat4 &matrix)
     ++m_version;
 }
 
+std::string InxMaterial::ResolveToTextureGuid(const std::string &textureRef)
+{
+    if (textureRef.empty())
+        return {};
+
+    // Built-in procedural textures are addressed by well-known name, not by
+    // GUID (created in-memory by the renderer, never on disk).
+    if (textureRef == "white" || textureRef == "black" || textureRef == "normal")
+        return textureRef;
+
+    auto *adb = AssetRegistry::Instance().GetAssetDatabase();
+    if (!adb) {
+        // No database yet (very early startup) — pass through unchanged so
+        // builtin materials created before InitRenderer still work; they are
+        // re-normalized on first SetTextureGuid after the database exists.
+        return textureRef;
+    }
+
+    // Already a GUID?
+    if (!adb->GetPathFromGuid(textureRef).empty())
+        return textureRef;
+
+    // A path that is already registered?
+    std::string guid = adb->GetGuidFromPath(textureRef);
+    if (!guid.empty())
+        return guid;
+
+    // An existing file that just isn't registered yet — mint a GUID.
+    std::error_code ec;
+    if (std::filesystem::exists(ToFsPath(textureRef), ec) && !ec) {
+        guid = adb->RegisterResource(textureRef, ResourceType::Texture);
+        if (!guid.empty())
+            return guid;
+    }
+
+    // Builtin-resource relative reference (e.g. "icons/light.png") — resolve
+    // against the shader search roots, then register.
+    {
+        namespace fs = std::filesystem;
+        fs::path relative = ToFsPath(textureRef);
+        for (const auto &searchPathStr : InxShaderLoader::GetShaderSearchPaths()) {
+            fs::path current = ToFsPath(searchPathStr);
+            for (int depth = 0; depth < 8 && !current.empty(); ++depth) {
+                fs::path candidate = current / relative;
+                if (fs::exists(candidate, ec) && !ec) {
+                    std::string resolved = FromFsPath(fs::weakly_canonical(candidate, ec));
+                    guid = adb->GetGuidFromPath(resolved);
+                    if (guid.empty())
+                        guid = adb->RegisterResource(resolved, ResourceType::Texture);
+                    if (!guid.empty())
+                        return guid;
+                }
+                current = current.parent_path();
+            }
+        }
+    }
+
+    INXLOG_WARN("InxMaterial::ResolveToTextureGuid: cannot resolve texture reference '", textureRef, "' to a GUID.");
+    return {};
+}
+
 void InxMaterial::SetTextureGuid(const std::string &name, const std::string &textureGuid)
 {
+    // GUID-only contract: normalize any legacy path-style reference here so
+    // every downstream consumer (cache keys, invalidation, dependency graph)
+    // sees a GUID. Empty result for unresolvable refs clears the slot.
+    const std::string normalized = ResolveToTextureGuid(textureGuid);
+
     // Early-out: skip if the GUID is already identical (avoids dirty flag + GPU rebuild).
     auto it = m_properties.find(name);
     if (it != m_properties.end() && it->second.type == MaterialPropertyType::Texture2D) {
         const auto *existing = std::get_if<std::string>(&it->second.value);
-        if (existing && *existing == textureGuid)
+        if (existing && *existing == normalized)
             return;
     }
 
-    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Texture2D, textureGuid};
+    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Texture2D, normalized};
     m_propertiesDirty = true;
     ++m_version;
 
     // Update dependency graph: this material depends on the texture (by GUID).
-    if (!m_guid.empty() && !textureGuid.empty()) {
-        AssetDependencyGraph::Instance().AddDependency(m_guid, textureGuid);
+    if (!m_guid.empty() && !normalized.empty()) {
+        AssetDependencyGraph::Instance().AddDependency(m_guid, normalized);
     }
 }
 
@@ -842,9 +910,11 @@ bool InxMaterial::Deserialize(const std::string &jsonStr)
                     break;
                 }
                 case MaterialPropertyType::Texture2D:
-                    // v2: texture GUID stored under "guid" key (only format)
+                    // v2: texture GUID stored under "guid" key (only format).
+                    // Normalize on load so legacy files that stored a path
+                    // under the "guid" key heal into real GUIDs transparently.
                     if (propJson.contains("guid")) {
-                        prop.value = propJson["guid"].get<std::string>();
+                        prop.value = ResolveToTextureGuid(propJson["guid"].get<std::string>());
                     } else {
                         prop.value = std::string{};
                     }
@@ -1058,7 +1128,8 @@ std::shared_ptr<InxMaterial> InxMaterial::CreateSkyboxProceduralMaterial()
     //   wound CW → front faces. Back-face culling removes the outside faces.
     // - No depth write (skybox should always be behind everything)
     // - Depth test <= (skybox writes z=1.0, passes only where nothing closer exists)
-    // - Render first in the opaque queue (low renderQueue)
+    // - renderQueue = EngineConfig::skyboxQueue (last; after opaque+transparent
+    //   and outside the shadow-caster range so it never casts shadows)
     RenderState state;
     state.cullMode = VK_CULL_MODE_BACK_BIT;
     state.frontFace = VK_FRONT_FACE_CLOCKWISE;
@@ -1066,7 +1137,7 @@ std::shared_ptr<InxMaterial> InxMaterial::CreateSkyboxProceduralMaterial()
     state.depthWriteEnable = false;
     state.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     state.blendEnable = false;
-    state.renderQueue = 32767; // After all opaque/transparent, outside shadow caster range
+    state.renderQueue = EngineConfig::Get().skyboxQueue; // After all opaque/transparent, outside shadow caster range
     material->SetRenderState(state);
 
     // Default sky properties (matching shader @property annotations)

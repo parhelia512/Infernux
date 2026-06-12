@@ -632,6 +632,13 @@ void Infernux::Cleanup()
     ShutdownPreviewTaskSystem();
 
     SaveImGuiLayout();
+
+    // Destroy all scenes/GameObjects FIRST: Collider destructors release
+    // their Jolt bodies (needs a live PhysicsWorld) and AudioSource
+    // destructors detach from the AudioEngine. Singletons are intentionally
+    // leaked, so this explicit call is the only place scene teardown happens.
+    SceneManager::Instance().Shutdown();
+
     AudioEngine::Instance().Shutdown();
     PhysicsWorld::Instance().Shutdown();
 
@@ -2270,15 +2277,24 @@ void Infernux::ReloadTexture(const std::string &texturePath)
         return;
     }
 
-    // Resolve path → GUID so that InvalidateTextureCache can match GUID-based cache keys
+    // Boundary adapter: this is the only place where the texture hot-reload
+    // path crosses from the file-system domain (paths, from file watchers)
+    // into the renderer domain (GUID-only). Resolve here or bail out.
     auto &registry = AssetRegistry::Instance();
     auto *adb = registry.GetAssetDatabase();
     std::string guid;
-    if (adb)
+    if (adb) {
         guid = adb->GetGuidFromPath(texturePath);
+        if (guid.empty()) {
+            // Unregistered texture (e.g. just created) — register to mint a GUID.
+            guid = adb->RegisterResource(texturePath, ResourceType::Texture);
+        }
+    }
 
     if (guid.empty()) {
-        INXLOG_WARN("Infernux::ReloadTexture: could not resolve GUID for '", texturePath, "'");
+        INXLOG_WARN("Infernux::ReloadTexture: could not resolve GUID for '", texturePath,
+                    "' — skipping GPU cache invalidation (GUID-only contract).");
+        return;
     }
 
     // Reload InxTexture metadata in AssetRegistry (import settings may have changed)
@@ -2294,12 +2310,12 @@ void Infernux::ReloadTexture(const std::string &texturePath)
         }
     }
 
-    // InvalidateTextureCache accepts both GUID and path — prefer GUID
-    m_renderer->InvalidateTextureCache(!guid.empty() ? guid : texturePath);
+    // GUID-only invalidation (path fallback removed by design).
+    m_renderer->InvalidateTextureCache(guid);
 
     // Fire graph notification so dependent materials get their pipelines
     // invalidated via the Texture Modified callback.
-    if (!guid.empty()) {
+    {
         auto dependents = AssetDependencyGraph::Instance().GetDependents(guid);
         INXLOG_INFO("Infernux::ReloadTexture: NotifyEvent guid=", guid, " dependents=", dependents.size());
         AssetDependencyGraph::Instance().NotifyEvent(guid, ResourceType::Texture, AssetEvent::Modified);

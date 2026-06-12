@@ -68,6 +68,16 @@ def _runtime_installer_info_for_machine() -> tuple[str, str]:
             "python-3.12.8-macos11.pkg",
             "https://www.python.org/ftp/python/3.12.8/python-3.12.8-macos11.pkg",
         )
+    if sys.platform.startswith("linux"):
+        # python.org publishes no Linux binaries; use the relocatable
+        # python-build-standalone "install_only" archive (Astral).
+        arch = "aarch64" if machine in {"arm64", "aarch64"} else "x86_64"
+        name = f"cpython-3.12.8+20241206-{arch}-unknown-linux-gnu-install_only.tar.gz"
+        return (
+            name,
+            "https://github.com/astral-sh/python-build-standalone/releases/download/"
+            f"20241206/cpython-3.12.8%2B20241206-{arch}-unknown-linux-gnu-install_only.tar.gz",
+        )
     if machine in {"amd64", "x86_64"}:
         return (
             "python-3.12.8-amd64.exe",
@@ -423,8 +433,30 @@ def _install_full_runtime(dest_root: str, *, installer_cache_root: str | None = 
             "Python 3.12 .pkg installation completed, but the framework was not found afterwards."
         )
 
+    if sys.platform.startswith("linux"):
+        # python-build-standalone "install_only" tarball: extract and relocate.
+        import tarfile
+
+        extract_root = dest_root + ".extract"
+        _remove_tree(extract_root)
+        os.makedirs(extract_root, exist_ok=True)
+        with tarfile.open(installer_path, "r:gz") as tar:
+            tar.extractall(extract_root)  # noqa: S202 — trusted release artifact
+        # Archive layout: python/{bin,lib,include,...}
+        inner = os.path.join(extract_root, "python")
+        if not os.path.isdir(inner):
+            raise SystemExit(
+                "Unexpected python-build-standalone archive layout: missing 'python/' root."
+            )
+        shutil.move(inner, dest_root)
+        _remove_tree(extract_root)
+        staged = os.path.join(dest_root, "bin", "python3.12")
+        if not _is_python312(staged):
+            raise SystemExit("Staged Linux Python runtime failed the 3.12 verification.")
+        return
+
     if sys.platform != "win32":
-        raise SystemExit("Bundled full Python staging is only supported on Windows and macOS.")
+        raise SystemExit("Bundled full Python staging is only supported on Windows, macOS, and Linux.")
 
     completed = _run([
         installer_path,

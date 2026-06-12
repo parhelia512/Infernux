@@ -49,6 +49,22 @@ set(SDL_SHARED ON CACHE BOOL "" FORCE)
 set(SDL_STATIC OFF CACHE BOOL "" FORCE)
 
 # Jolt Physics configuration
+#
+# SIMD baseline: distribution builds must run on CPUs without AVX (e.g. the
+# Pentium/Celeron parts that ship with Intel UHD 610 graphics). Jolt defaults
+# AVX/AVX2/F16C/LZCNT/TZCNT/FMADD to ON, which makes Jolt.dll's static
+# initializers execute AVX instructions and fail with WinError 1114 on such
+# machines (GitHub issue #47). Keep SSE4.2 (universal on x86-64 since ~2010)
+# and disable everything newer.
+set(USE_SSE4_1 ON CACHE BOOL "" FORCE)
+set(USE_SSE4_2 ON CACHE BOOL "" FORCE)
+set(USE_AVX OFF CACHE BOOL "" FORCE)
+set(USE_AVX2 OFF CACHE BOOL "" FORCE)
+set(USE_AVX512 OFF CACHE BOOL "" FORCE)
+set(USE_LZCNT OFF CACHE BOOL "" FORCE)
+set(USE_TZCNT OFF CACHE BOOL "" FORCE)
+set(USE_F16C OFF CACHE BOOL "" FORCE)
+set(USE_FMADD OFF CACHE BOOL "" FORCE)
 set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)   # pybind11 requires /MD (dynamic CRT)
 set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)                # Don't override parent project's CXX flags
 set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)      # Avoid LTO issues with pybind11 module

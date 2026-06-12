@@ -187,6 +187,9 @@ def _build_builtin_cached_plan(ctx: InxGUIContext, comp, props, lw, skip_fields,
         meta = cpp_prop.metadata
         cpp_attr = cpp_prop.cpp_attr
 
+        if getattr(meta, 'hidden', False):
+            continue
+
         if meta.visible_when is not None:
             try:
                 if not meta.visible_when(comp):
@@ -630,6 +633,9 @@ def render_multi_component(ctx: InxGUIContext, comps, *, is_native: bool):
         rows = []
         for py_name, cpp_prop in props:
             meta = cpp_prop.metadata
+            if getattr(meta, 'hidden', False):
+                continue
+
             if meta.visible_when is not None:
                 try:
                     if not all(meta.visible_when(comp) for comp in wrapped):
@@ -669,6 +675,9 @@ def render_multi_component(ctx: InxGUIContext, comps, *, is_native: bool):
         descriptors = []
         rows = []
         for field_name, metadata in fields.items():
+            if getattr(metadata, 'hidden', False):
+                continue
+
             if metadata.visible_when is not None:
                 try:
                     if not all(metadata.visible_when(comp) for comp in comps):
@@ -883,7 +892,10 @@ def _convert_batch_value(field_type, raw_value, enum_members):
         if 0 <= idx < len(enum_members):
             return enum_members[idx]
     if field_type == FieldType.COLOR:
-        return [raw_value[0], raw_value[1], raw_value[2], raw_value[3]]
+        from Infernux.components.serialized_field import normalize_rgba
+        return normalize_rgba([
+            raw_value[0], raw_value[1], raw_value[2], raw_value[3],
+        ])
     return raw_value
 
 
@@ -1096,6 +1108,9 @@ def render_py_component(ctx: InxGUIContext, py_comp):
             else:
                 _group_visible = True
         if not _group_visible:
+            continue
+
+        if getattr(metadata, 'hidden', False):
             continue
 
         if metadata.visible_when is not None:

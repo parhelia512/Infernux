@@ -89,7 +89,6 @@ def add_shadow_caster_pass(
     name: str = "ShadowCasterPass",
     queue_range: tuple[int, int] | None = None,
     light_index: int = 0,
-    shadow_type: str = "hard",
 ) -> None:
     with graph.add_pass(name) as p:
         p.write_depth(SHADOW_MAP_TEXTURE)
@@ -97,7 +96,6 @@ def add_shadow_caster_pass(
         p.draw_shadow_casters(
             queue_range=queue_range or shadow_caster_queue_range(),
             light_index=light_index,
-            shadow_type=shadow_type,
         )
 
 

@@ -20,8 +20,9 @@ namespace infernux
 
 AssetRegistry &AssetRegistry::Instance()
 {
-    static AssetRegistry instance;
-    return instance;
+    // Intentionally leaked — Shutdown() runs explicitly in Infernux::Cleanup().
+    static AssetRegistry *instance = new AssetRegistry();
+    return *instance;
 }
 
 // =============================================================================

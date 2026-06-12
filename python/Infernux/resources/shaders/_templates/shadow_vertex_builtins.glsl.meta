@@ -1,0 +1,57 @@
+{
+    "meta_version": 2,
+    "metadata": {
+        "character_count": {
+            "type": "size_t",
+            "value": 2045
+        },
+        "content_hash": {
+            "type": "string",
+            "value": "cef5490d8e06149a"
+        },
+        "encoding": {
+            "type": "string",
+            "value": "utf-8"
+        },
+        "file_extension": {
+            "type": "string",
+            "value": ".glsl"
+        },
+        "file_path": {
+            "type": "string",
+            "value": "E:/project/InfEngine/python/Infernux/resources/shaders/_templates/shadow_vertex_builtins.glsl"
+        },
+        "file_size": {
+            "type": "size_t",
+            "value": 2109
+        },
+        "file_type": {
+            "type": "string",
+            "value": "text"
+        },
+        "guid": {
+            "type": "string",
+            "value": "c1e9c0e7ebc499410088d70ddbceb43d"
+        },
+        "importer_version": {
+            "type": "int",
+            "value": 1
+        },
+        "is_readable": {
+            "type": "bool",
+            "value": true
+        },
+        "last_modified": {
+            "type": "string",
+            "value": "1777370493"
+        },
+        "line_count": {
+            "type": "size_t",
+            "value": 65
+        },
+        "resource_type": {
+            "type": "enum infernux::ResourceType",
+            "value": "DefaultText"
+        }
+    }
+}

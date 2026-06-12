@@ -866,8 +866,9 @@ void RegisterSceneBindings(py::module_ &m)
              "Get imported animation take duration in seconds")
         .def("submit_animation_pose", &SkinnedMeshRenderer::SubmitAnimationPose, py::arg("take_name"),
              py::arg("time_seconds"), py::arg("normalized_time"), py::arg("blend_take_name") = "",
-             py::arg("blend_time_seconds") = 0.0f, py::arg("blend_weight") = 0.0f,
-             "Submit active and blend animation state in one native call")
+             py::arg("blend_time_seconds") = 0.0f, py::arg("blend_weight") = 0.0f, py::arg("loop") = true,
+             "Submit active and blend animation state in one native call. "
+             "Empty take_name renders the bind pose; loop=False holds the end pose.")
         .def_property("runtime_animation_time", &SkinnedMeshRenderer::GetRuntimeAnimationTime,
                       &SkinnedMeshRenderer::SetRuntimeAnimationTime,
                       "Current clip time in seconds (runtime; driven by SkeletalAnimator)")
@@ -947,6 +948,8 @@ void RegisterSceneBindings(py::module_ &m)
         .def_property("shadows", &Light::GetShadows, &Light::SetShadows, "Shadow type (None, Hard, Soft)")
         .def_property("shadow_strength", &Light::GetShadowStrength, &Light::SetShadowStrength, "Shadow strength (0-1)")
         .def_property("shadow_bias", &Light::GetShadowBias, &Light::SetShadowBias, "Shadow depth bias")
+        .def_property("shadow_normal_bias", &Light::GetShadowNormalBias, &Light::SetShadowNormalBias,
+                      "Shadow normal-offset bias (world units along the surface normal)")
 
         // Shadow mapping matrices
         .def("get_light_view_matrix", &Light::GetLightViewMatrix, "Get the light's view matrix for shadow mapping")

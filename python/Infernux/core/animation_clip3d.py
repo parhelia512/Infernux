@@ -5,8 +5,10 @@ Serialized as ``.animclip3d`` JSON files.  This is the authoring-side
 counterpart to 2D :class:`AnimationClip` — it references a source model
 (typically ``.fbx``) and names an animation take embedded in that file.
 
-Runtime sampling / skinning lives in C++ (future milestones); this asset
-is intentionally simple and stable for Python workflows + AI tooling.
+This asset is a *take pointer*, not a keyframe container: runtime sampling,
+blending, and GPU skinning are implemented in C++ (``InxSkinnedMesh`` builds
+the bone palette; the vertex shader applies 4-influence skinning). Keep this
+class simple and stable for Python workflows + AI tooling.
 """
 
 from __future__ import annotations

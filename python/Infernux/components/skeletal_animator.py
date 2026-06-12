@@ -284,6 +284,10 @@ class SkeletalAnimator(InxComponent):
             return False
         return self._enter_state(name)
 
+    def cross_fade(self, state_name: str, duration: float) -> bool:
+        """Enter *state_name* blending over *duration* seconds (Unity-style)."""
+        return self._enter_state(state_name, fade_duration=max(float(duration), 0.0))
+
     def stop(self):
         self._playing = False
         self._clear_blend_state()
@@ -374,7 +378,7 @@ class SkeletalAnimator(InxComponent):
         self._clip_cache[key] = clip
         return clip
 
-    def _enter_state(self, state_name: str) -> bool:
+    def _enter_state(self, state_name: str, fade_duration: Optional[float] = None) -> bool:
         if not self._fsm:
             return False
         state = self._fsm.get_state(state_name)
@@ -392,7 +396,8 @@ class SkeletalAnimator(InxComponent):
         previous_speed = self._clip_effective_speed(previous_state, previous_clip)
 
         clip = self._resolve_clip(state)
-        self._start_blend_if_needed(previous_clip, previous_elapsed, previous_speed, clip)
+        self._start_blend_if_needed(previous_clip, previous_elapsed, previous_speed, clip,
+                                    fade_duration=fade_duration)
         self._current_state_name = state_name
         self._current_clip = clip
         self._elapsed = 0.0
@@ -435,14 +440,22 @@ class SkeletalAnimator(InxComponent):
         previous_elapsed: float,
         previous_speed: float,
         next_clip: Optional[AnimationClip3D],
+        fade_duration: Optional[float] = None,
     ) -> None:
         self._clear_blend_state()
         if previous_clip is None or next_clip is None:
             return
         prev_take = str(getattr(previous_clip, "take_name", "") or "")
         next_take = str(getattr(next_clip, "take_name", "") or "")
-        duration = max(float(getattr(self, "cross_fade_duration", 0.0) or 0.0), 0.0)
-        if duration <= 0.0 or not prev_take or not next_take or prev_take == next_take:
+        # Per-transition duration (AnimTransition.duration / cross_fade()) wins;
+        # the component-level cross_fade_duration is only the fallback.
+        if fade_duration is not None:
+            duration = max(float(fade_duration), 0.0)
+        else:
+            duration = max(float(getattr(self, "cross_fade_duration", 0.0) or 0.0), 0.0)
+        # Same-take fades are supported natively (different sample times), so
+        # only an actually-missing take disables blending.
+        if duration <= 0.0 or not prev_take or not next_take:
             return
         self._blend_from_clip = previous_clip
         self._blend_from_take_name = prev_take
@@ -500,7 +513,13 @@ class SkeletalAnimator(InxComponent):
             return
         submit_pose = getattr(cpp, "submit_animation_pose", None)
         if callable(submit_pose):
-            take_name = self.current_take_name if self._playing and self._current_clip is not None else ""
+            # A finished non-looping clip keeps submitting its take with
+            # loop=False so the native sampler holds the END pose; an empty
+            # take renders the bind pose (mesh always stays visible).
+            has_clip = self._current_clip is not None and bool(self.current_take_name)
+            take_name = self.current_take_name if has_clip else ""
+            state = self._get_current_state()
+            loop = bool(state.loop) if state is not None else True
             normalized = float(self.normalized_time) if take_name else 0.0
             blend_take = ""
             blend_time = 0.0
@@ -517,6 +536,7 @@ class SkeletalAnimator(InxComponent):
                 blend_take,
                 blend_time,
                 blend_weight,
+                loop,
             )
             self._last_native_take_name = take_name
             return
@@ -563,7 +583,11 @@ class SkeletalAnimator(InxComponent):
         for tr in state.transitions:
             if self._evaluate_condition(tr):
                 self._consume_triggers(tr.condition)
-                self._enter_state(tr.target_state)
+                # AnimTransition.duration (authored in the FSM editor) drives
+                # this specific fade; <= 0 falls back to cross_fade_duration.
+                tr_duration = float(getattr(tr, "duration", 0.0) or 0.0)
+                self._enter_state(tr.target_state,
+                                  fade_duration=tr_duration if tr_duration > 0.0 else None)
                 return
 
     def _evaluate_condition(self, transition: AnimTransition) -> bool:
@@ -594,6 +618,10 @@ class SkeletalAnimator(InxComponent):
             return False
 
     def _consume_triggers(self, condition: str):
+        # Identifier-boundary matching: a trigger named "attack" must NOT be
+        # consumed by a condition that references "is_attacking".
+        import re
+        identifiers = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", condition or ""))
         for name, val in list(self._parameters.items()):
-            if val is True and name in condition:
+            if val is True and name in identifiers:
                 self._parameters[name] = False

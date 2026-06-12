@@ -1,0 +1,57 @@
+{
+    "meta_version": 2,
+    "metadata": {
+        "character_count": {
+            "type": "size_t",
+            "value": 3841
+        },
+        "content_hash": {
+            "type": "string",
+            "value": "ac29f44bedeed9a9"
+        },
+        "encoding": {
+            "type": "string",
+            "value": "utf-8"
+        },
+        "file_extension": {
+            "type": "string",
+            "value": ".glsl"
+        },
+        "file_path": {
+            "type": "string",
+            "value": "E:/project/InfEngine/python/Infernux/resources/shaders/lib/depth.glsl"
+        },
+        "file_size": {
+            "type": "size_t",
+            "value": 3930
+        },
+        "file_type": {
+            "type": "string",
+            "value": "text"
+        },
+        "guid": {
+            "type": "string",
+            "value": "4b5a28ca3af20300da1f100a9099dce0"
+        },
+        "importer_version": {
+            "type": "int",
+            "value": 1
+        },
+        "is_readable": {
+            "type": "bool",
+            "value": true
+        },
+        "last_modified": {
+            "type": "string",
+            "value": "1774891199"
+        },
+        "line_count": {
+            "type": "size_t",
+            "value": 90
+        },
+        "resource_type": {
+            "type": "enum infernux::ResourceType",
+            "value": "DefaultText"
+        }
+    }
+}

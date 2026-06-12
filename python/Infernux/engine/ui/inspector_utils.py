@@ -364,6 +364,9 @@ def has_field_changed(field_type, old_value, new_value) -> bool:
             return not float_close(float(new_value), float(old_value))
     elif field_type in (FieldType.VEC2, FieldType.VEC3, FieldType.VEC4):
         return new_value is not old_value
+    elif field_type == FieldType.COLOR:
+        from Infernux.components.serialized_field import rgba_equal
+        return not rgba_equal(old_value, new_value)
     return new_value != old_value
 
 
@@ -774,13 +777,19 @@ def _ensure_prop_map():
         FieldType.VEC3:   PROP_VEC3,
         FieldType.VEC4:   PROP_VEC4,
         FieldType.ENUM:   PROP_ENUM,
-        FieldType.COLOR:  PROP_COLOR,
+        # COLOR intentionally omitted — rendered via Python _render_color_bar
+        # (Unity long-bar style, same as material ptype-7).  C++ PROP_COLOR uses
+        # ImGui::ColorEdit4 (numeric fields + square swatch) and must not be
+        # used for component serialized fields.
     }
 
 
 def is_batch_renderable(field_type) -> bool:
     """Return True if this FieldType can be handled by C++ batch renderer."""
+    from Infernux.components.serialized_field import FieldType
     _ensure_prop_map()
+    if field_type == FieldType.COLOR:
+        return False
     return field_type in _FIELD_TYPE_TO_PROP
 
 
@@ -849,14 +858,7 @@ def build_scalar_desc(
             desc["ei"] = find_enum_index(members, current_value)
         else:
             return None  # can't render without enum info
-    elif prop_type == PROP_COLOR:
-        if current_value is not None:
-            desc["f"] = float(current_value[0])
-            desc["f2"] = float(current_value[1])
-            desc["f3"] = float(current_value[2])
-            desc["f4"] = float(current_value[3])
-        else:
-            desc["f"] = 1.0; desc["f2"] = 1.0; desc["f3"] = 1.0; desc["f4"] = 1.0
+    # PROP_COLOR: only if COLOR is re-added to _FIELD_TYPE_TO_PROP (not used today).
 
     # --- Metadata ---
     if metadata.range:

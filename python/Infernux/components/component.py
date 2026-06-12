@@ -111,93 +111,113 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
         
         # Always create a fresh dict for this class (don't inherit from parent)
         cls._serialized_fields_ = {}
-        
-        # Collect own-class annotations for the annotation-only pass below
-        own_annotations = cls.__dict__.get('__annotations__', {})
 
-        # Only scan attributes defined directly on this class (not inherited)
+        from .serialized_field import (
+            FieldMetadata, HiddenField, SerializedFieldDescriptor,
+            build_field_from_annotation, get_annotation_default,
+            infer_field_type_from_value, _UNSET, _unwrap_annotation,
+            _apply_markers, NON_SERIALIZED_FIELD,
+        )
+
+        # ── Resolve own-class annotations once ──────────────────────────
+        # String annotations (incl. files using ``from __future__ import
+        # annotations``) are evaluated against the defining module's globals
+        # so Annotated[...]/Optional[...] survive. Resolution is per-name —
+        # a single unresolvable forward ref must not poison the others
+        # (deliberately NOT typing.get_type_hints, which walks the whole MRO
+        # and fails wholesale on any base-class forward reference).
+        own_annotations = dict(cls.__dict__.get('__annotations__', {}))
+        resolved_hints: dict = {}
+        if own_annotations:
+            import sys as _sys
+            _module = _sys.modules.get(cls.__module__)
+            _globalns = getattr(_module, '__dict__', {})
+            for _k, _v in own_annotations.items():
+                if isinstance(_v, str):
+                    try:
+                        resolved_hints[_k] = eval(_v, _globalns, dict(vars(cls)))  # noqa: S307
+                    except Exception:
+                        pass  # keep raw string → legacy resolve_annotation path
+                else:
+                    resolved_hints[_k] = _v
+
+        def _annotation_for(name):
+            return resolved_hints.get(name, own_annotations.get(name))
+
+        # ── Pass 1: attributes with a class-level value ──────────────────
         for attr_name in list(cls.__dict__):
             if attr_name.startswith('_'):
                 continue
-            
-            # Get the raw attribute from class __dict__ to avoid descriptor protocol
+
+            # Raw attribute from class __dict__ (avoids descriptor protocol)
             attr = cls.__dict__[attr_name]
-            
-            # Skip methods, properties, classmethods, staticmethods
-            if callable(attr):
+
+            if callable(attr) or isinstance(attr, (property, classmethod, staticmethod)):
                 continue
-            if isinstance(attr, (property, classmethod, staticmethod)):
-                continue
-            
-            # Register this field if it's a simple value or FieldMetadata
-            from .serialized_field import (
-                FieldMetadata, HiddenField, SerializedFieldDescriptor,
-                infer_field_type_from_value, resolve_annotation,
-            )
-            
-            # Skip hidden fields (marked with hide_field())
             if isinstance(attr, HiddenField):
                 continue
 
+            ann = _annotation_for(attr_name)
+
             # CppProperty — delegates to a C++ component attribute.
-            # Recognised via duck-typing marker to avoid circular imports
-            # with builtin_component.py.
             if getattr(attr, '_is_cpp_property', False):
                 if hasattr(attr, 'metadata'):
                     attr.metadata.name = attr_name
                     cls._serialized_fields_[attr_name] = attr.metadata
                 continue
-            
-            # SerializedFieldDescriptor — __set_name__ already stored its
-            # metadata, but we wiped _serialized_fields_ above.  Restore it.
+
+            # serialized_field() descriptor — keep it, but fold in any
+            # Annotated[] markers from a coexisting type annotation so
+            # ``speed: Annotated[float, Range(0, 1)] = serialized_field(0.5)``
+            # composes naturally.
             if isinstance(attr, SerializedFieldDescriptor):
-                cls._serialized_fields_[attr_name] = attr.metadata
-            elif isinstance(attr, FieldMetadata):
-                # Already a field metadata object
-                cls._serialized_fields_[attr_name] = attr
-            elif attr is None:
-                # Value is None — check type annotation for reference types
-                # e.g. ``text: UIText = None`` or ``mat: Material = None``
-                ann = own_annotations.get(attr_name)
                 if ann is not None:
-                    meta = resolve_annotation(ann)
-                    if meta is not None:
-                        meta.name = attr_name
-                        descriptor = SerializedFieldDescriptor(meta)
-                        descriptor.__set_name__(cls, attr_name)
-                        setattr(cls, attr_name, descriptor)
-                        cls._serialized_fields_[attr_name] = meta
-            else:
-                # Create metadata AND a descriptor from the plain value.
-                # This ensures __set__ is intercepted for dirty-tracking
-                # and undo recording, just like serialized_field() fields.
+                    _base, markers = _unwrap_annotation(ann)
+                    if markers and _apply_markers(attr.metadata, markers) is None:
+                        # NonSerialized marker wins: drop the field entirely.
+                        delattr(cls, attr_name)
+                        continue
+                cls._serialized_fields_[attr_name] = attr.metadata
+                continue
+
+            if isinstance(attr, FieldMetadata):
+                cls._serialized_fields_[attr_name] = attr
+                continue
+
+            # Annotation present → annotation drives the field type; the
+            # class value becomes the default (Unity-style declaration).
+            metadata = None
+            if ann is not None:
+                metadata = build_field_from_annotation(ann, default=attr)
+                if metadata is NON_SERIALIZED_FIELD:
+                    # Explicitly excluded: keep the plain class attribute as-is
+                    # (regular Python attr, not serialized, not in Inspector).
+                    continue
+
+            # No (usable) annotation → infer from the plain value.
+            if metadata is None:
+                if attr is None:
+                    continue  # bare ``x = None`` with no usable annotation
                 from enum import Enum as _Enum
                 field_type = infer_field_type_from_value(attr)
-                enum_type = type(attr) if isinstance(attr, _Enum) else None
                 metadata = FieldMetadata(
                     name=attr_name,
                     field_type=field_type,
                     default=attr,
-                    enum_type=enum_type,
+                    enum_type=type(attr) if isinstance(attr, _Enum) else None,
                 )
-                descriptor = SerializedFieldDescriptor(metadata)
-                descriptor.__set_name__(cls, attr_name)
-                setattr(cls, attr_name, descriptor)
-                cls._serialized_fields_[attr_name] = metadata
 
-        # ── Annotation-only pass: fields with a type hint but no value ──
-        # e.g. ``text: UIText`` (no ``= ...`` at all)
-        from .serialized_field import (
-            FieldMetadata, HiddenField, SerializedFieldDescriptor,
-            get_annotation_default, resolve_annotation,
-        )
-        for attr_name, ann in own_annotations.items():
-            # Skip if already processed above (has an entry in __dict__)
-            if attr_name in cls.__dict__:
+            metadata.name = attr_name
+            descriptor = SerializedFieldDescriptor(metadata)
+            descriptor.__set_name__(cls, attr_name)
+            setattr(cls, attr_name, descriptor)
+            cls._serialized_fields_[attr_name] = metadata
+
+        # ── Pass 2: annotation-only fields (no ``= value``) ─────────────
+        for attr_name in own_annotations:
+            if attr_name in cls.__dict__ or attr_name in cls._serialized_fields_:
                 continue
-            # Skip if already registered (e.g. inherited descriptor)
-            if attr_name in cls._serialized_fields_:
-                continue
+            ann = _annotation_for(attr_name)
 
             if attr_name.startswith('_'):
                 default_value = get_annotation_default(ann)
@@ -207,13 +227,15 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
                     setattr(cls, attr_name, hidden)
                 continue
 
-            meta = resolve_annotation(ann)
-            if meta is not None:
-                meta.name = attr_name
-                descriptor = SerializedFieldDescriptor(meta)
+            metadata = build_field_from_annotation(ann, default=_UNSET)
+            if metadata is NON_SERIALIZED_FIELD:
+                continue
+            if metadata is not None:
+                metadata.name = attr_name
+                descriptor = SerializedFieldDescriptor(metadata)
                 descriptor.__set_name__(cls, attr_name)
                 setattr(cls, attr_name, descriptor)
-                cls._serialized_fields_[attr_name] = meta
+                cls._serialized_fields_[attr_name] = metadata
 
         # ── Register numeric fields with C++ ComponentDataStore ──
         from ._cds_bridge import register_class as _cds_register

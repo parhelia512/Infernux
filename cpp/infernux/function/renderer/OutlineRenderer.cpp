@@ -461,7 +461,7 @@ void OutlineRenderer::CreateOutlineDescriptorResources()
 
         // Write scene UBO to binding 0
         VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = m_core->GetUniformBuffer(0);
+        bufferInfo.buffer = m_core->GetSceneUbo();
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(UniformBufferObject);
         vkrender::UpdateDescriptorSetWithBuffer(device, m_outlineMaskDescSet, kOutlineSceneUBOBinding,
@@ -893,7 +893,7 @@ VkDescriptorSet OutlineRenderer::GetOrCreateMtlOutlineDescSet(InxMaterial *mater
 
     // Binding 0: scene UBO (same as the fixed outline mask)
     VkDescriptorBufferInfo sceneBufInfo{};
-    sceneBufInfo.buffer = m_core->GetUniformBuffer(0);
+    sceneBufInfo.buffer = m_core->GetSceneUbo();
     sceneBufInfo.offset = 0;
     sceneBufInfo.range = sizeof(UniformBufferObject);
     vkrender::UpdateDescriptorSetWithBuffer(device, descSet, kOutlineSceneUBOBinding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -908,7 +908,7 @@ VkDescriptorSet OutlineRenderer::GetOrCreateMtlOutlineDescSet(InxMaterial *mater
         vertMatBufInfo.offset = 0;
         vertMatBufInfo.range = renderData->materialDescSet->vertexMaterialUBO->GetSize();
     } else {
-        vertMatBufInfo.buffer = m_core->GetUniformBuffer(0);
+        vertMatBufInfo.buffer = m_core->GetSceneUbo();
         vertMatBufInfo.offset = 0;
         vertMatBufInfo.range = sizeof(UniformBufferObject);
     }

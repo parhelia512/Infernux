@@ -657,8 +657,9 @@ class AssetManager:
         guid = cls._get_guid_from_path(path)
         native = cls._native_engine()
         if native is not None and hasattr(native, 'reload_texture'):
-            # Always pass the file path — C++ ReloadTexture() calls
-            # GetGuidFromPath() internally, which fails if given a GUID string.
+            # ReloadTexture(path) is the designated file-system → GUID boundary
+            # adapter: it resolves (or registers) the GUID once, then the whole
+            # renderer-side invalidation chain runs GUID-only.
             native.reload_texture(path)
         # Evict from the Python-side strong cache
         if guid:

@@ -188,10 +188,19 @@ class Light(BuiltinComponent):
     shadow_bias = CppProperty(
         "shadow_bias",
         FieldType.FLOAT,
-            default=0.0,
+        default=0.0,
         range=(0.0, 1),
         visible_when=lambda comp: int(comp.shadows) > 0,
         tooltip="Shadow depth bias",
+    )
+    shadow_normal_bias = CppProperty(
+        "shadow_normal_bias",
+        FieldType.FLOAT,
+        default=0.01,
+        range=(0.0, 0.5),
+        visible_when=lambda comp: int(comp.shadows) > 0,
+        tooltip="Normal-offset bias in world units (pushes the sampling "
+                "position along the surface normal to fight shadow acne)",
     )
 
     # ------------------------------------------------------------------

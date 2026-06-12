@@ -833,6 +833,10 @@ class NuitkaBuilder:
     ):
         self.entry_script = os.path.abspath(entry_script)
         self.output_dir = os.path.abspath(output_dir)
+        # Platform-normalized executable name: the Windows-style ".exe"
+        # default is stripped on Linux/macOS so callers don't need to care.
+        if sys.platform != "win32" and output_filename.lower().endswith(".exe"):
+            output_filename = output_filename[:-4]
         self.output_filename = output_filename
         self.product_name = product_name
         self.file_version = file_version
@@ -996,7 +1000,6 @@ class NuitkaBuilder:
             self._builder_python, "-m", "nuitka",
             "--standalone",
             "--assume-yes-for-downloads",
-            f"--windows-console-mode={self.console_mode}",
             "--follow-imports",
             f"--output-dir={self._staging_dir}",
             f"--output-filename={self.output_filename}",
@@ -1009,6 +1012,7 @@ class NuitkaBuilder:
         ]
 
         if sys.platform == "win32":
+            cmd.append(f"--windows-console-mode={self.console_mode}")
             if not _has_msvc_toolchain():
                 raise RuntimeError(
                     "Windows game builds require Microsoft Visual C++ Build Tools (MSVC).\n"
@@ -1019,6 +1023,12 @@ class NuitkaBuilder:
             # cl/link/rc/mt + Windows SDK environment before spawning Nuitka;
             # forcing "latest" makes SCons run its own VS/SDK discovery again,
             # which is exactly what fails on some machines with a valid SDK.
+        elif sys.platform.startswith("linux"):
+            if shutil.which("gcc") is None and shutil.which("clang") is None:
+                raise RuntimeError(
+                    "Linux game builds require a C compiler for Nuitka.\n"
+                    "Install one with: sudo apt-get install build-essential"
+                )
 
         # Link-time optimization for smaller and faster binaries
         if self.lto:
@@ -1339,21 +1349,33 @@ class NuitkaBuilder:
         # search (the .exe directory is always searched).
         dist_root = Path(dist_dir)
 
-        # List of native files to inject
+        # List of native files to inject — platform-filtered so a lib dir
+        # that was synced across machines never ships foreign binaries.
+        if sys.platform == "win32":
+            wanted = (".pyd", ".dll")
+        elif sys.platform == "darwin":
+            wanted = (".so", ".dylib")
+        else:
+            wanted = (".so",)
         native_files = []
         for f in lib_dir.iterdir():
-            if f.is_file() and f.suffix.lower() in (".pyd", ".dll"):
+            if f.is_file() and f.suffix.lower() in wanted:
+                native_files.append(f)
+            elif f.is_file() and f.name.startswith("lib") and ".so" in f.name and sys.platform.startswith("linux"):
+                # Versioned sonames like libSDL3.so.0
                 native_files.append(f)
 
         for src in native_files:
-            # .pyd goes into the package subdir (for relative import)
+            # Native modules + shared libs go into the package subdir; on
+            # Linux/macOS the module's RPATH ($ORIGIN/@loader_path) finds its
+            # dependencies right there.
             dst_pkg = target_dir / src.name
             if not dst_pkg.exists():
                 shutil.copy2(src, dst_pkg)
                 Debug.log_internal(f"  Injected (lib): {src.name}")
 
-            # DLLs also go into the dist root (for OS DLL search path)
-            if src.suffix.lower() == ".dll":
+            # DLLs also go into the dist root (Windows searches the .exe dir)
+            if sys.platform == "win32" and src.suffix.lower() == ".dll":
                 dst_root = dist_root / src.name
                 if not dst_root.exists():
                     shutil.copy2(src, dst_root)

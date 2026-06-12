@@ -10,8 +10,9 @@ namespace infernux
 
 ComponentDataStore &ComponentDataStore::Instance()
 {
-    static ComponentDataStore instance;
-    return instance;
+    // Intentionally leaked (see SceneManager::Instance).
+    static ComponentDataStore *instance = new ComponentDataStore();
+    return *instance;
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────

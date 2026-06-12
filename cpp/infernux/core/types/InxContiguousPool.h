@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef> // size_t (MSVC headers leak it; GCC/Clang do not)
 #include <cstdint>
 #include <type_traits>
 #include <vector>

@@ -268,8 +268,8 @@ bool GPUMeshPreview::RenderToPixels(const InxMesh &mesh, const std::vector<std::
     const uint32_t frameIndex =
         m_vkCore->GetSwapchain().GetCurrentFrame() % std::max(1u, m_vkCore->GetMaxFramesInFlight());
 
-    VkBuffer sceneUBOBuf = m_vkCore->GetUniformBuffer(0);
-    VkBuffer lightingUBOBuf = m_vkCore->GetLightingUBO(0);
+    VkBuffer sceneUBOBuf = m_vkCore->GetSceneUbo();
+    VkBuffer lightingUBOBuf = m_vkCore->GetLightingUbo();
     VkBuffer globalsUBOBuf = m_vkCore->GetGlobalsBuffer(frameIndex);
     VkBuffer instanceSSBOBuf = m_vkCore->GetInstanceSSBO(frameIndex);
 

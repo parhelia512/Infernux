@@ -9,6 +9,7 @@
 #include "gui/InxResourcePreviewer.h"
 #include <function/editor/ConsolePanel.h>
 #include <function/editor/EditorPanel.h>
+#include <function/editor/EditorThemeRegistry.h>
 #include <function/editor/HierarchyPanel.h>
 #include <function/editor/InspectorPanel.h>
 #include <function/editor/MenuBarPanel.h>
@@ -179,6 +180,38 @@ py::dict EncodePropertyChanges(const std::vector<PropertyChange> &changes)
 
 void RegisterGUIBindings(py::module_ &m)
 {
+    // ── Editor theme single source of truth ─────────────────────────────
+    // Python's Theme class calls these once at import and overrides its
+    // class attributes by name, so styling is defined in C++
+    // (EditorThemeTable.inl) and can't be drifted from Python.
+    m.def(
+        "get_editor_theme_colors",
+        []() {
+            py::dict out;
+            for (const auto &[name, c] : EditorThemeRegistry::Colors())
+                out[py::str(name)] = py::make_tuple(c.x, c.y, c.z, c.w);
+            return out;
+        },
+        "Editor theme RGBA colors keyed by constant name (single source of truth)");
+    m.def(
+        "get_editor_theme_vec2s",
+        []() {
+            py::dict out;
+            for (const auto &[name, v] : EditorThemeRegistry::Vec2s())
+                out[py::str(name)] = py::make_tuple(v.x, v.y);
+            return out;
+        },
+        "Editor theme 2D size/padding constants keyed by name");
+    m.def(
+        "get_editor_theme_floats",
+        []() {
+            py::dict out;
+            for (const auto &[name, f] : EditorThemeRegistry::Floats())
+                out[py::str(name)] = f;
+            return out;
+        },
+        "Editor theme scalar constants keyed by name");
+
     py::class_<PropertyBatchPlan, std::shared_ptr<PropertyBatchPlan>>(m, "PropertyBatchPlan")
         .def_property_readonly("size",
                                [](const PropertyBatchPlan &plan) { return static_cast<int>(plan.descriptors.size()); });
