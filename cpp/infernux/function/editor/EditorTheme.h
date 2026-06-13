@@ -101,6 +101,14 @@ constexpr ImVec4 PREFAB_TEXT{235.0f / 255.0f, 87.0f / 255.0f, 87.0f / 255.0f, 1.
 constexpr ImVec4 TEXT_DISABLED{0.40f, 0.40f, 0.40f, 1.0f};
 constexpr ImVec4 DND_REORDER_LINE{1.0f, 1.0f, 1.0f, 0.90f};
 constexpr ImVec4 DND_PARENT_OUTLINE{1.0f, 1.0f, 1.0f, 0.95f};
+
+// ── Project panel — model expand strip & embedded sub-assets ─────────
+constexpr ImVec4 PROJECT_EXPAND_STRIP_BG{0.22f, 0.22f, 0.24f, 1.0f};
+constexpr ImVec4 PROJECT_EXPAND_STRIP_HOVER{0.32f, 0.28f, 0.28f, 1.0f};
+constexpr ImVec4 PROJECT_SUBASSET_CELL_BG{0.17f, 0.17f, 0.19f, 0.94f};
+constexpr ImVec4 PROJECT_SUBASSET_ACCENT{ACCENT_R * 0.70f, ACCENT_G * 0.70f, ACCENT_B * 0.70f, 0.90f};
+constexpr float PROJECT_SUBASSET_ACCENT_W = 3.0f;
+
 constexpr float DND_REORDER_LINE_THICKNESS = 2.0f;
 constexpr float DND_PARENT_OUTLINE_THICKNESS = 1.5f;
 constexpr float DND_REORDER_SEPARATOR_H = 6.0f;

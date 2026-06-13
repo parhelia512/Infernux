@@ -317,6 +317,27 @@ def read_meta_file(asset_path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def read_meta_guid(asset_path: str) -> str:
+    """Return the asset GUID stored in the ``.meta`` sidecar (metadata map or legacy root)."""
+    meta_path = asset_path + ".meta"
+    if not os.path.isfile(meta_path):
+        return ""
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            root = json.load(f)
+        root_guid = root.get("guid")
+        if isinstance(root_guid, str) and root_guid.strip():
+            return root_guid.strip()
+        meta = read_meta_file(asset_path)
+        if meta:
+            guid = meta.get("guid")
+            if isinstance(guid, str):
+                return guid.strip()
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return ""
+
+
 def write_meta_fields(asset_path: str, updates: Dict[str, Any]) -> bool:
     """Update specific fields in a .meta file, preserving everything else.
 

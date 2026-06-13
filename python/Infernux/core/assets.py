@@ -685,6 +685,22 @@ class AssetManager:
         if guid:
             cls._cache.pop(guid, None)
 
+    @classmethod
+    def _invalidate_project_panel_cache(cls) -> None:
+        """Refresh Project Panel listing (embedded materials/animations depend on .meta)."""
+        try:
+            from Infernux.engine.bootstrap import EditorBootstrap
+            bs = EditorBootstrap.instance()
+            pp = getattr(bs, "project_panel", None) if bs else None
+            if pp is not None:
+                pp.invalidate_dir_cache()
+                native = cls._native_engine()
+                if native is not None and hasattr(native, "request_full_speed_frame"):
+                    native.request_full_speed_frame()
+        except Exception as exc:
+            from Infernux.debug import Debug
+            Debug.log_suppressed("AssetManager._invalidate_project_panel_cache", exc)
+
     @staticmethod
     def _normalize_asset_path(path: str) -> str:
         if not path:
@@ -919,3 +935,14 @@ class AssetManager:
         if ext in IMAGE_EXTENSIONS:
             cls._invalidate_texture_ui_cache(path)
             cls._schedule_gpu_texture_reload(path)
+
+        from Infernux.core.asset_types import MESH_EXTENSIONS
+        if ext in MESH_EXTENSIONS:
+            cls._reload_mesh_asset(path)
+
+        cls._emit_editor_asset_changed(path, "modified")
+
+    @classmethod
+    def invalidate_project_panel_cache(cls) -> None:
+        """Refresh Project Panel listing after meta/import changes (explicit call only)."""
+        cls._invalidate_project_panel_cache()

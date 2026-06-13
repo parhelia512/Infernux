@@ -677,7 +677,7 @@ void Infernux::InitPreviewTaskSystem(uint32_t workerCount)
                     m_previewTaskCv.wait(lock,
                                          [this]() { return m_previewStopRequested || !m_previewTaskQueue.empty(); });
 
-                    if (m_previewStopRequested && m_previewTaskQueue.empty())
+                    if (m_previewStopRequested)
                         return;
 
                     item = std::move(m_previewTaskQueue.front());
@@ -701,6 +701,8 @@ void Infernux::ShutdownPreviewTaskSystem()
     {
         std::lock_guard<std::mutex> lock(m_previewTaskMutex);
         m_previewStopRequested = true;
+        std::queue<PreviewTaskItem> empty;
+        m_previewTaskQueue.swap(empty);
     }
     m_previewTaskCv.notify_all();
 
@@ -711,20 +713,20 @@ void Infernux::ShutdownPreviewTaskSystem()
     m_previewWorkers.clear();
 
     {
-        std::lock_guard<std::mutex> lock(m_previewTaskMutex);
-        std::queue<PreviewTaskItem> empty;
-        m_previewTaskQueue.swap(empty);
-    }
-    {
         std::lock_guard<std::mutex> lock(m_previewResultMutex);
         std::queue<MaterialPreviewCompleted> empty;
         m_previewCompletedQueue.swap(empty);
         std::queue<TexturePreviewCompleted> emptyTex;
         m_texturePreviewCompletedQueue.swap(emptyTex);
+        std::queue<MeshPreviewCompleted> emptyMesh;
+        m_meshPreviewCompletedQueue.swap(emptyMesh);
         std::queue<MaterialPreviewRequest> emptyReq;
         m_previewRequestQueue.swap(emptyReq);
+        std::queue<MeshPreviewRequest> emptyMeshReq;
+        m_meshPreviewRequestQueue.swap(emptyMeshReq);
         m_materialPreviewStates.clear();
         m_texturePreviewStates.clear();
+        m_meshPreviewStates.clear();
     }
 
     m_previewTaskSystemInitialized = false;
@@ -737,6 +739,8 @@ void Infernux::EnqueuePreviewTask(std::function<void()> fn)
 
     {
         std::lock_guard<std::mutex> lock(m_previewTaskMutex);
+        if (m_previewStopRequested)
+            return;
         m_previewTaskQueue.push(PreviewTaskItem{std::move(fn)});
     }
     m_previewTaskCv.notify_one();
@@ -857,6 +861,10 @@ uint64_t Infernux::QueryOrScheduleMaterialPreview(const std::string &resourceKey
         if (materialJson.empty())
             state.generation++;
     }
+
+    // First request: generation was never bumped (e.g. embedded ::submat: paths with no mtime hint).
+    if (state.generation == 0)
+        state.generation = 1;
 
     // ── Already up-to-date? ─────────────────────────────────────
     if (state.readyGeneration == state.generation && state.textureId != 0)

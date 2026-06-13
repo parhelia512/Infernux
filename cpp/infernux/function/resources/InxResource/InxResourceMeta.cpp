@@ -44,8 +44,8 @@ std::string ComputeContentHashHex(const char *content, size_t contentSize)
 // ----------------------------------
 void InxResourceMeta::Init(const char *content, size_t contentSize, const std::string &filePath, ResourceType type)
 {
-    // Store resource path in metadata
-    AddMetadata("file_path", filePath);
+    // Store resource path in metadata (always forward-slash UTF-8 for stable lookups)
+    AddMetadata("file_path", FromFsPath(ToFsPath(filePath)));
     // Set resource type
     AddMetadata("resource_type", type);
 

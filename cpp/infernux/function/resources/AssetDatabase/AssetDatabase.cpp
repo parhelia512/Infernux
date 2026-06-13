@@ -274,10 +274,14 @@ const InxResourceMeta *AssetDatabase::GetMetaByGuid(const std::string &guid) con
 
 const InxResourceMeta *AssetDatabase::GetMetaByPath(const std::string &path) const
 {
+    if (path.empty())
+        return nullptr;
+
+    const std::string normPath = NormalizePath(path);
     for (const auto &[guid, meta] : m_metas) {
         if (meta->HasKey("file_path")) {
             std::string metaPath = meta->GetDataAs<std::string>("file_path");
-            if (metaPath == path) {
+            if (metaPath == path || NormalizePath(metaPath) == normPath) {
                 return meta.get();
             }
         }
@@ -722,6 +726,9 @@ void AssetDatabase::ModifyResource(const std::string &path)
     if (fs::exists(fsMetaPath) && meta.LoadFromFile(metaPath)) {
         existingGuid = meta.GetGuid();
     }
+    if (existingGuid.empty()) {
+        existingGuid = GetGuidFromPath(path);
+    }
 
     auto loaderIt = m_loaders.find(type);
     if (loaderIt == m_loaders.end()) {
@@ -731,6 +738,7 @@ void AssetDatabase::ModifyResource(const std::string &path)
 
     InxResourceMeta newMeta;
     loaderIt->second->CreateMeta(content.data(), content.size(), path, newMeta);
+    newMeta.AddMetadata("file_path", FromFsPath(ToFsPath(path)));
 
     if (fs::exists(fsMetaPath) && meta.GetMetadata().size() > 0) {
         for (const auto &[key, metaPair] : meta.GetMetadata()) {

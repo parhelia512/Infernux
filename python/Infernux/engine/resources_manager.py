@@ -35,6 +35,24 @@ class ResourceChangeHandler(FileSystemEventHandler):
         # Get AssetDatabase for resource registration
         self._asset_database = engine.get_asset_database()
 
+    @staticmethod
+    def _is_meta_sidecar_path(file_path: str) -> bool:
+        lower = file_path.replace("\\", "/").lower()
+        return lower.endswith(".meta") and not lower.endswith(".meta.tmp")
+
+    @staticmethod
+    def _owner_path_for_meta_sidecar(meta_path: str) -> str:
+        return meta_path[:-5]
+
+    def _queue_meta_missing_rebuild(self, owner_path: str) -> None:
+        """Queue meta regeneration when the .meta sidecar was deleted but the asset file remains."""
+        if not owner_path or not os.path.isfile(owner_path):
+            return
+        with self._queue_lock:
+            key = ("meta_missing", owner_path)
+            if key not in self._pending_reload_queue:
+                self._pending_reload_queue.append(key)
+
     def _should_ignore(self, file_path: str) -> bool:
         """Ignore meta/temp/cache files to avoid GUID churn and noisy events."""
         lower = file_path.replace("\\", "/").lower()
@@ -127,6 +145,11 @@ class ResourceChangeHandler(FileSystemEventHandler):
 
     def on_deleted(self, event):
         if not event.is_directory:
+            if self._is_meta_sidecar_path(event.src_path):
+                owner_path = self._owner_path_for_meta_sidecar(event.src_path)
+                Debug.log_internal(f"[Meta Deleted] {event.src_path} -> rebuild {owner_path}")
+                self._queue_meta_missing_rebuild(owner_path)
+                return
             if self._should_ignore(event.src_path):
                 return
             Debug.log_internal(f"[Deleted] {event.src_path}")
@@ -137,24 +160,6 @@ class ResourceChangeHandler(FileSystemEventHandler):
     def on_modified(self, event):
         if not event.is_directory:
             src = event.src_path
-            lower = src.replace("\\", "/").lower()
-
-            # .meta file changed → queue for main-thread processing.
-            # The watcher thread must NOT call C++ GPU/pipeline functions
-            # directly — that races with the render loop and causes
-            # use-after-free of Vulkan handles (VkImageView, descriptor sets).
-            if lower.endswith(".meta") and not lower.endswith(".meta.tmp"):
-                owner_path = src[:-5]  # strip ".meta"
-                if os.path.isfile(owner_path):
-                    from Infernux.core.assets import AssetManager
-                    if AssetManager.is_meta_watcher_suppressed(owner_path):
-                        Debug.log_internal(f"[Meta Modified] suppressed watcher echo for '{owner_path}'")
-                        return
-                    with self._queue_lock:
-                        key = ("meta", owner_path)
-                        if key not in self._pending_reload_queue:
-                            self._pending_reload_queue.append(key)
-                return
 
             if self._should_ignore(src):
                 return
@@ -231,8 +236,8 @@ class ResourceChangeHandler(FileSystemEventHandler):
             try:
                 if isinstance(item, tuple) and item[0] == "shader":
                     self._reload_shader(item[1])
-                elif isinstance(item, tuple) and item[0] == "meta":
-                    self._process_meta_change(item[1])
+                elif isinstance(item, tuple) and item[0] == "meta_missing":
+                    self._process_meta_missing_rebuild(item[1])
                 elif isinstance(item, tuple) and item[0] == "asset":
                     self._process_asset_modified(item[1])
                 elif isinstance(item, str):
@@ -240,13 +245,14 @@ class ResourceChangeHandler(FileSystemEventHandler):
             except Exception as exc:
                 Debug.log_error(f"Reload failed for {item}: {exc}")
 
-    def _process_meta_change(self, owner_path: str):
-        """Handle .meta file change on the main thread."""
-        Debug.log_internal(f"[Meta Modified] {owner_path}.meta -> owner {owner_path}")
+    def _process_meta_missing_rebuild(self, owner_path: str):
+        """Regenerate .meta when the sidecar was deleted (watchdog-driven, main thread)."""
+        Debug.log_internal(f"[Meta Missing] regenerate sidecar for {owner_path}")
         if self._asset_database:
-            self._asset_database.on_asset_modified(owner_path)
+            self._asset_database.import_asset(owner_path)
         from Infernux.core.assets import AssetManager
-        AssetManager.on_asset_modified(owner_path)
+        AssetManager.invalidate_path(owner_path)
+        AssetManager.invalidate_project_panel_cache()
         self._emit_asset_changed(owner_path, "modified")
 
     def _process_asset_modified(self, src_path: str):

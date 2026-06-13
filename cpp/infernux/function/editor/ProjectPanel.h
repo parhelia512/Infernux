@@ -236,10 +236,13 @@ class ProjectPanel : public EditorPanel
     std::unordered_map<std::string, std::pair<uint64_t, double>> m_materialMtimeCache;
     std::unordered_map<std::string, std::pair<uint64_t, double>> m_textureMtimeCache;
     std::unordered_map<std::string, std::pair<uint64_t, double>> m_modelMtimeCache;
+    int m_embeddedMaterialPreviewSchedulesThisFrame = 0;
+    int m_embeddedMaterialPreviewScheduleFrame = -1;
 
     void ProcessPendingThumbnails();
     uint64_t GetThumbnail(const std::string &filePath, uint64_t cachedMtimeNs);
     uint64_t GetMaterialThumbnail(const std::string &filePath);
+    uint64_t GetEmbeddedMaterialThumbnail(const FileItem &item, bool allowSchedule);
     uint64_t GetModelThumbnail(const std::string &filePath);
     uint64_t GetPrefabThumbnail(const std::string &filePath);
     uint64_t GetMaterialMtimeNs(const std::string &filePath);
@@ -309,6 +312,8 @@ class ProjectPanel : public EditorPanel
     // mid-render (CommitRename, Delete, Paste, Move) so that the file grid's item
     // pointer stays valid for the remainder of the frame.
     bool m_pendingCacheInvalidation = false;
+    // Model expand/collapse only needs augmented sub-asset rows rebuilt — not a full dir rescan.
+    bool m_pendingAugmentedCacheInvalidation = false;
 
     // Clipboard
     std::vector<std::string> m_clipboardPaths;

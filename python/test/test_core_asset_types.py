@@ -268,3 +268,35 @@ class TestPythonTypeToMetaTag:
 
     def test_none_defaults_to_string(self):
         assert _python_type_to_meta_tag(None) == "string"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# read_meta_guid
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestReadMetaGuid:
+    def test_reads_guid_from_metadata_map(self, tmp_path):
+        asset = tmp_path / "model.fbx"
+        asset.write_bytes(b"fbx")
+        meta = {
+            "meta_version": 2,
+            "metadata": {
+                "guid": {"type": "string", "value": "abc123def456"},
+            },
+        }
+        meta_path = str(asset) + ".meta"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f)
+
+        from Infernux.core.asset_types import read_meta_guid
+        assert read_meta_guid(str(asset)) == "abc123def456"
+
+    def test_reads_legacy_root_guid(self, tmp_path):
+        asset = tmp_path / "legacy.fbx"
+        asset.write_bytes(b"fbx")
+        meta_path = str(asset) + ".meta"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump({"guid": "legacy-root-guid"}, f)
+
+        from Infernux.core.asset_types import read_meta_guid
+        assert read_meta_guid(str(asset)) == "legacy-root-guid"

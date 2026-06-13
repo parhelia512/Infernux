@@ -249,13 +249,6 @@ class AnimationClip3D:
 
 
 def _read_asset_guid_from_meta_sidecar(asset_path: str) -> str:
-    """Return GUID from a ``.meta`` file's root (not the metadata{} map)."""
-    meta_path = asset_path + ".meta"
-    if not os.path.isfile(meta_path):
-        return ""
-    try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            root = json.load(f)
-        return str(root.get("guid", "") or "")
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        return ""
+    """Return GUID from a ``.meta`` sidecar (metadata map or legacy root field)."""
+    from Infernux.core.asset_types import read_meta_guid
+    return read_meta_guid(asset_path)

@@ -896,7 +896,7 @@ bool MaterialPreviewer::RenderModelEmbeddedMaterialToPixels(const std::string &m
         return false;
 
     auto mesh = AssetRegistry::Instance().LoadAssetByPath<InxMesh>(modelPath, ResourceType::Mesh);
-    if (!mesh || slotIndex >= mesh->GetMaterialSlotCount())
+    if (!mesh)
         return false;
 
     const auto &slotDataVec = mesh->GetMaterialSlotData();

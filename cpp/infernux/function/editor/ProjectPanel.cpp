@@ -39,10 +39,12 @@ static std::string TrimCopy(std::string s)
     return s;
 }
 
-/// "Armature | Action" from importers → display / row id "Armature" only.
+/// "Armature | Action" or "骨架|骨架Action" from importers → display stem only.
 static std::string StripPipeDisplaySuffix(const std::string &s)
 {
     auto pos = s.find(" | ");
+    if (pos == std::string::npos)
+        pos = s.find('|');
     if (pos == std::string::npos)
         return s;
     return TrimCopy(s.substr(0, pos));
@@ -152,11 +154,26 @@ inline ImU32 ProjectSelectionOutlineColor()
                     static_cast<int>(EditorTheme::ACCENT_B * 255.0f), 255);
 }
 
+inline ImU32 ProjectExpandStripBg(bool hovered)
+{
+    const ImVec4 &c = hovered ? EditorTheme::PROJECT_EXPAND_STRIP_HOVER : EditorTheme::PROJECT_EXPAND_STRIP_BG;
+    return IM_COL32(static_cast<int>(c.x * 255.0f), static_cast<int>(c.y * 255.0f), static_cast<int>(c.z * 255.0f),
+                    static_cast<int>(c.w * 255.0f));
+}
+
+inline ImU32 ProjectSubAssetCellBg()
+{
+    const ImVec4 &c = EditorTheme::PROJECT_SUBASSET_CELL_BG;
+    return IM_COL32(static_cast<int>(c.x * 255.0f), static_cast<int>(c.y * 255.0f), static_cast<int>(c.z * 255.0f),
+                    static_cast<int>(c.w * 255.0f));
+}
+
 constexpr float kProjectSelectionOutlineThickness = 2.0f;
 /// Full-height click strip on the right of the model icon (image drawn with aspect preserved).
 constexpr float kModelExpandStripW = 12.0f;
 /// Pixel size of `model_expand_*.png` in repo (square); used only for correct scaling in the strip.
 constexpr float kModelExpandIconSrcPx = 32.0f;
+constexpr int kEmbeddedMaterialPreviewSchedulesPerFrame = 1;
 
 } // namespace
 
@@ -210,6 +227,7 @@ const std::unordered_map<std::string, std::string> &ProjectPanel::GetIconMap()
         {".otf", "font"},
         {".txt", "text"},
         {".md", "readme"},
+        {".mat", "file"},
         {".scene", "scene"},
         {".prefab", "prefab"},
         {".animclip2d", "animclip2d"},
@@ -650,14 +668,13 @@ ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot(const std::string &path)
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             item.ext = std::move(ext);
 
-            if (IsImageExt(item.ext) || IsMaterialExt(item.ext)) {
-                auto ftime = entry.last_write_time(ec);
-                if (!ec) {
-                    const auto rawNs =
-                        std::chrono::duration_cast<std::chrono::nanoseconds>(ftime.time_since_epoch()).count();
-                    std::memcpy(&item.mtimeNs, &rawNs, sizeof(item.mtimeNs));
-                }
+            auto ftime = entry.last_write_time(ec);
+            if (!ec) {
+                const auto rawNs =
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(ftime.time_since_epoch()).count();
+                std::memcpy(&item.mtimeNs, &rawNs, sizeof(item.mtimeNs));
             }
+
             snap.files.push_back(std::move(item));
         }
     }
@@ -992,6 +1009,29 @@ uint64_t ProjectPanel::GetMaterialThumbnail(const std::string &filePath)
 
     const std::string resourceKey = std::string("mat|") + filePath;
     return m_engine->QueryOrScheduleMaterialPreview(resourceKey, filePath, "", mtimeNs);
+}
+
+uint64_t ProjectPanel::GetEmbeddedMaterialThumbnail(const FileItem &item, bool allowSchedule)
+{
+    if (item.path.empty() || item.parentPath.empty() || item.slotIndex < 0 || !m_engine || !m_assetDatabase)
+        return 0;
+
+    const std::string resourceKey = std::string("mat|") + item.path;
+    uint64_t ready = m_engine->GetMaterialPreviewTextureId(resourceKey);
+    if (ready != 0 || !allowSchedule)
+        return ready;
+
+    const int frame = ImGui::GetFrameCount();
+    if (m_embeddedMaterialPreviewScheduleFrame != frame) {
+        m_embeddedMaterialPreviewScheduleFrame = frame;
+        m_embeddedMaterialPreviewSchedulesThisFrame = 0;
+    }
+    if (m_embeddedMaterialPreviewSchedulesThisFrame >= kEmbeddedMaterialPreviewSchedulesPerFrame)
+        return 0;
+
+    ++m_embeddedMaterialPreviewSchedulesThisFrame;
+    const uint64_t mtimeNs = GetMaterialMtimeNs(item.path);
+    return m_engine->QueryOrScheduleMaterialPreview(resourceKey, item.path, "", mtimeNs);
 }
 
 uint64_t ProjectPanel::GetModelThumbnail(const std::string &filePath)
@@ -1814,6 +1854,10 @@ void ProjectPanel::OnRenderContent(InxGUIContext *ctx)
         m_pendingCacheInvalidation = false;
         InvalidateDirCache();
     }
+    if (m_pendingAugmentedCacheInvalidation) {
+        m_pendingAugmentedCacheInvalidation = false;
+        m_augmentedCache.clear();
+    }
 
     RenderBreadcrumb(ctx);
     ctx->Separator();
@@ -1998,6 +2042,8 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
             ctx->TableNextColumn();
             ImGui::PushID(i);
 
+            const bool isSubAsset = (item.type == FileItem::SubMaterial || item.type == FileItem::SubMesh);
+
             bool isSelected = m_selectedSet.count(item.path) > 0;
             // Record cell start position for full-cell drop overlay later
             // ── Resolve display texture (inline for speed) ──
@@ -2005,9 +2051,7 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
             if (item.type == FileItem::SubMesh) {
                 displayTexId = GetTypeIconId(item);
             } else if (item.type == FileItem::SubMaterial) {
-                displayTexId = GetMaterialThumbnail(item.path);
-                if (displayTexId == 0)
-                    displayTexId = GetTypeIconId(item);
+                displayTexId = GetEmbeddedMaterialThumbnail(item, true);
             } else if (item.type == FileItem::File) {
                 if (IsImageExt(item.ext))
                     displayTexId = GetThumbnail(item.path, item.mtimeNs);
@@ -2031,7 +2075,10 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
             if (displayTexId != 0) {
                 int srcW = 0;
                 int srcH = 0;
-                if (item.type == FileItem::File) {
+                if (item.type == FileItem::SubMaterial) {
+                    srcW = 256;
+                    srcH = 256;
+                } else if (item.type == FileItem::File) {
                     if (IsImageExt(item.ext) && m_engine) {
                         const std::string resourceKey = std::string("tex|") + item.path;
                         auto [readyW, readyH] = m_engine->GetTexturePreviewSize(resourceKey);
@@ -2041,9 +2088,6 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                         srcW = 256;
                         srcH = 256;
                     }
-                } else if (item.type == FileItem::SubMaterial) {
-                    srcW = 256;
-                    srcH = 256;
                 }
 
                 ImGui::BeginGroup();
@@ -2053,6 +2097,8 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                 const bool thumbRmb = ImGui::IsItemClicked(1);
                 ImVec2 rMin = ImGui::GetItemRectMin();
                 ImVec2 rMax = ImGui::GetItemRectMax();
+                if (isSubAsset)
+                    drawList->AddRectFilled(rMin, rMax, ProjectSubAssetCellBg(), 3.0f);
                 ImVec2 drawMin = rMin;
                 ImVec2 drawMax = rMax;
                 if (srcW > 0 && srcH > 0) {
@@ -2082,9 +2128,11 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                         // ImageButton with ImVec2(stripW, iconSize) distorts a square art asset; keep hit area
                         // full strip x icon height but draw the glyph with aspect preserved and centered.
                         ImGui::InvisibleButton("##mdlexpand", ImVec2(stripW, iconSize));
-                        expandClicked = ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && !hasDragPayload;
+                        const bool expandHovered = ImGui::IsItemHovered();
+                        expandClicked = expandHovered && ImGui::IsMouseReleased(0) && !hasDragPayload;
                         const ImVec2 ex0 = ImGui::GetItemRectMin();
                         const ImVec2 ex1 = ImGui::GetItemRectMax();
+                        drawList->AddRectFilled(ex0, ex1, ProjectExpandStripBg(expandHovered), 2.0f);
                         const float exW = ex1.x - ex0.x;
                         const float exH = ex1.y - ex0.y;
                         const float srcW = kModelExpandIconSrcPx;
@@ -2098,16 +2146,48 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                         const ImVec2 dmax(cx + dW * 0.5f, cy + dH * 0.5f);
                         drawList->AddImage(ImTextureRef(static_cast<ImTextureID>(expandTex)), dmin, dmax);
                     } else {
+                        ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::PROJECT_EXPAND_STRIP_BG);
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, EditorTheme::PROJECT_EXPAND_STRIP_HOVER);
+                        ImGui::PushStyleColor(ImGuiCol_ButtonActive, EditorTheme::PROJECT_EXPAND_STRIP_HOVER);
                         expandClicked = ImGui::Button(ex ? "v" : ">", ImVec2(stripW, iconSize));
+                        ImGui::PopStyleColor(3);
                     }
                     if (expandClicked) {
                         if (ex)
                             m_expandedModels.erase(item.path);
                         else
                             m_expandedModels.insert(item.path);
+                        m_pendingAugmentedCacheInvalidation = true;
                     }
                     ImGui::PopStyleVar();
                 }
+                ImGui::EndGroup();
+
+                if (isSelected) {
+                    const ImVec2 g0 = ImGui::GetItemRectMin();
+                    const ImVec2 g1 = ImGui::GetItemRectMax();
+                    drawList->AddRect(g0, g1, ProjectSelectionOutlineColor(), 0.0f, 0,
+                                      kProjectSelectionOutlineThickness);
+                }
+                if (thumbHovered && ImGui::IsMouseReleased(0) && !hasDragPayload)
+                    HandleItemClick(item, ctx);
+                if (thumbRmb) {
+                    m_selectedFile = item.path;
+                    if (m_selectedSet.count(item.path) == 0) {
+                        m_selectedFiles = {item.path};
+                        m_selectedSet = {item.path};
+                    }
+                    NotifySelectionChanged();
+                }
+            } else if (isSubAsset && item.type == FileItem::SubMaterial) {
+                // Preview still rendering — empty icon slot (no FILE placeholder).
+                ImGui::BeginGroup();
+                ImGui::InvisibleButton("##ic", ImVec2(thumbW, iconSize));
+                const bool thumbHovered = ImGui::IsItemHovered();
+                const bool thumbRmb = ImGui::IsItemClicked(1);
+                ImVec2 rMin = ImGui::GetItemRectMin();
+                ImVec2 rMax = ImGui::GetItemRectMax();
+                drawList->AddRectFilled(rMin, rMax, ProjectSubAssetCellBg(), 3.0f);
                 ImGui::EndGroup();
 
                 if (isSelected) {
