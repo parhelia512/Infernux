@@ -21,7 +21,9 @@ from Infernux.components.component import InxComponent
 from Infernux.components.serialized_field import serialized_field, FieldType
 from Infernux.components.decorators import require_component, disallow_multiple, add_component_menu
 from Infernux.components.builtin.sprite_renderer import SpriteRenderer
-from Infernux.core.anim_state_machine import AnimStateMachine, AnimState, AnimTransition
+from Infernux.core.anim_state_machine import (
+    AnimStateMachine, AnimState, AnimTransition, evaluate_anim_condition,
+)
 from Infernux.core.animation_clip import AnimationClip
 from Infernux.core.asset_ref import AnimStateMachineRef
 from Infernux.debug import Debug
@@ -138,24 +140,41 @@ class SpiritAnimator(InxComponent):
             return
 
         duration = clip.duration
+        prev_norm = getattr(self, "_prev_event_norm", 0.0)
 
         # Handle looping / clip end
         if self._elapsed >= duration:
             state = self._get_current_state()
             should_loop = state.loop if state else clip.loop
             if should_loop:
-                # Evaluate transitions at loop boundary while elapsed >= duration (progress 1.0)
+                post = (self._elapsed % duration) if duration > 0 else 0.0
+                post_norm = (post / duration) if duration > 0 else 0.0
+                # Fire events crossed in (prev, 1] ∪ [0, post] for the looped clip.
+                self._dispatch_clip_events(clip, prev_norm, post_norm, True)
+                self._prev_event_norm = post_norm
+                # Evaluate transitions at loop boundary while progress == 1.0,
+                # BEFORE wrapping elapsed (preserves exit-time gating).
                 self._try_auto_transition()
-                self._elapsed %= duration
+                if self._current_clip is clip and self._playing:
+                    self._elapsed = post
             else:
                 self._elapsed = duration
+                self._dispatch_clip_events(clip, prev_norm, 1.0, False)
+                self._prev_event_norm = 1.0
                 self._playing = False
                 self._try_auto_transition()
                 return
+        else:
+            curr_norm = (self._elapsed / duration) if duration > 0 else 0.0
+            self._dispatch_clip_events(clip, prev_norm, curr_norm, False)
+            self._prev_event_norm = curr_norm
 
         # Compute and apply frame index. Only touch the renderer when the
         # frame actually changed — sync_visual() walks the material-sync
         # chain and is wasteful to run every tick for unchanged frames.
+        clip = self._current_clip
+        if not self._playing or clip is None or clip.fps <= 0 or clip.frame_count == 0:
+            return
         raw_frame = int(self._elapsed * clip.fps)
         raw_frame = min(raw_frame, clip.frame_count - 1)
         sprite_frame = clip.frame_indices[raw_frame]
@@ -166,6 +185,17 @@ class SpiritAnimator(InxComponent):
 
         # Check transitions every frame (for condition-driven transitions)
         self._try_auto_transition()
+
+    def _dispatch_clip_events(self, clip, prev_norm: float, curr_norm: float, looped: bool):
+        """Fire any animation events on *clip* crossed this frame."""
+        events = getattr(clip, "events", None)
+        if not events:
+            return
+        try:
+            from Infernux.core.animation_event import dispatch_animation_events
+            dispatch_animation_events(self.game_object, events, prev_norm, curr_norm, looped)
+        except Exception as exc:
+            Debug.log_warning(f"[SpiritAnimator] event dispatch error: {exc}")
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -314,6 +344,7 @@ class SpiritAnimator(InxComponent):
         self._current_state_name = state_name
         self._current_clip = clip
         self._elapsed = 0.0
+        self._prev_event_norm = 0.0
         self._playing = True
 
         # Apply first frame immediately
@@ -368,17 +399,18 @@ class SpiritAnimator(InxComponent):
                 return self._elapsed >= self._current_clip.duration
             return False
 
-        # Build a safe evaluation context
+        # Build the evaluation context (parameters + runtime read-only vars)
         ctx = dict(self._parameters)
         ctx["time"] = self._elapsed
         ctx["normalized_time"] = self.normalized_time
         ctx["state"] = self._current_state_name
 
+        # Safe structured evaluation — no eval()/builtins/attribute access.
         try:
-            return bool(eval(cond, {"__builtins__": {}}, ctx))  # noqa: S307
+            return evaluate_anim_condition(cond, ctx)
         except Exception as exc:
             Debug.log_warning(
-                f"[SpiritAnimator] Condition eval error in '{self._current_state_name}': "
+                f"[SpiritAnimator] Condition error in '{self._current_state_name}': "
                 f"'{cond}' -> {exc}"
             )
             return False

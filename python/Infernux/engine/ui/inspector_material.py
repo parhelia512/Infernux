@@ -791,12 +791,11 @@ def render_material_body(ctx: InxGUIContext, panel, state):
     now = _time.time()
     cache_tag = state.extra.get("_material_cache_tag", "")
     if not cache_tag:
-        if is_embedded_slot:
-            try:
-                cache_tag = json.dumps(mat_data, sort_keys=True, ensure_ascii=False)
-            except Exception:
-                cache_tag = ""
-        # Keep regular material initial tag empty so first inspector draw matches bootstrap prewarm key.
+        # Embedded model materials are immutable and have no .mat JSON the C++
+        # RenderFromJson path can deserialize; leave the tag empty so the preview
+        # uses the embedded-slot render path (the same one the Project panel uses,
+        # which renders correctly). Regular materials also start empty so the first
+        # inspector draw matches the bootstrap prewarm key.
         state.extra["_material_cache_tag"] = cache_tag
 
     pending_preview_refresh = bool(state.extra.get("_material_preview_pending", False))

@@ -753,21 +753,6 @@ class RenderGraph:
                 f"Pass '{p._name}' clears depth but has no depth output"
             )
 
-        if p._action == "compute" and p._write_depth is not None:
-            raise ValueError(
-                f"Pass '{p._name}' is compute and cannot write a depth attachment"
-            )
-
-        if p._action == "compute" and p._clear_color is not None:
-            raise ValueError(
-                f"Pass '{p._name}' is compute and cannot clear color attachments"
-            )
-
-        if p._action == "compute" and p._clear_depth is not None:
-            raise ValueError(
-                f"Pass '{p._name}' is compute and cannot clear depth attachments"
-            )
-
         # draw_renderers must write to a camera_target (backbuffer) texture.
         # Material VkPipelines are compiled against backbuffer VkRenderPass;
         # writing to a non-backbuffer texture causes format incompatibility.

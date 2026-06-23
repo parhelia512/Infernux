@@ -862,10 +862,6 @@ uint64_t Infernux::QueryOrScheduleMaterialPreview(const std::string &resourceKey
             state.generation++;
     }
 
-    // First request: generation was never bumped (e.g. embedded ::submat: paths with no mtime hint).
-    if (state.generation == 0)
-        state.generation = 1;
-
     // ── Already up-to-date? ─────────────────────────────────────
     if (state.readyGeneration == state.generation && state.textureId != 0)
         return state.textureId;

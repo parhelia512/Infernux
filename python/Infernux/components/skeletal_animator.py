@@ -15,7 +15,9 @@ from Infernux.components.component import InxComponent
 from Infernux.components.serialized_field import serialized_field
 from Infernux.components.decorators import require_component, disallow_multiple, add_component_menu
 from Infernux.components.builtin.skinned_mesh_renderer import SkinnedMeshRenderer
-from Infernux.core.anim_state_machine import AnimStateMachine, AnimState, AnimTransition
+from Infernux.core.anim_state_machine import (
+    AnimStateMachine, AnimState, AnimTransition, evaluate_anim_condition,
+)
 from Infernux.core.animation_clip3d import AnimationClip3D, resolve_disk_path_for_guid_string
 from Infernux.core.asset_ref import AnimStateMachineRef
 from Infernux.debug import Debug
@@ -122,23 +124,32 @@ def _get_asset_database():
     return None
 
 
-def _resolve_clip_path(state: AnimState) -> Optional[str]:
-    if state.clip_guid:
+def _resolve_clip_path_from(guid: str, path_hint: str) -> Optional[str]:
+    """Resolve a clip GUID / path-hint to a usable disk path (or embedded take id)."""
+    if guid:
         db = _get_asset_database()
         if db:
             try:
-                path = resolve_disk_path_for_guid_string(db, state.clip_guid)
-                if path:
-                    return path
+                p = resolve_disk_path_for_guid_string(db, guid)
+                if p:
+                    return p
             except Exception:
                 pass
-    raw = (state.clip_path or "").strip()
+    raw = (path_hint or "").strip()
     # Project panel: embedded FBX take as "<guid>::subanim:<index>" (not a file path).
     if raw and "::subanim:" in raw:
         return raw
     if raw and os.path.isfile(raw):
         return raw
     return None
+
+
+def _resolve_clip_path(state: AnimState) -> Optional[str]:
+    return _resolve_clip_path_from(state.clip_guid, state.clip_path)
+
+
+def _resolve_clip_b_path(state: AnimState) -> Optional[str]:
+    return _resolve_clip_path_from(getattr(state, "clip_b_guid", ""), getattr(state, "clip_b_path", ""))
 
 
 def _clip_duration_hint(clip: Optional[AnimationClip3D]) -> float:
@@ -236,22 +247,45 @@ class SkeletalAnimator(InxComponent):
         self._elapsed += delta_time * speed
         self._advance_blend(delta_time)
 
+        prev_norm = getattr(self, "_prev_event_norm", 0.0)
         duration = self._clip_duration(clip)
         if duration > 0.0 and self._elapsed >= duration:
             should_loop = state.loop if state else True
             if should_loop:
+                post = self._elapsed % duration
+                post_norm = post / duration
+                self._dispatch_clip_events(clip, prev_norm, post_norm, True)
+                self._prev_event_norm = post_norm
                 self._try_auto_transition()
-                self._elapsed %= duration
+                if self._current_clip is clip and self._playing:
+                    self._elapsed = post
             else:
                 self._elapsed = duration
+                self._dispatch_clip_events(clip, prev_norm, 1.0, False)
+                self._prev_event_norm = 1.0
                 self._playing = False
                 self._try_auto_transition()
                 self._sync_native_runtime_playback()
                 return
+        else:
+            curr_norm = (self._elapsed / duration) if duration > 0.0 else 0.0
+            self._dispatch_clip_events(clip, prev_norm, curr_norm, False)
+            self._prev_event_norm = curr_norm
 
         self._apply_active_take()
         self._try_auto_transition()
         self._sync_native_runtime_playback()
+
+    def _dispatch_clip_events(self, clip, prev_norm: float, curr_norm: float, looped: bool):
+        """Fire any animation events on *clip* crossed this frame."""
+        events = getattr(clip, "events", None)
+        if not events:
+            return
+        try:
+            from Infernux.core.animation_event import dispatch_animation_events
+            dispatch_animation_events(self.game_object, events, prev_norm, curr_norm, looped)
+        except Exception as exc:
+            Debug.log_warning(f"[SkeletalAnimator] event dispatch error: {exc}")
 
     @property
     def current_state(self) -> str:
@@ -378,6 +412,62 @@ class SkeletalAnimator(InxComponent):
         self._clip_cache[key] = clip
         return clip
 
+    def _resolve_clip_b(self, state: AnimState) -> Optional[AnimationClip3D]:
+        """Resolve the second clip (B) of a blend state."""
+        key = state.name + "::B"
+        if key in self._clip_cache:
+            return self._clip_cache[key]
+        clip_path = _resolve_clip_b_path(state)
+        clip = AnimationClip3D.load(clip_path) if clip_path else None
+        self._clip_cache[key] = clip
+        return clip
+
+    def _blend_state_lerp(self, state: AnimState) -> float:
+        """Per-node Lerp (authored ``blend_value``), overridable via param ``<state>/Lerp``."""
+        lerp = float(getattr(state, "blend_value", 0.5) or 0.0)
+        pkey = f"{state.name}/Lerp"
+        if pkey in self._parameters:
+            try:
+                lerp = float(self._parameters[pkey])
+            except (TypeError, ValueError):
+                pass
+        return max(0.0, min(1.0, lerp))
+
+    def _submit_blend_state(self, cpp, state: AnimState) -> bool:
+        """Submit a blend-state pose (clip A lerp clip B). Returns True if handled."""
+        clip_a = self._current_clip
+        take_a = str(getattr(clip_a, "take_name", "") or "") if clip_a is not None else ""
+        clip_b = self._resolve_clip_b(state)
+        take_b = str(getattr(clip_b, "take_name", "") or "") if clip_b is not None else ""
+        if not take_a and not take_b:
+            return False
+        lerp = self._blend_state_lerp(state)
+        loop = bool(getattr(state, "loop", True))
+        t = float(self._elapsed)
+        normalized = float(self.normalized_time)
+
+        # Preferred: a 2-layer pose stack (correct per-bone N-way blend, needs the
+        # native pose-stack API); otherwise fall back to the 2-clip crossfade slot.
+        submit_stack = getattr(cpp, "submit_pose_stack", None)
+        if callable(submit_stack) and take_a and take_b:
+            try:
+                submit_stack([
+                    {"take_name": take_a, "time": t, "weight": 1.0 - lerp, "loop": loop},
+                    {"take_name": take_b, "time": t, "weight": lerp, "loop": loop},
+                ])
+                self._last_native_take_name = take_a
+                return True
+            except Exception as exc:
+                Debug.log_suppressed("SkeletalAnimator._submit_blend_state.pose_stack", exc)
+
+        submit_pose = getattr(cpp, "submit_animation_pose", None)
+        if callable(submit_pose):
+            submit_pose(take_a or take_b, t, normalized,
+                        take_b if take_a else "", t, lerp if take_a else 0.0, loop)
+            self._last_native_take_name = take_a or take_b
+            return True
+        return False
+
     def _enter_state(self, state_name: str, fade_duration: Optional[float] = None) -> bool:
         if not self._fsm:
             return False
@@ -401,6 +491,7 @@ class SkeletalAnimator(InxComponent):
         self._current_state_name = state_name
         self._current_clip = clip
         self._elapsed = 0.0
+        self._prev_event_norm = 0.0
         self._playing = True
         self._apply_active_take()
         self._sync_native_runtime_playback()
@@ -511,6 +602,12 @@ class SkeletalAnimator(InxComponent):
         cpp = getattr(r, "_cpp_component", None)
         if cpp is None:
             return
+        # Blend states output a continuous A↔B lerp via their own Lerp value,
+        # independent of transition crossfades.
+        state = self._get_current_state()
+        if state is not None and getattr(state, "kind", "clip") == "blend":
+            if self._submit_blend_state(cpp, state):
+                return
         submit_pose = getattr(cpp, "submit_animation_pose", None)
         if callable(submit_pose):
             # A finished non-looping clip keeps submitting its take with
@@ -608,11 +705,12 @@ class SkeletalAnimator(InxComponent):
         ctx["normalized_time"] = self.normalized_time
         ctx["state"] = self._current_state_name
 
+        # Safe structured evaluation — no eval()/builtins/attribute access.
         try:
-            return bool(eval(cond, {"__builtins__": {}}, ctx))  # noqa: S307
+            return evaluate_anim_condition(cond, ctx)
         except Exception as exc:
             Debug.log_warning(
-                f"[SkeletalAnimator] Condition eval error in '{self._current_state_name}': "
+                f"[SkeletalAnimator] Condition error in '{self._current_state_name}': "
                 f"'{cond}' -> {exc}"
             )
             return False

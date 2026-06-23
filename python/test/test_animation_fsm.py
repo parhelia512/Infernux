@@ -146,3 +146,152 @@ class TestNormalizedTime:
         anim._current_clip = _FakeClip(duration_hint=0.0)
         anim._elapsed = 0.25
         assert 0.0 <= anim.normalized_time < 1.0
+
+
+# ── Safe condition evaluator (replaces eval()) ──────────────────────────────
+
+class TestSafeConditionEvaluator:
+    def test_simple_compare(self):
+        from Infernux.core.anim_state_machine import evaluate_anim_condition
+        assert evaluate_anim_condition("speed > 2.0", {"speed": 3.0}) is True
+        assert evaluate_anim_condition("speed > 2.0", {"speed": 1.0}) is False
+
+    def test_and_chain(self):
+        from Infernux.core.anim_state_machine import evaluate_anim_condition
+        ctx = {"speed": 3.0, "grounded": True}
+        assert evaluate_anim_condition("(speed > 0.5) and (grounded == 1.0)", ctx) is True
+        ctx["grounded"] = False
+        assert evaluate_anim_condition("(speed > 0.5) and (grounded == 1.0)", ctx) is False
+
+    def test_or_and_not(self):
+        from Infernux.core.anim_state_machine import evaluate_anim_condition
+        assert evaluate_anim_condition("a or b", {"a": False, "b": True}) is True
+        assert evaluate_anim_condition("not grounded", {"grounded": False}) is True
+        assert evaluate_anim_condition("not grounded", {"grounded": True}) is False
+
+    def test_bool_param_truthiness(self):
+        from Infernux.core.anim_state_machine import evaluate_anim_condition
+        assert evaluate_anim_condition("is_running", {"is_running": True}) is True
+        assert evaluate_anim_condition("is_running", {"is_running": False}) is False
+
+    def test_string_state_compare(self):
+        from Infernux.core.anim_state_machine import evaluate_anim_condition
+        assert evaluate_anim_condition('state == "idle"', {"state": "idle"}) is True
+        assert evaluate_anim_condition('state == "idle"', {"state": "run"}) is False
+
+    def test_unknown_identifier_defaults_zero(self):
+        from Infernux.core.anim_state_machine import evaluate_anim_condition
+        assert evaluate_anim_condition("missing > 0", {}) is False
+        assert evaluate_anim_condition("missing == 0", {}) is True
+
+    def test_malformed_raises(self):
+        from Infernux.core.anim_state_machine import evaluate_anim_condition, AnimConditionError
+        # Calls / attribute access / subscripts are rejected (no eval()).
+        with pytest.raises((AnimConditionError, SyntaxError)):
+            evaluate_anim_condition("__import__('os').system('x')", {})
+        with pytest.raises((AnimConditionError, SyntaxError)):
+            evaluate_anim_condition("obj.attr", {})
+
+
+# ── Animation events ────────────────────────────────────────────────────────
+
+class _EventSink:
+    def __init__(self):
+        self.calls = []
+        self.footsteps = 0
+
+    def on_animation_event(self, name, string_arg, number_arg):
+        self.calls.append((name, string_arg, number_arg))
+
+    def footstep(self, string_arg, number_arg):
+        self.footsteps += 1
+
+
+class _FakeGameObject:
+    def __init__(self, comps):
+        self._comps = comps
+
+    def get_py_components(self):
+        return list(self._comps)
+
+
+class TestAnimationEventWindowing:
+    def _ev(self, t, name="e"):
+        from Infernux.core.animation_event import AnimationEvent
+        return AnimationEvent(time_normalized=t, function=name)
+
+    def test_forward_window(self):
+        from Infernux.core.animation_event import collect_crossed_events
+        evs = [self._ev(0.3), self._ev(0.6)]
+        fired = collect_crossed_events(evs, 0.2, 0.5, looped=False)
+        assert [e.time_normalized for e in fired] == [0.3]
+
+    def test_no_double_fire(self):
+        from Infernux.core.animation_event import collect_crossed_events
+        evs = [self._ev(0.3)]
+        assert collect_crossed_events(evs, 0.3, 0.5, looped=False) == []  # exclusive lower bound
+
+    def test_loop_wrap_window(self):
+        from Infernux.core.animation_event import collect_crossed_events
+        evs = [self._ev(0.9), self._ev(0.05)]
+        fired = collect_crossed_events(evs, 0.8, 0.1, looped=True)
+        names = sorted(e.time_normalized for e in fired)
+        assert names == [0.05, 0.9]
+
+    def test_dispatch_calls_generic_and_named(self):
+        from Infernux.core.animation_event import AnimationEvent, dispatch_animation_events
+        sink = _EventSink()
+        go = _FakeGameObject([sink])
+        evs = [AnimationEvent(time_normalized=0.5, function="footstep", string_arg="L", number_arg=2.0)]
+        dispatch_animation_events(go, evs, 0.4, 0.6, looped=False)
+        assert sink.footsteps == 1
+        assert sink.calls == [("footstep", "L", 2.0)]
+
+
+# ── Serialization round-trips for new fields ────────────────────────────────
+
+class TestAnimationSerialization:
+    def test_transition_duration_round_trip(self):
+        tr = AnimTransition(target_state="Run", condition="speed > 1", duration=0.25)
+        tr2 = AnimTransition.from_dict(tr.to_dict())
+        assert tr2.duration == 0.25
+        assert tr2.target_state == "Run"
+
+    def test_clip2d_events_round_trip(self):
+        from Infernux.core.animation_clip import AnimationClip
+        from Infernux.core.animation_event import AnimationEvent
+        clip = AnimationClip(name="walk", frame_indices=[0, 1, 2], fps=12.0)
+        clip.events = [AnimationEvent(0.5, "footstep", "L", 1.0)]
+        clip2 = AnimationClip.from_dict(clip.to_dict())
+        assert len(clip2.events) == 1
+        assert clip2.events[0].function == "footstep"
+        assert clip2.events[0].time_normalized == 0.5
+
+    def test_clip3d_events_round_trip(self):
+        from Infernux.core.animation_clip3d import AnimationClip3D
+        from Infernux.core.animation_event import AnimationEvent
+        clip = AnimationClip3D(name="run", take_name="Run")
+        clip.events = [AnimationEvent(0.25, "hit", "", 3.0)]
+        clip2 = AnimationClip3D.from_dict(clip.to_dict())
+        assert len(clip2.events) == 1
+        assert clip2.events[0].number_arg == 3.0
+
+
+class TestBlendStateModel:
+    def test_blend_state_round_trip(self):
+        st = AnimState(name="LocoBlend", kind="blend",
+                       clip_guid="A-guid", clip_b_guid="B-guid", blend_value=0.7)
+        st2 = AnimState.from_dict(st.to_dict())
+        assert st2.kind == "blend"
+        assert st2.clip_guid == "A-guid"
+        assert st2.clip_b_guid == "B-guid"
+        assert st2.blend_value == 0.7
+
+    def test_blend_value_clamped(self):
+        st = AnimState.from_dict({"name": "x", "kind": "blend", "blend_value": 5.0})
+        assert st.blend_value == 1.0
+
+    def test_default_state_is_clip(self):
+        st = AnimState(name="idle")
+        assert st.kind == "clip"
+        assert AnimState.from_dict(st.to_dict()).kind == "clip"

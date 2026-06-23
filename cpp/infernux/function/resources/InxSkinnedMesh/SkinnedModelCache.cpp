@@ -384,8 +384,8 @@ std::shared_ptr<InxSkinnedMesh> SkinnedModelCache::ImportModel(const std::string
         model->animations.push_back(std::move(anim));
     }
 
-    INXLOG_INFO("SkinnedModelCache: imported '", FromFsPath(fsPath.filename()), "' — ", model->baseVertices.size(),
-                " verts, ", model->bones.size(), " bones, ", model->animations.size(), " anim(s)");
+    // INXLOG_INFO("SkinnedModelCache: imported '", FromFsPath(fsPath.filename()), "' — ", model->baseVertices.size(),
+    //             " verts, ", model->bones.size(), " bones, ", model->animations.size(), " anim(s)");
     return model;
 }
 

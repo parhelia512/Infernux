@@ -2164,7 +2164,7 @@ def _render_shader_body(ctx: InxGUIContext, panel, state: _State):
 
         if new_path != info.source_path:
             ext = os.path.splitext(new_path)[1].lower()
-            valid = {".vert", ".frag", ".geom", ".comp", ".tesc", ".tese"}
+            valid = {".vert", ".frag", ".geom", ".tesc", ".tese"}
             if ext not in valid:
                 ctx.push_style_color(ImGuiCol.Text, *Theme.ERROR_TEXT)
                 ctx.label(t("asset.shader_invalid_ext").format(ext=ext))

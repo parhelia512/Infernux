@@ -483,7 +483,7 @@ std::vector<std::string> TextPreviewer::GetSupportedExtensions() const
     return {".txt", ".md",   ".json", ".xml",  ".yaml", ".yml",  ".ini",  ".cfg",  ".conf",      ".log",
             ".csv", ".html", ".htm",  ".css",  ".js",   ".ts",   ".py",   ".cpp",  ".c",         ".h",
             ".hpp", ".java", ".cs",   ".go",   ".rs",   ".rb",   ".php",  ".lua",  ".sh",        ".bat",
-            ".ps1", ".glsl", ".hlsl", ".vert", ".frag", ".comp", ".toml", ".lock", ".gitignore", ".editorconfig"};
+            ".ps1", ".glsl", ".hlsl", ".vert", ".frag", ".toml", ".lock", ".gitignore", ".editorconfig"};
 }
 
 bool TextPreviewer::Load(const std::string &filePath)

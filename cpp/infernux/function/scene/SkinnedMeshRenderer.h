@@ -2,6 +2,8 @@
 
 #include "MeshRenderer.h"
 
+#include <function/resources/InxSkinnedMesh/InxSkinnedMesh.h>
+
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
@@ -96,6 +98,16 @@ class SkinnedMeshRenderer : public MeshRenderer
     }
     void ClearAnimationBlend();
 
+    /// Submit a multi-layer pose stack (AnimationTree output: N-way weighted +
+    /// additive blend with optional per-layer bone masks). This overrides the
+    /// single-clip / crossfade path until ClearPoseStack() is called.
+    void SubmitPoseStack(const std::vector<PoseStackLayer> &layers);
+    void ClearPoseStack();
+    [[nodiscard]] bool HasPoseStack() const
+    {
+        return m_usePoseStack;
+    }
+
     [[nodiscard]] bool HasAnimationTakes() const
     {
         return !m_animationTakeNames.empty();
@@ -142,6 +154,8 @@ class SkinnedMeshRenderer : public MeshRenderer
     float m_blendAnimationTime = 0.0f;
     float m_blendWeight = 0.0f;
     bool m_runtimeAnimationLoop = true;
+    std::vector<PoseStackLayer> m_poseStack;
+    bool m_usePoseStack = false;
     std::vector<Vertex> m_runtimeSkinnedVertices;
     std::vector<uint32_t> m_runtimeSkinnedIndices;
     std::vector<SubMesh> m_runtimeSkinnedSubMeshes;

@@ -198,6 +198,9 @@ class NodeGraphView:
         self.on_link_deleted: Optional[Callable[[str], None]] = None
         self.on_nodes_deleted: Optional[Callable[[List[str]], None]] = None
         self.on_node_add_request: Optional[Callable[[str, float, float], None]] = None
+        # Pin drag released over empty canvas: (src_node, src_pin, src_kind, graph_x, graph_y).
+        # Hosts can use this to pop a "create node and auto-connect" search menu.
+        self.on_link_dropped_empty: Optional[Callable[[str, str, "PinKind", float, float], None]] = None
         self.on_node_selected: Optional[Callable[[str], None]] = None
         # Called immediately before user-driven selection changes (click), so editors can snapshot undo.
         self.on_before_selection_change: Optional[Callable[[], None]] = None
@@ -1033,6 +1036,10 @@ class NodeGraphView:
     def _try_complete_link(self, mx, my):
         target_node, target_pin, target_kind = self._hit_test_pin(mx, my)
         if target_pin is None:
+            if self.on_link_dropped_empty is not None and self._drag_src_node and self._drag_src_pin:
+                gx, gy = self.screen_to_graph(mx, my)
+                self.on_link_dropped_empty(
+                    self._drag_src_node, self._drag_src_pin, self._drag_src_kind, gx, gy)
             return
         if target_kind == self._drag_src_kind:
             return

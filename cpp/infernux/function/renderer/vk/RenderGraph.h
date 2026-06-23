@@ -189,7 +189,6 @@ struct PassHandle
 enum class PassType
 {
     Graphics, ///< Regular graphics pass with render targets
-    Compute,  ///< Compute shader pass
     Transfer, ///< Resource copy/transfer pass
     Present   ///< Final present pass
 };
@@ -276,18 +275,12 @@ class RenderContext
     /// @brief Bind a graphics pipeline
     void BindPipeline(VkPipeline pipeline);
 
-    /// @brief Bind a compute pipeline
-    void BindComputePipeline(VkPipeline pipeline);
-
     /// @brief Draw command
     void Draw(uint32_t vertexCount, uint32_t instanceCount = 1, uint32_t firstVertex = 0, uint32_t firstInstance = 0);
 
     /// @brief Indexed draw command
     void DrawIndexed(uint32_t indexCount, uint32_t instanceCount = 1, uint32_t firstIndex = 0, int32_t vertexOffset = 0,
                      uint32_t firstInstance = 0);
-
-    /// @brief Dispatch compute shader
-    void Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
 
     /// @brief Transition to the next subpass (for multi-subpass render passes)
     void NextSubpass();
@@ -566,11 +559,6 @@ class RenderGraph
      * @return Pass handle
      */
     PassHandle AddPass(const std::string &name, PassSetupCallback setup);
-
-    /**
-     * @brief Add a compute pass to the graph
-     */
-    PassHandle AddComputePass(const std::string &name, PassSetupCallback setup);
 
     /**
      * @brief Add a transfer pass to the graph (copy/blit operations, no render pass)

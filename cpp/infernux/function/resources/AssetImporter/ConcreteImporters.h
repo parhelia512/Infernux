@@ -69,7 +69,7 @@ class ShaderImporter final : public AssetImporter
 
     [[nodiscard]] std::vector<std::string> GetSupportedExtensions() const override
     {
-        return {".vert", ".frag", ".geom", ".comp", ".tesc", ".tese"};
+        return {".vert", ".frag", ".geom", ".tesc", ".tese"};
     }
 
     bool Import(const ImportContext &ctx) override

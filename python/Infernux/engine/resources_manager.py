@@ -30,6 +30,13 @@ class ResourceChangeHandler(FileSystemEventHandler):
         self._pending_deletes = {}
         self._pending_lock = threading.Lock()
         self._move_grace_seconds = 1.0
+        # Pending .meta deletions (meta_path -> timestamp). A meta rewrite uses
+        # tmp-file + atomic rename, which Windows reports as a transient DELETE of
+        # the target. We only rebuild a meta after a grace period IF it is still
+        # genuinely missing on disk — this avoids thrashing on every save (e.g.
+        # dragging a material colour rewrites the .meta many times per second).
+        self._pending_meta_deletes = {}
+        self._meta_delete_grace_seconds = 0.6
         # Callbacks for shader cache invalidation
         self._shader_cache_invalidation_callbacks = []
         # Get AssetDatabase for resource registration
@@ -44,14 +51,28 @@ class ResourceChangeHandler(FileSystemEventHandler):
     def _owner_path_for_meta_sidecar(meta_path: str) -> str:
         return meta_path[:-5]
 
-    def _queue_meta_missing_rebuild(self, owner_path: str) -> None:
-        """Queue meta regeneration when the .meta sidecar was deleted but the asset file remains."""
-        if not owner_path or not os.path.isfile(owner_path):
-            return
-        with self._queue_lock:
-            key = ("meta_missing", owner_path)
-            if key not in self._pending_reload_queue:
-                self._pending_reload_queue.append(key)
+    def _process_pending_meta_deletes(self):
+        """Rebuild a meta ONLY if its sidecar is still genuinely missing after a grace period.
+
+        Filters out the transient delete that a tmp+rename meta rewrite produces,
+        so saving an asset (e.g. dragging a material colour) never triggers a meta
+        rebuild/reload — only an actual on-disk deletion does.
+        """
+        now = time.time()
+        ready = []
+        with self._pending_lock:
+            for meta_path, ts in list(self._pending_meta_deletes.items()):
+                if now - ts >= self._meta_delete_grace_seconds:
+                    ready.append(meta_path)
+                    del self._pending_meta_deletes[meta_path]
+        for meta_path in ready:
+            # Reappeared (rewrite/rename) → not a real deletion, ignore.
+            if os.path.exists(meta_path):
+                continue
+            owner_path = self._owner_path_for_meta_sidecar(meta_path)
+            if owner_path and os.path.isfile(owner_path):
+                Debug.log_internal(f"[Meta Deleted] confirmed missing -> rebuild {owner_path}")
+                self._process_meta_missing_rebuild(owner_path)
 
     def _should_ignore(self, file_path: str) -> bool:
         """Ignore meta/temp/cache files to avoid GUID churn and noisy events."""
@@ -146,9 +167,11 @@ class ResourceChangeHandler(FileSystemEventHandler):
     def on_deleted(self, event):
         if not event.is_directory:
             if self._is_meta_sidecar_path(event.src_path):
-                owner_path = self._owner_path_for_meta_sidecar(event.src_path)
-                Debug.log_internal(f"[Meta Deleted] {event.src_path} -> rebuild {owner_path}")
-                self._queue_meta_missing_rebuild(owner_path)
+                # Defer: a tmp+rename meta rewrite reports a transient delete.
+                # Only rebuild if the .meta is still gone after a grace period
+                # (verified in _process_pending_meta_deletes on the main thread).
+                with self._pending_lock:
+                    self._pending_meta_deletes[event.src_path] = time.time()
                 return
             if self._should_ignore(event.src_path):
                 return
@@ -228,6 +251,7 @@ class ResourceChangeHandler(FileSystemEventHandler):
     def process_pending_reloads(self):
         """Process pending script reloads. Call this from main thread (e.g., in update loop)."""
         self._process_pending_deletes()
+        self._process_pending_meta_deletes()
         with self._queue_lock:
             pending = list(self._pending_reload_queue)
             self._pending_reload_queue.clear()
@@ -236,8 +260,6 @@ class ResourceChangeHandler(FileSystemEventHandler):
             try:
                 if isinstance(item, tuple) and item[0] == "shader":
                     self._reload_shader(item[1])
-                elif isinstance(item, tuple) and item[0] == "meta_missing":
-                    self._process_meta_missing_rebuild(item[1])
                 elif isinstance(item, tuple) and item[0] == "asset":
                     self._process_asset_modified(item[1])
                 elif isinstance(item, str):
@@ -246,12 +268,29 @@ class ResourceChangeHandler(FileSystemEventHandler):
                 Debug.log_error(f"Reload failed for {item}: {exc}")
 
     def _process_meta_missing_rebuild(self, owner_path: str):
-        """Regenerate .meta when the sidecar was deleted (watchdog-driven, main thread)."""
-        Debug.log_internal(f"[Meta Missing] regenerate sidecar for {owner_path}")
+        """Handle a deleted .meta sidecar (watchdog-driven, main thread).
+
+        Deleting a .meta while the engine runs should immediately:
+          1. Regenerate the .meta sidecar — AssetDatabase.on_asset_modified() goes
+             through ModifyResource(), which recovers the *in-memory* GUID so the
+             stable asset id (and every scene reference to it) is preserved, then
+             re-runs the importer to rewrite mesh/animation/material metadata.
+          2. Reload the live resource + GPU caches so the change takes effect now
+             (AssetRegistry in-place reload, mesh palette/SkinnedModelCache refresh,
+             texture GPU re-upload, dependent material refresh).
+        """
+        Debug.log_internal(f"[Meta Missing] regenerate + reload for {owner_path}")
+        if not owner_path or not os.path.isfile(owner_path):
+            return
+
+        # 1) Regenerate the sidecar first so the reload in step 2 sees correct
+        #    import settings (mesh scale, srgb, etc.) and the preserved GUID.
         if self._asset_database:
-            self._asset_database.import_asset(owner_path)
+            self._asset_database.on_asset_modified(owner_path)
+
+        # 2) Reload the in-memory asset + caches (mesh/material/texture).
         from Infernux.core.assets import AssetManager
-        AssetManager.invalidate_path(owner_path)
+        AssetManager.on_asset_modified(owner_path)
         AssetManager.invalidate_project_panel_cache()
         self._emit_asset_changed(owner_path, "modified")
 
@@ -261,6 +300,10 @@ class ResourceChangeHandler(FileSystemEventHandler):
             Debug.log_internal(f"[Scene Modified] ignored watcher echo for active scene: {os.path.basename(src_path)}")
             return
         from Infernux.core.assets import AssetManager
+        # AssetManager.on_asset_modified() already honours the per-path write
+        # suppression (set by apply_import_settings) to skip the in-place reload
+        # during our own debounced writes; we still emit ASSET_CHANGED so the
+        # Project panel thumbnail and other listeners refresh.
         AssetManager.on_asset_modified(src_path)
         if self._asset_database:
             self._asset_database.on_asset_modified(src_path)

@@ -882,7 +882,38 @@ void RegisterSceneBindings(py::module_ &m)
                       "Secondary animation time in seconds used for runtime pose blending")
         .def_property("blend_weight", &SkinnedMeshRenderer::GetBlendWeight, &SkinnedMeshRenderer::SetBlendWeight,
                       "Runtime pose blend weight from active take to blend take")
-        .def("clear_animation_blend", &SkinnedMeshRenderer::ClearAnimationBlend, "Clear runtime pose blending state");
+        .def("clear_animation_blend", &SkinnedMeshRenderer::ClearAnimationBlend, "Clear runtime pose blending state")
+        .def(
+            "submit_pose_stack",
+            [](SkinnedMeshRenderer &sr, const py::list &layers) {
+                std::vector<PoseStackLayer> stack;
+                stack.reserve(py::len(layers));
+                for (const auto &item : layers) {
+                    py::dict d = item.cast<py::dict>();
+                    PoseStackLayer layer;
+                    if (d.contains("take_name"))
+                        layer.takeName = d["take_name"].cast<std::string>();
+                    if (d.contains("time"))
+                        layer.timeSeconds = d["time"].cast<float>();
+                    if (d.contains("weight"))
+                        layer.weight = d["weight"].cast<float>();
+                    if (d.contains("additive"))
+                        layer.additive = d["additive"].cast<bool>();
+                    if (d.contains("loop"))
+                        layer.loop = d["loop"].cast<bool>();
+                    if (d.contains("bone_mask"))
+                        layer.boneMask = d["bone_mask"].cast<std::vector<std::string>>();
+                    stack.push_back(std::move(layer));
+                }
+                sr.SubmitPoseStack(stack);
+            },
+            py::arg("layers"),
+            "Submit a multi-layer pose stack (AnimationTree output). Each layer is a dict: "
+            "{take_name:str, time:float, weight:float, additive:bool, loop:bool, bone_mask:list[str]}. "
+            "Enables N-way weighted + additive + bone-masked blending beyond the 2-clip crossfade.")
+        .def("clear_pose_stack", &SkinnedMeshRenderer::ClearPoseStack,
+             "Clear the pose stack and revert to the single-clip / crossfade path")
+        .def("has_pose_stack", &SkinnedMeshRenderer::HasPoseStack, "Whether a pose stack is currently active");
 
     // ========================================================================
     // SpriteRenderer — inherits MeshRenderer for rendering, adds sprite props

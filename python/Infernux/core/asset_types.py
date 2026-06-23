@@ -203,14 +203,14 @@ class ShaderAssetInfo:
 
     guid: str = ""
     source_path: str = ""
-    shader_type: str = ""  # "vertex", "fragment", "geometry", "compute", etc.
+    shader_type: str = ""  # "vertex", "fragment", "geometry", "tess_control", etc.
 
     @classmethod
     def from_path(cls, path: str, guid: str = "") -> "ShaderAssetInfo":
         ext = os.path.splitext(path)[1].lower()
         _type_map = {
             ".vert": "vertex", ".frag": "fragment", ".geom": "geometry",
-            ".comp": "compute", ".tesc": "tess_control", ".tese": "tess_eval",
+            ".tesc": "tess_control", ".tese": "tess_eval",
         }
         return cls(guid=guid, source_path=path, shader_type=_type_map.get(ext, "unknown"))
 
@@ -511,7 +511,7 @@ IMAGE_EXTENSIONS = frozenset({
 
 # Shader extensions supported by ShaderImporter
 SHADER_EXTENSIONS = frozenset({
-    ".vert", ".frag", ".geom", ".comp", ".tesc", ".tese",
+    ".vert", ".frag", ".geom", ".tesc", ".tese",
 })
 
 # Material extension

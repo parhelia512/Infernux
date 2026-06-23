@@ -257,9 +257,109 @@ std::vector<glm::mat4> InxSkinnedMesh::BuildBoneMatrices(const SkinnedSampleRequ
     return boneMatrices;
 }
 
+std::vector<glm::mat4> InxSkinnedMesh::BuildBoneMatricesFromPoseStack(const std::vector<PoseStackLayer> &layers) const
+{
+    const size_t N = nodes.size();
+
+    // Bind pose per node (the base / fallback for uncovered nodes).
+    std::vector<SkinnedNodePose> bind(N);
+    for (size_t ni = 0; ni < N; ++ni)
+        bind[ni] = BindNodePose(nodes[ni]);
+
+    // Non-additive accumulation (coverage-normalized weighted average).
+    std::vector<glm::vec3> posSum(N, glm::vec3(0.0f));
+    std::vector<glm::vec3> scaleSum(N, glm::vec3(0.0f));
+    std::vector<glm::quat> rotAccum(N, glm::quat(0.0f, 0.0f, 0.0f, 0.0f));
+    std::vector<float> wSum(N, 0.0f);
+
+    // Additive accumulation (delta from bind, applied on top).
+    std::vector<glm::vec3> addPos(N, glm::vec3(0.0f));
+    std::vector<glm::vec3> addScale(N, glm::vec3(0.0f));
+    std::vector<glm::quat> addRot(N, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+    std::vector<bool> hasAdd(N, false);
+
+    for (const PoseStackLayer &layer : layers) {
+        const float w = glm::clamp(layer.weight, 0.0f, 1.0f);
+        if (w <= kEpsilon)
+            continue;
+        const SkinnedRuntimeAnimation *anim = FindAnimation(layer.takeName);
+        const double tTicks = ToAnimationTicks(anim, layer.timeSeconds, layer.loop);
+
+        // Resolve the optional bone mask to a node-name set (empty = all nodes).
+        const bool masked = !layer.boneMask.empty();
+        std::unordered_map<std::string, char> maskSet;
+        if (masked)
+            for (const std::string &b : layer.boneMask)
+                maskSet.emplace(b, 1);
+
+        for (size_t ni = 0; ni < N; ++ni) {
+            if (masked && maskSet.find(nodes[ni].name) == maskSet.end())
+                continue;
+            const SkinnedNodePose pose = SampleNodePose(anim, nodes[ni], tTicks);
+            if (layer.additive) {
+                addPos[ni] += (pose.translation - bind[ni].translation) * w;
+                addScale[ni] += (pose.scale - bind[ni].scale) * w;
+                glm::quat delta = glm::normalize(pose.rotation * glm::inverse(bind[ni].rotation));
+                glm::quat scaled = glm::slerp(glm::quat(1.0f, 0.0f, 0.0f, 0.0f), delta, w);
+                addRot[ni] = glm::normalize(scaled * addRot[ni]);
+                hasAdd[ni] = true;
+            } else {
+                posSum[ni] += pose.translation * w;
+                scaleSum[ni] += pose.scale * w;
+                glm::quat q = pose.rotation;
+                if (wSum[ni] > 0.0f && glm::dot(rotAccum[ni], q) < 0.0f)
+                    q = -q; // hemisphere-align for a stable nlerp accumulation
+                rotAccum[ni] += q * w;
+                wSum[ni] += w;
+            }
+        }
+    }
+
+    std::vector<glm::mat4> globals(N, glm::mat4(1.0f));
+    for (size_t ni = 0; ni < N; ++ni) {
+        SkinnedNodePose finalPose = bind[ni];
+        if (wSum[ni] > kEpsilon) {
+            const float coverage = glm::clamp(wSum[ni], 0.0f, 1.0f);
+            SkinnedNodePose avg;
+            avg.translation = posSum[ni] / wSum[ni];
+            avg.scale = scaleSum[ni] / wSum[ni];
+            avg.rotation = glm::normalize(rotAccum[ni]);
+            // Blend bind → weighted-average by coverage (uncovered weight holds bind).
+            finalPose.translation = glm::mix(bind[ni].translation, avg.translation, coverage);
+            finalPose.scale = glm::mix(bind[ni].scale, avg.scale, coverage);
+            finalPose.rotation = glm::normalize(glm::slerp(bind[ni].rotation, avg.rotation, coverage));
+        }
+        if (hasAdd[ni]) {
+            finalPose.translation += addPos[ni];
+            finalPose.scale += addScale[ni];
+            finalPose.rotation = glm::normalize(addRot[ni] * finalPose.rotation);
+        }
+
+        glm::mat4 local = MakeTRS(finalPose.translation, finalPose.rotation, finalPose.scale);
+        globals[ni] = (nodes[ni].parent >= 0) ? globals[static_cast<size_t>(nodes[ni].parent)] * local : local;
+    }
+
+    std::vector<glm::mat4> boneMatrices(bones.size(), glm::mat4(1.0f));
+    for (size_t bi = 0; bi < bones.size(); ++bi) {
+        const SkinnedRuntimeBone &bone = bones[bi];
+        if (bone.nodeIndex >= 0 && static_cast<size_t>(bone.nodeIndex) < globals.size())
+            boneMatrices[bi] = globals[static_cast<size_t>(bone.nodeIndex)] * bone.inverseBind;
+    }
+    return boneMatrices;
+}
+
 std::vector<glm::mat4> InxSkinnedMesh::BuildGpuBonePalette(const SkinnedSampleRequest &request) const
 {
     std::vector<glm::mat4> palette = BuildBoneMatrices(request);
+    const glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(scaleFactor));
+    for (glm::mat4 &m : palette)
+        m = scale * m;
+    return palette;
+}
+
+std::vector<glm::mat4> InxSkinnedMesh::BuildGpuBonePaletteFromPoseStack(const std::vector<PoseStackLayer> &layers) const
+{
+    std::vector<glm::mat4> palette = BuildBoneMatricesFromPoseStack(layers);
     const glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(scaleFactor));
     for (glm::mat4 &m : palette)
         m = scale * m;

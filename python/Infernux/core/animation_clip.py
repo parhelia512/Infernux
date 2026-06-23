@@ -17,6 +17,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from Infernux.core.animation_event import AnimationEvent, events_from_list
+
 
 @dataclass
 class AnimationClip:
@@ -28,6 +30,8 @@ class AnimationClip:
     frame_indices: List[int] = field(default_factory=list)
     fps: float = 12.0
     loop: bool = True
+    # Animation events keyed by normalized time (0..1); dispatched at runtime.
+    events: List[AnimationEvent] = field(default_factory=list)
     file_path: str = field(default="", repr=False, compare=False)
 
     # ── Serialization ─────────────────────────────────────────────────
@@ -40,6 +44,7 @@ class AnimationClip:
             "frame_indices": list(self.frame_indices),
             "fps": self.fps,
             "loop": self.loop,
+            "events": [e.to_dict() for e in self.events],
         }
         return d
 
@@ -52,6 +57,7 @@ class AnimationClip:
             frame_indices=list(d.get("frame_indices", [])),
             fps=float(d.get("fps", 12.0)),
             loop=bool(d.get("loop", True)),
+            events=events_from_list(d.get("events", [])),
         )
 
     def copy(self) -> AnimationClip:

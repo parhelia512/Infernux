@@ -173,7 +173,6 @@ constexpr float kProjectSelectionOutlineThickness = 2.0f;
 constexpr float kModelExpandStripW = 12.0f;
 /// Pixel size of `model_expand_*.png` in repo (square); used only for correct scaling in the strip.
 constexpr float kModelExpandIconSrcPx = 32.0f;
-constexpr int kEmbeddedMaterialPreviewSchedulesPerFrame = 1;
 
 } // namespace
 
@@ -668,13 +667,14 @@ ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot(const std::string &path)
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             item.ext = std::move(ext);
 
-            auto ftime = entry.last_write_time(ec);
-            if (!ec) {
-                const auto rawNs =
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(ftime.time_since_epoch()).count();
-                std::memcpy(&item.mtimeNs, &rawNs, sizeof(item.mtimeNs));
+            if (IsImageExt(item.ext) || IsMaterialExt(item.ext)) {
+                auto ftime = entry.last_write_time(ec);
+                if (!ec) {
+                    const auto rawNs =
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(ftime.time_since_epoch()).count();
+                    std::memcpy(&item.mtimeNs, &rawNs, sizeof(item.mtimeNs));
+                }
             }
-
             snap.files.push_back(std::move(item));
         }
     }
@@ -1011,27 +1011,23 @@ uint64_t ProjectPanel::GetMaterialThumbnail(const std::string &filePath)
     return m_engine->QueryOrScheduleMaterialPreview(resourceKey, filePath, "", mtimeNs);
 }
 
-uint64_t ProjectPanel::GetEmbeddedMaterialThumbnail(const FileItem &item, bool allowSchedule)
+uint64_t ProjectPanel::GetEmbeddedMaterialThumbnail(const FileItem &item)
 {
-    if (item.path.empty() || item.parentPath.empty() || item.slotIndex < 0 || !m_engine || !m_assetDatabase)
+    if (item.path.empty() || item.slotIndex < 0 || !m_engine)
         return 0;
+
+    // Sub-asset rows inherit the parent model's mtime, but model files are NOT
+    // stamped in the dir snapshot (only image/material files are), so item.mtimeNs
+    // is 0 here.  Passing 0 as the stamp leaves the preview state's generation at 0
+    // and no render is ever scheduled.  GetMaterialMtimeNs strips the "::submat:"
+    // token and stats the underlying model file (cached, 1s TTL), giving a non-zero
+    // stamp so the embedded material preview actually renders — same path as .mat.
+    uint64_t stamp = GetMaterialMtimeNs(item.path);
+    if (stamp == 0)
+        return 0; // parent model file missing/unreadable
 
     const std::string resourceKey = std::string("mat|") + item.path;
-    uint64_t ready = m_engine->GetMaterialPreviewTextureId(resourceKey);
-    if (ready != 0 || !allowSchedule)
-        return ready;
-
-    const int frame = ImGui::GetFrameCount();
-    if (m_embeddedMaterialPreviewScheduleFrame != frame) {
-        m_embeddedMaterialPreviewScheduleFrame = frame;
-        m_embeddedMaterialPreviewSchedulesThisFrame = 0;
-    }
-    if (m_embeddedMaterialPreviewSchedulesThisFrame >= kEmbeddedMaterialPreviewSchedulesPerFrame)
-        return 0;
-
-    ++m_embeddedMaterialPreviewSchedulesThisFrame;
-    const uint64_t mtimeNs = GetMaterialMtimeNs(item.path);
-    return m_engine->QueryOrScheduleMaterialPreview(resourceKey, item.path, "", mtimeNs);
+    return m_engine->QueryOrScheduleMaterialPreview(resourceKey, item.path, "", stamp);
 }
 
 uint64_t ProjectPanel::GetModelThumbnail(const std::string &filePath)
@@ -2035,7 +2031,6 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
         }
 
         ImDrawList *drawList = ImGui::GetWindowDrawList();
-        float cellW = static_cast<float>(CELL_WIDTH);
 
         for (int i = range.startIndex; i < range.endIndex; ++i) {
             auto &item = (*items)[i];
@@ -2043,6 +2038,17 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
             ImGui::PushID(i);
 
             const bool isSubAsset = (item.type == FileItem::SubMaterial || item.type == FileItem::SubMesh);
+            const ImVec2 cellTopLeft = ImGui::GetCursorScreenPos();
+            if (isSubAsset) {
+                // Tint only the icon square — the label row stays transparent so the
+                // sub-asset reads as part of the model without a heavy full-cell band.
+                // Draw into the table's background channel so the icon/preview (drawn
+                // in the content channel) always renders ON TOP of this tint.
+                const ImVec2 iconBgMax(cellTopLeft.x + iconSize, cellTopLeft.y + iconSize);
+                ImGui::TablePushBackgroundChannel();
+                drawList->AddRectFilled(cellTopLeft, iconBgMax, ProjectSubAssetCellBg(), 4.0f);
+                ImGui::TablePopBackgroundChannel();
+            }
 
             bool isSelected = m_selectedSet.count(item.path) > 0;
             // Record cell start position for full-cell drop overlay later
@@ -2051,7 +2057,9 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
             if (item.type == FileItem::SubMesh) {
                 displayTexId = GetTypeIconId(item);
             } else if (item.type == FileItem::SubMaterial) {
-                displayTexId = GetEmbeddedMaterialThumbnail(item, true);
+                displayTexId = GetEmbeddedMaterialThumbnail(item);
+                if (displayTexId == 0)
+                    displayTexId = GetTypeIconId(item);
             } else if (item.type == FileItem::File) {
                 if (IsImageExt(item.ext))
                     displayTexId = GetThumbnail(item.path, item.mtimeNs);
@@ -2097,8 +2105,6 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                 const bool thumbRmb = ImGui::IsItemClicked(1);
                 ImVec2 rMin = ImGui::GetItemRectMin();
                 ImVec2 rMax = ImGui::GetItemRectMax();
-                if (isSubAsset)
-                    drawList->AddRectFilled(rMin, rMax, ProjectSubAssetCellBg(), 3.0f);
                 ImVec2 drawMin = rMin;
                 ImVec2 drawMax = rMax;
                 if (srcW > 0 && srcH > 0) {
@@ -2161,33 +2167,6 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                     }
                     ImGui::PopStyleVar();
                 }
-                ImGui::EndGroup();
-
-                if (isSelected) {
-                    const ImVec2 g0 = ImGui::GetItemRectMin();
-                    const ImVec2 g1 = ImGui::GetItemRectMax();
-                    drawList->AddRect(g0, g1, ProjectSelectionOutlineColor(), 0.0f, 0,
-                                      kProjectSelectionOutlineThickness);
-                }
-                if (thumbHovered && ImGui::IsMouseReleased(0) && !hasDragPayload)
-                    HandleItemClick(item, ctx);
-                if (thumbRmb) {
-                    m_selectedFile = item.path;
-                    if (m_selectedSet.count(item.path) == 0) {
-                        m_selectedFiles = {item.path};
-                        m_selectedSet = {item.path};
-                    }
-                    NotifySelectionChanged();
-                }
-            } else if (isSubAsset && item.type == FileItem::SubMaterial) {
-                // Preview still rendering — empty icon slot (no FILE placeholder).
-                ImGui::BeginGroup();
-                ImGui::InvisibleButton("##ic", ImVec2(thumbW, iconSize));
-                const bool thumbHovered = ImGui::IsItemHovered();
-                const bool thumbRmb = ImGui::IsItemClicked(1);
-                ImVec2 rMin = ImGui::GetItemRectMin();
-                ImVec2 rMax = ImGui::GetItemRectMax();
-                drawList->AddRectFilled(rMin, rMax, ProjectSubAssetCellBg(), 3.0f);
                 ImGui::EndGroup();
 
                 if (isSelected) {

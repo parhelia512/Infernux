@@ -75,6 +75,20 @@ struct SkinnedSampleRequest
     float blendWeight = 0.0f;
 };
 
+/// One weighted contribution to a multi-layer pose blend (AnimationTree output).
+/// Non-additive layers are combined as a coverage-normalized weighted average
+/// toward bind pose; additive layers add their (sample − bind) delta on top.
+/// An empty boneMask affects all nodes; otherwise only nodes whose name matches.
+struct PoseStackLayer
+{
+    std::string takeName;
+    float timeSeconds = 0.0f;
+    float weight = 1.0f;
+    bool additive = false;
+    bool loop = true;
+    std::vector<std::string> boneMask;
+};
+
 class InxSkinnedMesh
 {
   public:
@@ -103,6 +117,13 @@ class InxSkinnedMesh
     [[nodiscard]] std::shared_ptr<const std::vector<glm::mat4>>
     GetOrBuildGpuBonePalette(const SkinnedSampleRequest &request) const;
     [[nodiscard]] std::vector<Vertex> SampleVertices(const SkinnedSampleRequest &request) const;
+
+    /// Build bone matrices from a multi-layer pose stack (N-way weighted +
+    /// additive blending with optional per-layer bone masks). Used by the
+    /// Python AnimationTree runtime. Not cached (the stack is dynamic).
+    [[nodiscard]] std::vector<glm::mat4> BuildBoneMatricesFromPoseStack(const std::vector<PoseStackLayer> &layers) const;
+    [[nodiscard]] std::vector<glm::mat4>
+    BuildGpuBonePaletteFromPoseStack(const std::vector<PoseStackLayer> &layers) const;
 
     void NormalizeInfluences();
 

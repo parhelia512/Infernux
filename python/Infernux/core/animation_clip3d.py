@@ -19,6 +19,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from Infernux.core.animation_event import AnimationEvent, events_from_list
+
 
 def is_asset_guid_string(s: str) -> bool:
     """True for dashed UUIDs or 32 hex chars (no hyphens) as used in the asset database."""
@@ -98,6 +100,9 @@ class AnimationClip3D:
     # Optional seconds (authoring or tooling); 0.0 = unknown. Embedded takes may be unknown.
     duration_hint: float = 0.0
 
+    # Animation events keyed by normalized time (0..1); dispatched at runtime.
+    events: List[AnimationEvent] = field(default_factory=list)
+
     file_path: str = field(default="", repr=False, compare=False)
 
     # ── Serialization ───────────────────────────────────────────────
@@ -111,6 +116,7 @@ class AnimationClip3D:
             "take_name": self.take_name,
             "bind_pose_bone_names": list(self.bind_pose_bone_names),
             "duration_hint": float(self.duration_hint),
+            "events": [e.to_dict() for e in self.events],
         }
 
     @classmethod
@@ -126,6 +132,7 @@ class AnimationClip3D:
             take_name=str(d.get("take_name", "")),
             bind_pose_bone_names=[str(x) for x in bones],
             duration_hint=float(d.get("duration_hint", 0.0) or 0.0),
+            events=events_from_list(d.get("events", [])),
         )
 
     def copy(self) -> "AnimationClip3D":

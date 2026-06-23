@@ -586,7 +586,7 @@ ResourceType AssetDatabase::GetResourcesType(const std::string &extensionName) c
     std::string ext = extensionName;
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
-    if (ext == ".vert" || ext == ".frag" || ext == ".geom" || ext == ".comp" || ext == ".tesc" || ext == ".tese") {
+    if (ext == ".vert" || ext == ".frag" || ext == ".geom" || ext == ".tesc" || ext == ".tese") {
         return ResourceType::Shader;
     }
     if (ext == ".mat") {

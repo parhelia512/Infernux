@@ -29,8 +29,7 @@ enum class ShaderStageType
     Fragment,
     Geometry,
     TessControl,
-    TessEval,
-    Compute
+    TessEval
 };
 
 /**

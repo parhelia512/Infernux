@@ -41,8 +41,7 @@ bool PassDescEquals(const GraphPassDesc &a, const GraphPassDesc &b)
            a.clearColorR == b.clearColorR && a.clearColorG == b.clearColorG && a.clearColorB == b.clearColorB &&
            a.clearColorA == b.clearColorA && a.clearDepthValue == b.clearDepthValue && a.action == b.action &&
            a.queueMin == b.queueMin && a.queueMax == b.queueMax && a.sortMode == b.sortMode && a.passTag == b.passTag &&
-           a.overrideMaterial == b.overrideMaterial && a.computeShaderName == b.computeShaderName &&
-           a.dispatchX == b.dispatchX && a.dispatchY == b.dispatchY && a.dispatchZ == b.dispatchZ &&
+           a.overrideMaterial == b.overrideMaterial &&
            a.lightIndex == b.lightIndex && a.screenUIList == b.screenUIList && a.shaderName == b.shaderName &&
            a.pushConstants == b.pushConstants && a.inputBindings == b.inputBindings;
 }
@@ -116,12 +115,6 @@ bool ValidatePythonGraphDescription(const RenderGraphDescription &desc)
             INXLOG_ERROR("SceneRenderGraph::ApplyPythonGraph: duplicate pass '", pass.name, "'");
             return false;
         }
-        if (pass.action == GraphPassActionType::Compute &&
-            (pass.clearColor || pass.clearDepth || !pass.writeDepth.empty())) {
-            INXLOG_ERROR("SceneRenderGraph::ApplyPythonGraph: compute pass '", pass.name,
-                         "' cannot use attachment clear/depth output state");
-            return false;
-        }
         if (pass.action == GraphPassActionType::DrawShadowCasters) {
             if (!pass.writeColors.empty()) {
                 INXLOG_ERROR("SceneRenderGraph::ApplyPythonGraph: shadow pass '", pass.name,
@@ -180,15 +173,6 @@ bool ValidatePythonGraphDescription(const RenderGraphDescription &desc)
             if (textures.find(textureName) == textures.end()) {
                 INXLOG_ERROR("SceneRenderGraph::ApplyPythonGraph: pass '", pass.name, "' input '", samplerName,
                              "' references unknown texture '", textureName, "'");
-                return false;
-            }
-        }
-
-        if (pass.action == GraphPassActionType::Compute) {
-            if (pass.dispatchX == 0 || pass.dispatchY == 0 || pass.dispatchZ == 0) {
-                INXLOG_ERROR("SceneRenderGraph::ApplyPythonGraph: compute pass '", pass.name,
-                             "' dispatch group count must be >= 1 (got ", pass.dispatchX, "x", pass.dispatchY, "x",
-                             pass.dispatchZ, ")");
                 return false;
             }
         }
@@ -338,10 +322,6 @@ void SceneRenderGraph::ApplyPythonGraph(const RenderGraphDescription &desc)
         }
         const int queueMin = passDesc.queueMin;
         const int queueMax = passDesc.queueMax;
-        const std::string computeShaderName = passDesc.computeShaderName;
-        const uint32_t dispatchX = std::max(passDesc.dispatchX, 1u);
-        const uint32_t dispatchY = std::max(passDesc.dispatchY, 1u);
-        const uint32_t dispatchZ = std::max(passDesc.dispatchZ, 1u);
         const int screenUIListIndex = passDesc.screenUIList;
         const int lightIndex = passDesc.lightIndex;
         const std::string sortMode = passDesc.sortMode;
@@ -355,9 +335,8 @@ void SceneRenderGraph::ApplyPythonGraph(const RenderGraphDescription &desc)
         // Capture screen UI renderer pointer for DrawScreenUI passes
         InxScreenUIRenderer *screenUIRenderer = m_screenUIRenderer;
 
-        m_pythonCallbacks[passDesc.name] = [vkCore, graphPassAction, queueMin, queueMax, computeShaderName, dispatchX,
-                                            dispatchY, dispatchZ, screenUIRenderer, screenUIListIndex, inputBindings,
-                                            lightIndex, sortMode, overrideMaterial,
+        m_pythonCallbacks[passDesc.name] = [vkCore, graphPassAction, queueMin, queueMax, screenUIRenderer,
+                                            screenUIListIndex, inputBindings, lightIndex, sortMode, overrideMaterial,
                                             passTag](vk::RenderContext &ctx, uint32_t w, uint32_t h) {
             switch (graphPassAction) {
             case GraphPassActionType::DrawRenderers:
@@ -369,9 +348,6 @@ void SceneRenderGraph::ApplyPythonGraph(const RenderGraphDescription &desc)
                 vkCore->DrawSceneFiltered(ctx.GetCommandBuffer(), w, h, skyboxQueue, skyboxQueue);
                 break;
             }
-            case GraphPassActionType::Compute:
-                vkCmdDispatch(ctx.GetCommandBuffer(), dispatchX, dispatchY, dispatchZ);
-                break;
             case GraphPassActionType::DrawShadowCasters:
                 // Shadow caster pass: draw filtered objects using shadow pipeline
                 // with lightVP from SceneLightCollector. The shadow pipeline is
@@ -1028,38 +1004,6 @@ void SceneRenderGraph::BuildRenderGraph()
             // pass's VkRenderPass, making it incompatible with pipelines
             // created against m_internalRenderPass (attachment count mismatch).
             vk::ResourceHandle resolveTarget;
-
-            // =================================================================
-            // Compute passes use AddComputePass() — no render pass,
-            // no color/depth attachments, no render area.
-            // Respects Python-declared read/write resources for proper
-            // DAG edges and Vulkan barriers.
-            // =================================================================
-            if (passDesc.action == GraphPassActionType::Compute) {
-                // Collect all resource handles declared by Python.
-                // Read-only textures (non-depth, non-backbuffer):
-                std::vector<vk::ResourceHandle> computeReadHandles = colorReadHandles;
-                // Write target: use primary (slot 0) color target
-                vk::ResourceHandle computeWriteTarget = primaryColorTarget;
-
-                m_renderGraph->AddComputePass(passDesc.name, [callback, computeReadHandles, computeWriteTarget, width,
-                                                              height](vk::PassBuilder &builder) {
-                    // Declare read dependencies for proper DAG edges
-                    for (const auto &readHandle : computeReadHandles) {
-                        builder.Read(readHandle, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-                    }
-                    // Declare read/write access to the output target
-                    builder.ReadWrite(computeWriteTarget, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-
-                    // Return execute callback
-                    return [callback, width, height](vk::RenderContext &ctx) {
-                        if (callback) {
-                            callback(ctx, width, height);
-                        }
-                    };
-                });
-                continue;
-            }
 
             // =================================================================
             // FullscreenQuad passes: fullscreen triangle with named shader,

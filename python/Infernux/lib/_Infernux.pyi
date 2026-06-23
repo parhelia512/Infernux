@@ -81,7 +81,6 @@ class GraphPassActionType(IntEnum):
     NONE: int
     DRAW_RENDERERS: int
     DRAW_SKYBOX: int
-    COMPUTE: int
     CUSTOM: int
     DRAW_SHADOW_CASTERS: int
     DRAW_SCREEN_UI: int
@@ -1445,10 +1444,6 @@ class GraphPassDesc:
     pass_tag: str
     override_material: str
     input_bindings: List[Tuple[str, str]]
-    compute_shader_name: str
-    dispatch_x: int
-    dispatch_y: int
-    dispatch_z: int
     light_index: int
     screen_ui_list: int
     shader_name: str
