@@ -621,8 +621,14 @@ class AnimFSMEditorPanel(EditorPanel):
                     self._panel_state_restored_once = True
             self._apply_pending_panel_restore()
 
-        # Ctrl+S save shortcut
-        if (ctx.is_key_down(self._IMGUI_MOD_CTRL)
+        # Ctrl+S save shortcut — only when THIS editor window is focused, so the
+        # global key press doesn't also save other open editors.
+        try:
+            _focused = ctx.is_window_focused(3)  # RootAndChildWindows
+        except Exception:
+            _focused = True
+        if (_focused
+                and ctx.is_key_down(self._IMGUI_MOD_CTRL)
                 and ctx.is_key_pressed(self._IMGUI_KEY_S)
                 and self._fsm is not None):
             self._do_save()

@@ -37,6 +37,7 @@
   "animtimeline_editor.stop": "停止",
   "animtimeline_editor.add_key": "添加关键帧",
   "animtimeline_editor.delete_key": "删除关键帧",
+  "animtimeline_editor.preview": "预览",
   "animtimeline_editor.keyframe": "关键帧",
   "animtimeline_editor.no_key_selected": "未选中关键帧。移动播放头后点击添加关键帧。",
   "animtimeline_editor.key_time": "时间 (秒)",

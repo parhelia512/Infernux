@@ -13,6 +13,7 @@ Opened from Window menu → Timeline Editor, or by double-clicking a
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from typing import Optional
@@ -50,6 +51,36 @@ _C_TEXT_DIM = (0.55, 0.55, 0.57, 0.95)
 _C_KEY = (0.62, 0.62, 0.64, 1.0)
 _C_KEY_HOVER = (0.82, 0.82, 0.84, 1.0)
 _C_ACCENT = (0.922, 0.341, 0.341, 1.0)  # theme red (#EB5757)
+_C_PREVIEW_BG = (0.11, 0.11, 0.12, 1.0)
+_C_FLOOR = (0.26, 0.27, 0.30, 0.85)
+_C_FLOOR_AXIS = (0.36, 0.30, 0.30, 0.9)
+
+# Unit cube centred at origin (Y up), faces + outward normals.
+_CUBE_VERTS = [(-.5, -.5, -.5), (.5, -.5, -.5), (.5, .5, -.5), (-.5, .5, -.5),
+               (-.5, -.5, .5), (.5, -.5, .5), (.5, .5, .5), (-.5, .5, .5)]
+_CUBE_FACES = [(0, 1, 2, 3), (5, 4, 7, 6), (4, 0, 3, 7), (1, 5, 6, 2), (3, 2, 6, 7), (4, 5, 1, 0)]
+_CUBE_NORMALS = [(0, 0, -1), (0, 0, 1), (-1, 0, 0), (1, 0, 0), (0, 1, 0), (0, -1, 0)]
+_LIGHT = (-0.35, 0.78, -0.50)
+
+# Floor camera: Y up, floor = XZ plane. Yaw then pitch (look slightly down at floor).
+_CAM_YAW = math.radians(-32.0)
+_CAM_PITCH = math.radians(-27.0)
+
+
+def _rot_xyz(p, rx, ry, rz):
+    x, y, z = p
+    ca, sa = math.cos(rx), math.sin(rx); y, z = y * ca - z * sa, y * sa + z * ca
+    ca, sa = math.cos(ry), math.sin(ry); x, z = x * ca + z * sa, -x * sa + z * ca
+    ca, sa = math.cos(rz), math.sin(rz); x, y = x * ca - y * sa, x * sa + y * ca
+    return (x, y, z)
+
+
+def _cam(p):
+    """World (Y-up) → view space via fixed yaw+pitch (object-resting-on-floor view)."""
+    x, y, z = p
+    ca, sa = math.cos(_CAM_YAW), math.sin(_CAM_YAW); x, z = x * ca + z * sa, -x * sa + z * ca
+    ca, sa = math.cos(_CAM_PITCH), math.sin(_CAM_PITCH); y, z = y * ca - z * sa, y * sa + z * ca
+    return (x, y, z)
 
 
 @editor_panel(
@@ -76,6 +107,12 @@ class AnimTimelineEditorPanel(EditorPanel):
         self._drag_armed: bool = False
         self._press_x: float = 0.0
         self._bar_was_active: bool = False
+        self._idle_suppressed: bool = False
+        self._idle_prev: bool = True
+
+    def on_disable(self) -> None:
+        # Always restore the editor idle setting if we suppressed it.
+        self._set_engine_active(False)
 
     # Unsaved marker in the window title (shared dirty/save/close handled by ClosablePanel).
     def _window_title_suffix(self) -> str:
@@ -197,33 +234,74 @@ class AnimTimelineEditorPanel(EditorPanel):
             dt = max(0.0, min(dt, 0.05))  # clamp to avoid jumps when frames stall
             self._playhead += dt
             dur = max(1e-6, self._timeline.duration)
-            # The editor preview always loops; runtime looping is decided by the FSM state.
+            # The timeline has no loop of its own — looping is decided solely by the
+            # owning FSM state at runtime. The editor preview plays once and holds.
             if self._playhead >= dur:
-                self._playhead = self._playhead % dur
+                self._playhead = dur
+                self._playing = False
         self._last_tick = now
+
+    def _set_engine_active(self, active: bool):
+        """Suppress editor idle while *active* so autonomous playback stays smooth.
+
+        Editor idle mode caps the loop to ~10 FPS when there is no input; during
+        timeline playback there is no input, so we temporarily disable idle and
+        restore the previous setting when playback stops / the panel closes.
+        """
+        try:
+            from .asset_resource_preview import _resolve_native_engine
+            native = _resolve_native_engine(self)
+            if native is None:
+                return
+            if active and not self._idle_suppressed:
+                self._idle_prev = bool(native.is_editor_idle_enabled())
+                native.set_editor_idle_enabled(False)
+                self._idle_suppressed = True
+            elif not active and self._idle_suppressed:
+                native.set_editor_idle_enabled(self._idle_prev)
+                self._idle_suppressed = False
+        except Exception:
+            pass
 
     # ── Render ─────────────────────────────────────────────────────────
     def on_render_content(self, ctx: InxGUIContext):
         self._handle_shortcuts(ctx)
         self._advance_playback()
+        self._set_engine_active(self._playing)
 
         self._render_toolbar(ctx)
         ctx.separator()
 
         avail_h = max(120.0, ctx.get_content_region_avail_height())
         avail_w = ctx.get_content_region_avail_width()
-        right_w = min(_RIGHT_PANEL_W, max(200.0, avail_w * 0.34))
-        left_w = max(220.0, avail_w - right_w - 8.0)
+        left_w = min(_RIGHT_PANEL_W, max(200.0, avail_w * 0.34))
+        right_w = max(220.0, avail_w - left_w - 8.0)
 
-        if ctx.begin_child("##tl_left", left_w, avail_h, False):
-            self._render_left(ctx)
-        ctx.end_child()
-        ctx.same_line()
-        if ctx.begin_child("##tl_right", right_w, avail_h, True):
+        # Left: compact selected-keyframe inspector only.
+        if ctx.begin_child("##tl_left", left_w, avail_h, True):
             self._render_keyframe_inspector(ctx)
         ctx.end_child()
+        ctx.same_line()
+        # Right: transport + visual timeline + add/delete.
+        if ctx.begin_child("##tl_right", right_w, avail_h, False):
+            self._render_left(ctx)
+        ctx.end_child()
+        # Floating cube preview in the bottom-right corner of the editor.
+        rx1 = ctx.get_item_rect_max_x()
+        ry1 = ctx.get_item_rect_max_y()
+        self._draw_floating_preview(ctx, rx1, ry1)
+
+    def _is_focused(self, ctx: InxGUIContext) -> bool:
+        # RootAndChildWindows = RootWindow(1<<1) | ChildWindows(1<<0) = 3
+        try:
+            return ctx.is_window_focused(3)
+        except Exception:
+            return True
 
     def _handle_shortcuts(self, ctx: InxGUIContext):
+        # Only the focused editor window reacts to its shortcuts.
+        if not self._is_focused(ctx):
+            return
         ctrl = ctx.is_key_down(_MOD_CTRL)
         shift = ctx.is_key_down(_MOD_SHIFT)
         if ctrl and ctx.is_key_pressed(KEY_S):
@@ -238,6 +316,9 @@ class AnimTimelineEditorPanel(EditorPanel):
             self._toggle_play()
 
     def _toggle_play(self):
+        # Replaying from the end restarts (the preview plays once, no auto-loop).
+        if not self._playing and self._playhead >= float(self._timeline.duration) - 1e-4:
+            self._playhead = 0.0
         self._playing = not self._playing
         self._last_tick = time.perf_counter()
 
@@ -394,6 +475,94 @@ class AnimTimelineEditorPanel(EditorPanel):
             self._drag_key = None
             self._drag_armed = False
         self._bar_was_active = active
+
+    # ── Floating cube preview (bottom-right corner) ─────────────────────
+    def _draw_floating_preview(self, ctx: InxGUIContext, anchor_x: float, anchor_y: float):
+        """Compact floating preview: a cube resting on a floor, driven by the playhead."""
+        W, H, pad = 184.0, 150.0, 10.0
+        x1 = anchor_x - pad
+        y1 = anchor_y - pad
+        x0 = x1 - W
+        y0 = y1 - H
+        ctx.draw_filled_rect(x0, y0, x1, y1, *_C_PREVIEW_BG, 5.0)
+        ctx.draw_rect(x0, y0, x1, y1, 0.07, 0.07, 0.08, 1.0, 1.0, 5.0)
+        ctx.draw_text(x0 + 8.0, y0 + 5.0, t("animtimeline_editor.preview"), 0.55, 0.56, 0.58, 0.9)
+        sampled = self._timeline.sample(self._playhead)
+        if sampled is not None:
+            pos, rot, scl = sampled
+        else:
+            pos, rot, scl = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]
+        self._draw_cube_on_floor(ctx, x0, y0 + 16.0, x1, y1, pos, rot, scl)
+
+    @staticmethod
+    def _draw_cube_on_floor(ctx: InxGUIContext, x0, y0, x1, y1, pos, rot, scl):
+        box = min(x1 - x0, y1 - y0)
+        proj = box * 0.34
+        ox = (x0 + x1) * 0.5
+        oy = y0 + (y1 - y0) * 0.66  # origin lower so the cube sits above the floor
+
+        def project(p):
+            v = _cam(p)
+            return (ox + v[0] * proj, oy - v[1] * proj)
+
+        # Floor grid (XZ plane, y = 0).
+        g = 1.5
+        steps = 6
+        for i in range(steps + 1):
+            t01 = i / steps
+            c = -g + 2 * g * t01
+            a1 = project((c, 0.0, -g)); a2 = project((c, 0.0, g))
+            b1 = project((-g, 0.0, c)); b2 = project((g, 0.0, c))
+            col = _C_FLOOR_AXIS if abs(c) < 1e-3 else _C_FLOOR
+            ctx.draw_line(a1[0], a1[1], a2[0], a2[1], *col, 1.0)
+            ctx.draw_line(b1[0], b1[1], b2[0], b2[1], *col, 1.0)
+
+        rx, ry, rz = math.radians(rot[0]), math.radians(rot[1]), math.radians(rot[2])
+        sx = max(0.05, float(scl[0])); sy = max(0.05, float(scl[1])); sz = max(0.05, float(scl[2]))
+        px, py, pz = float(pos[0]), float(pos[1]), float(pos[2])
+        lift = 0.5 * sy  # rest the cube's base on the floor (rotation is about its centre)
+
+        # Contact shadow (cube footprint projected on the floor).
+        foot = []
+        for sgx, sgz in ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)):
+            foot.append(project((sgx * sx + px, 0.0, sgz * sz + pz)))
+        AnimTimelineEditorPanel._fill_quad(ctx, foot[0], foot[1], foot[2], foot[3], (0.0, 0.0, 0.0, 0.30))
+
+        view = []
+        for v in _CUBE_VERTS:
+            p = (v[0] * sx, v[1] * sy, v[2] * sz)
+            p = _rot_xyz(p, rx, ry, rz)
+            p = (p[0] + px, p[1] + lift + py, p[2] + pz)
+            view.append(_cam(p))
+        scr = [(ox + p[0] * proj, oy - p[1] * proj) for p in view]
+        order = sorted(range(6), key=lambda fi: sum(view[i][2] for i in _CUBE_FACES[fi]) / 4.0, reverse=True)
+        for fi in order:
+            n = _cam(_rot_xyz(_CUBE_NORMALS[fi], rx, ry, rz))
+            if n[2] >= 0.0:  # backface cull (viewer toward -z)
+                continue
+            d = max(0.0, n[0] * _LIGHT[0] + n[1] * _LIGHT[1] + n[2] * _LIGHT[2])
+            b = 0.30 + 0.58 * d
+            col = (b * 0.80, b * 0.82, b * 0.86, 1.0)
+            face = _CUBE_FACES[fi]
+            a, bb, c, dd = scr[face[0]], scr[face[1]], scr[face[2]], scr[face[3]]
+            AnimTimelineEditorPanel._fill_quad(ctx, a, bb, c, dd, col)
+            for k in range(4):
+                p1 = scr[face[k]]
+                p2 = scr[face[(k + 1) % 4]]
+                ctx.draw_line(p1[0], p1[1], p2[0], p2[1], 0.09, 0.09, 0.10, 0.95, 1.2)
+
+    @staticmethod
+    def _fill_quad(ctx: InxGUIContext, a, b, c, d, color):
+        """Scanline-fill a convex quad a-b-c-d (no native triangle primitive)."""
+        maxlen = max(abs(b[0] - a[0]) + abs(b[1] - a[1]), abs(c[0] - d[0]) + abs(c[1] - d[1]))
+        steps = max(8, min(80, int(maxlen / 2.0) + 2))
+        for i in range(steps + 1):
+            t = i / steps
+            p1x = a[0] + (b[0] - a[0]) * t
+            p1y = a[1] + (b[1] - a[1]) * t
+            p2x = d[0] + (c[0] - d[0]) * t
+            p2y = d[1] + (c[1] - d[1]) * t
+            ctx.draw_line(p1x, p1y, p2x, p2y, *color, 2.0)
 
     def _render_keyframe_inspector(self, ctx: InxGUIContext):
         ctx.push_style_color(ImGuiCol.Text, 0.55, 0.56, 0.58, 1.0)

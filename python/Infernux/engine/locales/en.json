@@ -37,6 +37,7 @@
   "animtimeline_editor.stop": "Stop",
   "animtimeline_editor.add_key": "Add Key",
   "animtimeline_editor.delete_key": "Delete Key",
+  "animtimeline_editor.preview": "Preview",
   "animtimeline_editor.keyframe": "Keyframe",
   "animtimeline_editor.no_key_selected": "No keyframe selected. Move the playhead and Add Key.",
   "animtimeline_editor.key_time": "Time (s)",
