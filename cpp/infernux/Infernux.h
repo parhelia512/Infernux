@@ -491,8 +491,8 @@ class Infernux
     bool m_cubePreviewFloorBuilt = false;
 
     bool ExecuteTimelineCubePreviewRender(float px, float py, float pz, float rx, float ry, float rz, float sx,
-                                          float sy, float sz, float camYaw, float camPitch, float camDistance,
-                                          int size, uint64_t hash);
+                                          float sy, float sz, float camYaw, float camPitch, float camDistance, int size,
+                                          uint64_t hash);
 
     void LoadImGuiLayout();
     void SaveImGuiLayout();

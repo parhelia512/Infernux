@@ -41,9 +41,9 @@ bool PassDescEquals(const GraphPassDesc &a, const GraphPassDesc &b)
            a.clearColorR == b.clearColorR && a.clearColorG == b.clearColorG && a.clearColorB == b.clearColorB &&
            a.clearColorA == b.clearColorA && a.clearDepthValue == b.clearDepthValue && a.action == b.action &&
            a.queueMin == b.queueMin && a.queueMax == b.queueMax && a.sortMode == b.sortMode && a.passTag == b.passTag &&
-           a.overrideMaterial == b.overrideMaterial &&
-           a.lightIndex == b.lightIndex && a.screenUIList == b.screenUIList && a.shaderName == b.shaderName &&
-           a.pushConstants == b.pushConstants && a.inputBindings == b.inputBindings;
+           a.overrideMaterial == b.overrideMaterial && a.lightIndex == b.lightIndex &&
+           a.screenUIList == b.screenUIList && a.shaderName == b.shaderName && a.pushConstants == b.pushConstants &&
+           a.inputBindings == b.inputBindings;
 }
 
 bool GraphDescEquals(const RenderGraphDescription &a, const RenderGraphDescription &b)

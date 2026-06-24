@@ -461,8 +461,9 @@ void RegisterSceneBindings(py::module_ &m)
         // invalidation. Per-frame animation fast path (TimelineAction etc.).
         .def(
             "set_local_trs",
-            [](Transform *t, float px, float py, float pz, float rx, float ry, float rz, float sx, float sy,
-               float sz) { t->SetLocalTRS(glm::vec3(px, py, pz), glm::vec3(rx, ry, rz), glm::vec3(sx, sy, sz)); },
+            [](Transform *t, float px, float py, float pz, float rx, float ry, float rz, float sx, float sy, float sz) {
+                t->SetLocalTRS(glm::vec3(px, py, pz), glm::vec3(rx, ry, rz), glm::vec3(sx, sy, sz));
+            },
             py::arg("px"), py::arg("py"), py::arg("pz"), py::arg("rx"), py::arg("ry"), py::arg("rz"), py::arg("sx"),
             py::arg("sy"), py::arg("sz"),
             "Set local position+euler(deg)+scale in one call (single dirty/invalidate). "

@@ -1612,7 +1612,8 @@ bool InxRenderer::RenderMeshPreviewGPUCamera(const InxMesh &mesh,
 {
     if (!m_vkCore)
         return false;
-    return m_vkCore->RenderMeshPreviewGPUCamera(mesh, materials, size, view, proj, cameraPos, outPixels, cloneMaterials);
+    return m_vkCore->RenderMeshPreviewGPUCamera(mesh, materials, size, view, proj, cameraPos, outPixels,
+                                                cloneMaterials);
 }
 
 uint64_t InxRenderer::RenderMeshPreviewGPUImGuiCamera(const InxMesh &mesh,

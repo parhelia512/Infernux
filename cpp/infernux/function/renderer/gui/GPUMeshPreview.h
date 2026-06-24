@@ -54,10 +54,9 @@ class GPUMeshPreview
     /// @brief Live editor preview: render directly into a GPU image and return an
     ///        ImGui texture id.  Avoids CPU readback + re-upload every frame
     ///        (same idea as SceneRenderTarget).  Uses scene MSAA/format settings.
-    uint64_t RenderToImGuiTextureCamera(const InxMesh &mesh,
-                                        const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
-                                        const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
-                                        bool cloneMaterials = false);
+    uint64_t RenderToImGuiTextureCamera(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials,
+                                        int size, const glm::mat4 &view, const glm::mat4 &proj,
+                                        const glm::vec3 &cameraPos, bool cloneMaterials = false);
 
   private:
     bool EnsureResources(int size);

@@ -155,7 +155,10 @@ namespace
 // All editor colors resolve through the runtime theme registry (active theme),
 // so a theme switch re-skins the Project panel live. Fallbacks reproduce the
 // current look when a token is absent.
-inline ImVec4 ThemeColor(const char *name, const ImVec4 &fb) { return EditorThemeRegistry::Color(name, fb); }
+inline ImVec4 ThemeColor(const char *name, const ImVec4 &fb)
+{
+    return EditorThemeRegistry::Color(name, fb);
+}
 inline ImU32 ThemeU32(const char *name, const ImVec4 &fb)
 {
     return ImGui::ColorConvertFloat4ToU32(EditorThemeRegistry::Color(name, fb));
@@ -2309,9 +2312,8 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
             // bridges into the first sub-asset cell on the same row.
             const bool isModelFile = (item.type == FileItem::File && IsModelExt(item.ext));
             if (isModelFile && m_expandedModels.count(item.path) > 0) {
-                const bool nextIsSubSameRow =
-                    (i + 1 < itemCount) && isSubAssetItem((*items)[i + 1]) &&
-                    (*items)[i + 1].parentPath == item.path && ((i + 1) % cols) != 0;
+                const bool nextIsSubSameRow = (i + 1 < itemCount) && isSubAssetItem((*items)[i + 1]) &&
+                                              (*items)[i + 1].parentPath == item.path && ((i + 1) % cols) != 0;
                 if (nextIsSubSameRow) {
                     const ImVec2 bgMin(cellTopLeft.x, cellTopLeft.y);
                     const ImVec2 bgMax(cellTopLeft.x + cellW, cellTopLeft.y + iconSize);
@@ -2329,9 +2331,8 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                     (i > 0) && (*items)[i - 1].type == FileItem::File && (*items)[i - 1].path == item.parentPath;
                 const bool prevIsSibling =
                     (i > 0) && isSubAssetItem((*items)[i - 1]) && (*items)[i - 1].parentPath == item.parentPath;
-                const bool nextIsSibling =
-                    (i + 1 < itemCount) && isSubAssetItem((*items)[i + 1]) &&
-                    (*items)[i + 1].parentPath == item.parentPath && ((i + 1) % cols) != 0;
+                const bool nextIsSibling = (i + 1 < itemCount) && isSubAssetItem((*items)[i + 1]) &&
+                                           (*items)[i + 1].parentPath == item.parentPath && ((i + 1) % cols) != 0;
 
                 float stripLeft = cellTopLeft.x;
                 if (prevIsParent)

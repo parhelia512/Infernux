@@ -875,7 +875,8 @@ uint64_t GPUMeshPreview::RenderToImGuiTextureCamera(const InxMesh &mesh,
             m_sampleCount != VK_SAMPLE_COUNT_1_BIT ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
                                                    : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             VK_IMAGE_ASPECT_COLOR_BIT, VK_ACCESS_SHADER_READ_BIT,
-            m_sampleCount != VK_SAMPLE_COUNT_1_BIT ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+            m_sampleCount != VK_SAMPLE_COUNT_1_BIT ? VK_ACCESS_TRANSFER_WRITE_BIT
+                                                   : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
         vkCmdPipelineBarrier(cmd,
                              m_sampleCount != VK_SAMPLE_COUNT_1_BIT ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
                                                                     : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,

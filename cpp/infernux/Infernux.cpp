@@ -1045,8 +1045,7 @@ int Infernux::PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown)
         if (texName.empty())
             continue;
 
-        const uint64_t texId =
-            m_renderer->UploadTextureForImGui(texName, pixels.data(), 256, 256, VK_FILTER_LINEAR);
+        const uint64_t texId = m_renderer->UploadTextureForImGui(texName, pixels.data(), 256, 256, VK_FILTER_LINEAR);
         const uint64_t liveTexId = LiveImGuiTextureId(m_renderer.get(), texName, texId);
 
         {
@@ -1604,10 +1603,10 @@ void Infernux::PumpTimelineCubePreviewIfDirty()
     }
     m_timelineCubeDirty = false;
 
-    ExecuteTimelineCubePreviewRender(m_pendingCubePx, m_pendingCubePy, m_pendingCubePz, m_pendingCubeRx, m_pendingCubeRy,
-                                     m_pendingCubeRz, m_pendingCubeSx, m_pendingCubeSy, m_pendingCubeSz,
-                                     m_pendingCubeCamYaw, m_pendingCubeCamPitch, m_pendingCubeCamDist, m_pendingCubeSize,
-                                     m_pendingCubePreviewHash);
+    ExecuteTimelineCubePreviewRender(m_pendingCubePx, m_pendingCubePy, m_pendingCubePz, m_pendingCubeRx,
+                                     m_pendingCubeRy, m_pendingCubeRz, m_pendingCubeSx, m_pendingCubeSy,
+                                     m_pendingCubeSz, m_pendingCubeCamYaw, m_pendingCubeCamPitch, m_pendingCubeCamDist,
+                                     m_pendingCubeSize, m_pendingCubePreviewHash);
 }
 
 bool Infernux::ExecuteTimelineCubePreviewRender(float px, float py, float pz, float rx, float ry, float rz, float sx,
@@ -1756,9 +1755,7 @@ uint64_t Infernux::RenderTimelineCubePreview(float px, float py, float pz, float
     if (!m_renderer || size <= 0)
         return m_cubePreviewTexId;
 
-    auto qi = [](float f) -> long long {
-        return static_cast<long long>(f * 1000.0f + (f >= 0.0f ? 0.5f : -0.5f));
-    };
+    auto qi = [](float f) -> long long { return static_cast<long long>(f * 1000.0f + (f >= 0.0f ? 0.5f : -0.5f)); };
     uint64_t hash = 1469598103934665603ull;
     auto mix = [&hash](long long v) { hash = (hash ^ static_cast<uint64_t>(v)) * 1099511628211ull; };
     mix(qi(px));

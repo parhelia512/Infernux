@@ -121,7 +121,8 @@ class InxSkinnedMesh
     /// Build bone matrices from a multi-layer pose stack (N-way weighted +
     /// additive blending with optional per-layer bone masks). Used by the
     /// Python AnimationTree runtime. Not cached (the stack is dynamic).
-    [[nodiscard]] std::vector<glm::mat4> BuildBoneMatricesFromPoseStack(const std::vector<PoseStackLayer> &layers) const;
+    [[nodiscard]] std::vector<glm::mat4>
+    BuildBoneMatricesFromPoseStack(const std::vector<PoseStackLayer> &layers) const;
     [[nodiscard]] std::vector<glm::mat4>
     BuildGpuBonePaletteFromPoseStack(const std::vector<PoseStackLayer> &layers) const;
 

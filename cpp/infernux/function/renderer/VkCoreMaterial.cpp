@@ -1311,9 +1311,10 @@ bool InxVkCoreModular::RenderMeshPreviewGPUCamera(const InxMesh &mesh,
                                                   cloneMaterials);
 }
 
-uint64_t InxVkCoreModular::RenderMeshPreviewGPUImGuiCamera(
-    const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size, const glm::mat4 &view,
-    const glm::mat4 &proj, const glm::vec3 &cameraPos, bool cloneMaterials)
+uint64_t InxVkCoreModular::RenderMeshPreviewGPUImGuiCamera(const InxMesh &mesh,
+                                                           const std::vector<std::shared_ptr<InxMaterial>> &materials,
+                                                           int size, const glm::mat4 &view, const glm::mat4 &proj,
+                                                           const glm::vec3 &cameraPos, bool cloneMaterials)
 {
     if (size <= 0 || !m_materialPipelineManagerInitialized)
         return 0;

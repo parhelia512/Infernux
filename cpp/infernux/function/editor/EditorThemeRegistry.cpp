@@ -32,7 +32,7 @@ ThemeData MakeAccentVariant(const ThemeData &base, const ImVec4 &accent)
 {
     ThemeData v = base;
     v.colors["ROLE_ACCENT"] = accent;
-    v.colors["APPLY_BUTTON"] = accent;       // keep custom-drawn accent in sync
+    v.colors["APPLY_BUTTON"] = accent; // keep custom-drawn accent in sync
     v.colors["LOG_ERROR"] = accent;
     v.colors["PREFAB_TEXT"] = accent;
     v.colors["STATUS_PROGRESS_CLR"] = accent;
@@ -49,9 +49,9 @@ struct Registry
     Registry()
     {
         ThemeData base = BuildBaseTheme();
-        Add("infernux", base);                                              // theme red (default)
-        Add("graphite", MakeAccentVariant(base, ImVec4(0.30f, 0.56f, 0.86f, 1.0f)));  // steel blue
-        Add("amber", MakeAccentVariant(base, ImVec4(0.92f, 0.62f, 0.22f, 1.0f)));     // instrument amber
+        Add("infernux", base);                                                       // theme red (default)
+        Add("graphite", MakeAccentVariant(base, ImVec4(0.30f, 0.56f, 0.86f, 1.0f))); // steel blue
+        Add("amber", MakeAccentVariant(base, ImVec4(0.92f, 0.62f, 0.22f, 1.0f)));    // instrument amber
         active = "infernux";
     }
 
@@ -62,7 +62,10 @@ struct Registry
         themes[name] = data;
     }
 
-    ThemeData &Active() { return themes[active]; }
+    ThemeData &Active()
+    {
+        return themes[active];
+    }
 };
 
 Registry &Reg()
@@ -74,17 +77,28 @@ Registry &Reg()
 
 inline ImVec4 Mix(const ImVec4 &a, const ImVec4 &b, float t)
 {
-    return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t,
-                  a.z + (b.z - a.z) * t, a.w + (b.w - a.w) * t);
+    return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, a.w + (b.w - a.w) * t);
 }
 
-inline ImVec4 Alpha(const ImVec4 &c, float a) { return ImVec4(c.x, c.y, c.z, a); }
+inline ImVec4 Alpha(const ImVec4 &c, float a)
+{
+    return ImVec4(c.x, c.y, c.z, a);
+}
 
 } // namespace
 
-const std::unordered_map<std::string, ImVec4> &EditorThemeRegistry::Colors() { return Reg().Active().colors; }
-const std::unordered_map<std::string, ImVec2> &EditorThemeRegistry::Vec2s() { return Reg().Active().vec2s; }
-const std::unordered_map<std::string, float> &EditorThemeRegistry::Floats() { return Reg().Active().floats; }
+const std::unordered_map<std::string, ImVec4> &EditorThemeRegistry::Colors()
+{
+    return Reg().Active().colors;
+}
+const std::unordered_map<std::string, ImVec2> &EditorThemeRegistry::Vec2s()
+{
+    return Reg().Active().vec2s;
+}
+const std::unordered_map<std::string, float> &EditorThemeRegistry::Floats()
+{
+    return Reg().Active().floats;
+}
 
 ImVec4 EditorThemeRegistry::Color(const std::string &name, const ImVec4 &fallback)
 {
@@ -100,8 +114,14 @@ float EditorThemeRegistry::Float(const std::string &name, float fallback)
     return it != m.end() ? it->second : fallback;
 }
 
-std::vector<std::string> EditorThemeRegistry::ThemeNames() { return Reg().order; }
-const std::string &EditorThemeRegistry::ActiveTheme() { return Reg().active; }
+std::vector<std::string> EditorThemeRegistry::ThemeNames()
+{
+    return Reg().order;
+}
+const std::string &EditorThemeRegistry::ActiveTheme()
+{
+    return Reg().active;
+}
 
 bool EditorThemeRegistry::SetActiveTheme(const std::string &name)
 {
@@ -115,7 +135,10 @@ bool EditorThemeRegistry::SetActiveTheme(const std::string &name)
     return true;
 }
 
-unsigned long EditorThemeRegistry::Generation() { return Reg().generation; }
+unsigned long EditorThemeRegistry::Generation()
+{
+    return Reg().generation;
+}
 
 void EditorThemeRegistry::ApplyImGuiColors()
 {
