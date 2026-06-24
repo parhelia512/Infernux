@@ -493,6 +493,7 @@ void InxGUI::BuildFrame()
             ImGui::DockBuilderDockWindow("###ui_editor", dockScene);
             ImGui::DockBuilderDockWindow("###animclip2d_editor", dockScene);
             ImGui::DockBuilderDockWindow("###animfsm_editor", dockScene);
+            ImGui::DockBuilderDockWindow("###animtimeline_editor", dockScene);
             ImGui::DockBuilderDockWindow("###console", dockBottom);
             ImGui::DockBuilderDockWindow("###project", dockBottom);
 

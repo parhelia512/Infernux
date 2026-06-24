@@ -532,13 +532,15 @@ class NodeGraphView:
     def _draw_pin(self, ctx, pl: _PinLayout, kind: PinKind, radius: float,
                    node_uid: str = "") -> None:
         color = pl.pin_def.color
+        z = self.zoom
         connected = self._is_pin_connected(pl.pin_def.id, kind == PinKind.OUTPUT)
+        # Crisp dot: dark outline (matches the dark theme) + filled/hollow core.
+        ctx.draw_filled_circle(pl.cx, pl.cy, radius + 1.2 * z, 0.08, 0.08, 0.09, 1.0)
         if connected:
             ctx.draw_filled_circle(pl.cx, pl.cy, radius, *color)
         else:
-            ctx.draw_circle(pl.cx, pl.cy, radius, *color, 1.5 * self.zoom)
-            ctx.draw_filled_circle(pl.cx, pl.cy, radius * 0.35,
-                                   color[0], color[1], color[2], 0.3)
+            ctx.draw_filled_circle(pl.cx, pl.cy, radius, 0.17, 0.17, 0.18, 1.0)
+            ctx.draw_circle(pl.cx, pl.cy, radius, *color, 1.6 * z)
         # Hover / drag-target highlight ring
         hp_node, hp_pin, hp_kind = self._hovered_pin
         if (hp_pin and hp_pin == pl.pin_def.id and hp_kind == kind
@@ -582,13 +584,13 @@ class NodeGraphView:
             is_hov = lk.uid == self._hovered_link
 
             if is_sel:
-                color, thick = _LINK_SELECTED_COLOR, 3.5 * self.zoom
+                color, thick = _LINK_SELECTED_COLOR, 3.0 * self.zoom
             elif is_hov:
-                color, thick = _LINK_HOVER_COLOR, 3.0 * self.zoom
+                color, thick = _LINK_HOVER_COLOR, 2.6 * self.zoom
             else:
                 color, thick = _LINK_DEFAULT_COLOR, _LINK_THICKNESS * self.zoom
 
-            self._draw_bezier(ctx, sx2, sy2, ex2, ey2, color, thick)
+            self._draw_link_with_arrow(ctx, sx2, sy2, ex2, ey2, color, thick)
 
     def _draw_pending_link(self, ctx) -> None:
         src_l = self._layouts.get(self._drag_src_node)
@@ -609,16 +611,47 @@ class NodeGraphView:
                 pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1],
                 *color, thickness,
             )
-        # Arrow head
-        if len(pts) >= 2:
-            ex, ey = pts[-1]
-            px, py = pts[-2]
-            angle = math.atan2(ey - py, ex - px)
-            a_len = 8.0 * self.zoom
-            for off in (-0.35, 0.35):
-                ax = ex - a_len * math.cos(angle + off)
-                ay = ey - a_len * math.sin(angle + off)
-                ctx.draw_line(ex, ey, ax, ay, *color, thickness)
+
+    def _draw_link_with_arrow(self, ctx, x1, y1, x2, y2, color, thickness):
+        """Bezier link trimmed before the target pin + a solid triangle arrowhead."""
+        z = self.zoom
+        pts = _bezier_points(x1, y1, x2, y2)
+        if len(pts) < 2:
+            return
+        ex, ey = pts[-1]
+        px, py = pts[-2]
+        ang = math.atan2(ey - py, ex - px)
+        dx, dy = math.cos(ang), math.sin(ang)
+        gap = (_PIN_RADIUS + 3.0) * z          # tip sits just outside the input pin
+        a_len = 13.0 * z
+        a_half = 7.0 * z
+        tipx, tipy = ex - dx * gap, ey - dy * gap
+        basex, basey = tipx - dx * a_len, tipy - dy * a_len
+        cutoff = gap + a_len
+        for i in range(len(pts) - 1):
+            ax, ay = pts[i]
+            if math.hypot(ex - ax, ey - ay) <= cutoff:
+                break
+            bx, by = pts[i + 1]
+            ctx.draw_line(ax, ay, bx, by, *color, thickness)
+        self._draw_filled_arrow(ctx, tipx, tipy, basex, basey, a_half, color)
+
+    @staticmethod
+    def _draw_filled_arrow(ctx, tipx, tipy, basex, basey, half_w, color):
+        """Fill a triangle (tip→base) with perpendicular scanlines (no native tri prim)."""
+        dx = tipx - basex
+        dy = tipy - basey
+        length = math.hypot(dx, dy) or 1.0
+        ux, uy = dx / length, dy / length
+        perx, pery = -uy, ux
+        steps = max(6, int(length))
+        for i in range(steps + 1):
+            f = i / steps
+            cx = basex + ux * length * f
+            cy = basey + uy * length * f
+            hw = half_w * (1.0 - f)
+            ctx.draw_line(cx + perx * hw, cy + pery * hw,
+                          cx - perx * hw, cy - pery * hw, *color, 2.0)
     def _resolve_node_header_color(self, layout: _NodeLayout) -> Tuple[float, float, float, float]:
         raw = layout.node.data.get("header_color", layout.typedef.header_color)
         return self._coerce_rgba(raw, layout.typedef.header_color)

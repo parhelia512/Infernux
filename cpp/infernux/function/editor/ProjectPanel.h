@@ -91,6 +91,10 @@ class ProjectPanel : public EditorPanel
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimClip3D;
     /// Create animation state machine: (currentPath, name) → (ok, errorMsg)
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimFsm;
+    /// Create transform timeline: (currentPath, name) → (ok, errorMsg)
+    std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimTimeline;
+    /// Create timeline state machine: (currentPath, name) → (ok, errorMsg)
+    std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createTimelineFsm;
     /// Create prefab from hierarchy gameobject: (objId, currentPath)
     std::function<void(uint64_t, const std::string &)> createPrefabFromHierarchy;
 
@@ -115,6 +119,10 @@ class ProjectPanel : public EditorPanel
     std::function<void(const std::string &)> openAnimClip;
     /// Open animation state machine: (filePath)
     std::function<void(const std::string &)> openAnimFsm;
+    /// Open transform timeline: (filePath)
+    std::function<void(const std::string &)> openAnimTimeline;
+    /// Open timeline state machine: (filePath)
+    std::function<void(const std::string &)> openTimelineFsm;
     /// Reveal in file explorer: (path)
     std::function<void(const std::string &)> revealInExplorer;
 

@@ -209,13 +209,16 @@ class AnimState:
     """
 
     name: str = "New State"
-    kind: str = "clip"        # "clip" | "blend"
+    kind: str = "clip"        # "clip" | "blend" | "timeline"
     clip_guid: str = ""       # GUID of the referenced .animclip2d / .animclip3d (clip A)
     clip_path: str = ""       # fallback path (editor-only hint)
     # Blend-state second clip (B) + per-node Lerp (0..1) when kind == "blend".
     clip_b_guid: str = ""
     clip_b_path: str = ""
     blend_value: float = 0.5
+    # Timeline-state reference when kind == "timeline" (.animtimeline asset).
+    timeline_guid: str = ""
+    timeline_path: str = ""
     speed: float = 1.0
     # 0..1: minimum normalized clip progress before outgoing transitions are considered.
     # 1.0 = must reach end of current clip segment (default; matches "play full clip then transition").
@@ -239,6 +242,8 @@ class AnimState:
             "clip_b_guid": self.clip_b_guid,
             "clip_b_path": self.clip_b_path,
             "blend_value": float(self.blend_value),
+            "timeline_guid": self.timeline_guid,
+            "timeline_path": self.timeline_path,
             "speed": self.speed,
             "exit_time_normalized": self.exit_time_normalized,
             "loop": self.loop,
@@ -270,6 +275,8 @@ class AnimState:
             clip_b_guid=str(d.get("clip_b_guid", "")),
             clip_b_path=str(d.get("clip_b_path", "")),
             blend_value=max(0.0, min(1.0, float(d.get("blend_value", 0.5)))),
+            timeline_guid=str(d.get("timeline_guid", "")),
+            timeline_path=str(d.get("timeline_path", "")),
             speed=float(d.get("speed", 1.0)),
             exit_time_normalized=max(
                 0.0, min(1.0, float(d.get("exit_time_normalized", 1.0)))

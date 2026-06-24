@@ -540,6 +540,12 @@ ANIMCLIP3D_EXTENSIONS = frozenset({".animclip3d"})
 # Animation state machine extension
 ANIMFSM_EXTENSIONS = frozenset({".animfsm"})
 
+# Transform timeline extension
+ANIMTIMELINE_EXTENSIONS = frozenset({".animtimeline"})
+
+# Timeline state machine extension (FSM whose nodes are all timelines)
+TIMELINEFSM_EXTENSIONS = frozenset({".timelinefsm"})
+
 
 def asset_category_from_extension(ext: str) -> Optional[str]:
     """Return 'material' | 'texture' | 'shader' | 'audio' | 'font' | 'mesh' | 'prefab' | None for a file extension."""
@@ -564,4 +570,8 @@ def asset_category_from_extension(ext: str) -> Optional[str]:
         return "animclip3d"
     if ext in ANIMFSM_EXTENSIONS:
         return "animfsm"
+    if ext in ANIMTIMELINE_EXTENSIONS:
+        return "animtimeline"
+    if ext in TIMELINEFSM_EXTENSIONS:
+        return "timelinefsm"
     return None

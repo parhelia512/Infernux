@@ -332,6 +332,15 @@ def _ensure_categories():
         autosave_debounce=0.5,
     )
 
+    # ── Timeline State Machine (.timelinefsm) ──────────────────────────
+    _categories["timelinefsm"] = AssetCategoryDef(
+        display_name="asset.display_timelinefsm",
+        access_mode=AssetAccessMode.READ_WRITE_RESOURCE,
+        load_fn=_load_animfsm,
+        custom_body_fn=_render_animfsm_body,
+        autosave_debounce=0.5,
+    )
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Per-category loaders

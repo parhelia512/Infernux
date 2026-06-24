@@ -255,6 +255,8 @@ class AssetManager:
         cls.register_save_strategy("animclip", cls._save_animclip_resource)
         cls.register_save_strategy("animclip3d", cls._save_animclip3d_resource)
         cls.register_save_strategy("animfsm", cls._save_animfsm_resource)
+        cls.register_save_strategy("animtimeline", cls._save_animtimeline_resource)
+        cls.register_save_strategy("timelinefsm", cls._save_animfsm_resource)
 
         cls._execution_strategies_initialized = True
 
@@ -460,6 +462,14 @@ class AssetManager:
     @classmethod
     def _save_animfsm_resource(cls, resource_obj):
         """Save an AnimStateMachine resource."""
+        save = getattr(resource_obj, "save", None)
+        if not callable(save):
+            return False
+        return save()
+
+    @classmethod
+    def _save_animtimeline_resource(cls, resource_obj):
+        """Save an AnimationTimeline resource."""
         save = getattr(resource_obj, "save", None)
         if not callable(save):
             return False

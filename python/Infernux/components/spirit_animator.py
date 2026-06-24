@@ -64,6 +64,22 @@ def _resolve_clip_path(state: AnimState) -> Optional[str]:
     return None
 
 
+def _resolve_timeline_path(state: AnimState) -> Optional[str]:
+    """Resolve a timeline state's ``.animtimeline`` asset to a disk path."""
+    guid = getattr(state, "timeline_guid", "") or ""
+    path = (getattr(state, "timeline_path", "") or "").strip()
+    if guid:
+        db = _get_asset_database()
+        if db:
+            try:
+                p = db.get_path_from_guid(guid)
+                if p:
+                    return p
+            except Exception:
+                pass
+    return path or None
+
+
 @require_component(SpriteRenderer)
 @disallow_multiple
 @add_component_menu("Animation/Spirit Animator")
@@ -103,12 +119,18 @@ class SpiritAnimator(InxComponent):
     _current_clip: Optional[AnimationClip] = None
     _elapsed: float = 0.0
     _playing: bool = False
+    _current_timeline = None
+    _timeline_cache: Dict[str, object] = {}
+    _timeline_base = None
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
     def awake(self):
         self._parameters = {}
         self._clip_cache = {}
+        self._timeline_cache = {}
+        self._current_timeline = None
+        self._timeline_base = None
         self._current_state_name = ""
         self._current_clip = None
         self._elapsed = 0.0
@@ -126,6 +148,9 @@ class SpiritAnimator(InxComponent):
             self.play(self._fsm.default_state)
 
     def update(self, delta_time: float):
+        if self._current_timeline is not None:
+            self._update_timeline(delta_time)
+            return
         if not self._playing or not self._current_clip or not self._sprite_renderer:
             return
 
@@ -211,6 +236,11 @@ class SpiritAnimator(InxComponent):
     @property
     def normalized_time(self) -> float:
         """Current playback position in [0, 1]."""
+        if self._current_timeline is not None:
+            dur = max(1e-6, float(self._current_timeline.duration))
+            if bool(getattr(self._current_timeline, "loop", True)):
+                return (self._elapsed % dur) / dur
+            return min(self._elapsed / dur, 1.0)
         if self._current_clip and self._current_clip.duration > 0:
             return min(self._elapsed / self._current_clip.duration, 1.0)
         return 0.0
@@ -268,6 +298,9 @@ class SpiritAnimator(InxComponent):
 
     def on_after_deserialize(self):
         self._clip_cache = {}
+        self._timeline_cache = {}
+        self._current_timeline = None
+        self._timeline_base = None
         self._parameters = {}
 
     # ── Internals ───────────────────────────────────────────────────
@@ -276,6 +309,7 @@ class SpiritAnimator(InxComponent):
         """Load the AnimStateMachine from the *controller* asset reference."""
         self._fsm = None
         self._clip_cache = {}
+        self._timeline_cache = {}
 
         # self.controller auto-resolves the AnimStateMachineRef via the
         # descriptor, so *fsm* is already the loaded AnimStateMachine (or None).
@@ -327,6 +361,86 @@ class SpiritAnimator(InxComponent):
         self._clip_cache[key] = clip
         return clip
 
+    def _resolve_timeline(self, state: AnimState):
+        """Resolve and cache the ``.animtimeline`` asset for a timeline state."""
+        key = state.name
+        if key in self._timeline_cache:
+            return self._timeline_cache[key]
+        tl = None
+        path = _resolve_timeline_path(state)
+        if path:
+            try:
+                from Infernux.core.animation_timeline import AnimationTimeline
+                tl = AnimationTimeline.load(path)
+            except Exception:
+                tl = None
+            if tl is None:
+                Debug.log_warning(f"[SpiritAnimator] Failed to load timeline for state '{state.name}': {path}")
+        self._timeline_cache[key] = tl
+        return tl
+
+    def _update_timeline(self, delta_time: float):
+        """Advance + apply a timeline state, driving the owner GameObject transform."""
+        tl = self._current_timeline
+        if tl is None:
+            return
+        state = self._get_current_state()
+        loop = bool(state.loop) if state is not None else True
+        if self._playing:
+            speed = self.playback_speed * (state.speed if state else 1.0)
+            self._elapsed += delta_time * speed
+            dur = max(1e-6, float(tl.duration))
+            if self._elapsed >= dur:
+                self._apply_timeline(tl, dur)
+                self._try_auto_transition()
+                if self._current_timeline is tl and self._playing:
+                    if loop:
+                        self._elapsed = self._elapsed % dur
+                    else:
+                        self._elapsed = dur
+                        self._playing = False
+                    self._apply_timeline(tl, self._elapsed)
+                return
+        self._apply_timeline(tl, self._elapsed)
+        self._try_auto_transition()
+
+    def _capture_timeline_base(self):
+        tr = getattr(self.game_object, "transform", None)
+        if tr is None:
+            self._timeline_base = ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+            return
+        try:
+            p, r, s = tr.local_position, tr.local_euler_angles, tr.local_scale
+            self._timeline_base = (
+                [float(p.x), float(p.y), float(p.z)],
+                [float(r.x), float(r.y), float(r.z)],
+                [float(s.x), float(s.y), float(s.z)],
+            )
+        except Exception:
+            self._timeline_base = ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+
+    def _apply_timeline(self, tl, t: float):
+        """Sample *tl* at time *t* and write the local transform of the owner."""
+        sampled = tl.sample(t)
+        if sampled is None:
+            return
+        pos, rot, scl = sampled
+        if getattr(tl, "apply_mode", "additive") == "additive":
+            bp, br, bs = self._timeline_base or ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+            pos = [bp[0] + pos[0], bp[1] + pos[1], bp[2] + pos[2]]
+            rot = [br[0] + rot[0], br[1] + rot[1], br[2] + rot[2]]
+            scl = [bs[0] * scl[0], bs[1] * scl[1], bs[2] * scl[2]]
+        tr = getattr(self.game_object, "transform", None)
+        if tr is None:
+            return
+        try:
+            from Infernux.lib import Vector3
+            tr.local_position = Vector3(float(pos[0]), float(pos[1]), float(pos[2]))
+            tr.local_euler_angles = Vector3(float(rot[0]), float(rot[1]), float(rot[2]))
+            tr.local_scale = Vector3(float(scl[0]), float(scl[1]), float(scl[2]))
+        except Exception:
+            pass
+
     def _enter_state(self, state_name: str) -> bool:
         """Enter a state: load its clip and reset playback."""
         if not self._fsm:
@@ -340,6 +454,19 @@ class SpiritAnimator(InxComponent):
             if self._playing and self._current_state_name == state_name:
                 return True
 
+        if getattr(state, "kind", "clip") == "timeline":
+            self._current_state_name = state_name
+            self._current_clip = None
+            self._current_timeline = self._resolve_timeline(state)
+            self._elapsed = 0.0
+            self._prev_event_norm = 0.0
+            self._playing = True
+            self._capture_timeline_base()
+            if self._current_timeline is not None:
+                self._apply_timeline(self._current_timeline, 0.0)
+            return True
+
+        self._current_timeline = None
         clip = self._resolve_clip(state)
         self._current_state_name = state_name
         self._current_clip = clip
@@ -361,6 +488,11 @@ class SpiritAnimator(InxComponent):
 
     def _exit_time_gate_ok(self, state: AnimState) -> bool:
         """Require normalized clip progress >= state's exit_time before any outgoing transition."""
+        if self._current_timeline is not None:
+            dur = max(1e-6, float(self._current_timeline.duration))
+            thr = max(0.0, min(1.0, float(getattr(state, "exit_time_normalized", 1.0))))
+            progress = min(max(self._elapsed / dur, 0.0), 1.0)
+            return progress + 1e-7 >= thr
         if not self._current_clip or self._current_clip.duration <= 0:
             return True
         thr = float(getattr(state, "exit_time_normalized", 1.0))

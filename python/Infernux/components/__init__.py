@@ -98,6 +98,7 @@ from .decorators import (
 )
 from .spirit_animator import SpiritAnimator
 from .skeletal_animator import SkeletalAnimator
+from .timeline_action import TimelineAction
 
 __all__ = [
     "InxComponent",
@@ -175,4 +176,5 @@ __all__ = [
     # Animation
     "SpiritAnimator",
     "SkeletalAnimator",
+    "TimelineAction",
 ]

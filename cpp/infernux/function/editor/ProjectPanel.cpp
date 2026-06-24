@@ -268,6 +268,8 @@ const std::unordered_map<std::string, ProjectPanel::DragDropInfo> &ProjectPanel:
         {".animclip2d", {"ANIMCLIP_FILE", "2D AnimClip"}},
         {".animclip3d", {"ANIMCLIP3D_FILE", "3D AnimClip"}},
         {".animfsm", {"ANIMFSM_FILE", "AnimFSM"}},
+        {".animtimeline", {"ANIMTIMELINE_FILE", "Timeline"}},
+        {".timelinefsm", {"TIMELINEFSM_FILE", "TimelineFSM"}},
     };
     return map;
 }
@@ -335,6 +337,10 @@ const char *ProjectPanel::GetFileTypeTag(const std::string &filename)
         return "[PRE]";
     if (ext == ".animclip3d")
         return "[A3]";
+    if (ext == ".animtimeline")
+        return "[Timeline]";
+    if (ext == ".timelinefsm")
+        return "[TLFSM]";
     if (ext == ".wav")
         return "[AUD]";
     if (ext == ".ttf" || ext == ".otf")
@@ -1327,6 +1333,12 @@ void ProjectPanel::HandleItemClick(const FileItem &item, InxGUIContext *ctx)
         } else if (item.ext == ".animfsm") {
             if (openAnimFsm)
                 openAnimFsm(item.path);
+        } else if (item.ext == ".animtimeline") {
+            if (openAnimTimeline)
+                openAnimTimeline(item.path);
+        } else if (item.ext == ".timelinefsm") {
+            if (openTimelineFsm)
+                openTimelineFsm(item.path);
         } else {
             if (openFile)
                 openFile(item.path);
@@ -2308,6 +2320,21 @@ void ProjectPanel::RenderContextMenu(InxGUIContext *ctx)
             CreateAndRename("NewScene", ".scene", [this](const std::string &name) {
                 if (createScene)
                     return createScene(m_currentPath, name);
+                return std::make_pair(false, std::string("No callback"));
+            });
+        }
+        ctx->Separator();
+        if (ctx->Selectable(Tr("project.create_animtimeline"), false)) {
+            CreateAndRename("NewTimeline", ".animtimeline", [this](const std::string &name) {
+                if (createAnimTimeline)
+                    return createAnimTimeline(m_currentPath, name);
+                return std::make_pair(false, std::string("No callback"));
+            });
+        }
+        if (ctx->Selectable(Tr("project.create_timelinefsm"), false)) {
+            CreateAndRename("NewTimelineFSM", ".timelinefsm", [this](const std::string &name) {
+                if (createTimelineFsm)
+                    return createTimelineFsm(m_currentPath, name);
                 return std::make_pair(false, std::string("No callback"));
             });
         }
