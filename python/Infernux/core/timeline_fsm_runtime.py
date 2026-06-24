@@ -18,10 +18,25 @@ from typing import Dict, Optional
 from Infernux.core.anim_state_machine import (
     AnimStateMachine, AnimState, AnimTransition, evaluate_anim_condition,
 )
-from Infernux.core.animation_timeline import AnimationTimeline
+from Infernux.core.animation_timeline import AnimationTimeline, sample_sorted_keys
 from Infernux.debug import Debug
 
 _DEFAULT_PERIOD = 1.0  # fallback loop period when a timeline has no duration
+
+# Lazily-resolved Vector3 class.  Importing inside the per-frame apply path cost a
+# sys.modules lookup every frame; resolve it once and reuse.
+_Vector3 = None
+
+
+def _resolve_vector3():
+    global _Vector3
+    if _Vector3 is None:
+        try:
+            from Infernux.lib import Vector3
+            _Vector3 = Vector3
+        except Exception:
+            return None
+    return _Vector3
 
 
 def _get_asset_database():
@@ -69,6 +84,16 @@ class TimelineFSMRuntime:
         self._playing: bool = False
         self._base = None
         self.playback_speed: float = 1.0
+        # ── Per-frame caches (refreshed on state entry) ─────────────────
+        self._state: Optional[AnimState] = None          # active AnimState (avoids name scans)
+        self._sorted_keys = None                          # timeline keys sorted once per state
+        self._apply_additive: bool = True                 # cached apply_mode test
+        self._duration: float = _DEFAULT_PERIOD           # cached timeline duration
+        self._cond_ctx: Dict[str, object] = {}            # reused condition-eval scratch dict
+        # Cached transform fast-path: the combined `set_local_trs` bound method is
+        # resolved once per transform identity (one pybind call/frame, no Vector3).
+        self._trs_transform = None
+        self._trs_setter = None
 
     # ── Setup ──────────────────────────────────────────────────────────
     def set_fsm(self, fsm: Optional[AnimStateMachine]):
@@ -80,6 +105,12 @@ class TimelineFSMRuntime:
         self._elapsed = 0.0
         self._playing = False
         self._base = None
+        self._state = None
+        self._sorted_keys = None
+        self._apply_additive = True
+        self._duration = _DEFAULT_PERIOD
+        self._trs_transform = None
+        self._trs_setter = None
         if fsm is not None:
             for p in fsm.parameters:
                 if p.kind == "bool":
@@ -103,12 +134,11 @@ class TimelineFSMRuntime:
 
     @property
     def normalized_time(self) -> float:
-        tl = self._timeline
-        if tl is None:
+        if self._timeline is None:
             return 0.0
-        dur = max(1e-6, float(tl.duration))
-        state = self._get_state()
-        if state is not None and bool(state.loop):
+        dur = max(1e-6, self._duration)
+        state = self._state
+        if state is not None and state.loop:
             return (self._elapsed % dur) / dur
         return min(self._elapsed / dur, 1.0)
 
@@ -156,12 +186,12 @@ class TimelineFSMRuntime:
         if self._fsm is None or self._timeline is None:
             return
         tl = self._timeline
-        state = self._get_state()
-        loop = bool(state.loop) if state is not None else True
+        state = self._state
+        loop = state.loop if state is not None else True
         if self._playing:
             speed = self.playback_speed * (state.speed if state else 1.0)
             self._elapsed += delta_time * speed
-            dur = max(1e-6, float(tl.duration))
+            dur = self._duration
             if self._elapsed >= dur:
                 self._apply_timeline(tl, dur, transform)
                 self._try_transition(transform)
@@ -178,8 +208,14 @@ class TimelineFSMRuntime:
 
     # ── Internals ──────────────────────────────────────────────────────
     def _get_state(self) -> Optional[AnimState]:
+        # Fast path: the cached AnimState matches the active state name.
+        s = self._state
+        if s is not None and s.name == self._state_name:
+            return s
         if self._fsm and self._state_name:
-            return self._fsm.get_state(self._state_name)
+            s = self._fsm.get_state(self._state_name)
+            self._state = s
+            return s
         return None
 
     def _resolve_timeline(self, state: AnimState) -> Optional[AnimationTimeline]:
@@ -206,12 +242,24 @@ class TimelineFSMRuntime:
             if self._playing and self._state_name == state_name:
                 return True
         self._state_name = state_name
+        self._state = state
         self._timeline = self._resolve_timeline(state)
         self._elapsed = 0.0
         self._playing = True
+        # Refresh per-state caches so the per-frame update path does no scans,
+        # re-sorts, getattr lookups, or imports.
+        tl = self._timeline
+        if tl is not None:
+            self._sorted_keys = tl.sorted_keys()
+            self._apply_additive = (getattr(tl, "apply_mode", "additive") == "additive")
+            self._duration = max(1e-6, float(tl.duration))
+        else:
+            self._sorted_keys = None
+            self._apply_additive = True
+            self._duration = _DEFAULT_PERIOD
         self._capture_base(transform)
-        if self._timeline is not None:
-            self._apply_timeline(self._timeline, 0.0, transform)
+        if tl is not None:
+            self._apply_timeline(tl, 0.0, transform)
         return True
 
     def _capture_base(self, transform):
@@ -231,53 +279,79 @@ class TimelineFSMRuntime:
     def _apply_timeline(self, tl: AnimationTimeline, t: float, transform):
         if transform is None:
             return
-        sampled = tl.sample(t)
+        keys = self._sorted_keys
+        sampled = sample_sorted_keys(keys, t) if keys is not None else tl.sample(t)
         if sampled is None:
             return
         pos, rot, scl = sampled
-        if getattr(tl, "apply_mode", "additive") == "additive":
-            bp, br, bs = self._base or ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
-            pos = [bp[0] + pos[0], bp[1] + pos[1], bp[2] + pos[2]]
-            rot = [br[0] + rot[0], br[1] + rot[1], br[2] + rot[2]]
-            scl = [bs[0] * scl[0], bs[1] * scl[1], bs[2] * scl[2]]
+
+        # Resolve the combined-setter bound method once per transform identity.
+        if transform is not self._trs_transform:
+            self._trs_transform = transform
+            self._trs_setter = getattr(transform, "set_local_trs", None)
+        trs = self._trs_setter
+
         try:
-            from Infernux.lib import Vector3
-            transform.local_position = Vector3(float(pos[0]), float(pos[1]), float(pos[2]))
-            transform.local_euler_angles = Vector3(float(rot[0]), float(rot[1]), float(rot[2]))
-            transform.local_scale = Vector3(float(scl[0]), float(scl[1]), float(scl[2]))
+            if self._apply_additive:
+                bp, br, bs = self._base or ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+                px, py, pz = bp[0] + pos[0], bp[1] + pos[1], bp[2] + pos[2]
+                rx, ry, rz = br[0] + rot[0], br[1] + rot[1], br[2] + rot[2]
+                sx, sy, sz = bs[0] * scl[0], bs[1] * scl[1], bs[2] * scl[2]
+            else:
+                px, py, pz = pos[0], pos[1], pos[2]
+                rx, ry, rz = rot[0], rot[1], rot[2]
+                sx, sy, sz = scl[0], scl[1], scl[2]
+
+            if trs is not None:
+                # Single pybind crossing, no Vector3 objects, one subtree invalidate.
+                trs(px, py, pz, rx, ry, rz, sx, sy, sz)
+                return
+
+            # Fallback for older native builds without set_local_trs.
+            V = _Vector3 or _resolve_vector3()
+            if V is None:
+                return
+            transform.local_position = V(px, py, pz)
+            transform.local_euler_angles = V(rx, ry, rz)
+            transform.local_scale = V(sx, sy, sz)
         except Exception as exc:
             Debug.log_suppressed("TimelineFSMRuntime._apply_timeline", exc)
 
     def _exit_gate_ok(self, state: AnimState) -> bool:
-        tl = self._timeline
-        if tl is None:
+        if self._timeline is None:
             return True
-        dur = max(1e-6, float(tl.duration))
+        dur = self._duration
         thr = max(0.0, min(1.0, float(getattr(state, "exit_time_normalized", 1.0))))
         progress = min(max(self._elapsed / dur, 0.0), 1.0)
         return progress + 1e-7 >= thr
 
     def _try_transition(self, transform):
-        state = self._get_state()
+        state = self._state if self._state is not None else self._get_state()
         if not state:
+            return
+        transitions = state.transitions
+        if not transitions:
             return
         if not self._exit_gate_ok(state):
             return
-        for tr in state.transitions:
+        for tr in transitions:
             if self._evaluate_condition(tr, state):
                 self._consume_triggers(tr.condition)
                 self._enter_state(tr.target_state, transform)
                 return
 
     def _evaluate_condition(self, transition: AnimTransition, state: AnimState) -> bool:
-        cond = (transition.condition or "").strip()
-        if not cond:
+        cond = transition.condition
+        if not cond or not cond.strip():
             # No explicit condition: advance only when a non-looping timeline ends.
-            tl = self._timeline
-            if tl is None or bool(state.loop):
+            if self._timeline is None or state.loop:
                 return False
-            return self._elapsed >= max(1e-6, float(tl.duration))
-        ctx = dict(self._params)
+            return self._elapsed >= self._duration
+        cond = cond.strip()
+        # Reuse a persistent scratch dict instead of allocating a new ctx each frame.
+        ctx = self._cond_ctx
+        ctx.clear()
+        ctx.update(self._params)
         ctx["time"] = self._elapsed
         ctx["normalized_time"] = self.normalized_time
         ctx["state"] = self._state_name

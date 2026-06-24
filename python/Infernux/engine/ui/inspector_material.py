@@ -67,6 +67,59 @@ def _draw_centered_texture(ctx: InxGUIContext, tex_id: int, width: float, height
     return True
 
 
+def _query_material_preview_tex(panel, native_mat, mat_data, state, cache_tag, preview_path) -> int:
+    """Resolve a material preview texture for asset and inline (prefab/scene) editors."""
+    from .asset_resource_preview import (
+        _resolve_native_engine,
+        _try_get_cpp_material_preview_texture,
+        get_resource_preview_texture_id,
+    )
+
+    embedded = isinstance(preview_path, str) and "::submat:" in preview_path
+    disk_ok = (
+        isinstance(preview_path, str)
+        and bool(preview_path)
+        and not embedded
+        and os.path.isfile(preview_path)
+    )
+
+    json_blob = (cache_tag or "").strip()
+    if not json_blob:
+        try:
+            json_blob = state.extra.get("cached_json") or json.dumps(
+                mat_data, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            json_blob = ""
+
+    if embedded and preview_path:
+        return int(get_resource_preview_texture_id(
+            panel, preview_path, material_json=json_blob) or 0)
+
+    native = _resolve_native_engine(panel)
+    if native is None:
+        return 0
+
+    # Prefab/scene instance overrides often have no saved .mat on disk — render from JSON.
+    if json_blob and not disk_ok:
+        guid = (getattr(native_mat, "guid", "") or "").strip()
+        resource_key = f"matedit|inline|{guid or id(native_mat)}"
+        path_hint = preview_path or f"inline:{guid or id(native_mat)}"
+        tex = int(_try_get_cpp_material_preview_texture(
+            native, resource_key, path_hint, material_json=json_blob, file_mtime_hint=0) or 0)
+        if tex:
+            return tex
+
+    if not preview_path:
+        return 0
+
+    tex = int(get_resource_preview_texture_id(
+        panel, preview_path, material_json=json_blob or "") or 0)
+    if tex == 0 and json_blob:
+        tex = int(get_resource_preview_texture_id(
+            panel, preview_path, material_json="") or 0)
+    return tex
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Material property renderer (JSON type system: ptype 0-7)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -733,7 +786,9 @@ def render_material_body(ctx: InxGUIContext, panel, state):
     if is_builtin:
         mat_data["builtin"] = True
 
-    is_embedded_slot = "::submat:" in (getattr(state, "file_path", "") or "")
+    is_embedded_slot = "::submat:" in (
+        (getattr(_native_mat, "file_path", "") or getattr(state, "file_path", "") or "")
+    )
     # Built-in materials use per-section disabled(); embedded uses one outer disabled()
     # so every control (including pickers) looks non-interactive like a default slot material.
     section_readonly = is_builtin
@@ -821,22 +876,11 @@ def render_material_body(ctx: InxGUIContext, panel, state):
         last_preview_path = state.extra.get("_material_preview_path", "")
         if preview_path != last_preview_path:
             state.extra["_material_preview_path"] = preview_path
-            state.extra.pop("_material_preview_tex_id", None)
 
-        preview_tex_id = int(state.extra.get("_material_preview_tex_id", 0) or 0)
-        should_query_preview = bool(preview_path) and (not pending_preview_refresh or preview_tex_id == 0)
-        if should_query_preview:
-            # Pass live mat_data JSON so the C++ preview renderer uses the
-            # in-memory state instead of reading the (potentially stale) disk file.
-            queried_tex_id = int(get_resource_preview_texture_id(
-                panel,
-                preview_path,
-                preview_size=int(preview_size),
-                material_json=cache_tag,
-            ) or 0)
-            if queried_tex_id != 0:
-                preview_tex_id = queried_tex_id
-                state.extra["_material_preview_tex_id"] = queried_tex_id
+        preview_tex_id = 0
+        if preview_path or _native_mat is not None:
+            preview_tex_id = _query_material_preview_tex(
+                panel, _native_mat, mat_data, state, cache_tag, preview_path)
 
         if not _draw_centered_texture(ctx, preview_tex_id, avail_w, preview_size, 256, 256):
             ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
@@ -977,7 +1021,12 @@ class _InlineMaterialExecLayer:
 
 def _build_inline_state(panel, native_mat):
     extra = _get_inline_material_extra(panel, native_mat)
-    return SimpleNamespace(extra=extra, exec_layer=_InlineMaterialExecLayer(panel))
+    mat_path = getattr(native_mat, "file_path", "") or ""
+    return SimpleNamespace(
+        extra=extra,
+        exec_layer=_InlineMaterialExecLayer(panel),
+        file_path=mat_path,
+    )
 
 
 def _get_inline_material_extra(panel, native_mat) -> dict:

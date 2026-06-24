@@ -534,6 +534,13 @@ class SkeletalAnimator(InxComponent):
         if tr is None:
             return
         try:
+            trs = getattr(tr, "set_local_trs", None)
+            if trs is not None:
+                # Single boundary crossing + one subtree invalidate (no Vector3 allocs).
+                trs(float(pos[0]), float(pos[1]), float(pos[2]),
+                    float(rot[0]), float(rot[1]), float(rot[2]),
+                    float(scl[0]), float(scl[1]), float(scl[2]))
+                return
             from Infernux.lib import Vector3
             tr.local_position = Vector3(float(pos[0]), float(pos[1]), float(pos[2]))
             tr.local_euler_angles = Vector3(float(rot[0]), float(rot[1]), float(rot[2]))

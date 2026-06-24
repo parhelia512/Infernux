@@ -1605,6 +1605,26 @@ bool InxRenderer::RenderMeshPreviewGPU(const InxMesh &mesh, const std::vector<st
     return m_vkCore->RenderMeshPreviewGPU(mesh, materials, size, outPixels);
 }
 
+bool InxRenderer::RenderMeshPreviewGPUCamera(const InxMesh &mesh,
+                                             const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
+                                             const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
+                                             std::vector<unsigned char> &outPixels, bool cloneMaterials)
+{
+    if (!m_vkCore)
+        return false;
+    return m_vkCore->RenderMeshPreviewGPUCamera(mesh, materials, size, view, proj, cameraPos, outPixels, cloneMaterials);
+}
+
+uint64_t InxRenderer::RenderMeshPreviewGPUImGuiCamera(const InxMesh &mesh,
+                                                      const std::vector<std::shared_ptr<InxMaterial>> &materials,
+                                                      int size, const glm::mat4 &view, const glm::mat4 &proj,
+                                                      const glm::vec3 &cameraPos, bool cloneMaterials)
+{
+    if (!m_vkCore)
+        return 0;
+    return m_vkCore->RenderMeshPreviewGPUImGuiCamera(mesh, materials, size, view, proj, cameraPos, cloneMaterials);
+}
+
 void InxRenderer::InvalidateShaderCache(const std::string &shaderId)
 {
     INXLOG_DEBUG("InvalidateShaderCache called: ", shaderId);

@@ -457,6 +457,16 @@ void RegisterSceneBindings(py::module_ &m)
         .def_property(
             "local_scale", [](Transform *t) { return t->GetLocalScale(); },
             [](Transform *t, const glm::vec3 &v) { t->SetLocalScale(v.x, v.y, v.z); }, "Scale in local space")
+        // Combined local TRS setter — single boundary crossing + one subtree
+        // invalidation. Per-frame animation fast path (TimelineAction etc.).
+        .def(
+            "set_local_trs",
+            [](Transform *t, float px, float py, float pz, float rx, float ry, float rz, float sx, float sy,
+               float sz) { t->SetLocalTRS(glm::vec3(px, py, pz), glm::vec3(rx, ry, rz), glm::vec3(sx, sy, sz)); },
+            py::arg("px"), py::arg("py"), py::arg("pz"), py::arg("rx"), py::arg("ry"), py::arg("rz"), py::arg("sx"),
+            py::arg("sy"), py::arg("sz"),
+            "Set local position+euler(deg)+scale in one call (single dirty/invalidate). "
+            "Fast path for per-frame animation; avoids 3 separate setters + Vector3 allocations.")
         .def_property_readonly(
             "lossy_scale", [](Transform *t) { return t->GetWorldScale(); },
             "Approximate world-space scale (read-only, like Unity lossyScale)")

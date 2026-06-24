@@ -166,6 +166,16 @@ class InxRenderer
     bool RenderMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
                               std::vector<unsigned char> &outPixels);
 
+    /// @brief Mesh preview with an explicit camera (no auto-fit) — interactive Timeline viewport.
+    bool RenderMeshPreviewGPUCamera(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials,
+                                    int size, const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
+                                    std::vector<unsigned char> &outPixels, bool cloneMaterials = true);
+
+    uint64_t RenderMeshPreviewGPUImGuiCamera(const InxMesh &mesh,
+                                             const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
+                                             const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
+                                             bool cloneMaterials = false);
+
     // Refresh all materials using a specific shader
     bool RefreshMaterialsUsingShader(const std::string &shaderId);
 

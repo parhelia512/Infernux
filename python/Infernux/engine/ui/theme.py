@@ -877,5 +877,57 @@ def _apply_native_theme_overrides() -> None:
         Theme._NATIVE_OVERRIDES_APPLIED = -1
 
 
+def _native_theme_generation() -> int:
+    try:
+        from Infernux.lib import editor_theme_generation
+        return int(editor_theme_generation())
+    except Exception:
+        return 0
+
+
+def set_editor_theme(name: str) -> bool:
+    """Switch the active editor theme.
+
+    The C++ registry re-skins every built-in ImGui widget (C++ and Python
+    panels) in one call; we then refresh the Python-side ``Theme`` tokens used
+    by custom drawing. Returns ``True`` on success.
+    """
+    try:
+        from Infernux.lib import set_editor_theme as _native_set
+    except Exception:
+        return False
+    ok = bool(_native_set(name))
+    if ok:
+        _apply_native_theme_overrides()
+        Theme._NATIVE_THEME_GENERATION = _native_theme_generation()
+    return ok
+
+
+def list_editor_themes() -> list:
+    """Return the names of all registered editor themes."""
+    try:
+        from Infernux.lib import list_editor_themes as _native_list
+        return list(_native_list())
+    except Exception:
+        return []
+
+
+def active_editor_theme() -> str:
+    """Return the active editor theme name."""
+    try:
+        from Infernux.lib import get_editor_theme as _native_get
+        return str(_native_get())
+    except Exception:
+        return ""
+
+
+# Convenience API on the Theme class: Theme.set_theme("amber") / Theme.list_themes()
+Theme.set_theme = staticmethod(set_editor_theme)
+Theme.list_themes = staticmethod(list_editor_themes)
+Theme.active_theme = staticmethod(active_editor_theme)
+Theme.refresh = staticmethod(_apply_native_theme_overrides)
+
 Theme._NATIVE_OVERRIDES_APPLIED = 0
+Theme._NATIVE_THEME_GENERATION = 0
 _apply_native_theme_overrides()
+Theme._NATIVE_THEME_GENERATION = _native_theme_generation()

@@ -13,7 +13,6 @@ Opened from Window menu → Timeline Editor, or by double-clicking a
 
 from __future__ import annotations
 
-import math
 import os
 import time
 from typing import Optional
@@ -36,51 +35,43 @@ from .theme import ImGuiCol, Theme
 _MOD_CTRL = 1 << 12
 _MOD_SHIFT = 1 << 13
 
-_INTERP_LABELS = ("Constant", "Linear", "Ease In", "Ease Out", "Ease In-Out")
-_APPLY_LABELS = ("Additive (Increment)", "Absolute")
-_RIGHT_PANEL_W = 290.0
-_BAR_H = 84.0
+# Combo label i18n keys (order matches INTERP_MODES / APPLY_MODES).
+_INTERP_LABEL_KEYS = ("interp_constant", "interp_linear", "interp_ease_in", "interp_ease_out", "interp_ease_inout")
+_APPLY_LABEL_KEYS = ("apply_additive", "apply_absolute")
+_BAR_H = 88.0
+_BAR_EDGE_PAD = 14.0  # inset track so t=0 / t=dur keyframes stay inside the bar
+_PREVIEW_H = 196.0  # 3D preview height reserved at the bottom of the right (keyframe) panel
+_KF_LABEL_W = 78.0  # fixed label column width so inline label+field rows align
 _DRAG_THRESHOLD = 4.0  # px the mouse must move before a keyframe starts dragging (Blender-like)
-
-# Theme-aligned palette (black/white/gray + red accent).
-_C_BAR_BG = (0.135, 0.135, 0.140, 1.0)
-_C_RULER_BG = (0.175, 0.175, 0.180, 1.0)
-_C_LANE = (0.205, 0.205, 0.210, 1.0)
-_C_TICK = (0.45, 0.45, 0.47, 0.85)
-_C_TEXT_DIM = (0.55, 0.55, 0.57, 0.95)
-_C_KEY = (0.62, 0.62, 0.64, 1.0)
-_C_KEY_HOVER = (0.82, 0.82, 0.84, 1.0)
-_C_ACCENT = (0.922, 0.341, 0.341, 1.0)  # theme red (#EB5757)
-_C_PREVIEW_BG = (0.11, 0.11, 0.12, 1.0)
-_C_FLOOR = (0.26, 0.27, 0.30, 0.85)
-_C_FLOOR_AXIS = (0.36, 0.30, 0.30, 0.9)
-
-# Unit cube centred at origin (Y up), faces + outward normals.
-_CUBE_VERTS = [(-.5, -.5, -.5), (.5, -.5, -.5), (.5, .5, -.5), (-.5, .5, -.5),
-               (-.5, -.5, .5), (.5, -.5, .5), (.5, .5, .5), (-.5, .5, .5)]
-_CUBE_FACES = [(0, 1, 2, 3), (5, 4, 7, 6), (4, 0, 3, 7), (1, 5, 6, 2), (3, 2, 6, 7), (4, 5, 1, 0)]
-_CUBE_NORMALS = [(0, 0, -1), (0, 0, 1), (-1, 0, 0), (1, 0, 0), (0, 1, 0), (0, -1, 0)]
-_LIGHT = (-0.35, 0.78, -0.50)
-
-# Floor camera: Y up, floor = XZ plane. Yaw then pitch (look slightly down at floor).
-_CAM_YAW = math.radians(-32.0)
-_CAM_PITCH = math.radians(-27.0)
+_PREVIEW_RENDER_PX = 240  # fixed offscreen render size (stable → no per-frame framebuffer churn)
 
 
-def _rot_xyz(p, rx, ry, rz):
-    x, y, z = p
-    ca, sa = math.cos(rx), math.sin(rx); y, z = y * ca - z * sa, y * sa + z * ca
-    ca, sa = math.cos(ry), math.sin(ry); x, z = x * ca + z * sa, -x * sa + z * ca
-    ca, sa = math.cos(rz), math.sin(rz); x, y = x * ca - y * sa, x * sa + y * ca
-    return (x, y, z)
+def _tl_colors():
+    """Timeline palette pulled live from the editor Theme (so theme switches apply)."""
+
+    def _mix(a, b, t):
+        return tuple(a[i] + (b[i] - a[i]) * t for i in range(4))
+
+    bar = Theme.FRAME_BG
+    return {
+        "bar": bar,
+        "ruler": Theme.HEADER,
+        "lane": _mix(bar, Theme.HEADER, 0.6),
+        "tick": Theme.TEXT_DIM,
+        "text": Theme.TEXT_DIM,
+        "key": Theme.TEXT_DIM,
+        "key_hi": Theme.TEXT,
+        "accent": Theme.APPLY_BUTTON,
+        "preview_bg": Theme.WINDOW_BG,
+    }
 
 
-def _cam(p):
-    """World (Y-up) → view space via fixed yaw+pitch (object-resting-on-floor view)."""
-    x, y, z = p
-    ca, sa = math.cos(_CAM_YAW), math.sin(_CAM_YAW); x, z = x * ca + z * sa, -x * sa + z * ca
-    ca, sa = math.cos(_CAM_PITCH), math.sin(_CAM_PITCH); y, z = y * ca - z * sa, y * sa + z * ca
-    return (x, y, z)
+def _interp_labels():
+    return [t(f"animtimeline_editor.{k}") for k in _INTERP_LABEL_KEYS]
+
+
+def _apply_labels():
+    return [t(f"animtimeline_editor.{k}") for k in _APPLY_LABEL_KEYS]
 
 
 @editor_panel(
@@ -102,6 +93,8 @@ class AnimTimelineEditorPanel(EditorPanel):
         self._playhead: float = 0.0
         self._playing: bool = False
         self._last_tick: float = 0.0
+        self._play_wall_start: float = 0.0
+        self._playhead_at_play_start: float = 0.0
         self._sel_key: Optional[TimelineKeyframe] = None
         self._drag_key: Optional[TimelineKeyframe] = None
         self._drag_armed: bool = False
@@ -109,6 +102,15 @@ class AnimTimelineEditorPanel(EditorPanel):
         self._bar_was_active: bool = False
         self._idle_suppressed: bool = False
         self._idle_prev: bool = True
+        # Orbit camera for the 3D preview viewport (yaw/pitch radians, distance = zoom).
+        self._cam_yaw: float = -0.6
+        self._cam_pitch: float = 0.5
+        self._cam_dist: float = 6.0
+        self._orbiting: bool = False
+        self._preview_tex_cache: int = 0
+        # Panel persistence: ``load_state`` may run from bootstrap or first render.
+        self._panel_state_restored_once: bool = False
+        self._panel_restore_data: Optional[dict] = None
 
     def on_disable(self) -> None:
         # Always restore the editor idle setting if we suppressed it.
@@ -148,6 +150,132 @@ class AnimTimelineEditorPanel(EditorPanel):
         # ClosablePanel._sync_dirty_registry() reads self._dirty every frame and
         # registers the title + _do_save handler, so we only flip the flag here.
         self._dirty = bool(value)
+
+    # ── State persistence ──────────────────────────────────────────────
+
+    def _normalize_timeline_path(self, path: str) -> str:
+        """Return a normalized absolute timeline path when possible."""
+        p = (path or "").strip()
+        if not p:
+            return ""
+        p = os.path.normpath(p)
+        if os.path.isabs(p):
+            return p
+        try:
+            from Infernux.engine.project_context import get_project_root
+
+            root = get_project_root()
+        except Exception:
+            root = None
+        if root:
+            return os.path.normpath(os.path.join(root, p))
+        return os.path.abspath(p)
+
+    def save_state(self) -> dict:
+        """Persist open .animtimeline path (saved on disk only) and view settings."""
+        data: dict = {}
+        fp = self._normalize_timeline_path(self._file_path)
+        rel_fallback = ""
+        if fp and not os.path.isfile(fp):
+            fp = ""
+        if not fp and self._panel_restore_data:
+            fp = self._normalize_timeline_path(self._panel_restore_data.get("file_path") or "")
+            rel_fallback = (self._panel_restore_data.get("file_path_rel") or "").strip()
+            if fp and not os.path.isfile(fp):
+                fp = ""
+        if not fp and not rel_fallback:
+            try:
+                from Infernux.engine.ui import panel_state as _ps
+
+                prev = _ps.get(f"panel:{self.window_id}")
+                if prev:
+                    fp = self._normalize_timeline_path(prev.get("file_path") or "")
+                    rel_fallback = (prev.get("file_path_rel") or "").strip()
+                    if fp and not os.path.isfile(fp):
+                        fp = ""
+            except Exception:
+                pass
+        if fp:
+            data["file_path"] = fp
+            try:
+                from Infernux.engine.project_context import get_project_root
+
+                root = get_project_root()
+                if root:
+                    abs_p = os.path.abspath(fp)
+                    abs_r = os.path.abspath(root)
+                    rel = os.path.relpath(abs_p, abs_r)
+                    if not rel.startswith(".."):
+                        data["file_path_rel"] = rel
+            except (ValueError, OSError):
+                pass
+        elif rel_fallback:
+            data["file_path_rel"] = rel_fallback
+        data["playhead"] = float(self._playhead)
+        data["cam_yaw"] = float(self._cam_yaw)
+        data["cam_pitch"] = float(self._cam_pitch)
+        data["cam_dist"] = float(self._cam_dist)
+        return data
+
+    def _resolve_saved_timeline_path(self, data: dict) -> str:
+        """Resolve persisted path using absolute path, then project-relative."""
+        fp = self._normalize_timeline_path(data.get("file_path") or "")
+        rel = (data.get("file_path_rel") or "").strip()
+        if fp and os.path.isfile(fp):
+            return fp
+        if rel:
+            try:
+                from Infernux.engine.project_context import get_project_root
+
+                root = get_project_root()
+                if root:
+                    cand = os.path.normpath(os.path.join(root, rel.replace("/", os.sep)))
+                    if os.path.isfile(cand):
+                        return cand
+            except (OSError, ValueError):
+                pass
+        return ""
+
+    def load_state(self, data: dict) -> None:
+        if not data:
+            self._panel_restore_data = None
+            self._panel_state_restored_once = True
+            return
+        self._panel_restore_data = dict(data)
+        self._playhead = float(data.get("playhead", self._playhead))
+        self._cam_yaw = float(data.get("cam_yaw", self._cam_yaw))
+        self._cam_pitch = float(data.get("cam_pitch", self._cam_pitch))
+        self._cam_dist = float(data.get("cam_dist", self._cam_dist))
+        self._panel_state_restored_once = False
+
+    def _apply_pending_panel_restore(self) -> None:
+        """Open saved .animtimeline once project root can resolve relative paths."""
+        if self._panel_state_restored_once:
+            return
+        data = self._panel_restore_data
+        if not data:
+            self._panel_state_restored_once = True
+            return
+        to_open = self._resolve_saved_timeline_path(data)
+        if to_open:
+            self._open_timeline(to_open)
+            self._playhead = float(data.get("playhead", self._playhead))
+            self._panel_state_restored_once = True
+            return
+        fp = (data.get("file_path") or "").strip()
+        rel = (data.get("file_path_rel") or "").strip()
+        if not fp and not rel:
+            self._panel_state_restored_once = True
+            return
+        try:
+            from Infernux.engine.project_context import get_project_root
+
+            root = get_project_root()
+        except Exception:
+            root = None
+        if root is None:
+            return
+        self._panel_state_restored_once = True
 
     # ── Save ───────────────────────────────────────────────────────────
     def _do_save(self):
@@ -230,24 +358,17 @@ class AnimTimelineEditorPanel(EditorPanel):
     def _advance_playback(self):
         now = time.perf_counter()
         if self._playing:
-            dt = now - self._last_tick if self._last_tick else 0.0
-            dt = max(0.0, min(dt, 0.05))  # clamp to avoid jumps when frames stall
-            self._playhead += dt
-            dur = max(1e-6, self._timeline.duration)
-            # The timeline has no loop of its own — looping is decided solely by the
-            # owning FSM state at runtime. The editor preview plays once and holds.
+            # Wall-clock playback: playhead advances at real time regardless of
+            # frame rate or GPU preview stalls (dt accumulation was running slow).
+            self._playhead = self._playhead_at_play_start + (now - self._play_wall_start)
+            dur = max(1e-6, float(self._timeline.duration))
             if self._playhead >= dur:
                 self._playhead = dur
                 self._playing = False
         self._last_tick = now
 
     def _set_engine_active(self, active: bool):
-        """Suppress editor idle while *active* so autonomous playback stays smooth.
-
-        Editor idle mode caps the loop to ~10 FPS when there is no input; during
-        timeline playback there is no input, so we temporarily disable idle and
-        restore the previous setting when playback stops / the panel closes.
-        """
+        """Keep the editor loop at full speed while the timeline is interactively active."""
         try:
             from .asset_resource_preview import _resolve_native_engine
             native = _resolve_native_engine(self)
@@ -265,31 +386,61 @@ class AnimTimelineEditorPanel(EditorPanel):
 
     # ── Render ─────────────────────────────────────────────────────────
     def on_render_content(self, ctx: InxGUIContext):
+        if not self._panel_state_restored_once:
+            if self._panel_restore_data is None:
+                from Infernux.engine.ui import panel_state as _ps
+
+                data = _ps.get(f"panel:{self.window_id}")
+                if data:
+                    self.load_state(data)
+                else:
+                    self._panel_state_restored_once = True
+            self._apply_pending_panel_restore()
+
         self._handle_shortcuts(ctx)
         self._advance_playback()
-        self._set_engine_active(self._playing)
 
         self._render_toolbar(ctx)
         ctx.separator()
 
         avail_h = max(120.0, ctx.get_content_region_avail_height())
         avail_w = ctx.get_content_region_avail_width()
-        left_w = min(_RIGHT_PANEL_W, max(200.0, avail_w * 0.34))
-        right_w = max(220.0, avail_w - left_w - 8.0)
+        right_w = min(360.0, max(260.0, avail_w * 0.34))
+        left_w = max(240.0, avail_w - right_w - 8.0)
 
-        # Left: compact selected-keyframe inspector only.
-        if ctx.begin_child("##tl_left", left_w, avail_h, True):
-            self._render_keyframe_inspector(ctx)
+        # LEFT: transport + the full-height timeline scrubber (the main authoring area).
+        if ctx.begin_child("##tl_left", left_w, avail_h, False):
+            self._render_transport(ctx)
+            ctx.dummy(0, 4)
+            self._render_timeline_bar(ctx)
         ctx.end_child()
         ctx.same_line()
-        # Right: transport + visual timeline + add/delete.
-        if ctx.begin_child("##tl_right", right_w, avail_h, False):
-            self._render_left(ctx)
+        # RIGHT: keyframe inspector (top) + the 3D preview viewport (bottom-right),
+        # both sharing this panel.
+        if ctx.begin_child("##tl_right", right_w, avail_h, True):
+            inner_w = ctx.get_content_region_avail_width()
+            inner_h = ctx.get_content_region_avail_height()
+            insp_h = max(80.0, inner_h - _PREVIEW_H - 8.0)
+            if ctx.begin_child("##tl_kf", inner_w, insp_h, False):
+                self._render_keyframe_inspector(ctx)
+            ctx.end_child()
+            ctx.separator()
+            self._render_preview_viewport(ctx, ctx.get_content_region_avail_width(),
+                                          max(120.0, ctx.get_content_region_avail_height()))
         ctx.end_child()
-        # Floating cube preview in the bottom-right corner of the editor.
-        rx1 = ctx.get_item_rect_max_x()
-        ry1 = ctx.get_item_rect_max_y()
-        self._draw_floating_preview(ctx, rx1, ry1)
+
+        # Full-speed frames while scrubbing the bar or orbiting the preview.
+        self._set_engine_active(self._orbiting or self._bar_was_active)
+
+        # GPU work is scheduled above; pump after all timeline UI is drawn so scrubbing
+        # feels instant while the preview catches up once per frame.
+        try:
+            from .asset_resource_preview import _resolve_native_engine
+            native = _resolve_native_engine(self)
+            if native is not None and hasattr(native, "pump_preview_tasks"):
+                native.pump_preview_tasks()
+        except Exception:
+            pass
 
     def _is_focused(self, ctx: InxGUIContext) -> bool:
         # RootAndChildWindows = RootWindow(1<<1) | ChildWindows(1<<0) = 3
@@ -319,6 +470,9 @@ class AnimTimelineEditorPanel(EditorPanel):
         # Replaying from the end restarts (the preview plays once, no auto-loop).
         if not self._playing and self._playhead >= float(self._timeline.duration) - 1e-4:
             self._playhead = 0.0
+        if not self._playing:
+            self._play_wall_start = time.perf_counter()
+            self._playhead_at_play_start = float(self._playhead)
         self._playing = not self._playing
         self._last_tick = time.perf_counter()
 
@@ -351,15 +505,15 @@ class AnimTimelineEditorPanel(EditorPanel):
         ctx.label(f"{t('animtimeline_editor.apply_mode')}:")
         ctx.same_line()
         ctx.set_next_item_width(160.0)
+        apply_labels = _apply_labels()
         cur_mode = self._timeline.apply_mode if self._timeline.apply_mode in APPLY_MODES else APPLY_MODES[0]
         mode_idx = APPLY_MODES.index(cur_mode)
-        new_mode = ctx.combo("##tl_apply_mode", mode_idx, list(_APPLY_LABELS), len(_APPLY_LABELS))
+        new_mode = ctx.combo("##tl_apply_mode", mode_idx, apply_labels, len(apply_labels))
         if new_mode != mode_idx:
             self._timeline.apply_mode = APPLY_MODES[new_mode]
             self._set_dirty(True)
 
-    def _render_left(self, ctx: InxGUIContext):
-        # Transport
+    def _render_transport(self, ctx: InxGUIContext):
         if ctx.button(t("animtimeline_editor.pause") if self._playing else t("animtimeline_editor.play")):
             self._toggle_play()
         ctx.same_line()
@@ -367,17 +521,13 @@ class AnimTimelineEditorPanel(EditorPanel):
             self._playing = False
             self._playhead = 0.0
         ctx.same_line()
-        ctx.label(f"{self._playhead:.2f} / {self._timeline.duration:.2f}s")
-
-        ctx.dummy(0, 4)
-        self._render_timeline_bar(ctx)
-        ctx.dummy(0, 6)
-
         if ctx.button(t("animtimeline_editor.add_key")):
             self._add_keyframe_at_playhead()
         ctx.same_line()
         if ctx.button(t("animtimeline_editor.delete_key")):
             self._delete_selected_key()
+        ctx.same_line()
+        ctx.label(f"{self._playhead:.2f} / {self._timeline.duration:.2f}s")
 
     def _render_timeline_bar(self, ctx: InxGUIContext):
         dur = max(1e-6, float(self._timeline.duration))
@@ -387,36 +537,42 @@ class AnimTimelineEditorPanel(EditorPanel):
         y0 = ctx.get_item_rect_min_y()
         x1 = ctx.get_item_rect_max_x()
         y1 = ctx.get_item_rect_max_y()
-        w = max(1.0, x1 - x0)
         active = ctx.is_item_active()
         hovered = ctx.is_item_hovered()
         mx = ctx.get_mouse_pos_x()
 
+        c = _tl_colors()
         ruler_h = 18.0
         ruler_y = y0 + ruler_h
         lane_y = (ruler_y + y1) * 0.5
         ks = 6.5  # keyframe half-size (square)
 
+        # Track content is inset horizontally so edge keyframes remain grabbable.
+        pad = _BAR_EDGE_PAD
+        tx0 = x0 + pad
+        tx1 = x1 - pad
+        tw = max(1.0, tx1 - tx0)
+
         def time_to_x(tm: float) -> float:
-            return x0 + (max(0.0, min(dur, tm)) / dur) * w
+            return tx0 + (max(0.0, min(dur, tm)) / dur) * tw
 
         def x_to_time(xx: float) -> float:
-            return max(0.0, min(1.0, (xx - x0) / w)) * dur
+            return max(0.0, min(1.0, (xx - tx0) / tw)) * dur
 
-        # Background, ruler strip, track lane
-        ctx.draw_filled_rect(x0, y0, x1, y1, *_C_BAR_BG, 4.0)
-        ctx.draw_filled_rect(x0, y0, x1, ruler_y, *_C_RULER_BG, 4.0)
-        ctx.draw_filled_rect(x0 + 4, lane_y - 11, x1 - 4, lane_y + 11, *_C_LANE, 3.0)
-        ctx.draw_text(x0 + 6, lane_y - 9, t("animtimeline_editor.transform"), *_C_TEXT_DIM)
+        # Background, ruler strip, track lane (theme colors).
+        ctx.draw_filled_rect(x0, y0, x1, y1, *c["bar"], 4.0)
+        ctx.draw_filled_rect(x0, y0, x1, ruler_y, *c["ruler"], 4.0)
+        ctx.draw_filled_rect(tx0, lane_y - 11, tx1, lane_y + 11, *c["lane"], 3.0)
+        ctx.draw_text(tx0 + 2, lane_y - 9, t("animtimeline_editor.transform"), *c["text"])
 
-        # Ruler ticks + time labels
+        # Ruler ticks + time labels (aligned to inset track)
         for i in range(0, 11):
             frac = i / 10.0
-            tx = x0 + frac * w
+            tick_x = tx0 + frac * tw
             major = (i % 5 == 0)
-            ctx.draw_line(tx, ruler_y - (8.0 if major else 4.0), tx, ruler_y, *_C_TICK, 1.0)
+            ctx.draw_line(tick_x, ruler_y - (8.0 if major else 4.0), tick_x, ruler_y, *c["tick"], 1.0)
             if major:
-                ctx.draw_text(tx + 2, y0 + 2, f"{frac * dur:.2f}", *_C_TEXT_DIM)
+                ctx.draw_text(tick_x + 2, y0 + 2, f"{frac * dur:.2f}", *c["text"])
 
         # Hover highlight: which keyframe would be grabbed
         hover_key = None
@@ -431,16 +587,16 @@ class AnimTimelineEditorPanel(EditorPanel):
         sel = self._current_sel_key()
         for k in self._timeline.keyframes:
             kx = time_to_x(k.time)
-            col = _C_KEY_HOVER if (k is hover_key or k is sel) else _C_KEY
+            col = c["key_hi"] if (k is hover_key or k is sel) else c["key"]
             ctx.draw_filled_rect(kx - ks, lane_y - ks, kx + ks, lane_y + ks, *col, 2.0)
             if k is sel:
                 b = ks + 3.0
-                ctx.draw_rect(kx - b, lane_y - b, kx + b, lane_y + b, *_C_ACCENT, 1.6, 2.0)
+                ctx.draw_rect(kx - b, lane_y - b, kx + b, lane_y + b, *c["accent"], 1.6, 2.0)
 
-        # Playhead (line + top handle, theme red)
+        # Playhead (line + top handle, theme accent)
         px = time_to_x(self._playhead)
-        ctx.draw_line(px, y0, px, y1, *_C_ACCENT, 2.0)
-        ctx.draw_filled_rect(px - 4.0, y0, px + 4.0, y0 + 7.0, *_C_ACCENT, 1.0)
+        ctx.draw_line(px, y0, px, y1, *c["accent"], 2.0)
+        ctx.draw_filled_rect(px - 4.0, y0, px + 4.0, y0 + 7.0, *c["accent"], 1.0)
 
         # ── Interaction: grab a keyframe to drag (after a threshold); empty area scrubs ──
         press_started = active and not self._bar_was_active
@@ -476,108 +632,99 @@ class AnimTimelineEditorPanel(EditorPanel):
             self._drag_armed = False
         self._bar_was_active = active
 
-    # ── Floating cube preview (bottom-right corner) ─────────────────────
-    def _draw_floating_preview(self, ctx: InxGUIContext, anchor_x: float, anchor_y: float):
-        """Compact floating preview: a cube resting on a floor, driven by the playhead."""
-        W, H, pad = 184.0, 150.0, 10.0
-        x1 = anchor_x - pad
-        y1 = anchor_y - pad
-        x0 = x1 - W
-        y0 = y1 - H
-        ctx.draw_filled_rect(x0, y0, x1, y1, *_C_PREVIEW_BG, 5.0)
-        ctx.draw_rect(x0, y0, x1, y1, 0.07, 0.07, 0.08, 1.0, 1.0, 5.0)
-        ctx.draw_text(x0 + 8.0, y0 + 5.0, t("animtimeline_editor.preview"), 0.55, 0.56, 0.58, 0.9)
+    # ── Interactive 3D preview viewport ─────────────────────────────────
+    def _render_preview_viewport(self, ctx: InxGUIContext, w: float, h: float):
+        """A scene-like 3D viewport: grid floor + cube in a virtual space.
+
+        Rendered by the engine's GPU mesh-preview pipeline (same one used for FBX
+        thumbnails) and shown as a texture. Right- or middle-drag orbits the camera;
+        the mouse wheel zooms.
+        """
+        ctx.invisible_button("##tl_vp", w, h)
+        x0 = ctx.get_item_rect_min_x()
+        y0 = ctx.get_item_rect_min_y()
+        x1 = ctx.get_item_rect_max_x()
+        y1 = ctx.get_item_rect_max_y()
+        hovered = ctx.is_item_hovered()
+
+        # Zoom (wheel) and orbit (right/middle drag).
+        if hovered:
+            wheel = ctx.get_mouse_wheel_delta()
+            if wheel:
+                # Wide zoom range so the (now far-extending) grid can fill the view.
+                self._cam_dist = max(2.0, min(40.0, self._cam_dist * (0.88 ** wheel)))
+        drag_r = ctx.is_mouse_dragging(1)
+        drag_m = ctx.is_mouse_dragging(2)
+        if hovered and (drag_r or drag_m):
+            self._orbiting = True
+        if not (drag_r or drag_m):
+            self._orbiting = False
+        if self._orbiting:
+            btn = 1 if drag_r else 2
+            dx = ctx.get_mouse_drag_delta_x(btn)
+            dy = ctx.get_mouse_drag_delta_y(btn)
+            ctx.reset_mouse_drag_delta(btn)
+            self._cam_yaw += dx * 0.012
+            self._cam_pitch = max(-1.45, min(1.45, self._cam_pitch + dy * 0.012))
+
+        c = _tl_colors()
+        ctx.draw_filled_rect(x0, y0, x1, y1, *c["preview_bg"], 4.0)
+
         sampled = self._timeline.sample(self._playhead)
         if sampled is not None:
             pos, rot, scl = sampled
         else:
             pos, rot, scl = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]
-        self._draw_cube_on_floor(ctx, x0, y0 + 16.0, x1, y1, pos, rot, scl)
 
-    @staticmethod
-    def _draw_cube_on_floor(ctx: InxGUIContext, x0, y0, x1, y1, pos, rot, scl):
-        box = min(x1 - x0, y1 - y0)
-        proj = box * 0.34
-        ox = (x0 + x1) * 0.5
-        oy = y0 + (y1 - y0) * 0.66  # origin lower so the cube sits above the floor
+        side = min(x1 - x0, y1 - y0)
+        tex = self._cube_preview_texture(pos, rot, scl)
+        if tex:
+            cx = (x0 + x1) * 0.5
+            cy = (y0 + y1) * 0.5
+            ctx.draw_image_rect(tex, cx - side * 0.5, cy - side * 0.5, cx + side * 0.5, cy + side * 0.5,
+                                0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, False, False, 3.0)
+        else:
+            ctx.draw_text(x0 + 10.0, y0 + 10.0, "renderer offline", *c["text"])
+        ctx.draw_text(x0 + 8.0, y1 - 18.0, t("animtimeline_editor.preview"), *c["text"])
 
-        def project(p):
-            v = _cam(p)
-            return (ox + v[0] * proj, oy - v[1] * proj)
-
-        # Floor grid (XZ plane, y = 0).
-        g = 1.5
-        steps = 6
-        for i in range(steps + 1):
-            t01 = i / steps
-            c = -g + 2 * g * t01
-            a1 = project((c, 0.0, -g)); a2 = project((c, 0.0, g))
-            b1 = project((-g, 0.0, c)); b2 = project((g, 0.0, c))
-            col = _C_FLOOR_AXIS if abs(c) < 1e-3 else _C_FLOOR
-            ctx.draw_line(a1[0], a1[1], a2[0], a2[1], *col, 1.0)
-            ctx.draw_line(b1[0], b1[1], b2[0], b2[1], *col, 1.0)
-
-        rx, ry, rz = math.radians(rot[0]), math.radians(rot[1]), math.radians(rot[2])
-        sx = max(0.05, float(scl[0])); sy = max(0.05, float(scl[1])); sz = max(0.05, float(scl[2]))
-        px, py, pz = float(pos[0]), float(pos[1]), float(pos[2])
-        lift = 0.5 * sy  # rest the cube's base on the floor (rotation is about its centre)
-
-        # Contact shadow (cube footprint projected on the floor).
-        foot = []
-        for sgx, sgz in ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)):
-            foot.append(project((sgx * sx + px, 0.0, sgz * sz + pz)))
-        AnimTimelineEditorPanel._fill_quad(ctx, foot[0], foot[1], foot[2], foot[3], (0.0, 0.0, 0.0, 0.30))
-
-        view = []
-        for v in _CUBE_VERTS:
-            p = (v[0] * sx, v[1] * sy, v[2] * sz)
-            p = _rot_xyz(p, rx, ry, rz)
-            p = (p[0] + px, p[1] + lift + py, p[2] + pz)
-            view.append(_cam(p))
-        scr = [(ox + p[0] * proj, oy - p[1] * proj) for p in view]
-        order = sorted(range(6), key=lambda fi: sum(view[i][2] for i in _CUBE_FACES[fi]) / 4.0, reverse=True)
-        for fi in order:
-            n = _cam(_rot_xyz(_CUBE_NORMALS[fi], rx, ry, rz))
-            if n[2] >= 0.0:  # backface cull (viewer toward -z)
-                continue
-            d = max(0.0, n[0] * _LIGHT[0] + n[1] * _LIGHT[1] + n[2] * _LIGHT[2])
-            b = 0.30 + 0.58 * d
-            col = (b * 0.80, b * 0.82, b * 0.86, 1.0)
-            face = _CUBE_FACES[fi]
-            a, bb, c, dd = scr[face[0]], scr[face[1]], scr[face[2]], scr[face[3]]
-            AnimTimelineEditorPanel._fill_quad(ctx, a, bb, c, dd, col)
-            for k in range(4):
-                p1 = scr[face[k]]
-                p2 = scr[face[(k + 1) % 4]]
-                ctx.draw_line(p1[0], p1[1], p2[0], p2[1], 0.09, 0.09, 0.10, 0.95, 1.2)
-
-    @staticmethod
-    def _fill_quad(ctx: InxGUIContext, a, b, c, d, color):
-        """Scanline-fill a convex quad a-b-c-d (no native triangle primitive)."""
-        maxlen = max(abs(b[0] - a[0]) + abs(b[1] - a[1]), abs(c[0] - d[0]) + abs(c[1] - d[1]))
-        steps = max(8, min(80, int(maxlen / 2.0) + 2))
-        for i in range(steps + 1):
-            t = i / steps
-            p1x = a[0] + (b[0] - a[0]) * t
-            p1y = a[1] + (b[1] - a[1]) * t
-            p2x = d[0] + (c[0] - d[0]) * t
-            p2y = d[1] + (c[1] - d[1]) * t
-            ctx.draw_line(p1x, p1y, p2x, p2y, *color, 2.0)
+    def _cube_preview_texture(self, pos, rot, scl) -> int:
+        """Schedule GPU cube preview; pump_preview_tasks() renders once per frame."""
+        try:
+            from .asset_resource_preview import _resolve_native_engine
+            native = _resolve_native_engine(self)
+            if native is None or not hasattr(native, "render_timeline_cube_preview"):
+                return self._preview_tex_cache
+            tex = int(native.render_timeline_cube_preview(
+                float(pos[0]), float(pos[1]), float(pos[2]),
+                float(rot[0]), float(rot[1]), float(rot[2]),
+                float(scl[0]), float(scl[1]), float(scl[2]),
+                float(self._cam_yaw), float(self._cam_pitch), float(self._cam_dist),
+                _PREVIEW_RENDER_PX,
+            ) or 0)
+            if tex == 0 and hasattr(native, "get_imgui_texture_id"):
+                tex = int(native.get_imgui_texture_id("__cpp_timeline_cube_preview__") or 0)
+            if tex:
+                self._preview_tex_cache = tex
+            return tex or self._preview_tex_cache
+        except Exception:
+            return self._preview_tex_cache
 
     def _render_keyframe_inspector(self, ctx: InxGUIContext):
-        ctx.push_style_color(ImGuiCol.Text, 0.55, 0.56, 0.58, 1.0)
+        ctx.push_style_color(ImGuiCol.Text, *Theme.TEXT_DIM)
         ctx.label(t("animtimeline_editor.keyframe"))
         ctx.pop_style_color(1)
         ctx.separator()
 
         k = self._current_sel_key()
         if k is None:
-            ctx.push_style_color(ImGuiCol.Text, 0.50, 0.51, 0.53, 1.0)
+            ctx.push_style_color(ImGuiCol.Text, *Theme.TEXT_DISABLED)
             ctx.label(t("animtimeline_editor.no_key_selected"))
             ctx.pop_style_color(1)
             return
 
+        # Time — inline label + field.
         ctx.label(t("animtimeline_editor.key_time"))
+        ctx.same_line(_KF_LABEL_W)
         ctx.set_next_item_width(-1)
         nt = ctx.drag_float("##k_time", float(k.time), 0.01, 0.0, float(self._timeline.duration))
         if nt != k.time:
@@ -585,16 +732,19 @@ class AnimTimelineEditorPanel(EditorPanel):
             self._playhead = k.time
             self._set_dirty(True)
 
+        # Transition — inline label + combo.
         ctx.label(t("animtimeline_editor.transition"))
+        ctx.same_line(_KF_LABEL_W)
         ctx.set_next_item_width(-1)
+        interp_labels = _interp_labels()
         idx = INTERP_MODES.index(k.interp) if k.interp in INTERP_MODES else 1
-        nidx = ctx.combo("##k_interp", idx, list(_INTERP_LABELS), len(_INTERP_LABELS))
+        nidx = ctx.combo("##k_interp", idx, interp_labels, len(interp_labels))
         if nidx != idx:
             k.interp = INTERP_MODES[nidx]
             self._set_dirty(True)
 
-        ctx.dummy(0, 6)
-        ctx.push_style_color(ImGuiCol.Text, 0.55, 0.56, 0.58, 1.0)
+        ctx.dummy(0, 4)
+        ctx.push_style_color(ImGuiCol.Text, *Theme.TEXT_DIM)
         ctx.label(t("animtimeline_editor.transform"))
         ctx.pop_style_color(1)
         ctx.separator()
@@ -608,11 +758,12 @@ class AnimTimelineEditorPanel(EditorPanel):
 
     @staticmethod
     def _vec3_row(ctx: InxGUIContext, vid: str, label: str, values, speed: float) -> bool:
-        """Render an X/Y/Z drag row (Inspector-style). Mutates *values* in place."""
+        """Render a single-line ``label  [X][Y][Z]`` drag row. Mutates *values* in place."""
         ctx.label(label)
+        ctx.same_line(_KF_LABEL_W)  # fixed column so all rows' fields align
         changed = False
         avail = ctx.get_content_region_avail_width()
-        field_w = max(36.0, (avail - 16.0) / 3.0)
+        field_w = max(28.0, (avail - 12.0) / 3.0)
         for i, axis in enumerate(("X", "Y", "Z")):
             ctx.set_next_item_width(field_w)
             nv = ctx.drag_float(f"##{vid}_{axis}", float(values[i]), speed, -1.0e9, 1.0e9)

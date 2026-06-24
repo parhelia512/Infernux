@@ -533,6 +533,17 @@ class InxVkCoreModular
     bool RenderMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
                               std::vector<unsigned char> &outPixels);
 
+    /// @brief Mesh preview with an explicit camera (no auto-fit) — interactive Timeline viewport.
+    bool RenderMeshPreviewGPUCamera(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials,
+                                    int size, const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
+                                    std::vector<unsigned char> &outPixels, bool cloneMaterials = true);
+
+    /// @brief Live mesh preview — GPU render target displayed directly in ImGui (no CPU readback).
+    uint64_t RenderMeshPreviewGPUImGuiCamera(const InxMesh &mesh,
+                                             const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
+                                             const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
+                                             bool cloneMaterials = false);
+
     /// @brief Create a per-material shadow pipeline using the material's shadow
     ///        vertex and fragment variants.
     void CreateMaterialShadowPipeline(std::shared_ptr<InxMaterial> material, const std::string &vertShaderName,

@@ -261,6 +261,8 @@ class ProjectPanel : public EditorPanel
 
     void EnsureTypeIconsLoaded();
     uint64_t GetTypeIconId(const FileItem &item) const;
+    uint64_t GetModel3dIconId() const;
+    static bool IsUiPrefabFile(const std::string &filePath);
 
     // ── Drag-drop maps ───────────────────────────────────────────────
     struct DragDropInfo
@@ -290,6 +292,10 @@ class ProjectPanel : public EditorPanel
     // ── Panel state ──────────────────────────────────────────────────
     std::string m_rootPath;
     std::string m_currentPath;
+    /// Default browse folder (usually `<project>/Assets`); also the navigation floor.
+    std::string m_preferredNavPath;
+    /// When true, bare project root is not a valid browse target ([..] stops at subfolders).
+    bool m_navHasSubfolders = false;
     std::string m_lastNotifiedPath;
 
     // Breadcrumb
@@ -384,6 +390,14 @@ class ProjectPanel : public EditorPanel
     // ── Path utility ─────────────────────────────────────────────────
     static std::string NormalizePath(const std::string &path);
     static bool IsPathWithin(const std::string &path, const std::string &parent);
+    /// Directory depth relative to m_rootPath (root=0, Assets=1, Assets/Mats=2, …).
+    int GetPathDepthFromRoot(const std::string &path) const;
+    /// Lowest folder users may browse (Assets/Logs when present, else project root).
+    std::string GetMinimumBrowsePath() const;
+    void ClampNavigationPath();
+    void AssignCurrentPath(const std::string &path);
+    /// True when [..] may move to the parent folder (blocked at project-root subfolders).
+    bool CanNavigateUpFromCurrent() const;
     static uint64_t GetMtimeNs(const std::string &path);
 
     // ── Grid layout ──────────────────────────────────────────────────

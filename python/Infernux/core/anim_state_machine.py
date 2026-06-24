@@ -92,6 +92,18 @@ def _anim_as_number(value: Any) -> float:
         return 0.0
 
 
+# Parsed-AST cache: transition conditions are authored once and evaluated every
+# frame by every animator (Spirit / Skeletal / Timeline FSM).  Re-parsing the
+# source each frame dominated the runtime cost, so we memoize the parsed body
+# keyed on the (stripped) condition string.  ``None`` marks a string that failed
+# to parse so we don't re-attempt (and keep raising) every frame.
+_ANIM_COND_AST_CACHE: Dict[str, Any] = {}
+_ANIM_COND_AST_CACHE_LIMIT = 1024
+
+# Sentinel distinct from a cached ``None`` (failed-parse) entry.
+_CACHE_MISS = object()
+
+
 def evaluate_anim_condition(expr: str, context: Dict[str, Any]) -> bool:
     """Safely evaluate an FSM transition condition string against ``context``.
 
@@ -100,12 +112,25 @@ def evaluate_anim_condition(expr: str, context: Dict[str, Any]) -> bool:
     hand-authored conditions (bare flags, ``not x``, ``state == "idle"``).
     Raises :class:`AnimConditionError` (or ``SyntaxError``) on malformed input so
     callers can log a warning, matching the previous eval()-based behaviour.
+
+    The parsed AST is cached per condition string so steady-state evaluation is
+    a tree walk only (no per-frame ``ast.parse``).
     """
     c = (expr or "").strip()
     if not c:
         return False
-    tree = ast.parse(c, mode="eval")
-    return bool(_anim_eval_node(tree.body, context))
+    body = _ANIM_COND_AST_CACHE.get(c, _CACHE_MISS)
+    if body is _CACHE_MISS:
+        try:
+            body = ast.parse(c, mode="eval").body
+        except SyntaxError:
+            body = None
+        if len(_ANIM_COND_AST_CACHE) < _ANIM_COND_AST_CACHE_LIMIT:
+            _ANIM_COND_AST_CACHE[c] = body
+    if body is None:
+        # Preserve previous behaviour: surface malformed input to the caller.
+        ast.parse(c, mode="eval")
+    return bool(_anim_eval_node(body, context))
 
 
 @dataclass

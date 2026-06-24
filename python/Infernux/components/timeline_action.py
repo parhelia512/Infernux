@@ -43,10 +43,12 @@ class TimelineAction(InxComponent):
 
     # ── Private runtime state ───────────────────────────────────────────
     _runtime: Optional[TimelineFSMRuntime] = None
+    _cached_transform = None  # resolved once; avoids per-frame game_object→transform pybind chain
 
     # ── Lifecycle ───────────────────────────────────────────────────────
     def awake(self):
         self._runtime = TimelineFSMRuntime()
+        self._cached_transform = None
 
     def start(self):
         self._load_controller()
@@ -57,14 +59,18 @@ class TimelineAction(InxComponent):
     def on_after_deserialize(self):
         if getattr(self, "_runtime", None) is None:
             self._runtime = TimelineFSMRuntime()
+        self._cached_transform = None
         self._load_controller()
 
     def update(self, delta_time: float):
-        rt = getattr(self, "_runtime", None)
+        rt = self._runtime
         if rt is None:
             return
-        rt.playback_speed = float(self.playback_speed)
-        rt.update(delta_time, self._transform())
+        rt.playback_speed = self.playback_speed
+        tr = self._cached_transform
+        if tr is None:
+            tr = self._cached_transform = self._transform()
+        rt.update(delta_time, tr)
 
     # ── Public API ──────────────────────────────────────────────────────
     def reload_controller(self):
@@ -134,7 +140,12 @@ class TimelineAction(InxComponent):
 
     # ── Internals ───────────────────────────────────────────────────────
     def _transform(self):
-        return getattr(self.game_object, "transform", None)
+        tr = self._cached_transform
+        if tr is not None:
+            return tr
+        tr = self._try_get_transform()
+        self._cached_transform = tr
+        return tr
 
     def _load_controller(self):
         rt = getattr(self, "_runtime", None)

@@ -34,7 +34,7 @@ constexpr float kPreviewMatteR = 0.0f;
 constexpr float kPreviewMatteG = 0.0f;
 constexpr float kPreviewMatteB = 0.0f;
 constexpr float kPreviewMatteA = 0.0f;
-constexpr float kPreviewCameraDistance = 2.0f;
+constexpr float kPreviewCameraDistance = 1.82f; // slightly closer so the material sphere fills a bit more
 constexpr float kPreviewModelScale = 1.28f;
 constexpr int kPreviewSupersampleFactor = 2;
 
@@ -473,6 +473,7 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
     PushConstants pushData{};
     pushData.model = previewModel;
     pushData.normalMat = previewNormal;
+    bool anyDrawn = false;
     for (auto &binding : passBindings) {
         if (!refreshPassBinding(binding)) {
             INXLOG_WARN("GPUMaterialPreview: preview pass became invalid before draw");
@@ -519,6 +520,7 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
         vkCmdPushConstants(cmd, binding.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants),
                            &pushData);
         vkCmdDrawIndexed(cmd, m_sphereIndexCount, 1, 0, 0, 0);
+        anyDrawn = true;
     }
 
     vkCmdEndRenderPass(cmd);
@@ -580,6 +582,13 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
 
     // Submit and wait
     m_vkCore->EndSingleTimeCommands(cmd);
+
+    // If every pass was skipped (e.g. a descriptor set went dead while the user was
+    // editing the material), the sphere wasn't drawn. Report failure so the caller
+    // falls back to the CPU renderer instead of returning a blank/transparent image
+    // (which made Project-panel and Inspector previews intermittently disappear).
+    if (!anyDrawn)
+        return false;
 
     // ------------------------------------------------------------------
     // Readback: HDR R16G16B16A16_SFLOAT → RGBA8 with Reinhard tonemap

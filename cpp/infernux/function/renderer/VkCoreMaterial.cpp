@@ -1295,4 +1295,33 @@ bool InxVkCoreModular::RenderMeshPreviewGPU(const InxMesh &mesh,
     return m_gpuMeshPreview->RenderToPixels(mesh, materials, size, outPixels);
 }
 
+bool InxVkCoreModular::RenderMeshPreviewGPUCamera(const InxMesh &mesh,
+                                                  const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
+                                                  const glm::mat4 &view, const glm::mat4 &proj,
+                                                  const glm::vec3 &cameraPos, std::vector<unsigned char> &outPixels,
+                                                  bool cloneMaterials)
+{
+    if (size <= 0 || !m_materialPipelineManagerInitialized)
+        return false;
+
+    if (!m_gpuMeshPreview)
+        m_gpuMeshPreview = std::make_unique<GPUMeshPreview>(this);
+
+    return m_gpuMeshPreview->RenderToPixelsCamera(mesh, materials, size, view, proj, cameraPos, outPixels,
+                                                  cloneMaterials);
+}
+
+uint64_t InxVkCoreModular::RenderMeshPreviewGPUImGuiCamera(
+    const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size, const glm::mat4 &view,
+    const glm::mat4 &proj, const glm::vec3 &cameraPos, bool cloneMaterials)
+{
+    if (size <= 0 || !m_materialPipelineManagerInitialized)
+        return 0;
+
+    if (!m_gpuMeshPreview)
+        m_gpuMeshPreview = std::make_unique<GPUMeshPreview>(this);
+
+    return m_gpuMeshPreview->RenderToImGuiTextureCamera(mesh, materials, size, view, proj, cameraPos, cloneMaterials);
+}
+
 } // namespace infernux

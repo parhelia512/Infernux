@@ -3,6 +3,17 @@
 // reconciled against EditorTheme.h (C++ panel values win on conflicts).
 // Edit THIS file to restyle the editor; theme.py only mirrors it.
 // clang-format off
+// ── Semantic ROLE tokens — drive the composed ImGui global palette ───────────
+// (ApplyImGuiColors in EditorThemeRegistry.cpp composes every built-in widget
+//  color from these. Theme switching overrides ROLE_* + APPLY_BUTTON.)
+INX_THEME_COLOR(ROLE_ACCENT, 0.922f, 0.341f, 0.341f, 1.0f)
+INX_THEME_COLOR(ROLE_BG_BASE, 0.098f, 0.098f, 0.098f, 1.0f)
+INX_THEME_COLOR(ROLE_BG_SURFACE, 0.125f, 0.125f, 0.125f, 1.0f)
+INX_THEME_COLOR(ROLE_BG_RAISED, 0.150f, 0.150f, 0.150f, 1.0f)
+INX_THEME_COLOR(ROLE_BG_HOVER, 0.165f, 0.165f, 0.165f, 1.0f)
+INX_THEME_COLOR(ROLE_TEXT, 0.812f, 0.812f, 0.812f, 1.0f)
+INX_THEME_COLOR(ROLE_TEXT_DIM, 0.55f, 0.55f, 0.55f, 1.0f)
+INX_THEME_COLOR(ROLE_BORDER, 0.184f, 0.184f, 0.184f, 1.0f)
 INX_THEME_COLOR(APPLY_BUTTON, 0.922f, 0.341f, 0.341f, 1.0f)
 INX_THEME_COLOR(BORDER, 0.1f, 0.1f, 0.1f, 1.0f)
 INX_THEME_COLOR(BORDER_PAUSE, 1.0f, 0.718f, 0.302f, 1.0f)

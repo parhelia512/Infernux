@@ -61,7 +61,38 @@ def _apply_interp(mode: str, u: float) -> float:
 
 
 def _lerp3(a: Vec3, b: Vec3, w: float) -> Vec3:
-    return [a[i] + (b[i] - a[i]) * w for i in range(3)]
+    return [a[0] + (b[0] - a[0]) * w, a[1] + (b[1] - a[1]) * w, a[2] + (b[2] - a[2]) * w]
+
+
+def sample_sorted_keys(keys: List["TimelineKeyframe"], t: float) -> Optional[Tuple[Vec3, Vec3, Vec3]]:
+    """Sample ``(position, rotation, scale)`` at *t* from an already time-sorted list.
+
+    Hot-path helper shared by :meth:`AnimationTimeline.sample` (editor) and the
+    runtime (which caches the sorted list once per state, avoiding a per-frame
+    re-sort).  ``keys`` MUST be sorted ascending by ``time``.
+    """
+    if not keys:
+        return None
+    if t <= keys[0].time:
+        k = keys[0]
+        return (list(k.position), list(k.rotation), list(k.scale))
+    if t >= keys[-1].time:
+        k = keys[-1]
+        return (list(k.position), list(k.rotation), list(k.scale))
+    for i in range(1, len(keys)):
+        a = keys[i - 1]
+        b = keys[i]
+        if a.time <= t <= b.time:
+            span = b.time - a.time
+            u = 0.0 if span <= 1e-9 else (t - a.time) / span
+            w = _apply_interp(b.interp, u)  # b.interp = transition INTO b
+            return (
+                _lerp3(a.position, b.position, w),
+                _lerp3(a.rotation, b.rotation, w),
+                _lerp3(a.scale, b.scale, w),
+            )
+    k = keys[-1]
+    return (list(k.position), list(k.rotation), list(k.scale))
 
 
 def _vec3(v, default: Vec3) -> Vec3:
@@ -130,30 +161,13 @@ class AnimationTimeline:
         return sorted(self.keyframes, key=lambda k: k.time)
 
     def sample(self, t: float) -> Optional[Tuple[Vec3, Vec3, Vec3]]:
-        """Return ``(position, rotation, scale)`` at time *t*; ``None`` if empty."""
-        keys = self.sorted_keys()
-        if not keys:
-            return None
-        if t <= keys[0].time:
-            k = keys[0]
-            return (list(k.position), list(k.rotation), list(k.scale))
-        if t >= keys[-1].time:
-            k = keys[-1]
-            return (list(k.position), list(k.rotation), list(k.scale))
-        for i in range(1, len(keys)):
-            a = keys[i - 1]
-            b = keys[i]
-            if a.time <= t <= b.time:
-                span = b.time - a.time
-                u = 0.0 if span <= 1e-9 else (t - a.time) / span
-                w = _apply_interp(b.interp, u)  # b.interp = transition INTO b
-                return (
-                    _lerp3(a.position, b.position, w),
-                    _lerp3(a.rotation, b.rotation, w),
-                    _lerp3(a.scale, b.scale, w),
-                )
-        k = keys[-1]
-        return (list(k.position), list(k.rotation), list(k.scale))
+        """Return ``(position, rotation, scale)`` at time *t*; ``None`` if empty.
+
+        Editor-facing convenience that re-sorts each call (fine for interactive
+        scrubbing).  Runtime code should sort once and call
+        :func:`sample_sorted_keys` to avoid the per-frame sort.
+        """
+        return sample_sorted_keys(self.sorted_keys(), t)
 
     # ── Serialization ──────────────────────────────────────────────────
     def to_dict(self) -> dict:

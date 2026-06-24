@@ -507,6 +507,13 @@ PYBIND11_MODULE(_Infernux, m)
         .def("get_material_preview_texture_id", &Infernux::GetMaterialPreviewTextureId, py::arg("resource_key"),
              py::call_guard<py::gil_scoped_release>(),
              "Get texture id for material preview (stale-return for anti-flicker)")
+        .def("render_timeline_cube_preview", &Infernux::RenderTimelineCubePreview, py::arg("px"), py::arg("py"),
+             py::arg("pz"), py::arg("rx"), py::arg("ry"), py::arg("rz"), py::arg("sx"), py::arg("sy"), py::arg("sz"),
+             py::arg("cam_yaw"), py::arg("cam_pitch"), py::arg("cam_distance"), py::arg("size") = 192,
+             py::call_guard<py::gil_scoped_release>(),
+             "Render a cube on a grid floor with the given transform (rotation in degrees), viewed by an orbit "
+             "camera (yaw/pitch radians, distance=zoom), using the real engine renderer; returns an ImGui texture id "
+             "(cached + throttled).")
         .def("get_texture_preview_texture_id", &Infernux::GetTexturePreviewTextureId, py::arg("resource_key"),
              py::call_guard<py::gil_scoped_release>(),
              "Get texture id for texture preview (stale-return for anti-flicker)")

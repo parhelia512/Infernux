@@ -211,6 +211,33 @@ void RegisterGUIBindings(py::module_ &m)
             return out;
         },
         "Editor theme scalar constants keyed by name");
+    m.def(
+        "list_editor_themes",
+        []() {
+            py::list out;
+            for (const auto &name : EditorThemeRegistry::ThemeNames())
+                out.append(py::str(name));
+            return out;
+        },
+        "Names of all registered editor themes");
+    m.def(
+        "get_editor_theme",
+        []() { return py::str(EditorThemeRegistry::ActiveTheme()); },
+        "Active editor theme name");
+    m.def(
+        "editor_theme_generation",
+        []() { return static_cast<unsigned long long>(EditorThemeRegistry::Generation()); },
+        "Monotonic counter bumped on every theme switch (cheap change detection)");
+    m.def(
+        "set_editor_theme",
+        [](const std::string &name) {
+            bool ok = EditorThemeRegistry::SetActiveTheme(name);
+            if (ok)
+                EditorThemeRegistry::ApplyImGuiColors(); // re-skin all built-in widgets at once
+            return ok;
+        },
+        py::arg("name"),
+        "Switch the active editor theme and re-apply the ImGui palette; returns False if unknown");
 
     py::class_<PropertyBatchPlan, std::shared_ptr<PropertyBatchPlan>>(m, "PropertyBatchPlan")
         .def_property_readonly("size",

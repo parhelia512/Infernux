@@ -7,6 +7,7 @@
 
 #include "GPUMeshPreview.h"
 #include "InxError.h"
+#include <backends/imgui_impl_vulkan.h>
 #include <function/renderer/EngineGlobals.h>
 #include <function/renderer/InxRenderStruct.h>
 #include <function/renderer/InxVkCoreModular.h>
@@ -99,7 +100,8 @@ FitCameraResult FitCameraToBounds(const glm::vec3 &boundsMin, const glm::vec3 &b
     const float halfFov = glm::radians(fovDeg) * 0.5f;
     // Bounding sphere radius from actual diagonal, with padding
     const float radius = glm::length(extent) * 0.5f;
-    const float distance = (radius / std::sin(halfFov)) * 1.15f;
+    // Tighter framing (was 1.15) so model / prefab thumbnails sit closer and larger.
+    const float distance = (radius / std::sin(halfFov)) * 0.98f;
 
     // Shift look-at target slightly upward so the model isn't bottom-heavy
     const glm::vec3 lookAt = center + glm::vec3(0.0f, maxExtent * 0.05f, 0.0f);
@@ -129,6 +131,7 @@ GPUMeshPreview::~GPUMeshPreview()
         return;
     VkDevice device = m_vkCore->GetDevice();
     vkDeviceWaitIdle(device);
+    DestroyImGuiDisplayDescriptor();
     DestroyFramebuffer();
     if (m_renderPass != VK_NULL_HANDLE)
         vkDestroyRenderPass(device, m_renderPass, nullptr);
@@ -143,6 +146,18 @@ bool GPUMeshPreview::RenderToPixels(const InxMesh &mesh, const std::vector<std::
 {
     if (!m_vkCore || size <= 0)
         return false;
+    // Auto-fit the camera to the mesh AABB, then delegate to the explicit-camera path.
+    auto cam = FitCameraToBounds(mesh.GetBoundsMin(), mesh.GetBoundsMax(), kMeshPreviewFovDeg);
+    return RenderToPixelsCamera(mesh, materials, size, cam.view, cam.proj, cam.cameraPos, outPixels);
+}
+
+bool GPUMeshPreview::RenderToPixelsCamera(const InxMesh &mesh,
+                                          const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
+                                          const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
+                                          std::vector<unsigned char> &outPixels, bool cloneMaterials)
+{
+    if (!m_vkCore || size <= 0)
+        return false;
 
     const auto &vertices = mesh.GetVertices();
     const auto &indices = mesh.GetIndices();
@@ -151,15 +166,15 @@ bool GPUMeshPreview::RenderToPixels(const InxMesh &mesh, const std::vector<std::
 
     const int renderSize = std::max(size, size * kPreviewSupersampleFactor);
 
+    if (!EnsureResources(renderSize))
+        return false;
+
     // ── Upload mesh geometry to temporary GPU buffers ────────────────
     auto &rm = m_vkCore->GetResourceManager();
     auto vbo = rm.CreateVertexBuffer(vertices.data(), vertices.size() * sizeof(Vertex));
     auto ibo = rm.CreateIndexBuffer(indices.data(), indices.size() * sizeof(uint32_t));
     if (!vbo || !ibo)
         return false;
-
-    // ── Auto-fit camera to mesh bounds ───────────────────────────────
-    auto cam = FitCameraToBounds(mesh.GetBoundsMin(), mesh.GetBoundsMax(), kMeshPreviewFovDeg);
 
     // ── Prepare per-submesh material pipelines ───────────────────────
     // Get a default material for submeshes without an assigned material.
@@ -193,11 +208,19 @@ bool GPUMeshPreview::RenderToPixels(const InxMesh &mesh, const std::vector<std::
         if (!srcMat)
             continue;
 
-        // Clone + prepare pipeline (isolate from live scene materials)
-        auto previewMat = srcMat->Clone();
-        if (!previewMat)
-            continue;
-        previewMat->ClearAllPassPipelines();
+        // Prepare pipeline. Thumbnails clone for isolation; live previews pass
+        // persistent dedicated clones (cloneMaterials=false) so the cached pipeline
+        // is reused every frame instead of rebuilt (Clone() makes a unique key each
+        // call → cache miss → vkCreateGraphicsPipelines per frame → playback lag).
+        std::shared_ptr<InxMaterial> previewMat;
+        if (cloneMaterials) {
+            previewMat = srcMat->Clone();
+            if (!previewMat)
+                continue;
+            previewMat->ClearAllPassPipelines();
+        } else {
+            previewMat = srcMat;
+        }
         if (!m_vkCore->RefreshMaterialPipeline(previewMat, previewMat->GetVertShaderName(),
                                                previewMat->GetFragShaderName()))
             continue;
@@ -224,9 +247,6 @@ bool GPUMeshPreview::RenderToPixels(const InxMesh &mesh, const std::vector<std::
     if (bindings.empty())
         return false;
 
-    if (!EnsureResources(renderSize))
-        return false;
-
     // Update UBO data for each preview material
     for (auto &b : bindings)
         m_vkCore->UpdateMaterialUBO(*b.ownedMaterial);
@@ -238,8 +258,8 @@ bool GPUMeshPreview::RenderToPixels(const InxMesh &mesh, const std::vector<std::
 
     UniformBufferObject sceneUBO{};
     sceneUBO.model = modelMat;
-    sceneUBO.view = cam.view;
-    sceneUBO.proj = cam.proj;
+    sceneUBO.view = view;
+    sceneUBO.proj = proj;
 
     // ── Lighting UBO ─────────────────────────────────────────────────
     ShaderLightingUBO lightingUBO{};
@@ -249,7 +269,7 @@ bool GPUMeshPreview::RenderToPixels(const InxMesh &mesh, const std::vector<std::
     lightingUBO.ambientSkyColor = glm::vec4(0.20f, 0.22f, 0.26f, 0.55f);
     lightingUBO.ambientEquatorColor = glm::vec4(0.10f, 0.11f, 0.13f, 1.0f);
     lightingUBO.ambientGroundColor = glm::vec4(0.05f, 0.04f, 0.035f, 0.30f);
-    lightingUBO.cameraPos = glm::vec4(cam.cameraPos, 1.0f);
+    lightingUBO.cameraPos = glm::vec4(cameraPos, 1.0f);
 
     lightingUBO.directionalLights[0].direction = glm::vec4(glm::normalize(glm::vec3(-0.7f, -1.0f, -0.5f)), 0.0f);
     lightingUBO.directionalLights[0].color = glm::vec4(1.8f, 1.71f, 1.62f, 1.8f);
@@ -262,7 +282,7 @@ bool GPUMeshPreview::RenderToPixels(const InxMesh &mesh, const std::vector<std::
     memset(&globalsUBO, 0, sizeof(globalsUBO));
     globalsUBO.screenParams =
         glm::vec4(static_cast<float>(renderSize), static_cast<float>(renderSize), 1.0f / renderSize, 1.0f / renderSize);
-    globalsUBO.worldSpaceCameraPos = glm::vec4(cam.cameraPos, 1.0f);
+    globalsUBO.worldSpaceCameraPos = glm::vec4(cameraPos, 1.0f);
 
     // ── Buffer indexing (same rationale as GPUMaterialPreview) ────────
     const uint32_t frameIndex =
@@ -515,6 +535,7 @@ bool GPUMeshPreview::EnsureResources(int size)
         (colorFormat != m_colorFormat || depthFormat != m_depthFormat || sampleCount != m_sampleCount);
 
     if (renderConfigChanged) {
+        DestroyImGuiDisplayDescriptor();
         DestroyFramebuffer();
         vkDestroyRenderPass(m_vkCore->GetDevice(), m_renderPass, nullptr);
         m_renderPass = VK_NULL_HANDLE;
@@ -530,6 +551,7 @@ bool GPUMeshPreview::EnsureResources(int size)
         return false;
 
     if (m_currentSize != size) {
+        DestroyImGuiDisplayDescriptor();
         DestroyFramebuffer();
         CreateFramebuffer(size);
         m_currentSize = size;
@@ -610,14 +632,17 @@ void GPUMeshPreview::CreateFramebuffer(int size)
     uint32_t h = static_cast<uint32_t>(size);
 
     m_msaaColor.Create(allocator, device, w, h, m_colorFormat, VK_IMAGE_TILING_OPTIMAL,
-                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                           (m_sampleCount == VK_SAMPLE_COUNT_1_BIT ? VK_IMAGE_USAGE_SAMPLED_BIT : 0),
                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_sampleCount);
     m_msaaColor.CreateView(m_colorFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 
     if (m_sampleCount != VK_SAMPLE_COUNT_1_BIT) {
         m_resolveColor.Create(allocator, device, w, h, m_colorFormat, VK_IMAGE_TILING_OPTIMAL,
-                              VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                              VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                  VK_IMAGE_USAGE_SAMPLED_BIT,
                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_SAMPLE_COUNT_1_BIT);
+        m_resolveColor.CreateView(m_colorFormat, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
     if (m_depthFormat != VK_FORMAT_UNDEFINED) {
@@ -664,6 +689,298 @@ void GPUMeshPreview::DestroyFramebuffer()
     m_depth.Destroy();
     m_staging.Destroy();
     m_currentSize = 0;
+    m_displayImageShaderReady = false;
+}
+
+void GPUMeshPreview::DestroyImGuiDisplayDescriptor()
+{
+    if (!m_vkCore)
+        return;
+    VkDevice device = m_vkCore->GetDevice();
+    if (m_displayDescriptorSet != VK_NULL_HANDLE) {
+        ImGui_ImplVulkan_RemoveTexture(m_displayDescriptorSet);
+        m_displayDescriptorSet = VK_NULL_HANDLE;
+    }
+    if (m_displaySampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device, m_displaySampler, nullptr);
+        m_displaySampler = VK_NULL_HANDLE;
+    }
+    m_displayImageShaderReady = false;
+}
+
+void GPUMeshPreview::EnsureImGuiDisplayDescriptor()
+{
+    if (m_displayDescriptorSet != VK_NULL_HANDLE)
+        return;
+
+    VkDevice device = m_vkCore->GetDevice();
+    VkImageView displayView = VK_NULL_HANDLE;
+    if (m_sampleCount != VK_SAMPLE_COUNT_1_BIT)
+        displayView = m_resolveColor.GetView();
+    else
+        displayView = m_msaaColor.GetView();
+    if (displayView == VK_NULL_HANDLE)
+        return;
+
+    auto samplerInfo = vkrender::MakeLinearClampSamplerInfo();
+    if (vkCreateSampler(device, &samplerInfo, nullptr, &m_displaySampler) != VK_SUCCESS)
+        return;
+
+    m_displayDescriptorSet =
+        ImGui_ImplVulkan_AddTexture(m_displaySampler, displayView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
+uint64_t GPUMeshPreview::RenderToImGuiTextureCamera(const InxMesh &mesh,
+                                                    const std::vector<std::shared_ptr<InxMaterial>> &materials,
+                                                    int size, const glm::mat4 &view, const glm::mat4 &proj,
+                                                    const glm::vec3 &cameraPos, bool cloneMaterials)
+{
+    if (!m_vkCore || size <= 0)
+        return 0;
+
+    const auto &vertices = mesh.GetVertices();
+    const auto &indices = mesh.GetIndices();
+    if (vertices.empty() || indices.empty())
+        return 0;
+
+    const int renderSize = size;
+    if (!EnsureResources(renderSize))
+        return 0;
+
+    auto &rm = m_vkCore->GetResourceManager();
+    auto vbo = rm.CreateVertexBuffer(vertices.data(), vertices.size() * sizeof(Vertex));
+    auto ibo = rm.CreateIndexBuffer(indices.data(), indices.size() * sizeof(uint32_t));
+    if (!vbo || !ibo)
+        return 0;
+
+    auto defaultMat = AssetRegistry::Instance().GetBuiltinMaterial("DefaultLit");
+    struct SubmeshBinding
+    {
+        const SubMesh *submesh = nullptr;
+        std::shared_ptr<InxMaterial> ownedMaterial;
+        VkPipeline pipeline = VK_NULL_HANDLE;
+        VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
+        VkDescriptorSet materialDescSet = VK_NULL_HANDLE;
+        ShaderProgram *program = nullptr;
+    };
+    std::vector<SubmeshBinding> bindings;
+    bindings.reserve(mesh.GetSubMeshCount());
+    for (uint32_t si = 0; si < mesh.GetSubMeshCount(); ++si) {
+        const SubMesh &sm = mesh.GetSubMesh(si);
+        if (sm.indexCount == 0)
+            continue;
+        std::shared_ptr<InxMaterial> srcMat;
+        if (sm.materialSlot < materials.size() && materials[sm.materialSlot])
+            srcMat = materials[sm.materialSlot];
+        else
+            srcMat = defaultMat;
+        if (!srcMat)
+            continue;
+        std::shared_ptr<InxMaterial> previewMat = cloneMaterials ? srcMat->Clone() : srcMat;
+        if (!previewMat)
+            continue;
+        if (cloneMaterials)
+            previewMat->ClearAllPassPipelines();
+        if (!m_vkCore->RefreshMaterialPipeline(previewMat, previewMat->GetVertShaderName(),
+                                               previewMat->GetFragShaderName()))
+            continue;
+        MaterialRenderData *rd = m_vkCore->GetMaterialPipelineManager().GetRenderData(previewMat->GetMaterialKey());
+        if (!rd || !rd->isValid || rd->descriptorSet == VK_NULL_HANDLE)
+            continue;
+        previewMat->SetPassPipeline(ShaderCompileTarget::Forward, rd->pipeline);
+        previewMat->SetPassPipelineLayout(ShaderCompileTarget::Forward, rd->pipelineLayout);
+        previewMat->SetPassDescriptorSet(ShaderCompileTarget::Forward, rd->descriptorSet);
+        previewMat->SetPassShaderProgram(ShaderCompileTarget::Forward, rd->shaderProgram);
+        SubmeshBinding b;
+        b.submesh = &sm;
+        b.ownedMaterial = previewMat;
+        b.pipeline = rd->pipeline;
+        b.pipelineLayout = rd->pipelineLayout;
+        b.materialDescSet = rd->descriptorSet;
+        b.program = rd->shaderProgram;
+        bindings.push_back(std::move(b));
+    }
+    if (bindings.empty())
+        return 0;
+
+    for (auto &b : bindings)
+        m_vkCore->UpdateMaterialUBO(*b.ownedMaterial);
+
+    const glm::mat4 modelMat = glm::mat4(1.0f);
+    UniformBufferObject sceneUBO{};
+    sceneUBO.model = modelMat;
+    sceneUBO.view = view;
+    sceneUBO.proj = proj;
+
+    ShaderLightingUBO lightingUBO{};
+    memset(&lightingUBO, 0, sizeof(lightingUBO));
+    lightingUBO.lightCounts = glm::ivec4(2, 0, 0, 0);
+    lightingUBO.ambientColor = glm::vec4(0.08f, 0.08f, 0.09f, 1.0f);
+    lightingUBO.ambientSkyColor = glm::vec4(0.20f, 0.22f, 0.26f, 0.55f);
+    lightingUBO.ambientEquatorColor = glm::vec4(0.10f, 0.11f, 0.13f, 1.0f);
+    lightingUBO.ambientGroundColor = glm::vec4(0.05f, 0.04f, 0.035f, 0.30f);
+    lightingUBO.cameraPos = glm::vec4(cameraPos, 1.0f);
+    lightingUBO.directionalLights[0].direction = glm::vec4(glm::normalize(glm::vec3(-0.7f, -1.0f, -0.5f)), 0.0f);
+    lightingUBO.directionalLights[0].color = glm::vec4(1.8f, 1.71f, 1.62f, 1.8f);
+    lightingUBO.directionalLights[1].direction = glm::vec4(glm::normalize(glm::vec3(0.5f, 0.3f, -0.7f)), 0.0f);
+    lightingUBO.directionalLights[1].color = glm::vec4(0.36f, 0.42f, 0.51f, 0.6f);
+
+    EngineGlobalsUBO globalsUBO{};
+    memset(&globalsUBO, 0, sizeof(globalsUBO));
+    globalsUBO.screenParams =
+        glm::vec4(static_cast<float>(renderSize), static_cast<float>(renderSize), 1.0f / renderSize, 1.0f / renderSize);
+    globalsUBO.worldSpaceCameraPos = glm::vec4(cameraPos, 1.0f);
+
+    const uint32_t frameIndex =
+        m_vkCore->GetSwapchain().GetCurrentFrame() % std::max(1u, m_vkCore->GetMaxFramesInFlight());
+    VkBuffer sceneUBOBuf = m_vkCore->GetSceneUbo();
+    VkBuffer lightingUBOBuf = m_vkCore->GetLightingUbo();
+    VkBuffer globalsUBOBuf = m_vkCore->GetGlobalsBuffer(frameIndex);
+    VkBuffer instanceSSBOBuf = m_vkCore->GetInstanceSSBO(frameIndex);
+    if (sceneUBOBuf == VK_NULL_HANDLE || lightingUBOBuf == VK_NULL_HANDLE)
+        return 0;
+
+    ShaderProgram *primaryProgram = bindings.front().program;
+    VkDescriptorSet shadowDesc = VK_NULL_HANDLE;
+    VkDescriptorSet globalsDesc = VK_NULL_HANDLE;
+    if (primaryProgram->HasDeclaredDescriptorSet(1)) {
+        shadowDesc = m_vkCore->GetActiveShadowDescriptorSet();
+        if (shadowDesc == VK_NULL_HANDLE) {
+            if (m_fallbackShadowDescSet == VK_NULL_HANDLE)
+                m_fallbackShadowDescSet = m_vkCore->AllocatePerViewDescriptorSet();
+            shadowDesc = m_fallbackShadowDescSet;
+        }
+        if (shadowDesc == VK_NULL_HANDLE)
+            return 0;
+    }
+    if (primaryProgram->HasDeclaredDescriptorSet(2)) {
+        if (globalsUBOBuf == VK_NULL_HANDLE || instanceSSBOBuf == VK_NULL_HANDLE)
+            return 0;
+        globalsDesc = m_vkCore->GetCurrentGlobalsDescSet();
+        if (globalsDesc == VK_NULL_HANDLE)
+            return 0;
+    }
+    if (instanceSSBOBuf != VK_NULL_HANDLE && !m_vkCore->WriteInstanceMatrix(frameIndex, 0, modelMat))
+        return 0;
+
+    VkCommandBuffer cmd = m_vkCore->BeginSingleTimeCommands();
+    if (cmd == VK_NULL_HANDLE)
+        return 0;
+
+    VkImage displayImage =
+        (m_sampleCount != VK_SAMPLE_COUNT_1_BIT) ? m_resolveColor.GetImage() : m_msaaColor.GetImage();
+    if (m_displayImageShaderReady) {
+        VkImageMemoryBarrier toDst = vkrender::MakeImageBarrier(
+            displayImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            m_sampleCount != VK_SAMPLE_COUNT_1_BIT ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                                                   : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_IMAGE_ASPECT_COLOR_BIT, VK_ACCESS_SHADER_READ_BIT,
+            m_sampleCount != VK_SAMPLE_COUNT_1_BIT ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+        vkCmdPipelineBarrier(cmd,
+                             m_sampleCount != VK_SAMPLE_COUNT_1_BIT ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+                                                                    : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             m_sampleCount != VK_SAMPLE_COUNT_1_BIT ? VK_PIPELINE_STAGE_TRANSFER_BIT
+                                                                    : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &toDst);
+    }
+
+    vkCmdUpdateBuffer(cmd, sceneUBOBuf, 0, sizeof(sceneUBO), &sceneUBO);
+    vkCmdUpdateBuffer(cmd, lightingUBOBuf, 0, sizeof(lightingUBO), &lightingUBO);
+    if (globalsUBOBuf != VK_NULL_HANDLE)
+        vkCmdUpdateBuffer(cmd, globalsUBOBuf, 0, sizeof(globalsUBO), &globalsUBO);
+
+    VkMemoryBarrier uboBarrier{};
+    uboBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    uboBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+    uboBarrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &uboBarrier,
+                         0, nullptr, 0, nullptr);
+
+    VkClearValue clearValues[2];
+    clearValues[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    clearValues[1].depthStencil = {1.0f, 0};
+    VkRenderPassBeginInfo rpBegin{};
+    rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rpBegin.renderPass = m_renderPass;
+    rpBegin.framebuffer = m_framebuffer;
+    rpBegin.renderArea.offset = {0, 0};
+    rpBegin.renderArea.extent = {static_cast<uint32_t>(renderSize), static_cast<uint32_t>(renderSize)};
+    rpBegin.clearValueCount = 2;
+    rpBegin.pClearValues = clearValues;
+    vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+    VkViewport viewport{};
+    viewport.width = static_cast<float>(renderSize);
+    viewport.height = static_cast<float>(renderSize);
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    VkRect2D scissor{};
+    scissor.extent = {static_cast<uint32_t>(renderSize), static_cast<uint32_t>(renderSize)};
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    VkBuffer vboBuf = vbo->GetBuffer();
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vboBuf, offsets);
+    vkCmdBindIndexBuffer(cmd, ibo->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+    struct PushConstants
+    {
+        glm::mat4 model;
+        glm::mat4 normalMat;
+    };
+    PushConstants pushData{};
+    pushData.model = modelMat;
+    pushData.normalMat = glm::transpose(glm::inverse(modelMat));
+
+    for (auto &b : bindings) {
+        if (!m_vkCore->GetMaterialPipelineManager().IsDescriptorSetLive(b.materialDescSet))
+            continue;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, b.pipeline);
+        vkdebug::CmdBindDescriptorSetsTracked("GPUMeshPreview.Live.Set0", cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                              b.pipelineLayout, 0, 1, &b.materialDescSet, 0, nullptr);
+        if (b.program->HasDeclaredDescriptorSet(1) && shadowDesc != VK_NULL_HANDLE)
+            vkdebug::CmdBindDescriptorSetsTracked("GPUMeshPreview.Live.Set1", cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                                  b.pipelineLayout, 1, 1, &shadowDesc, 0, nullptr);
+        if (b.program->HasDeclaredDescriptorSet(2) && globalsDesc != VK_NULL_HANDLE)
+            vkdebug::CmdBindDescriptorSetsTracked("GPUMeshPreview.Live.Set2", cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                                  b.pipelineLayout, 2, 1, &globalsDesc, 0, nullptr);
+        vkCmdPushConstants(cmd, b.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pushData);
+        vkCmdDrawIndexed(cmd, b.submesh->indexCount, 1, b.submesh->indexStart, 0, 0);
+    }
+    vkCmdEndRenderPass(cmd);
+
+    if (m_sampleCount != VK_SAMPLE_COUNT_1_BIT) {
+        VkImageMemoryBarrier msaaBarrier = vkrender::MakeImageBarrier(
+            m_msaaColor.GetImage(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_IMAGE_ASPECT_COLOR_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &msaaBarrier);
+        VkImageResolve resolveRegion{};
+        resolveRegion.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        resolveRegion.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        resolveRegion.extent = {static_cast<uint32_t>(renderSize), static_cast<uint32_t>(renderSize), 1};
+        vkCmdResolveImage(cmd, m_msaaColor.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_resolveColor.GetImage(),
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &resolveRegion);
+    }
+
+    VkImageMemoryBarrier toShader = vkrender::MakeImageBarrier(
+        displayImage,
+        m_sampleCount != VK_SAMPLE_COUNT_1_BIT ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                                               : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+        m_sampleCount != VK_SAMPLE_COUNT_1_BIT ? VK_ACCESS_TRANSFER_WRITE_BIT : VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_ACCESS_SHADER_READ_BIT);
+    vkCmdPipelineBarrier(cmd,
+                         m_sampleCount != VK_SAMPLE_COUNT_1_BIT ? VK_PIPELINE_STAGE_TRANSFER_BIT
+                                                                : VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toShader);
+
+    m_vkCore->EndSingleTimeCommands(cmd);
+    m_displayImageShaderReady = true;
+    EnsureImGuiDisplayDescriptor();
+    return reinterpret_cast<uint64_t>(m_displayDescriptorSet);
 }
 
 } // namespace infernux

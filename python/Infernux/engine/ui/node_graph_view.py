@@ -490,13 +490,25 @@ class NodeGraphView:
                 subtitle, *_TEXT_BODY_COLOR, 0.0, 0.0, sub_font,
             )
 
-        # Border
+        # Border — instant hover/selection feedback (no per-frame easing; cheap).
         if is_selected:
-            ctx.draw_rect(sx, sy, sx + w, sy + h,
-                          *_NODE_SELECTED_BORDER, 2.5 * z, rounding)
+            ctx.draw_rect(sx, sy, sx + w, sy + h, *_NODE_SELECTED_BORDER, 2.5 * z, rounding)
         else:
-            ctx.draw_rect(sx, sy, sx + w, sy + h,
-                          *_NODE_BORDER_COLOR, _NODE_BORDER_THICKNESS * z, rounding)
+            mx = ctx.get_mouse_pos_x()
+            my = ctx.get_mouse_pos_y()
+            hovered = (sx <= mx <= sx + w) and (sy <= my <= sy + h)
+            if hovered:
+                base = _NODE_BORDER_COLOR
+                acc = _NODE_SELECTED_BORDER
+                bcol = (
+                    base[0] + (acc[0] - base[0]) * 0.5,
+                    base[1] + (acc[1] - base[1]) * 0.5,
+                    base[2] + (acc[2] - base[2]) * 0.5,
+                    base[3] + (acc[3] - base[3]) * 0.5,
+                )
+                ctx.draw_rect(sx, sy, sx + w, sy + h, *bcol, _NODE_BORDER_THICKNESS * z, rounding)
+            else:
+                ctx.draw_rect(sx, sy, sx + w, sy + h, *_NODE_BORDER_COLOR, _NODE_BORDER_THICKNESS * z, rounding)
 
         # Pins
         pin_r = _PIN_RADIUS * z

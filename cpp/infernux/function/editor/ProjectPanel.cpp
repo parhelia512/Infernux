@@ -2,6 +2,7 @@
 
 #include "Infernux.h"
 
+#include <function/editor/EditorThemeRegistry.h>
 #include <function/renderer/gui/InxResourcePreviewer.h>
 #include <platform/filesystem/InxPath.h>
 
@@ -12,7 +13,10 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <functional>
 #include <imgui_internal.h>
+#include <nlohmann/json.hpp>
 #include <unordered_set>
 
 #ifdef INX_PLATFORM_WINDOWS
@@ -148,24 +152,39 @@ namespace infernux
 
 namespace
 {
+// All editor colors resolve through the runtime theme registry (active theme),
+// so a theme switch re-skins the Project panel live. Fallbacks reproduce the
+// current look when a token is absent.
+inline ImVec4 ThemeColor(const char *name, const ImVec4 &fb) { return EditorThemeRegistry::Color(name, fb); }
+inline ImU32 ThemeU32(const char *name, const ImVec4 &fb)
+{
+    return ImGui::ColorConvertFloat4ToU32(EditorThemeRegistry::Color(name, fb));
+}
+
 inline ImU32 ProjectSelectionOutlineColor()
 {
-    return IM_COL32(static_cast<int>(EditorTheme::ACCENT_R * 255.0f), static_cast<int>(EditorTheme::ACCENT_G * 255.0f),
-                    static_cast<int>(EditorTheme::ACCENT_B * 255.0f), 255);
+    return ThemeU32("ROLE_ACCENT", ImVec4(EditorTheme::ACCENT_R, EditorTheme::ACCENT_G, EditorTheme::ACCENT_B, 1.0f));
 }
 
 inline ImU32 ProjectExpandStripBg(bool hovered)
 {
-    const ImVec4 &c = hovered ? EditorTheme::PROJECT_EXPAND_STRIP_HOVER : EditorTheme::PROJECT_EXPAND_STRIP_BG;
-    return IM_COL32(static_cast<int>(c.x * 255.0f), static_cast<int>(c.y * 255.0f), static_cast<int>(c.z * 255.0f),
-                    static_cast<int>(c.w * 255.0f));
+    return hovered ? ThemeU32("PROJECT_EXPAND_STRIP_HOVER", EditorTheme::PROJECT_EXPAND_STRIP_HOVER)
+                   : ThemeU32("PROJECT_EXPAND_STRIP_BG", EditorTheme::PROJECT_EXPAND_STRIP_BG);
 }
 
 inline ImU32 ProjectSubAssetCellBg()
 {
-    const ImVec4 &c = EditorTheme::PROJECT_SUBASSET_CELL_BG;
-    return IM_COL32(static_cast<int>(c.x * 255.0f), static_cast<int>(c.y * 255.0f), static_cast<int>(c.z * 255.0f),
-                    static_cast<int>(c.w * 255.0f));
+    return ThemeU32("PROJECT_SUBASSET_CELL_BG", EditorTheme::PROJECT_SUBASSET_CELL_BG);
+}
+
+// Accent-tinted highlight used for eased hover / selection backgrounds.
+inline ImVec4 ProjectAccentColor()
+{
+    return ThemeColor("ROLE_ACCENT", ImVec4(EditorTheme::ACCENT_R, EditorTheme::ACCENT_G, EditorTheme::ACCENT_B, 1.0f));
+}
+inline ImVec4 ProjectHoverColor()
+{
+    return ThemeColor("ROLE_BG_HOVER", ImVec4(0.165f, 0.165f, 0.165f, 1.0f));
 }
 
 constexpr float kProjectSelectionOutlineThickness = 2.0f;
@@ -228,7 +247,8 @@ const std::unordered_map<std::string, std::string> &ProjectPanel::GetIconMap()
         {".md", "readme"},
         {".mat", "file"},
         {".scene", "scene"},
-        {".prefab", "prefab"},
+        // .prefab intentionally omitted — scene prefabs use the mesh-preview pipeline
+        // (same as models); UI-only prefabs fall back to model_3d.png via explicit logic.
         {".animclip2d", "animclip2d"},
         {".animclip3d", "animclip3d"},
         {".animfsm", "animfsm"},
@@ -416,6 +436,73 @@ bool ProjectPanel::IsPathWithin(const std::string &path, const std::string &pare
     return sep == '/' || sep == '\\';
 }
 
+std::string ProjectPanel::GetMinimumBrowsePath() const
+{
+    if (!m_rootPath.empty() && m_navHasSubfolders && !m_preferredNavPath.empty())
+        return NormalizePath(m_preferredNavPath);
+    return NormalizePath(m_rootPath);
+}
+
+bool ProjectPanel::CanNavigateUpFromCurrent() const
+{
+    if (m_rootPath.empty() || m_currentPath.empty())
+        return false;
+    if (!IsPathWithin(m_currentPath, m_rootPath))
+        return false;
+    // Floor at Assets/Logs (never the bare project root when subfolders exist).
+    return NormalizePath(m_currentPath) != GetMinimumBrowsePath();
+}
+
+int ProjectPanel::GetPathDepthFromRoot(const std::string &path) const
+{
+    if (m_rootPath.empty() || path.empty())
+        return 0;
+
+    const std::string normPath = NormalizePath(path);
+    const std::string normRoot = NormalizePath(m_rootPath);
+    if (!IsPathWithin(normPath, normRoot))
+        return -1;
+
+    std::error_code ec;
+    const fs::path rel = fs::relative(fs::u8path(normPath), fs::u8path(normRoot), ec);
+    if (ec)
+        return normPath == normRoot ? 0 : -1;
+    if (rel.empty() || rel == ".")
+        return 0;
+
+    int depth = 0;
+    for (const auto &part : rel) {
+        const std::string name = infernux::FromFsPath(part);
+        if (name.empty() || name == ".")
+            continue;
+        ++depth;
+    }
+    return depth;
+}
+
+void ProjectPanel::ClampNavigationPath()
+{
+    if (m_rootPath.empty() || m_currentPath.empty())
+        return;
+
+    if (!IsPathWithin(m_currentPath, m_rootPath)) {
+        m_currentPath = (m_navHasSubfolders && !m_preferredNavPath.empty()) ? m_preferredNavPath : m_rootPath;
+        return;
+    }
+
+    if (m_navHasSubfolders) {
+        const std::string cur = NormalizePath(m_currentPath);
+        if (cur == NormalizePath(m_rootPath) || GetPathDepthFromRoot(m_currentPath) < 1)
+            m_currentPath = m_preferredNavPath.empty() ? m_rootPath : m_preferredNavPath;
+    }
+}
+
+void ProjectPanel::AssignCurrentPath(const std::string &path)
+{
+    m_currentPath = path;
+    ClampNavigationPath();
+}
+
 uint64_t ProjectPanel::GetMtimeNs(const std::string &path)
 {
     std::error_code ec;
@@ -462,13 +549,32 @@ const std::string &ProjectPanel::Tr(const std::string &key)
 void ProjectPanel::SetRootPath(const std::string &path)
 {
     m_rootPath = path;
+    m_preferredNavPath = path;
+    m_navHasSubfolders = false;
     InvalidateDirCache();
-    fs::path assetsPath = fs::u8path(path) / "Assets";
+
     std::error_code ec;
-    if (fs::is_directory(assetsPath, ec))
-        m_currentPath = infernux::FromFsPath(assetsPath);
-    else
-        m_currentPath = path;
+    fs::path assetsPath = fs::u8path(path) / "Assets";
+    if (fs::is_directory(assetsPath, ec)) {
+        m_preferredNavPath = infernux::FromFsPath(assetsPath);
+        m_navHasSubfolders = true;
+        m_currentPath = m_preferredNavPath;
+        return;
+    }
+
+    if (fs::is_directory(fs::u8path(path), ec)) {
+        for (const auto &entry : fs::directory_iterator(fs::u8path(path), ec)) {
+            if (ec)
+                break;
+            if (!entry.is_directory(ec))
+                continue;
+            m_navHasSubfolders = true;
+            m_preferredNavPath = infernux::FromFsPath(entry.path());
+            break;
+        }
+    }
+
+    m_currentPath = m_navHasSubfolders ? m_preferredNavPath : path;
 }
 
 void ProjectPanel::SetEngine(Infernux *engine)
@@ -500,8 +606,17 @@ void ProjectPanel::SetIconsDirectory(const std::string &dir)
 void ProjectPanel::SetCurrentPath(const std::string &path)
 {
     std::error_code ec;
-    if (!path.empty() && fs::is_directory(fs::u8path(path), ec))
-        m_currentPath = path;
+    if (path.empty() || !fs::is_directory(fs::u8path(path), ec))
+        return;
+    if (!m_rootPath.empty() && !IsPathWithin(path, m_rootPath))
+        return;
+    if (m_navHasSubfolders) {
+        if (GetPathDepthFromRoot(path) < 1)
+            return;
+        if (NormalizePath(path) == NormalizePath(m_rootPath))
+            return;
+    }
+    AssignCurrentPath(path);
 }
 
 void ProjectPanel::ClearSelection()
@@ -525,7 +640,7 @@ void ProjectPanel::SetSelectedFile(const std::string &path)
     fs::path selectedPath = fs::u8path(path);
     fs::path parent = selectedPath.parent_path();
     if (!parent.empty() && fs::is_directory(parent, ec))
-        m_currentPath = infernux::FromFsPath(parent);
+        SetCurrentPath(infernux::FromFsPath(parent));
 
     m_selectedFile = path;
     m_selectedFiles = {path};
@@ -1009,11 +1124,16 @@ uint64_t ProjectPanel::GetMaterialThumbnail(const std::string &filePath)
     if (filePath.empty() || !m_engine)
         return 0;
 
-    uint64_t mtimeNs = GetMaterialMtimeNs(filePath);
-    if (mtimeNs == 0)
-        return 0;
-
     const std::string resourceKey = std::string("mat|") + filePath;
+    uint64_t mtimeNs = GetMaterialMtimeNs(filePath);
+    if (mtimeNs == 0) {
+        // Transient stat failure (e.g. during an atomic .mat save: tmp + rename
+        // briefly leaves the file missing). Keep showing the last-rendered
+        // preview instead of flickering to the placeholder icon, and don't
+        // reschedule until the file resolves again.
+        return m_engine->GetMaterialPreviewTextureId(resourceKey);
+    }
+
     return m_engine->QueryOrScheduleMaterialPreview(resourceKey, filePath, "", mtimeNs);
 }
 
@@ -1063,7 +1183,68 @@ uint64_t ProjectPanel::GetModelThumbnail(const std::string &filePath)
 
 uint64_t ProjectPanel::GetPrefabThumbnail(const std::string &filePath)
 {
+    if (IsUiPrefabFile(filePath))
+        return 0; // caller shows model_3d.png placeholder
     return GetModelThumbnail(filePath);
+}
+
+uint64_t ProjectPanel::GetModel3dIconId() const
+{
+    auto it = m_typeIconCache.find("model_3d");
+    return it != m_typeIconCache.end() ? it->second : 0;
+}
+
+bool ProjectPanel::IsUiPrefabFile(const std::string &filePath)
+{
+    if (filePath.empty())
+        return false;
+
+    std::ifstream input(fs::u8path(filePath), std::ios::binary);
+    if (!input.is_open())
+        return false;
+
+    nlohmann::json prefabJson = nlohmann::json::parse(input, nullptr, false);
+    if (prefabJson.is_discarded())
+        return false;
+
+    auto rootIt = prefabJson.find("root_object");
+    if (rootIt == prefabJson.end() || !rootIt->is_object())
+        return false;
+
+    bool hasUi = false;
+    bool hasSceneMesh = false;
+
+    const auto isUiComponent = [](const std::string &type) {
+        return type == "UICanvas" || type == "UIText" || type == "UIButton" || type == "UIImage" ||
+               type == "InxUIComponent" || type == "InxUIScreenComponent" || type == "InxUISelectable";
+    };
+    const auto isSceneMeshComponent = [](const std::string &type) {
+        return type == "MeshRenderer" || type == "SkinnedMeshRenderer" || type == "SpriteRenderer";
+    };
+
+    std::function<void(const nlohmann::json &)> walk = [&](const nlohmann::json &node) {
+        auto componentsIt = node.find("components");
+        if (componentsIt != node.end() && componentsIt->is_array()) {
+            for (const auto &componentJson : *componentsIt) {
+                if (!componentJson.is_object())
+                    continue;
+                const std::string type = componentJson.value("type", std::string());
+                if (isUiComponent(type))
+                    hasUi = true;
+                if (isSceneMeshComponent(type))
+                    hasSceneMesh = true;
+            }
+        }
+        auto childrenIt = node.find("children");
+        if (childrenIt != node.end() && childrenIt->is_array()) {
+            for (const auto &childJson : *childrenIt)
+                walk(childJson);
+        }
+    };
+
+    walk(*rootIt);
+    // UI-only prefabs (Canvas / widgets without a mesh renderer) use the static icon.
+    return hasUi && !hasSceneMesh;
 }
 
 void ProjectPanel::ProcessPendingThumbnails()
@@ -1132,10 +1313,22 @@ uint64_t ProjectPanel::GetTypeIconId(const FileItem &item) const
         key = mapIt != iconMap.end() ? &mapIt->second : nullptr;
     }
 
-    if (!key)
+    if (key) {
+        auto it = m_typeIconCache.find(*key);
+        if (it != m_typeIconCache.end())
+            return it->second;
+        // A mapped type whose icon asset is missing (e.g. model/prefab, which have no
+        // type icon and rely on their rendered preview). Return 0 so the caller keeps
+        // showing the preview / type tag — NOT the generic file.png placeholder.
         return 0;
-    auto it = m_typeIconCache.find(*key);
-    return it != m_typeIconCache.end() ? it->second : 0;
+    }
+    // Truly unmapped extension → generic file.png placeholder instead of "[FILE]".
+    if (item.type == FileItem::File) {
+        auto f = m_typeIconCache.find("file");
+        if (f != m_typeIconCache.end())
+            return f->second;
+    }
+    return 0;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1310,7 +1503,7 @@ void ProjectPanel::HandleItemClick(const FileItem &item, InxGUIContext *ctx)
 
     if (item.type == FileItem::Dir) {
         if (doubleClicked) {
-            m_currentPath = item.path;
+            AssignCurrentPath(item.path);
             m_lastClickedFile.clear();
         }
     } else if (item.type == FileItem::SubMesh || item.type == FileItem::SubMaterial) {
@@ -1510,7 +1703,7 @@ void ProjectPanel::CommitRename()
             m_selectedSet = {newPath};
         }
         if (m_currentPath == m_renamingPath)
-            m_currentPath = newPath;
+            AssignCurrentPath(newPath);
     }
     m_renamingPath.clear();
 }
@@ -1828,6 +2021,7 @@ void ProjectPanel::MoveProjectItemsToFolder(const std::string &targetDir, const 
 void ProjectPanel::PreRender(InxGUIContext *ctx)
 {
     m_frameTimeNow = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    ClampNavigationPath();
     EnsureTypeIconsLoaded();
     ProcessPendingThumbnails();
     GetGridTextLineHeight(ctx);
@@ -1934,8 +2128,12 @@ void ProjectPanel::RenderFolderTree(InxGUIContext *ctx)
 
         ctx->SetNextItemOpen(true, ImGuiCond_FirstUseEver);
         bool nodeOpen = ctx->TreeNodeEx((projectName + "###" + m_rootPath).c_str(), rootFlags);
-        if (ctx->IsItemClicked())
-            m_currentPath = m_rootPath;
+        if (ctx->IsItemClicked()) {
+            if (m_navHasSubfolders)
+                AssignCurrentPath(m_preferredNavPath);
+            else
+                AssignCurrentPath(m_rootPath);
+        }
         if (nodeOpen) {
             RenderFolderTreeRecursive(ctx, m_rootPath, rootSnap);
             ctx->TreePop();
@@ -1975,7 +2173,7 @@ void ProjectPanel::RenderFolderTreeRecursive(InxGUIContext *ctx, const std::stri
         ImGui::PushID(d.path.c_str());
         bool open = ctx->TreeNodeEx(d.name.c_str(), flags);
         if (ctx->IsItemClicked())
-            m_currentPath = d.path;
+            AssignCurrentPath(d.path);
         if (hasSubdirs && open) {
             RenderFolderTreeRecursive(ctx, d.path);
             ctx->TreePop();
@@ -2002,11 +2200,14 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
     if (!items)
         return;
 
-    // Back button
-    auto parent = infernux::FromFsPath(fs::u8path(m_currentPath).parent_path());
-    if (m_currentPath != m_rootPath && parent != m_rootPath) {
-        if (ctx->Selectable("[..]", false))
-            m_currentPath = parent;
+    // Back button — navigate up within the project, but stop at project-root
+    // subfolders (Assets, Logs, …). Never enter the bare project root folder or
+    // any path above it.
+    if (CanNavigateUpFromCurrent()) {
+        if (ctx->Selectable("[..]", false)) {
+            const std::string parent = infernux::FromFsPath(fs::u8path(NormalizePath(m_currentPath)).parent_path());
+            AssignCurrentPath(parent);
+        }
     }
 
     // Grid config
@@ -2044,6 +2245,54 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
 
         ImDrawList *drawList = ImGui::GetWindowDrawList();
 
+        // Resolve theme colors ONCE per frame (the registry lookups allocate a
+        // temp std::string per call; doing it per-item was a measurable hit).
+        const ImVec4 cAccent = ProjectAccentColor();
+        const ImVec4 cHover = ProjectHoverColor();
+        const ImU32 cHoverFill = ImGui::ColorConvertFloat4ToU32(ImVec4(cHover.x, cHover.y, cHover.z, 0.90f));
+        // Uniform neutral tint drawn ON TOP of the whole cell on hover (covers
+        // full-bleed thumbnails AND the model expand strip with ONE colour).
+        const ImU32 cHoverTopTint = ImGui::ColorConvertFloat4ToU32(ImVec4(cHover.x, cHover.y, cHover.z, 0.22f));
+        const ImU32 cSelFill = ImGui::ColorConvertFloat4ToU32(ImVec4(cAccent.x, cAccent.y, cAccent.z, 0.22f));
+        const ImU32 cSelOutline = ProjectSelectionOutlineColor();
+        const ImU32 cSubAssetBg = ProjectSubAssetCellBg();
+        const ImU32 cExpandBg = ProjectExpandStripBg(false);
+        const ImU32 cExpandBgHover = ProjectExpandStripBg(true);
+        const ImU32 cTagText = ImGui::ColorConvertFloat4ToU32(ImVec4(0.62f, 0.63f, 0.66f, 1.0f));
+        const float cellW = avail_w / static_cast<float>(cols);
+
+        // Unified per-cell hover/selection feedback so EVERY item type (thumbnail,
+        // inline sub-asset, model, and text-placeholder) reads identically: the
+        // fill goes behind the icon in the table background channel and the
+        // selection outline sits a couple px OUTSIDE the icon box.
+        auto drawCellFeedback = [&](const ImVec2 &g0, const ImVec2 &g1, bool hovered, bool selected) {
+            if (hovered || selected) {
+                ImGui::TablePushBackgroundChannel();
+                if (hovered)
+                    drawList->AddRectFilled(g0, g1, cHoverFill, 3.0f);
+                if (selected)
+                    drawList->AddRectFilled(g0, g1, cSelFill, 3.0f);
+                ImGui::TablePopBackgroundChannel();
+            }
+            // Single uniform tint on top → consistent hover for thumbnails, full-bleed
+            // images and model expand-strips alike (no second accent-coloured patch).
+            if (hovered)
+                drawList->AddRectFilled(g0, g1, cHoverTopTint, 3.0f);
+            if (selected) {
+                // The outline sits 2px OUTSIDE the icon box. For the leftmost/topmost
+                // column that 2px falls into the window-padding band, outside the
+                // cell clip rect, so it would be cropped. Briefly widen the clip rect
+                // (still well within the panel's padding) so the full outline shows.
+                const ImVec2 cMin = drawList->GetClipRectMin();
+                const ImVec2 cMax = drawList->GetClipRectMax();
+                drawList->PushClipRect(ImVec2(cMin.x - 4.0f, cMin.y - 4.0f), ImVec2(cMax.x + 4.0f, cMax.y + 4.0f),
+                                       false);
+                drawList->AddRect(ImVec2(g0.x - 2.0f, g0.y - 2.0f), ImVec2(g1.x + 2.0f, g1.y + 2.0f), cSelOutline, 3.0f,
+                                  0, kProjectSelectionOutlineThickness);
+                drawList->PopClipRect();
+            }
+        };
+
         for (int i = range.startIndex; i < range.endIndex; ++i) {
             auto &item = (*items)[i];
             ctx->TableNextColumn();
@@ -2051,14 +2300,53 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
 
             const bool isSubAsset = (item.type == FileItem::SubMaterial || item.type == FileItem::SubMesh);
             const ImVec2 cellTopLeft = ImGui::GetCursorScreenPos();
+
+            const auto isSubAssetItem = [](const FileItem &it) {
+                return it.type == FileItem::SubMaterial || it.type == FileItem::SubMesh;
+            };
+
+            // Expanded model on this row: draw the left portion of the inline strip so it
+            // bridges into the first sub-asset cell on the same row.
+            const bool isModelFile = (item.type == FileItem::File && IsModelExt(item.ext));
+            if (isModelFile && m_expandedModels.count(item.path) > 0) {
+                const bool nextIsSubSameRow =
+                    (i + 1 < itemCount) && isSubAssetItem((*items)[i + 1]) &&
+                    (*items)[i + 1].parentPath == item.path && ((i + 1) % cols) != 0;
+                if (nextIsSubSameRow) {
+                    const ImVec2 bgMin(cellTopLeft.x, cellTopLeft.y);
+                    const ImVec2 bgMax(cellTopLeft.x + cellW, cellTopLeft.y + iconSize);
+                    ImGui::TablePushBackgroundChannel();
+                    drawList->AddRectFilled(bgMin, bgMax, cSubAssetBg, 0.0f);
+                    ImGui::TablePopBackgroundChannel();
+                }
+            }
+
             if (isSubAsset) {
-                // Tint only the icon square — the label row stays transparent so the
-                // sub-asset reads as part of the model without a heavy full-cell band.
-                // Draw into the table's background channel so the icon/preview (drawn
-                // in the content channel) always renders ON TOP of this tint.
-                const ImVec2 iconBgMax(cellTopLeft.x + iconSize, cellTopLeft.y + iconSize);
+                // Icon-row band only (labels stay transparent). Width is limited to
+                // icon columns — extend left to the parent model, right only into the
+                // next sibling on the same row (never bleed into unrelated columns).
+                const bool prevIsParent =
+                    (i > 0) && (*items)[i - 1].type == FileItem::File && (*items)[i - 1].path == item.parentPath;
+                const bool prevIsSibling =
+                    (i > 0) && isSubAssetItem((*items)[i - 1]) && (*items)[i - 1].parentPath == item.parentPath;
+                const bool nextIsSibling =
+                    (i + 1 < itemCount) && isSubAssetItem((*items)[i + 1]) &&
+                    (*items)[i + 1].parentPath == item.parentPath && ((i + 1) % cols) != 0;
+
+                float stripLeft = cellTopLeft.x;
+                if (prevIsParent)
+                    stripLeft = cellTopLeft.x - cellW; // connect back into the parent model cell
+                else if (!prevIsSibling)
+                    stripLeft = cellTopLeft.x; // first on a wrapped row — icon column only
+
+                float stripRight = cellTopLeft.x + iconSize;
+                if (nextIsSibling)
+                    stripRight = cellTopLeft.x + cellW; // bridge to the next sibling cell
+
+                const ImVec2 cellBgMin(stripLeft, cellTopLeft.y);
+                const ImVec2 cellBgMax(stripRight, cellTopLeft.y + iconSize);
                 ImGui::TablePushBackgroundChannel();
-                drawList->AddRectFilled(cellTopLeft, iconBgMax, ProjectSubAssetCellBg(), 4.0f);
+                drawList->AddRectFilled(cellBgMin, cellBgMax, cSubAssetBg, 0.0f);
                 ImGui::TablePopBackgroundChannel();
             }
 
@@ -2079,16 +2367,24 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                     displayTexId = GetMaterialThumbnail(item.path);
                 else if (IsModelExt(item.ext))
                     displayTexId = GetModelThumbnail(item.path);
-                else if (item.ext == ".prefab")
-                    displayTexId = GetPrefabThumbnail(item.path);
-                if (displayTexId == 0)
-                    displayTexId = GetTypeIconId(item);
+                else if (item.ext == ".prefab") {
+                    if (IsUiPrefabFile(item.path))
+                        displayTexId = GetModel3dIconId();
+                    else
+                        displayTexId = GetPrefabThumbnail(item.path);
+                }
+                if (displayTexId == 0) {
+                    // Scene prefabs waiting for GPU preview → model_3d icon, not file.png.
+                    if (item.ext == ".prefab" && !IsUiPrefabFile(item.path))
+                        displayTexId = GetModel3dIconId();
+                    if (displayTexId == 0)
+                        displayTexId = GetTypeIconId(item);
+                }
             } else {
                 displayTexId = GetTypeIconId(item);
             }
 
             // ── Render icon (model: thumbnail on the left + narrow expand strip, same height) ──
-            const bool isModelFile = (item.type == FileItem::File && IsModelExt(item.ext));
             const float stripW = isModelFile ? kModelExpandStripW : 0.0f;
             const float thumbW = (stripW > 0.0f) ? (iconSize - stripW) : iconSize;
 
@@ -2150,7 +2446,7 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                         expandClicked = expandHovered && ImGui::IsMouseReleased(0) && !hasDragPayload;
                         const ImVec2 ex0 = ImGui::GetItemRectMin();
                         const ImVec2 ex1 = ImGui::GetItemRectMax();
-                        drawList->AddRectFilled(ex0, ex1, ProjectExpandStripBg(expandHovered), 2.0f);
+                        drawList->AddRectFilled(ex0, ex1, expandHovered ? cExpandBgHover : cExpandBg, 2.0f);
                         const float exW = ex1.x - ex0.x;
                         const float exH = ex1.y - ex0.y;
                         const float srcW = kModelExpandIconSrcPx;
@@ -2181,12 +2477,7 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                 }
                 ImGui::EndGroup();
 
-                if (isSelected) {
-                    const ImVec2 g0 = ImGui::GetItemRectMin();
-                    const ImVec2 g1 = ImGui::GetItemRectMax();
-                    drawList->AddRect(g0, g1, ProjectSelectionOutlineColor(), 0.0f, 0,
-                                      kProjectSelectionOutlineThickness);
-                }
+                drawCellFeedback(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), thumbHovered, isSelected);
                 if (thumbHovered && ImGui::IsMouseReleased(0) && !hasDragPayload)
                     HandleItemClick(item, ctx);
                 if (thumbRmb) {
@@ -2198,13 +2489,21 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                     NotifySelectionChanged();
                 }
             } else {
+                // No icon texture for this type → centered "[TAG]" placeholder, but
+                // rendered with the SAME iconSize box + feedback as thumbnailed items
+                // so every cell looks and sizes identically.
                 const char *tag = (item.type != FileItem::Dir) ? GetFileTypeTag(item.name) : "[DIR]";
-                ctx->Selectable(tag, isSelected, 0, iconSize, iconSize);
-                ImVec2 rMin = ImGui::GetItemRectMin();
-                ImVec2 rMax = ImGui::GetItemRectMax();
-                if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && !hasDragPayload)
+                ImGui::InvisibleButton("##ic", ImVec2(iconSize, iconSize));
+                const bool thumbHovered = ImGui::IsItemHovered();
+                const bool thumbRmb = ImGui::IsItemClicked(1);
+                const ImVec2 g0 = ImGui::GetItemRectMin();
+                const ImVec2 g1 = ImGui::GetItemRectMax();
+                const ImVec2 ts = ImGui::CalcTextSize(tag);
+                drawList->AddText(ImVec2((g0.x + g1.x - ts.x) * 0.5f, (g0.y + g1.y - ts.y) * 0.5f), cTagText, tag);
+                drawCellFeedback(g0, g1, thumbHovered, isSelected);
+                if (thumbHovered && ImGui::IsMouseReleased(0) && !hasDragPayload)
                     HandleItemClick(item, ctx);
-                if (ctx->IsItemClicked(1)) {
+                if (thumbRmb) {
                     m_selectedFile = item.path;
                     if (m_selectedSet.count(item.path) == 0) {
                         m_selectedFiles = {item.path};
@@ -2212,9 +2511,6 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                     }
                     NotifySelectionChanged();
                 }
-                if (isSelected)
-                    drawList->AddRect(rMin, rMax, ProjectSelectionOutlineColor(), 0.0f, 0,
-                                      kProjectSelectionOutlineThickness);
             }
 
             // ── Drag-drop source (must always run to detect drag start) ──
