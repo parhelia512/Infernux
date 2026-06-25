@@ -54,6 +54,7 @@
 | `set_sibling_index(index: int) → None` | 设置同级索引。 |
 | `set_as_first_sibling() → None` | 将变换移动到兄弟列表的开头。 |
 | `set_as_last_sibling() → None` | 将变换移动到兄弟列表的末尾。 |
+| `set_local_trs(px: float, py: float, pz: float, rx: float, ry: float, rz: float, sx: float, sy: float, sz: float) → None` |  |
 | `look_at(target: Vector3) → None` | 旋转变换使前方向指向目标位置。 |
 | `translate(delta: Vector3, space: int = ...) → None` | 按指定方向和距离移动变换。 |
 | `translate_local(delta: Vector3) → None` |  |
