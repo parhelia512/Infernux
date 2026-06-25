@@ -80,11 +80,6 @@ void RenderContext::BindPipeline(VkPipeline pipeline)
     vkCmdBindPipeline(m_cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 }
 
-void RenderContext::BindComputePipeline(VkPipeline pipeline)
-{
-    vkCmdBindPipeline(m_cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-}
-
 void RenderContext::Draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance)
 {
     vkCmdDraw(m_cmdBuffer, vertexCount, instanceCount, firstVertex, firstInstance);
@@ -94,11 +89,6 @@ void RenderContext::DrawIndexed(uint32_t indexCount, uint32_t instanceCount, uin
                                 uint32_t firstInstance)
 {
     vkCmdDrawIndexed(m_cmdBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
-}
-
-void RenderContext::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)
-{
-    vkCmdDispatch(m_cmdBuffer, groupCountX, groupCountY, groupCountZ);
 }
 
 void RenderContext::NextSubpass()
@@ -558,25 +548,6 @@ PassHandle RenderGraph::AddPass(const std::string &name, PassSetupCallback setup
     m_passes.push_back(std::move(passData));
 
     // Run setup callback
-    PassBuilder builder(this, handle.id);
-    auto executeCallback = setup(builder);
-    m_passes[handle.id].executeCallback = std::move(executeCallback);
-
-    return handle;
-}
-
-PassHandle RenderGraph::AddComputePass(const std::string &name, PassSetupCallback setup)
-{
-    PassHandle handle;
-    handle.id = static_cast<uint32_t>(m_passes.size());
-
-    RenderPassData passData;
-    passData.name = name;
-    passData.id = handle.id;
-    passData.type = PassType::Compute;
-
-    m_passes.push_back(std::move(passData));
-
     PassBuilder builder(this, handle.id);
     auto executeCallback = setup(builder);
     m_passes[handle.id].executeCallback = std::move(executeCallback);

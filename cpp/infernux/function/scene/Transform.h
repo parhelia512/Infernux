@@ -190,6 +190,25 @@ class Transform : public Component
         SetLocalScale(glm::vec3(uniform));
     }
 
+    /// @brief Set local position + euler rotation (degrees) + scale in one call.
+    ///
+    /// Fast path for per-frame animation drivers (TimelineAction / timeline FSM
+    /// states): folds three property writes into a single store update with ONE
+    /// dirty flag + ONE subtree invalidation, instead of three separate setters
+    /// each invalidating the world-matrix subtree.  This is the C++-side analogue
+    /// of the skeletal animator's single `submit_animation_pose` call.
+    void SetLocalTRS(const glm::vec3 &position, const glm::vec3 &euler, const glm::vec3 &scale)
+    {
+        auto &store = TransformECSStore::Instance();
+        store.SetLocalPosition(m_ecsHandle, position);
+        store.SetLocalEulerAngles(m_ecsHandle, euler);
+        store.SetLocalRotation(m_ecsHandle, EulerYXZToQuat(euler));
+        store.SetLocalScale(m_ecsHandle, scale);
+        store.SetHasCachedWorldEulerAngles(m_ecsHandle, false);
+        store.SetDirty(m_ecsHandle, true);
+        InvalidateWorldMatrix(true);
+    }
+
     /// @brief Aliases — GetScale/SetScale map to local scale (Unity convention)
     [[nodiscard]] glm::vec3 GetScale() const
     {

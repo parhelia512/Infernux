@@ -74,14 +74,21 @@ void SkinnedMeshRenderer::SetRuntimeAnimationTime(float t)
 
 void SkinnedMeshRenderer::SubmitAnimationPose(const std::string &takeName, float timeSeconds, float normalizedTime,
                                               const std::string &blendTakeName, float blendTimeSeconds,
-                                              float blendWeight)
+                                              float blendWeight, bool loop)
 {
+    // Switching back to the single-clip / crossfade path clears any active
+    // pose stack so a stale AnimationTree/blend pose doesn't keep overriding.
+    if (m_usePoseStack) {
+        m_usePoseStack = false;
+        m_poseStack.clear();
+    }
     m_activeTakeName = takeName;
     m_runtimeAnimationTime = timeSeconds;
     m_runtimeAnimationNormalized = normalizedTime;
     m_blendTakeName = blendTakeName;
     m_blendAnimationTime = blendTimeSeconds;
     m_blendWeight = std::clamp(blendWeight, 0.0f, 1.0f);
+    m_runtimeAnimationLoop = loop;
     RefreshRuntimeSkinnedMesh();
 }
 
@@ -115,6 +122,31 @@ void SkinnedMeshRenderer::ClearAnimationBlend()
     m_blendTakeName.clear();
     m_blendAnimationTime = 0.0f;
     m_blendWeight = 0.0f;
+    RefreshRuntimeSkinnedMesh();
+}
+
+void SkinnedMeshRenderer::SubmitPoseStack(const std::vector<PoseStackLayer> &layers)
+{
+    m_poseStack = layers;
+    m_usePoseStack = true;
+    // Keep a representative active take name so inspector/UI reflect playback.
+    if (!layers.empty()) {
+        const PoseStackLayer *dominant = &layers.front();
+        for (const auto &ly : layers)
+            if (!ly.additive && ly.weight > dominant->weight)
+                dominant = &ly;
+        m_activeTakeName = dominant->takeName;
+        m_runtimeAnimationTime = dominant->timeSeconds;
+    }
+    RefreshRuntimeSkinnedMesh();
+}
+
+void SkinnedMeshRenderer::ClearPoseStack()
+{
+    if (!m_usePoseStack)
+        return;
+    m_usePoseStack = false;
+    m_poseStack.clear();
     RefreshRuntimeSkinnedMesh();
 }
 
@@ -160,23 +192,17 @@ void SkinnedMeshRenderer::RefreshRuntimeSkinnedMesh()
         ClearRuntimeSkinnedMesh();
         return;
     }
-    if (m_activeTakeName.empty()) {
-        ClearRuntimeSkinnedMesh();
-        return;
-    }
+    // NOTE: an empty m_activeTakeName is a valid state — it renders the bind
+    // pose (FindAnimation("") → nullptr → SampleNodePose falls back to the
+    // node's bind-local TRS). The old behavior of clearing the mesh made
+    // characters invisible before the Animator's first play() and after
+    // stop(), which was a P0 correctness bug.
 
     auto model = GetOrLoadRuntimeModel();
     if (!model || !model->IsValid()) {
         ClearRuntimeSkinnedMesh();
         return;
     }
-
-    SkinnedSampleRequest request;
-    request.takeName = m_activeTakeName;
-    request.timeSeconds = m_runtimeAnimationTime;
-    request.blendTakeName = m_blendTakeName;
-    request.blendTimeSeconds = m_blendAnimationTime;
-    request.blendWeight = m_blendWeight;
 
     const bool wasEmpty = m_runtimeSkinnedVertices.empty();
     if (wasEmpty || m_runtimeSkinnedIndices.empty()) {
@@ -186,7 +212,21 @@ void SkinnedMeshRenderer::RefreshRuntimeSkinnedMesh()
         MarkMeshBufferDirty();
     }
 
-    m_runtimeSkinBonePalette = model->GetOrBuildGpuBonePalette(request);
+    if (m_usePoseStack) {
+        // AnimationTree path: N-way weighted + additive + masked blend.
+        // Not cached (the stack changes most frames); built fresh each refresh.
+        m_runtimeSkinBonePalette =
+            std::make_shared<const std::vector<glm::mat4>>(model->BuildGpuBonePaletteFromPoseStack(m_poseStack));
+    } else {
+        SkinnedSampleRequest request;
+        request.takeName = m_activeTakeName;
+        request.timeSeconds = m_runtimeAnimationTime;
+        request.loop = m_runtimeAnimationLoop;
+        request.blendTakeName = m_blendTakeName;
+        request.blendTimeSeconds = m_blendAnimationTime;
+        request.blendWeight = m_blendWeight;
+        m_runtimeSkinBonePalette = model->GetOrBuildGpuBonePalette(request);
+    }
     if (wasEmpty)
         SceneManager::Instance().NotifyMeshRendererChanged(this);
 }

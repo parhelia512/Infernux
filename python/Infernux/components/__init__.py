@@ -51,6 +51,21 @@ from .serialized_field import (
     get_serialized_fields,
     get_field_value,
     set_field_value,
+    # Unity-style Annotated[] field markers
+    Range,
+    Tooltip,
+    Header,
+    Space,
+    Group,
+    InfoText,
+    DragSpeed,
+    RequiredComponent,
+    Multiline,
+    ReadOnly,
+    HideInInspector,
+    NonSerialized,
+    HDR,
+    Color,
 )
 from .ref_wrappers import GameObjectRef, MaterialRef, ComponentRef, PrefabRef
 from .script_loader import (
@@ -83,6 +98,7 @@ from .decorators import (
 )
 from .spirit_animator import SpiritAnimator
 from .skeletal_animator import SkeletalAnimator
+from .timeline_action import TimelineAction
 
 __all__ = [
     "InxComponent",
@@ -108,6 +124,21 @@ __all__ = [
     "int_field",
     "hide_field",
     "FieldType",
+    # Annotated[] field markers
+    "Range",
+    "Tooltip",
+    "Header",
+    "Space",
+    "Group",
+    "InfoText",
+    "DragSpeed",
+    "RequiredComponent",
+    "Multiline",
+    "ReadOnly",
+    "HideInInspector",
+    "NonSerialized",
+    "HDR",
+    "Color",
     "GameObjectRef",
     "MaterialRef",
     "ComponentRef",
@@ -145,4 +176,5 @@ __all__ = [
     # Animation
     "SpiritAnimator",
     "SkeletalAnimator",
+    "TimelineAction",
 ]

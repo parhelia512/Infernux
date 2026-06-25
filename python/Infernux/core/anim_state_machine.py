@@ -13,10 +13,124 @@ Usage::
 
 from __future__ import annotations
 
+import ast
 import json
 import os
+import operator
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Safe transition-condition evaluator (replaces eval())
+# ═══════════════════════════════════════════════════════════════════════════
+
+class AnimConditionError(Exception):
+    """Raised when a transition condition cannot be parsed/evaluated safely."""
+
+
+_ANIM_CMP_OPS = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+}
+
+
+def _anim_eval_node(node: ast.AST, ctx: Dict[str, Any]) -> Any:
+    """Whitelist AST interpreter — NO eval, builtins, calls, attrs, or subscripts.
+
+    Supported: and / or / not, unary +/-, comparison chains, names (looked up in
+    ``ctx``; unknown → 0, Unity-like), and literal constants (number/str/bool/None).
+    """
+    if isinstance(node, ast.BoolOp):
+        if isinstance(node.op, ast.And):
+            return all(bool(_anim_eval_node(v, ctx)) for v in node.values)
+        if isinstance(node.op, ast.Or):
+            return any(bool(_anim_eval_node(v, ctx)) for v in node.values)
+        raise AnimConditionError("unsupported boolean operator")
+    if isinstance(node, ast.UnaryOp):
+        operand = _anim_eval_node(node.operand, ctx)
+        if isinstance(node.op, ast.Not):
+            return not bool(operand)
+        if isinstance(node.op, ast.USub):
+            return -_anim_as_number(operand)
+        if isinstance(node.op, ast.UAdd):
+            return +_anim_as_number(operand)
+        raise AnimConditionError("unsupported unary operator")
+    if isinstance(node, ast.Compare):
+        left = _anim_eval_node(node.left, ctx)
+        for op, comparator in zip(node.ops, node.comparators):
+            fn = _ANIM_CMP_OPS.get(type(op))
+            if fn is None:
+                raise AnimConditionError("unsupported comparison operator")
+            right = _anim_eval_node(comparator, ctx)
+            try:
+                ok = fn(left, right)
+            except TypeError:
+                # Mixed-type compare (e.g. str vs number): treat as not-equal-ish.
+                ok = fn(0.0, 1.0) if not isinstance(op, (ast.Eq,)) else False
+            if not ok:
+                return False
+            left = right
+        return True
+    if isinstance(node, ast.Name):
+        return ctx.get(node.id, 0)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float, str, bool)) or node.value is None:
+            return node.value
+        raise AnimConditionError("unsupported constant")
+    raise AnimConditionError(f"unsupported expression: {type(node).__name__}")
+
+
+def _anim_as_number(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+# Parsed-AST cache: transition conditions are authored once and evaluated every
+# frame by every animator (Spirit / Skeletal / Timeline FSM).  Re-parsing the
+# source each frame dominated the runtime cost, so we memoize the parsed body
+# keyed on the (stripped) condition string.  ``None`` marks a string that failed
+# to parse so we don't re-attempt (and keep raising) every frame.
+_ANIM_COND_AST_CACHE: Dict[str, Any] = {}
+_ANIM_COND_AST_CACHE_LIMIT = 1024
+
+# Sentinel distinct from a cached ``None`` (failed-parse) entry.
+_CACHE_MISS = object()
+
+
+def evaluate_anim_condition(expr: str, context: Dict[str, Any]) -> bool:
+    """Safely evaluate an FSM transition condition string against ``context``.
+
+    Replaces ``eval()`` in the animators.  Handles the structured AND-chains the
+    FSM editor produces (``(speed > 0.5) and (grounded == 1.0)``) plus reasonable
+    hand-authored conditions (bare flags, ``not x``, ``state == "idle"``).
+    Raises :class:`AnimConditionError` (or ``SyntaxError``) on malformed input so
+    callers can log a warning, matching the previous eval()-based behaviour.
+
+    The parsed AST is cached per condition string so steady-state evaluation is
+    a tree walk only (no per-frame ``ast.parse``).
+    """
+    c = (expr or "").strip()
+    if not c:
+        return False
+    body = _ANIM_COND_AST_CACHE.get(c, _CACHE_MISS)
+    if body is _CACHE_MISS:
+        try:
+            body = ast.parse(c, mode="eval").body
+        except SyntaxError:
+            body = None
+        if len(_ANIM_COND_AST_CACHE) < _ANIM_COND_AST_CACHE_LIMIT:
+            _ANIM_COND_AST_CACHE[c] = body
+    if body is None:
+        # Preserve previous behaviour: surface malformed input to the caller.
+        ast.parse(c, mode="eval")
+    return bool(_anim_eval_node(body, context))
 
 
 @dataclass
@@ -110,11 +224,26 @@ class AnimTransition:
 
 @dataclass
 class AnimState:
-    """A single state inside the FSM, referencing a clip and holding outgoing transitions."""
+    """A single state inside the FSM, referencing a clip and holding outgoing transitions.
+
+    A state is normally a single clip (``kind="clip"``).  A *blend* state
+    (``kind="blend"``) is a single-in/single-out node that linearly blends two
+    clips A and B by its own ``blend_value`` (0..1, "Lerp") — A reuses
+    ``clip_guid``/``clip_path``; B uses ``clip_b_guid``/``clip_b_path``.  Each
+    blend state owns its Lerp (not shared across nodes).
+    """
 
     name: str = "New State"
-    clip_guid: str = ""       # GUID of the referenced .animclip2d / .animclip3d
+    kind: str = "clip"        # "clip" | "blend" | "timeline"
+    clip_guid: str = ""       # GUID of the referenced .animclip2d / .animclip3d (clip A)
     clip_path: str = ""       # fallback path (editor-only hint)
+    # Blend-state second clip (B) + per-node Lerp (0..1) when kind == "blend".
+    clip_b_guid: str = ""
+    clip_b_path: str = ""
+    blend_value: float = 0.5
+    # Timeline-state reference when kind == "timeline" (.animtimeline asset).
+    timeline_guid: str = ""
+    timeline_path: str = ""
     speed: float = 1.0
     # 0..1: minimum normalized clip progress before outgoing transitions are considered.
     # 1.0 = must reach end of current clip segment (default; matches "play full clip then transition").
@@ -132,8 +261,14 @@ class AnimState:
     def to_dict(self) -> dict:
         return {
             "name": self.name,
+            "kind": self.kind,
             "clip_guid": self.clip_guid,
             "clip_path": self.clip_path,
+            "clip_b_guid": self.clip_b_guid,
+            "clip_b_path": self.clip_b_path,
+            "blend_value": float(self.blend_value),
+            "timeline_guid": self.timeline_guid,
+            "timeline_path": self.timeline_path,
             "speed": self.speed,
             "exit_time_normalized": self.exit_time_normalized,
             "loop": self.loop,
@@ -159,8 +294,14 @@ class AnimState:
                 header_color = []
         return cls(
             name=str(d.get("name", "New State")),
+            kind=str(d.get("kind", "clip")),
             clip_guid=str(d.get("clip_guid", "")),
             clip_path=str(d.get("clip_path", "")),
+            clip_b_guid=str(d.get("clip_b_guid", "")),
+            clip_b_path=str(d.get("clip_b_path", "")),
+            blend_value=max(0.0, min(1.0, float(d.get("blend_value", 0.5)))),
+            timeline_guid=str(d.get("timeline_guid", "")),
+            timeline_path=str(d.get("timeline_path", "")),
             speed=float(d.get("speed", 1.0)),
             exit_time_normalized=max(
                 0.0, min(1.0, float(d.get("exit_time_normalized", 1.0)))

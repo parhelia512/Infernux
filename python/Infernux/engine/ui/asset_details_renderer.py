@@ -332,6 +332,15 @@ def _ensure_categories():
         autosave_debounce=0.5,
     )
 
+    # ── Timeline State Machine (.timelinefsm) ──────────────────────────
+    _categories["timelinefsm"] = AssetCategoryDef(
+        display_name="asset.display_timelinefsm",
+        access_mode=AssetAccessMode.READ_WRITE_RESOURCE,
+        load_fn=_load_animfsm,
+        custom_body_fn=_render_animfsm_body,
+        autosave_debounce=0.5,
+    )
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Per-category loaders
@@ -2164,7 +2173,7 @@ def _render_shader_body(ctx: InxGUIContext, panel, state: _State):
 
         if new_path != info.source_path:
             ext = os.path.splitext(new_path)[1].lower()
-            valid = {".vert", ".frag", ".geom", ".comp", ".tesc", ".tese"}
+            valid = {".vert", ".frag", ".geom", ".tesc", ".tese"}
             if ext not in valid:
                 ctx.push_style_color(ImGuiCol.Text, *Theme.ERROR_TEXT)
                 ctx.label(t("asset.shader_invalid_ext").format(ext=ext))

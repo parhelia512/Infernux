@@ -19,8 +19,9 @@ const std::string TagLayerManager::s_emptyString;
 
 TagLayerManager &TagLayerManager::Instance()
 {
-    static TagLayerManager instance;
-    return instance;
+    // Intentionally leaked (see SceneManager::Instance).
+    static TagLayerManager *instance = new TagLayerManager();
+    return *instance;
 }
 
 TagLayerManager::TagLayerManager()

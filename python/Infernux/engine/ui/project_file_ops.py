@@ -116,6 +116,24 @@ ANIMFSM_TEMPLATE = '''{
 }
 '''
 
+ANIMTIMELINE_TEMPLATE = '''{
+  "schema_version": 1,
+  "name": "{timeline_name}",
+  "duration": 2.0,
+  "apply_mode": "additive",
+  "keyframes": []
+}
+'''
+
+TIMELINEFSM_TEMPLATE = '''{
+  "name": "{fsm_name}",
+  "default_state": "",
+  "mode": "timeline",
+  "states": [],
+  "parameters": []
+}
+'''
+
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -566,6 +584,76 @@ def create_animfsm(current_path: str, fsm_name: str, asset_database=None):
         try:
             guid = asset_database.import_asset(file_path)
             print(f"[ProjectPanel] Registered animfsm: {file_name} -> {guid}")
+        except Exception as exc:
+            return False, str(exc)
+
+    return True, ""
+
+
+def create_animtimeline(current_path: str, timeline_name: str, asset_database=None):
+    """Create a ``.animtimeline`` file from template. Returns ``(True, "")`` or ``(False, error_msg)``."""
+    if not timeline_name or not current_path:
+        return False, "Invalid timeline name"
+
+    timeline_name = timeline_name.strip()
+    if not timeline_name:
+        return False, "Timeline name cannot be empty"
+
+    if timeline_name.endswith('.animtimeline'):
+        timeline_name = timeline_name[:-13]
+
+    file_name = timeline_name + '.animtimeline'
+    file_path = os.path.join(current_path, file_name)
+
+    if os.path.exists(file_path):
+        return False, f"'{file_name}' already exists"
+
+    content = ANIMTIMELINE_TEMPLATE.format(timeline_name=timeline_name)
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+    except OSError as exc:
+        return False, str(exc)
+
+    if asset_database:
+        try:
+            guid = asset_database.import_asset(file_path)
+            print(f"[ProjectPanel] Registered animtimeline: {file_name} -> {guid}")
+        except Exception as exc:
+            return False, str(exc)
+
+    return True, ""
+
+
+def create_timelinefsm(current_path: str, fsm_name: str, asset_database=None):
+    """Create a ``.timelinefsm`` file from template. Returns ``(True, "")`` or ``(False, error_msg)``."""
+    if not fsm_name or not current_path:
+        return False, "Invalid timeline FSM name"
+
+    fsm_name = fsm_name.strip()
+    if not fsm_name:
+        return False, "Timeline FSM name cannot be empty"
+
+    if fsm_name.endswith('.timelinefsm'):
+        fsm_name = fsm_name[:-12]
+
+    file_name = fsm_name + '.timelinefsm'
+    file_path = os.path.join(current_path, file_name)
+
+    if os.path.exists(file_path):
+        return False, f"'{file_name}' already exists"
+
+    content = TIMELINEFSM_TEMPLATE.format(fsm_name=fsm_name)
+    try:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+    except OSError as exc:
+        return False, str(exc)
+
+    if asset_database:
+        try:
+            guid = asset_database.import_asset(file_path)
+            print(f"[ProjectPanel] Registered timelinefsm: {file_name} -> {guid}")
         except Exception as exc:
             return False, str(exc)
 

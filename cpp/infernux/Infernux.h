@@ -275,6 +275,16 @@ class Infernux
     uint64_t QueryOrScheduleMeshPreview(const std::string &resourceKey, const std::string &meshFilePath,
                                         uint64_t fileMtimeHint = 0);
 
+    /// @brief Queue a Timeline cube preview render (non-blocking). Returns the latest
+    ///        ImGui texture id immediately; GPU work runs in PumpPreviewTasks().
+    uint64_t RenderTimelineCubePreview(float px, float py, float pz, float rx, float ry, float rz, float sx, float sy,
+                                       float sz, float camYaw, float camPitch, float camDistance, int size);
+
+    /// @brief Execute a pending Timeline cube preview render if one was queued this frame.
+    void PumpTimelineCubePreviewIfDirty();
+    /// Process queued material preview renders (returns uploads consumed).
+    int PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown);
+
     /// @brief Schedule async material save from JSON snapshot.
     /// @param key Coalescing key (usually file path)
     /// @param filePath Target .mat path
@@ -463,6 +473,26 @@ class Infernux
     std::unordered_map<std::string, MeshPreviewState> m_meshPreviewStates;
     int m_lastPumpFrame = -1;
     std::chrono::steady_clock::time_point m_lastMaterialRenderTime{};
+
+    // Timeline-editor cube preview: query schedules, PumpTimelineCubePreviewIfDirty renders.
+    uint64_t m_cubePreviewTexId = 0;
+    uint64_t m_lastCubePreviewHash = 0;
+    uint64_t m_pendingCubePreviewHash = 0;
+    bool m_timelineCubeDirty = false;
+    float m_pendingCubePx = 0, m_pendingCubePy = 0, m_pendingCubePz = 0;
+    float m_pendingCubeRx = 0, m_pendingCubeRy = 0, m_pendingCubeRz = 0;
+    float m_pendingCubeSx = 1, m_pendingCubeSy = 1, m_pendingCubeSz = 1;
+    float m_pendingCubeCamYaw = 0, m_pendingCubeCamPitch = 0, m_pendingCubeCamDist = 6;
+    int m_pendingCubeSize = 240;
+    std::shared_ptr<InxMaterial> m_cubePreviewCubeMat;
+    std::shared_ptr<InxMaterial> m_cubePreviewFloorMat;
+    std::vector<Vertex> m_cubePreviewFloorVerts;
+    std::vector<uint32_t> m_cubePreviewFloorIndices;
+    bool m_cubePreviewFloorBuilt = false;
+
+    bool ExecuteTimelineCubePreviewRender(float px, float py, float pz, float rx, float ry, float rz, float sx,
+                                          float sy, float sz, float camYaw, float camPitch, float camDistance, int size,
+                                          uint64_t hash);
 
     void LoadImGuiLayout();
     void SaveImGuiLayout();

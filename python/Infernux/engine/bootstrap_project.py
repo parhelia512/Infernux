@@ -80,6 +80,10 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
         file_ops.create_animclip3d, cur, name, adb)
     pp.create_animfsm = lambda cur, name: _safe_project_create(
         file_ops.create_animfsm, cur, name, adb)
+    pp.create_animtimeline = lambda cur, name: _safe_project_create(
+        file_ops.create_animtimeline, cur, name, adb)
+    pp.create_timelinefsm = lambda cur, name: _safe_project_create(
+        file_ops.create_timelinefsm, cur, name, adb)
     pp.do_rename = lambda old, new_name: _safe_project_path(
         file_ops.do_rename, old, new_name, adb)
     pp.get_unique_name = lambda cur, base, ext: (
@@ -264,6 +268,40 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
                 pass
 
     pp.open_anim_fsm = _open_anim_fsm
+
+    def _open_anim_timeline(file_path):
+        from Infernux.engine.ui.window_manager import WindowManager
+        from Infernux.engine.ui.closable_panel import ClosablePanel
+        wm = WindowManager.instance()
+        if wm is None:
+            return
+        panel = wm.open_window("animtimeline_editor")
+        if panel is not None and hasattr(panel, '_open_timeline'):
+            panel._open_timeline(file_path)
+            ClosablePanel.focus_panel_by_id("animtimeline_editor")
+            try:
+                wm._engine.select_docked_window("animtimeline_editor")
+            except Exception:
+                pass
+
+    pp.open_anim_timeline = _open_anim_timeline
+
+    def _open_timeline_fsm(file_path):
+        from Infernux.engine.ui.window_manager import WindowManager
+        from Infernux.engine.ui.closable_panel import ClosablePanel
+        wm = WindowManager.instance()
+        if wm is None:
+            return
+        panel = wm.open_window("animfsm_editor")
+        if panel is not None and hasattr(panel, '_open_animfsm'):
+            panel._open_animfsm(file_path)
+            ClosablePanel.focus_panel_by_id("animfsm_editor")
+            try:
+                wm._engine.select_docked_window("animfsm_editor")
+            except Exception:
+                pass
+
+    pp.open_timeline_fsm = _open_timeline_fsm
 
     pp.reveal_in_explorer = lambda path: (
         project_utils.reveal_in_file_explorer(path)

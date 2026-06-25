@@ -1,6 +1,7 @@
 #include "InxGUI.h"
 #include "InxGUIContext.h"
 #include <function/editor/EditorTheme.h>
+#include <function/editor/EditorThemeRegistry.h>
 #include <function/renderer/vk/VkRenderUtils.h>
 
 #include <SDL3/SDL.h>
@@ -58,101 +59,11 @@ void InxGUI::Init(SDL_Window *window)
     // =========================================================================
     {
         ImGuiStyle &style = ImGui::GetStyle();
-        ImVec4 *c = style.Colors;
-
-        // No conversion needed: UNORM swapchain writes values as-is.
-        auto L = [](float r, float g, float b, float a) -> ImVec4 { return ImVec4(r, g, b, a); };
-
-        // Accent color shorthand (Infernux red #EB5757)
-        constexpr float AR = EditorTheme::ACCENT_R;
-        constexpr float AG = EditorTheme::ACCENT_G;
-        constexpr float AB = EditorTheme::ACCENT_B;
-
-        // --- Text ---
-        c[ImGuiCol_Text] = L(0.812f, 0.812f, 0.812f, 1.00f);           // #CFCFCF
-        c[ImGuiCol_TextDisabled] = L(0.333f, 0.333f, 0.333f, 1.00f);   // #555555
-        c[ImGuiCol_TextSelectedBg] = L(0.200f, 0.200f, 0.200f, 0.60f); // #333333
-
-        // --- Backgrounds ---
-        c[ImGuiCol_WindowBg] = L(0.098f, 0.098f, 0.098f, 1.00f);       // #191919
-        c[ImGuiCol_ChildBg] = L(0.125f, 0.125f, 0.125f, 1.00f);        // #202020
-        c[ImGuiCol_PopupBg] = L(0.125f, 0.125f, 0.125f, 0.98f);        // #202020
-        c[ImGuiCol_FrameBg] = L(0.125f, 0.125f, 0.125f, 1.00f);        // #202020
-        c[ImGuiCol_FrameBgHovered] = L(0.165f, 0.165f, 0.165f, 1.00f); // #2A2A2A
-        c[ImGuiCol_FrameBgActive] = L(0.240f, 0.170f, 0.170f, 1.00f);  // reddish tint when active
-
-        // --- Title bar ---
-        c[ImGuiCol_TitleBg] = L(0.098f, 0.098f, 0.098f, 1.00f);
-        c[ImGuiCol_TitleBgActive] = L(0.098f, 0.098f, 0.098f, 1.00f);
-        c[ImGuiCol_TitleBgCollapsed] = L(0.098f, 0.098f, 0.098f, 0.75f);
-
-        // --- MenuBar ---
-        c[ImGuiCol_MenuBarBg] = L(0.098f, 0.098f, 0.098f, 1.00f);
-
-        // --- Scrollbar ---
-        c[ImGuiCol_ScrollbarBg] = L(0.098f, 0.098f, 0.098f, 0.00f);
-        c[ImGuiCol_ScrollbarGrab] = L(0.184f, 0.184f, 0.184f, 1.00f);
-        c[ImGuiCol_ScrollbarGrabHovered] = L(0.333f, 0.333f, 0.333f, 1.00f);
-        c[ImGuiCol_ScrollbarGrabActive] = L(0.439f, 0.439f, 0.439f, 1.00f);
-
-        // --- Interactive accent ---
-        c[ImGuiCol_CheckMark] = L(AR, AG, AB, 1.00f);              // #EB5757
-        c[ImGuiCol_SliderGrab] = L(AR, AG, AB, 0.88f);             // #EB5757
-        c[ImGuiCol_SliderGrabActive] = L(AR, AG, AB, 1.00f);       // #EB5757
-        c[ImGuiCol_NavHighlight] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f); // no outline on active fields
-
-        // --- Buttons --- subtle dark surface with red accent on interaction
-        c[ImGuiCol_Button] = L(0.165f, 0.165f, 0.165f, 1.00f); // #2A2A2A
-        c[ImGuiCol_ButtonHovered] = L(0.220f, 0.165f, 0.165f, 1.00f);
-        c[ImGuiCol_ButtonActive] = L(0.270f, 0.180f, 0.180f, 1.00f);
-
-        // --- Header ---
-        c[ImGuiCol_Header] = L(0.200f, 0.200f, 0.200f, 1.00f);
-        c[ImGuiCol_HeaderHovered] = L(0.200f, 0.160f, 0.160f, 1.00f);
-        c[ImGuiCol_HeaderActive] = L(0.240f, 0.170f, 0.170f, 1.00f);
-
-        // --- Border / Separator ---
-        c[ImGuiCol_Border] = L(0.184f, 0.184f, 0.184f, 1.00f);
-        c[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        c[ImGuiCol_Separator] = L(0.184f, 0.184f, 0.184f, 1.00f);
-        c[ImGuiCol_SeparatorHovered] = L(AR, AG, AB, 0.60f); // #EB5757
-        c[ImGuiCol_SeparatorActive] = L(AR, AG, AB, 0.80f);  // #EB5757
-
-        // --- Resize grip ---
-        c[ImGuiCol_ResizeGrip] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        c[ImGuiCol_ResizeGripHovered] = L(AR, AG, AB, 0.30f);
-        c[ImGuiCol_ResizeGripActive] = L(AR, AG, AB, 0.50f);
-
-        // --- Tabs ---
-        c[ImGuiCol_Tab] = L(0.098f, 0.098f, 0.098f, 1.00f);               // #191919
-        c[ImGuiCol_TabHovered] = L(0.165f, 0.165f, 0.165f, 1.00f);        // #2A2A2A
-        c[ImGuiCol_TabSelected] = L(0.125f, 0.125f, 0.125f, 1.00f);       // #202020
-        c[ImGuiCol_TabSelectedOverline] = L(AR, AG, AB, 1.00f);           // #EB5757 red overline
-        c[ImGuiCol_TabDimmed] = L(0.098f, 0.098f, 0.098f, 1.00f);         // #191919
-        c[ImGuiCol_TabDimmedSelected] = L(0.125f, 0.125f, 0.125f, 1.00f); // #202020
-        c[ImGuiCol_TabDimmedSelectedOverline] = L(AR, AG, AB, 0.60f);     // dimmer red overline
-
-        // --- Docking ---
-        c[ImGuiCol_DockingPreview] = L(AR, AG, AB, 0.25f); // #EB5757
-        c[ImGuiCol_DockingEmptyBg] = L(0.060f, 0.060f, 0.060f, 1.00f);
-
-        // --- Plots ---
-        c[ImGuiCol_PlotLines] = L(0.439f, 0.439f, 0.439f, 1.00f);
-        c[ImGuiCol_PlotHistogram] = L(0.812f, 0.812f, 0.812f, 1.00f);
-
-        // --- Drag-drop target highlight --- pure white border
-        c[ImGuiCol_DragDropTarget] = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-        c[ImGuiCol_DragDropTargetBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-
-        // --- Modal dim ---
-        c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.56f);
-
-        // --- Table ---
-        c[ImGuiCol_TableHeaderBg] = L(0.125f, 0.125f, 0.125f, 1.00f);
-        c[ImGuiCol_TableBorderStrong] = L(0.184f, 0.184f, 0.184f, 1.00f);
-        c[ImGuiCol_TableBorderLight] = L(0.149f, 0.149f, 0.149f, 1.00f);
-        c[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-        c[ImGuiCol_TableRowBgAlt] = L(1.000f, 1.000f, 1.000f, 0.02f);
+        // Editor palette is composed from the active theme (single source of
+        // truth: EditorThemeRegistry / EditorThemeTable.inl). This themes every
+        // built-in widget at once — C++ AND Python panels — and is what theme
+        // switching re-applies. See EditorThemeRegistry::ApplyImGuiColors().
+        EditorThemeRegistry::ApplyImGuiColors();
 
         // =====================================================================
         // Style dimensions — Notion-style clean, modern spacing
@@ -493,6 +404,7 @@ void InxGUI::BuildFrame()
             ImGui::DockBuilderDockWindow("###ui_editor", dockScene);
             ImGui::DockBuilderDockWindow("###animclip2d_editor", dockScene);
             ImGui::DockBuilderDockWindow("###animfsm_editor", dockScene);
+            ImGui::DockBuilderDockWindow("###animtimeline_editor", dockScene);
             ImGui::DockBuilderDockWindow("###console", dockBottom);
             ImGui::DockBuilderDockWindow("###project", dockBottom);
 

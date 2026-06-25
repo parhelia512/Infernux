@@ -29,8 +29,7 @@ enum class ShaderStageType
     Fragment,
     Geometry,
     TessControl,
-    TessEval,
-    Compute
+    TessEval
 };
 
 /**
@@ -353,6 +352,17 @@ class InxMaterial
     void SetInt(const std::string &name, int value);
     void SetMatrix(const std::string &name, const glm::mat4 &matrix);
     void SetTextureGuid(const std::string &name, const std::string &textureGuid);
+
+    /**
+     * @brief Normalize an arbitrary texture reference to an asset GUID.
+     *
+     * Single choke point for the engine-wide GUID-only texture contract.
+     * Accepts: a GUID (returned as-is), an absolute/relative file path
+     * (registered with the AssetDatabase if needed), or a builtin-resource
+     * relative path resolved against the shader search roots.
+     * Returns an empty string when the reference cannot be resolved.
+     */
+    static std::string ResolveToTextureGuid(const std::string &textureRef);
     void ClearTexture(const std::string &name);
 
     [[nodiscard]] bool HasProperty(const std::string &name) const;

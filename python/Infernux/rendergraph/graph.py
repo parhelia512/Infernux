@@ -142,7 +142,6 @@ class RenderPassBuilder:
         self._override_material = ""
         self._input_bindings: Dict[str, str] = {}  # sampler -> texture_name
         self._light_index = 0
-        self._shadow_type = "hard"
         self._screen_ui_list = 0
         self._shader_name: str = ""
         self._push_constants: Dict[str, float] = {}
@@ -291,7 +290,6 @@ class RenderPassBuilder:
         self,
         queue_range: Tuple[int, int] = (0, 2999),
         light_index: int = 0,
-        shadow_type: str = "hard",
     ) -> "RenderPassBuilder":
         """Configure this pass to render shadow casters into a depth-only shadow map.
 
@@ -299,16 +297,18 @@ class RenderPassBuilder:
         fragment variant (auto-generated).  Front-face culling and depth bias
         are applied for shadow acne prevention.
 
+        Hard vs. soft shadows are NOT configured here: the shadow map only
+        stores depth. Filtering (16-tap Vogel-disk PCF) is selected per light
+        via ``light.shadows = LightShadows.Soft``.
+
         Args:
             queue_range: (min, max) inclusive render queue range for shadow casters.
                          Default (0, 2999) covers all opaque geometry regardless of queue.
             light_index: Index of the shadow-casting light (0 = first directional).
-            shadow_type: Shadow quality — ``"hard"`` or ``"soft"``.
         """
         self._action = "draw_shadow_casters"
         self._queue_min, self._queue_max = queue_range
         self._light_index = light_index
-        self._shadow_type = shadow_type
         return self
 
     def draw_screen_ui(
@@ -753,21 +753,6 @@ class RenderGraph:
                 f"Pass '{p._name}' clears depth but has no depth output"
             )
 
-        if p._action == "compute" and p._write_depth is not None:
-            raise ValueError(
-                f"Pass '{p._name}' is compute and cannot write a depth attachment"
-            )
-
-        if p._action == "compute" and p._clear_color is not None:
-            raise ValueError(
-                f"Pass '{p._name}' is compute and cannot clear color attachments"
-            )
-
-        if p._action == "compute" and p._clear_depth is not None:
-            raise ValueError(
-                f"Pass '{p._name}' is compute and cannot clear depth attachments"
-            )
-
         # draw_renderers must write to a camera_target (backbuffer) texture.
         # Material VkPipelines are compiled against backbuffer VkRenderPass;
         # writing to a non-backbuffer texture causes format incompatibility.
@@ -978,7 +963,6 @@ class RenderGraph:
 
             # DrawShadowCasters parameters
             pd.light_index = p._light_index
-            pd.shadow_type = p._shadow_type
 
             # DrawScreenUI parameters
             pd.screen_ui_list = p._screen_ui_list

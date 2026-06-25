@@ -9,6 +9,7 @@
 #include "gui/InxResourcePreviewer.h"
 #include <function/editor/ConsolePanel.h>
 #include <function/editor/EditorPanel.h>
+#include <function/editor/EditorThemeRegistry.h>
 #include <function/editor/HierarchyPanel.h>
 #include <function/editor/InspectorPanel.h>
 #include <function/editor/MenuBarPanel.h>
@@ -179,6 +180,60 @@ py::dict EncodePropertyChanges(const std::vector<PropertyChange> &changes)
 
 void RegisterGUIBindings(py::module_ &m)
 {
+    // ── Editor theme single source of truth ─────────────────────────────
+    // Python's Theme class calls these once at import and overrides its
+    // class attributes by name, so styling is defined in C++
+    // (EditorThemeTable.inl) and can't be drifted from Python.
+    m.def(
+        "get_editor_theme_colors",
+        []() {
+            py::dict out;
+            for (const auto &[name, c] : EditorThemeRegistry::Colors())
+                out[py::str(name)] = py::make_tuple(c.x, c.y, c.z, c.w);
+            return out;
+        },
+        "Editor theme RGBA colors keyed by constant name (single source of truth)");
+    m.def(
+        "get_editor_theme_vec2s",
+        []() {
+            py::dict out;
+            for (const auto &[name, v] : EditorThemeRegistry::Vec2s())
+                out[py::str(name)] = py::make_tuple(v.x, v.y);
+            return out;
+        },
+        "Editor theme 2D size/padding constants keyed by name");
+    m.def(
+        "get_editor_theme_floats",
+        []() {
+            py::dict out;
+            for (const auto &[name, f] : EditorThemeRegistry::Floats())
+                out[py::str(name)] = f;
+            return out;
+        },
+        "Editor theme scalar constants keyed by name");
+    m.def(
+        "list_editor_themes",
+        []() {
+            py::list out;
+            for (const auto &name : EditorThemeRegistry::ThemeNames())
+                out.append(py::str(name));
+            return out;
+        },
+        "Names of all registered editor themes");
+    m.def("get_editor_theme", []() { return py::str(EditorThemeRegistry::ActiveTheme()); }, "Active editor theme name");
+    m.def(
+        "editor_theme_generation", []() { return static_cast<unsigned long long>(EditorThemeRegistry::Generation()); },
+        "Monotonic counter bumped on every theme switch (cheap change detection)");
+    m.def(
+        "set_editor_theme",
+        [](const std::string &name) {
+            bool ok = EditorThemeRegistry::SetActiveTheme(name);
+            if (ok)
+                EditorThemeRegistry::ApplyImGuiColors(); // re-skin all built-in widgets at once
+            return ok;
+        },
+        py::arg("name"), "Switch the active editor theme and re-apply the ImGui palette; returns False if unknown");
+
     py::class_<PropertyBatchPlan, std::shared_ptr<PropertyBatchPlan>>(m, "PropertyBatchPlan")
         .def_property_readonly("size",
                                [](const PropertyBatchPlan &plan) { return static_cast<int>(plan.descriptors.size()); });
@@ -977,6 +1032,8 @@ void RegisterGUIBindings(py::module_ &m)
         .def_readwrite("create_animclip", &ProjectPanel::createAnimClip)
         .def_readwrite("create_animclip3d", &ProjectPanel::createAnimClip3D)
         .def_readwrite("create_animfsm", &ProjectPanel::createAnimFsm)
+        .def_readwrite("create_animtimeline", &ProjectPanel::createAnimTimeline)
+        .def_readwrite("create_timelinefsm", &ProjectPanel::createTimelineFsm)
         .def_readwrite("create_prefab_from_hierarchy", &ProjectPanel::createPrefabFromHierarchy)
         .def_readwrite("delete_items", &ProjectPanel::deleteItems)
         .def_readwrite("do_rename", &ProjectPanel::doRename)
@@ -988,6 +1045,8 @@ void RegisterGUIBindings(py::module_ &m)
         .def_readwrite("open_prefab_mode", &ProjectPanel::openPrefabMode)
         .def_readwrite("open_anim_clip", &ProjectPanel::openAnimClip)
         .def_readwrite("open_anim_fsm", &ProjectPanel::openAnimFsm)
+        .def_readwrite("open_anim_timeline", &ProjectPanel::openAnimTimeline)
+        .def_readwrite("open_timeline_fsm", &ProjectPanel::openTimelineFsm)
         .def_readwrite("reveal_in_explorer", &ProjectPanel::revealInExplorer)
         // Validation / GUID callbacks
         .def_readwrite("validate_script_component", &ProjectPanel::validateScriptComponent)

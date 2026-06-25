@@ -217,7 +217,7 @@ _ENTRY_TYPE = NodeTypeDef(
     deletable=False,
 )
 
-_DETAIL_PANEL_W = 252.0
+_DETAIL_PANEL_W = 300.0
 _VARS_PANEL_W = 236.0
 
 
@@ -253,6 +253,7 @@ class AnimFSMEditorPanel(EditorPanel):
         self._view.on_link_deleted = self._on_link_deleted
         self._view.on_nodes_deleted = self._on_nodes_deleted
         self._view.on_node_add_request = self._on_node_add_request
+        self._view.on_link_dropped_empty = self._on_link_dropped_empty
         self._view.on_node_selected = self._on_node_selected
         self._view.on_canvas_drop = self._on_canvas_drop
         self._view.on_node_drag_start = self._on_node_drag_start
@@ -272,6 +273,11 @@ class AnimFSMEditorPanel(EditorPanel):
 
         # Guard to avoid re-entrant selection clearing
         self._clearing_selection: bool = False
+
+        # Drag-to-create: pending context + popup search filter
+        self._link_create_ctx: Optional[dict] = None
+        self._open_link_create_popup: bool = False
+        self._link_create_search: str = ""
 
         # Panel persistence: ``load_state`` may run from bootstrap or first render
         self._panel_state_restored_once: bool = False
@@ -589,10 +595,10 @@ class AnimFSMEditorPanel(EditorPanel):
         return t("animfsm_editor.open_hint")
 
     def _empty_state_drop_types(self):
-        return ["ANIMFSM_FILE"]
+        return ["ANIMFSM_FILE", "TIMELINEFSM_FILE"]
 
     def _on_empty_state_drop(self, payload_type, payload):
-        if payload_type == "ANIMFSM_FILE" and payload:
+        if payload_type in ("ANIMFSM_FILE", "TIMELINEFSM_FILE") and payload:
             self._open_animfsm(payload)
 
     # ═══════════════════════════════════════════════════════════════════
@@ -615,8 +621,14 @@ class AnimFSMEditorPanel(EditorPanel):
                     self._panel_state_restored_once = True
             self._apply_pending_panel_restore()
 
-        # Ctrl+S save shortcut
-        if (ctx.is_key_down(self._IMGUI_MOD_CTRL)
+        # Ctrl+S save shortcut — only when THIS editor window is focused, so the
+        # global key press doesn't also save other open editors.
+        try:
+            _focused = ctx.is_window_focused(3)  # RootAndChildWindows
+        except Exception:
+            _focused = True
+        if (_focused
+                and ctx.is_key_down(self._IMGUI_MOD_CTRL)
                 and ctx.is_key_pressed(self._IMGUI_KEY_S)
                 and self._fsm is not None):
             self._do_save()
@@ -650,10 +662,16 @@ class AnimFSMEditorPanel(EditorPanel):
             self._render_detail_panel(ctx)
         ctx.end_child()
 
-        # Accept .animfsm file drops
+        # Drag-to-create: searchable "create node and connect" menu
+        self._draw_link_create_popup(ctx)
+
+        # Accept .animfsm / .timelinefsm file drops
         payload = ctx.accept_drag_drop_payload("ANIMFSM_FILE")
         if payload:
             self._open_animfsm(payload)
+        payload_tl = ctx.accept_drag_drop_payload("TIMELINEFSM_FILE")
+        if payload_tl:
+            self._open_animfsm(payload_tl)
 
     # ── Toolbar ───────────────────────────────────────────────────────
 
@@ -716,23 +734,28 @@ class AnimFSMEditorPanel(EditorPanel):
             self._try_record_undo("Rename FSM", before, self._undo_snapshot())
 
         ctx.same_line(0, 16)
-        has_2d, has_3d = self._clip_ext_flags()
         ctx.label(f"{t('animfsm_editor.mode')}:")
         ctx.same_line(0, 8)
-        ctx.set_next_item_width(72)
-        _MODES = ["2d", "3d"]
+        # One unified mode selector: 2D / 3D / Timeline. Switching is allowed only
+        # while the graph has no incompatible nodes, so a fresh FSM can pick any
+        # mode but you can't silently mix clip and timeline nodes.
+        has_2d, has_3d = self._clip_ext_flags()
+        has_clip_nodes = any(getattr(s, "kind", "clip") in ("clip", "blend") for s in fsm.states)
+        has_tl_nodes = any(getattr(s, "kind", "clip") == "timeline" for s in fsm.states)
+        ctx.set_next_item_width(110)
+        _MODES = ["2d", "3d", "timeline"]
+        _LABELS = ["2D", "3D", t("animfsm_editor.mode_timeline")]
         mode_idx = _MODES.index(fsm.mode) if fsm.mode in _MODES else 0
-        lock_both = has_2d and has_3d
-        ctx.begin_disabled(lock_both)
-        new_mode_idx = ctx.combo("##fsm_mode", mode_idx, ["2D", "3D"], 2)
-        ctx.end_disabled()
-        if new_mode_idx != mode_idx and not lock_both:
+        new_mode_idx = ctx.combo("##fsm_mode", mode_idx, _LABELS, 3)
+        if new_mode_idx != mode_idx:
             want = _MODES[new_mode_idx]
-            if want == "3d" and has_2d:
-                pass
-            elif want == "2d" and has_3d:
-                pass
-            else:
+            blocked = (
+                (want == "timeline" and has_clip_nodes)
+                or (want in ("2d", "3d") and has_tl_nodes)
+                or (want == "3d" and has_2d)
+                or (want == "2d" and has_3d)
+            )
+            if not blocked:
                 before = self._undo_snapshot()
                 fsm.mode = want
                 self._dirty = True
@@ -773,10 +796,30 @@ class AnimFSMEditorPanel(EditorPanel):
         self._dirty = True
         self._try_record_undo("Edit transition condition", before, self._undo_snapshot())
 
+    def _render_transition_duration_row(self, ctx: InxGUIContext, lk: GraphLink) -> None:
+        """Crossfade/blend duration (seconds) for this transition into its target."""
+        dur = float(lk.data.get("duration", 0.0) or 0.0)
+        ctx.push_style_color(ImGuiCol.Text, 0.55, 0.56, 0.58, 1.0)
+        ctx.label(t("animfsm_editor.transition_duration"))
+        ctx.pop_style_color(1)
+        ctx.set_next_item_width(-1)
+        new_dur = ctx.drag_float("##trdur", dur, 0.01, 0.0, 60.0)
+        if new_dur != dur:
+            new_dur = max(0.0, float(new_dur))
+            before = self._undo_snapshot()
+            lk.data["duration"] = new_dur
+            self._sync_transition_condition(lk)
+            self._dirty = True
+            self._try_record_undo("Edit transition duration", before, self._undo_snapshot())
+        ctx.dummy(0, 4)
+
     def _render_transition_condition_block(self, ctx: InxGUIContext, lk: GraphLink) -> None:
         fsm = self._fsm
         if fsm is None:
             return
+        # Crossfade duration applies to every transition regardless of condition
+        # mode, so render it first (before the condition-specific early returns).
+        self._render_transition_duration_row(ctx, lk)
         cond = str(lk.data.get("condition", "") or "")
         if "cond_terms" not in lk.data:
             terms = parse_condition_string_to_model(cond)
@@ -977,12 +1020,37 @@ class AnimFSMEditorPanel(EditorPanel):
             self._dirty = True
             self._try_record_undo("Remove parameter", before, self._undo_snapshot())
 
+        # When a blend node is selected, surface its Lerp here too (mirrors the
+        # detail panel) so the blend factor sits alongside the parameter list.
+        node = self._graph.find_node(self._selected_uid)
+        sel_state = None
+        if node is not None and node.type_id == "anim_state":
+            sel_state = fsm.get_state(self._uid_to_name.get(node.uid, ""))
+        if sel_state is not None and getattr(sel_state, "kind", "clip") == "blend":
+            ctx.dummy(0, 8)
+            ctx.separator()
+            ctx.push_style_color(ImGuiCol.Text, 0.55, 0.56, 0.58, 1.0)
+            ctx.label(f"{sel_state.name} · {t('animfsm_editor.blend_lerp')}")
+            ctx.pop_style_color(1)
+            ctx.set_next_item_width(-1)
+            cur = float(getattr(sel_state, "blend_value", 0.5) or 0.0)
+            nv = max(0.0, min(1.0, ctx.drag_float("##sel_blend_lerp", cur, 0.005, 0.0, 1.0)))
+            if nv != cur:
+                before = self._undo_snapshot()
+                sel_state.blend_value = nv
+                self._dirty = True
+                self._try_record_undo("Blend lerp", before, self._undo_snapshot())
+
     # ── Detail panel (right side) ─────────────────────────────────────
 
     def _fsm_clip_asset_type(self) -> str:
         fsm = self._fsm
         mode = getattr(fsm, "mode", "2d") if fsm is not None else "2d"
         return "AnimationClip3D" if mode == "3d" else "AnimationClip"
+
+    def _is_timeline_mode(self) -> bool:
+        fsm = self._fsm
+        return getattr(fsm, "mode", "2d") == "timeline" if fsm is not None else False
 
     def _clip_path_matches_fsm_mode(self, p: str) -> bool:
         """True if *p* is valid for current FSM mode: .animclip2d / .animclip3d file, or virtual ``::subanim:``."""
@@ -1022,8 +1090,144 @@ class AnimFSMEditorPanel(EditorPanel):
             ctx.set_cursor_pos_x(ctx.get_cursor_pos_x() + dx)
         return ctx.checkbox(wid, value)
 
+    def _clip_b_ref_for_state(self, state: AnimState):
+        """Build a clip ref for the blend node's second clip (B)."""
+        path = (getattr(state, "clip_b_path", "") or "").strip()
+        guid = getattr(state, "clip_b_guid", "") or ""
+        if not path and guid:
+            try:
+                from Infernux.core.assets import AssetManager
+                adb = getattr(AssetManager, "_asset_database", None)
+                if adb:
+                    path = adb.get_path_from_guid(guid) or ""
+            except Exception:
+                pass
+        if self._fsm_clip_asset_type() == "AnimationClip3D":
+            return AnimationClip3DRef(guid=guid, path_hint=path)
+        return AnimationClipRef(guid=guid, path_hint=path)
+
+    def _clip_b_display_name(self, state: AnimState, ref=None) -> str:
+        guid = str(getattr(state, "clip_b_guid", "") or "")
+        path = str(getattr(state, "clip_b_path", "") or "")
+        cache = getattr(self, "_clip_name_cache", None)
+        if cache is None:
+            cache = {}
+            self._clip_name_cache = cache
+        ckey = ("B", guid, path)
+        if ckey in cache:
+            return cache[ckey]
+        resolved = path
+        if (not resolved or "::subanim:" not in resolved) and guid:
+            try:
+                from Infernux.core.assets import AssetManager
+                adb = getattr(AssetManager, "_asset_database", None)
+                if adb:
+                    resolved = adb.get_path_from_guid(guid) or resolved
+            except Exception:
+                pass
+        name = self._clip_name_from(
+            guid, path, resolved, lambda: (ref or self._clip_b_ref_for_state(state)))
+        cache[ckey] = name
+        return name
+
+    def _assign_clip_b_to_state(self, state: AnimState, clip_path: str, node=None, *, record_undo: bool = True):
+        before = self._undo_snapshot() if record_undo else None
+        p = (clip_path or "").strip()
+        if p and not self._clip_path_matches_fsm_mode(p):
+            return
+        state.clip_b_guid = self._resolve_guid(p) if p else ""
+        state.clip_b_path = "" if state.clip_b_guid else (p or "")
+        self._clip_name_cache = {}
+        self._dirty = True
+        if record_undo and before is not None:
+            self._try_record_undo("Assign blend clip B", before, self._undo_snapshot())
+
+    def _clear_clip_b_from_state(self, state: AnimState, node=None, *, record_undo: bool = True):
+        before = self._undo_snapshot() if record_undo else None
+        state.clip_b_guid = ""
+        state.clip_b_path = ""
+        self._clip_name_cache = {}
+        self._dirty = True
+        if record_undo and before is not None:
+            self._try_record_undo("Clear blend clip B", before, self._undo_snapshot())
+
+    def _render_clip_b_reference_row(self, ctx: InxGUIContext, state: AnimState, node, lw: float) -> None:
+        cfg = get_asset_type_config(self._fsm_clip_asset_type()) or {}
+        type_hint = str(cfg.get("display", "AnimClip"))
+        drag_type = cfg.get("drag_type", "ANIMCLIP_FILE")
+        extensions = cfg.get("extensions", ("*.animclip2d", "*.animclip3d"))
+        prefix = str(cfg.get("prefix", "aclip"))
+        ref = self._clip_b_ref_for_state(state)
+        display = self._clip_b_display_name(state, ref)
+
+        def _picker(filt: str):
+            result = []
+            for g in extensions:
+                result += _picker_assets(filt, g, assets_only=False)
+            return result
+
+        field_label(ctx, t("animfsm_editor.clip_b"), lw)
+        render_object_field(
+            ctx,
+            f"{prefix}_fsm_clipb_{node.uid}",
+            display,
+            type_hint,
+            accept_drag_type=drag_type,
+            on_drop_callback=lambda p, _st=state, _nd=node: self._assign_clip_b_to_state(_st, str(p), _nd),
+            picker_asset_items=_picker,
+            on_pick=lambda path, _st=state, _nd=node: self._assign_clip_b_to_state(_st, path, _nd),
+            on_clear=lambda _st=state, _nd=node: self._clear_clip_b_from_state(_st, _nd),
+        )
+
+    def _clip_display_name(self, state: AnimState, ref=None) -> str:
+        """Human-readable clip name (take/file name) instead of a raw GUID."""
+        guid = str(getattr(state, "clip_guid", "") or "")
+        path = str(getattr(state, "clip_path", "") or "")
+        cache = getattr(self, "_clip_name_cache", None)
+        if cache is None:
+            cache = {}
+            self._clip_name_cache = cache
+        ckey = (guid, path)
+        if ckey in cache:
+            return cache[ckey]
+
+        resolved = self._resolved_clip_path_for_state(state)
+        name = self._clip_name_from(
+            guid, path, resolved, lambda: (ref or self._clip_ref_for_state(state)))
+        cache[ckey] = name
+        return name
+
+    @staticmethod
+    def _clip_name_from(guid: str, path: str, resolved: str, ref_factory) -> str:
+        """Resolve a human-readable clip name from guid/path/resolved-path."""
+        # Embedded FBX take "<base>::subanim:<i>": resolve the take's display name
+        # (basename of the virtual path is just the model GUID, which looks wrong).
+        emb = path if "::subanim:" in path else (resolved or "")
+        if "::subanim:" in emb:
+            try:
+                from Infernux.core.animation_clip3d import AnimationClip3D
+                ec = AnimationClip3D.from_embedded_take_virtual_path(emb)
+                if ec is not None and getattr(ec, "take_name", ""):
+                    return str(ec.take_name)
+            except Exception:
+                pass
+        try:
+            obj = ref_factory().resolve()
+            if obj is not None:
+                nm = str(getattr(obj, "take_name", "") or getattr(obj, "name", "") or "")
+                if nm:
+                    return nm
+        except Exception:
+            pass
+        p = resolved or path
+        if p and "::subanim:" not in p:
+            base = os.path.basename(p)
+            dot = base.rfind(".")
+            return base[:dot] if dot > 0 else base
+        return f"GUID:{guid[:8]}\u2026" if guid else "None"
+
     def _render_clip_reference_row(
-        self, ctx: InxGUIContext, state: AnimState, node, lw: float,
+        self, ctx: InxGUIContext, state: AnimState, node, lw: float, label: str = "",
     ) -> None:
         """Same object-field UX as the main Inspector (basename, picker, drag-drop, clear)."""
         cfg = get_asset_type_config(self._fsm_clip_asset_type()) or {}
@@ -1033,7 +1237,7 @@ class AnimFSMEditorPanel(EditorPanel):
         prefix = str(cfg.get("prefix", "aclip"))
 
         ref = self._clip_ref_for_state(state)
-        display = ref.display_name
+        display = self._clip_display_name(state, ref)
 
         def _picker(filt: str):
             result = []
@@ -1047,7 +1251,7 @@ class AnimFSMEditorPanel(EditorPanel):
         def _on_clear(_st=state, _nd=node):
             self._clear_clip_from_state(_st, _nd)
 
-        field_label(ctx, t("animfsm_editor.clip_ref"), lw)
+        field_label(ctx, label or t("animfsm_editor.clip_ref"), lw)
         render_object_field(
             ctx,
             f"{prefix}_fsm_clip_{node.uid}",
@@ -1133,7 +1337,28 @@ class AnimFSMEditorPanel(EditorPanel):
         ctx.separator()
         ctx.dummy(0, 4)
 
-        self._render_clip_reference_row(ctx, state, node, lw)
+        # The node kind (plain Clip / A↔B Blend / Timeline) is fixed at creation
+        # time (via the drag-to-create menu or by dropping an asset) and is
+        # intentionally not editable here.
+        kind = getattr(state, "kind", "clip")
+
+        if kind == "blend":
+            # Symmetric A/B naming for blend nodes.
+            self._render_clip_reference_row(ctx, state, node, lw, label=t("animfsm_editor.clip_a"))
+            self._render_clip_b_reference_row(ctx, state, node, lw)
+            field_label(ctx, t("animfsm_editor.blend_lerp"), lw)
+            ctx.same_line(0, 8)
+            ctx.set_next_item_width(-1)
+            new_lerp = ctx.drag_float("##blend_lerp", float(state.blend_value), 0.005, 0.0, 1.0)
+            if new_lerp != state.blend_value:
+                before = self._undo_snapshot()
+                state.blend_value = max(0.0, min(1.0, float(new_lerp)))
+                self._dirty = True
+                self._try_record_undo("Change blend lerp", before, self._undo_snapshot())
+        elif kind == "timeline":
+            self._render_timeline_reference_row(ctx, state, node, lw)
+        else:
+            self._render_clip_reference_row(ctx, state, node, lw)
 
         ctx.dummy(0, Theme.INSPECTOR_SECTION_GAP)
         ctx.push_style_color(ImGuiCol.Text, 0.55, 0.56, 0.58, 1.0)
@@ -1276,6 +1501,7 @@ class AnimFSMEditorPanel(EditorPanel):
                 lk = self._graph.add_link(src_uid, "out", dst_uid, "in")
                 if lk:
                     lk.data["condition"] = tr.condition
+                    lk.data["duration"] = float(getattr(tr, "duration", 0.0) or 0.0)
                     lk.data["cond_terms"] = parse_condition_string_to_model(tr.condition)
                     lk.data.pop("cond_joins", None)
 
@@ -1546,6 +1772,8 @@ class AnimFSMEditorPanel(EditorPanel):
         before = self._undo_snapshot()
         state = fsm.add_state()
         state.position = [x, y]
+        if self._is_timeline_mode():
+            state.kind = "timeline"
         node = self._graph.add_node("anim_state", x=x, y=y)
         node.data["label"] = state.name
         node.data["loop"] = state.loop
@@ -1557,6 +1785,103 @@ class AnimFSMEditorPanel(EditorPanel):
         self._update_entry_link()
         self._dirty = True
         self._try_record_undo("Add state", before, self._undo_snapshot())
+
+    # ── Drag-to-create ────────────────────────────────────────────────
+    def _on_link_dropped_empty(self, src_node: str, src_pin: str, src_kind, gx: float, gy: float):
+        """Pin drag released over empty canvas → open a create-and-connect menu."""
+        if self._fsm is None:
+            return
+        # Only outgoing pins start a forward transition into a new node.
+        if src_kind != PinKind.OUTPUT:
+            return
+        self._link_create_ctx = {"src_node": src_node, "gx": float(gx), "gy": float(gy)}
+        self._link_create_search = ""
+        self._link_create_focus = True
+        self._open_link_create_popup = True
+
+    def _draw_link_create_popup(self, ctx: InxGUIContext):
+        popup_id = "##fsm_link_create"
+        if self._open_link_create_popup:
+            ctx.open_popup(popup_id)
+            self._open_link_create_popup = False
+        if self._link_create_ctx is None:
+            return
+        created = None
+        if ctx.begin_popup(popup_id):
+            ctx.label(t("animfsm_editor.create_node_title"))
+            ctx.separator()
+            if getattr(self, "_link_create_focus", False):
+                ctx.set_keyboard_focus_here()
+                self._link_create_focus = False
+            self._link_create_search = ctx.input_text_with_hint(
+                "##fsm_link_create_search", t("animfsm_editor.create_search"),
+                self._link_create_search, 128)
+            flt = (self._link_create_search or "").strip().lower()
+            if self._is_timeline_mode():
+                options = (
+                    (t("animfsm_editor.node_kind_timeline"), "timeline"),
+                )
+            else:
+                options = (
+                    (t("animfsm_editor.node_kind_clip"), "clip"),
+                    (t("animfsm_editor.node_kind_blend"), "blend"),
+                )
+            for idx, (label, kind) in enumerate(options):
+                if flt and flt not in label.lower() and flt not in kind:
+                    continue
+                ctx.push_id(idx)
+                if ctx.selectable(label, False):
+                    created = (kind, self._link_create_ctx)
+                    self._link_create_ctx = None
+                    ctx.close_current_popup()
+                ctx.pop_id()
+            ctx.end_popup()
+        else:
+            self._link_create_ctx = None
+        # Defer the model mutation + graph rebuild until after the popup is fully
+        # ended, so we never touch the graph while inside ImGui popup scope.
+        if created is not None:
+            self._create_state_from_link(created[0], created[1])
+
+    def _create_state_from_link(self, kind: str, ctx_data: dict):
+        """Create a new state at the drop point and connect it from the drag source."""
+        fsm = self._fsm
+        if fsm is None or not ctx_data:
+            return
+        gx = float(ctx_data.get("gx", 0.0))
+        gy = float(ctx_data.get("gy", 0.0))
+        src_node = str(ctx_data.get("src_node", ""))
+        # Resolve the source state name *before* rebuilding (uids change on rebuild).
+        from_entry = (src_node == self._entry_uid)
+        src_name = "" if from_entry else self._uid_to_name.get(src_node, "")
+
+        before = self._undo_snapshot()
+        # Persist current node positions so the rebuild doesn't reset them.
+        self._sync_fsm_positions()
+
+        base_name = "Timeline" if kind == "timeline" else "State"
+        state = fsm.add_state(self._unique_state_name(base_name))
+        state.position = [gx, gy]
+        if kind in ("blend", "timeline"):
+            state.kind = kind
+
+        if from_entry:
+            fsm.default_state = state.name
+        elif src_name:
+            src_state = fsm.get_state(src_name)
+            if src_state is not None and not any(
+                    tr.target_state == state.name for tr in src_state.transitions):
+                src_state.transitions.append(AnimTransition(target_state=state.name))
+
+        # Rebuild graph from the model — same code path as loading an FSM, which
+        # guarantees graph/FSM consistency (manual node/link drift caused hangs).
+        self._sync_graph_from_fsm()
+        new_uid = self._name_to_uid.get(state.name, "")
+        if new_uid:
+            self._view.selected_nodes = [new_uid]
+            self._selected_uid = new_uid
+        self._dirty = True
+        self._try_record_undo("Create node from link", before, self._undo_snapshot())
 
     def _on_before_graph_selection_change(self) -> None:
         if not self._animfsm_undo_enabled():
@@ -1613,7 +1938,15 @@ class AnimFSMEditorPanel(EditorPanel):
             self._do_save()
 
     def _on_canvas_drop(self, payload_type: str, payload, gx: float, gy: float):
-        """Handle items dropped onto the node graph canvas (only 2D/3D clip file paths)."""
+        """Handle items dropped onto the node graph canvas (clip / timeline file paths)."""
+        is_tl = self._is_timeline_mode()
+        if payload_type == "ANIMTIMELINE_FILE":
+            # Timelines only become nodes inside a Timeline FSM.
+            if is_tl:
+                self._drop_timeline_to_canvas(payload, gx, gy)
+            return
+        if is_tl:
+            return  # Timeline FSMs don't accept animation clips.
         if payload_type not in ("ANIMCLIP_FILE", "ANIMCLIP3D_FILE"):
             return
         if not isinstance(payload, str):
@@ -1649,6 +1982,97 @@ class AnimFSMEditorPanel(EditorPanel):
             self._dirty = True
             self._try_record_undo("Drop clip to canvas", before, self._undo_snapshot())
 
+    def _drop_timeline_to_canvas(self, payload, gx: float, gy: float):
+        """Create or assign a Timeline node from a dropped ``.animtimeline`` path."""
+        if not isinstance(payload, str):
+            return
+        p = payload.strip()
+        if not p or not p.lower().endswith(".animtimeline"):
+            return
+        # Dropped onto an existing node → convert it into a timeline node.
+        for uid, name in self._uid_to_name.items():
+            node = self._graph.find_node(uid)
+            if node and abs(node.pos_x - gx) < 80 and abs(node.pos_y - gy) < 40:
+                state = self._fsm.get_state(name) if self._fsm else None
+                if state:
+                    self._assign_timeline_to_state(state, p, node, record_undo=True)
+                return
+        if self._fsm:
+            before = self._undo_snapshot()
+            state = self._fsm.add_state(self._unique_state_name("Timeline"))
+            state.position = [gx, gy]
+            state.kind = "timeline"
+            node = self._graph.add_node("anim_state", x=gx, y=gy)
+            node.data["label"] = state.name
+            self._name_to_uid[state.name] = node.uid
+            self._uid_to_name[node.uid] = state.name
+            self._assign_timeline_to_state(state, p, node, record_undo=False)
+            node.data["loop"] = state.loop
+            self._view.selected_nodes = [node.uid]
+            self._selected_uid = node.uid
+            self._update_entry_link()
+            self._dirty = True
+            self._try_record_undo("Drop timeline to canvas", before, self._undo_snapshot())
+
+    def _assign_timeline_to_state(self, state: AnimState, path: str, node=None, *, record_undo: bool = True):
+        before = self._undo_snapshot() if record_undo else None
+        p = (path or "").strip()
+        if p and not p.lower().endswith(".animtimeline"):
+            return
+        state.kind = "timeline"
+        state.timeline_guid = self._resolve_guid(p) if p else ""
+        state.timeline_path = "" if state.timeline_guid else (p or "")
+        self._clip_name_cache = {}
+        self._dirty = True
+        if record_undo and before is not None:
+            self._try_record_undo("Assign timeline", before, self._undo_snapshot())
+
+    def _clear_timeline_from_state(self, state: AnimState, node=None, *, record_undo: bool = True):
+        before = self._undo_snapshot() if record_undo else None
+        state.timeline_guid = ""
+        state.timeline_path = ""
+        self._clip_name_cache = {}
+        self._dirty = True
+        if record_undo and before is not None:
+            self._try_record_undo("Clear timeline", before, self._undo_snapshot())
+
+    def _timeline_display_name(self, state: AnimState) -> str:
+        guid = str(getattr(state, "timeline_guid", "") or "")
+        path = str(getattr(state, "timeline_path", "") or "")
+        resolved = path
+        if not resolved and guid:
+            try:
+                from Infernux.core.assets import AssetManager
+                adb = getattr(AssetManager, "_asset_database", None)
+                if adb:
+                    resolved = adb.get_path_from_guid(guid) or ""
+            except Exception:
+                resolved = path
+        if resolved:
+            base = os.path.basename(resolved)
+            dot = base.rfind(".")
+            return base[:dot] if dot > 0 else base
+        return f"GUID:{guid[:8]}\u2026" if guid else "None"
+
+    def _render_timeline_reference_row(self, ctx: InxGUIContext, state: AnimState, node, lw: float) -> None:
+        display = self._timeline_display_name(state)
+
+        def _picker(filt: str):
+            return _picker_assets(filt, "*.animtimeline", assets_only=False)
+
+        field_label(ctx, t("animfsm_editor.timeline_ref"), lw)
+        render_object_field(
+            ctx,
+            f"atl_fsm_tl_{node.uid}",
+            display,
+            "Timeline",
+            accept_drag_type="ANIMTIMELINE_FILE",
+            on_drop_callback=lambda p, _st=state, _nd=node: self._assign_timeline_to_state(_st, str(p), _nd),
+            picker_asset_items=_picker,
+            on_pick=lambda path, _st=state, _nd=node: self._assign_timeline_to_state(_st, path, _nd),
+            on_clear=lambda _st=state, _nd=node: self._clear_timeline_from_state(_st, _nd),
+        )
+
     # ── Helpers ───────────────────────────────────────────────────────
 
     @staticmethod
@@ -1665,6 +2089,7 @@ class AnimFSMEditorPanel(EditorPanel):
         before = self._undo_snapshot() if record_undo else None
         state.clip_guid = ""
         state.clip_path = ""
+        self._clip_name_cache = {}
         self._dirty = True
         if record_undo and before is not None:
             self._try_record_undo("Clear clip", before, self._undo_snapshot())
@@ -1709,6 +2134,7 @@ class AnimFSMEditorPanel(EditorPanel):
             return
         state.clip_guid = self._resolve_guid(p) if p else ""
         state.clip_path = "" if state.clip_guid else (p or "")
+        self._clip_name_cache = {}
         self._dirty = True
         if record_undo and before is not None:
             self._try_record_undo("Assign clip", before, self._undo_snapshot())
@@ -1742,6 +2168,11 @@ class AnimFSMEditorPanel(EditorPanel):
                 for tr in state.transitions:
                     if tr.target_state == dst_name:
                         tr.condition = lk.data.get("condition", "")
+                        if "duration" in lk.data:
+                            try:
+                                tr.duration = max(0.0, float(lk.data.get("duration", 0.0) or 0.0))
+                            except (TypeError, ValueError):
+                                tr.duration = 0.0
                         break
 
     # ── Save ──────────────────────────────────────────────────────────
@@ -1763,18 +2194,25 @@ class AnimFSMEditorPanel(EditorPanel):
         root = get_project_root()
         initial_dir = os.path.join(root, "Assets") if root else "."
         safe_name = (self._fsm.name or "NewStateMachine").replace(" ", "_")
-        default_filename = f"{safe_name}.animfsm"
+        # Timeline-mode FSMs save as .timelinefsm (so TimelineAction can pick them up).
+        if self._is_timeline_mode():
+            ext, label = "timelinefsm", "TimelineFSM"
+            title = "Save Timeline State Machine"
+        else:
+            ext, label = "animfsm", "AnimFSM"
+            title = "Save Animation State Machine"
+        default_filename = f"{safe_name}.{ext}"
         result = None
         try:
             from ._dialogs import save_file_dialog
 
             result = save_file_dialog(
-                title="Save Animation State Machine",
-                win32_filter="AnimFSM files (*.animfsm)\0*.animfsm\0All files (*.*)\0*.*\0\0",
+                title=title,
+                win32_filter=f"{label} files (*.{ext})\0*.{ext}\0All files (*.*)\0*.*\0\0",
                 initial_dir=initial_dir,
                 default_filename=default_filename,
-                default_ext="animfsm",
-                tk_filetypes=[("AnimFSM", "*.animfsm"), ("All Files", "*.*")],
+                default_ext=ext,
+                tk_filetypes=[(label, f"*.{ext}"), ("All Files", "*.*")],
             )
         except Exception as exc:
             Debug.log_warning(f"[AnimFSM] Save dialog error: {exc}")
@@ -1807,6 +2245,7 @@ class AnimFSMEditorPanel(EditorPanel):
                 return
             from Infernux.components.spirit_animator import SpiritAnimator
             from Infernux.components.skeletal_animator import SkeletalAnimator
+            from Infernux.components.timeline_action import TimelineAction
             norm = os.path.normpath(fsm_path)
             for go in scene.get_all_objects():
                 animator = go.get_component(SpiritAnimator)
@@ -1817,5 +2256,12 @@ class AnimFSMEditorPanel(EditorPanel):
                 if skel and skel._fsm and os.path.normpath(
                         skel._fsm.file_path or "") == norm:
                     skel.reload_controller()
+                ta = go.get_component(TimelineAction)
+                if ta is not None:
+                    rt = getattr(ta, "_runtime", None)
+                    fsm_obj = getattr(rt, "_fsm", None) if rt is not None else None
+                    if fsm_obj is not None and os.path.normpath(
+                            getattr(fsm_obj, "file_path", "") or "") == norm:
+                        ta.reload_controller()
         except Exception:
             pass

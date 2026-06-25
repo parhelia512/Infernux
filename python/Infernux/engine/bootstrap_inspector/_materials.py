@@ -178,4 +178,11 @@ def wire_material_sections(ip, _t, engine, _inspector_support,
                 ctx.separator()
         ctx.pop_style_var(2)
 
+        try:
+            native = engine.get_native_engine()
+            if native is not None and hasattr(native, "pump_preview_tasks"):
+                native.pump_preview_tasks()
+        except Exception:
+            pass
+
     ip.render_material_sections = _render_material_sections

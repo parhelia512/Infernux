@@ -678,8 +678,9 @@ CameraDrawCallResult SceneRenderer::BuildDrawCallsForCamera(Camera *camera, bool
 
 SceneRenderBridge &SceneRenderBridge::Instance()
 {
-    static SceneRenderBridge instance;
-    return instance;
+    // Intentionally leaked (see SceneManager::Instance).
+    static SceneRenderBridge *instance = new SceneRenderBridge();
+    return *instance;
 }
 
 void SceneRenderBridge::UpdateCameraData(float *outPos, float *outLookAt, float *outUp)

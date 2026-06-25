@@ -81,7 +81,6 @@ class GraphPassActionType(IntEnum):
     NONE: int
     DRAW_RENDERERS: int
     DRAW_SKYBOX: int
-    COMPUTE: int
     CUSTOM: int
     DRAW_SHADOW_CASTERS: int
     DRAW_SCREEN_UI: int
@@ -667,6 +666,8 @@ class Transform(Component):
     def set_as_first_sibling(self) -> None: ...
     def set_as_last_sibling(self) -> None: ...
 
+    def set_local_trs(self, px: float, py: float, pz: float, rx: float, ry: float, rz: float,
+                      sx: float, sy: float, sz: float) -> None: ...
     def look_at(self, target: Vector3) -> None: ...
     def translate(self, delta: Vector3, space: int = ...) -> None: ...
     def translate_local(self, delta: Vector3) -> None: ...
@@ -1445,12 +1446,7 @@ class GraphPassDesc:
     pass_tag: str
     override_material: str
     input_bindings: List[Tuple[str, str]]
-    compute_shader_name: str
-    dispatch_x: int
-    dispatch_y: int
-    dispatch_z: int
     light_index: int
-    shadow_type: str
     screen_ui_list: int
     shader_name: str
     push_constants: List[Tuple[str, float]]
@@ -2841,6 +2837,9 @@ def inflog_internal(msg: str) -> None: ...
 
 
 def get_registered_component_types() -> List[str]: ...
+def get_editor_theme_colors() -> Dict[str, Tuple[float, float, float, float]]: ...
+def get_editor_theme_vec2s() -> Dict[str, Tuple[float, float]]: ...
+def get_editor_theme_floats() -> Dict[str, float]: ...
 
 
 def generate_wire_sphere(

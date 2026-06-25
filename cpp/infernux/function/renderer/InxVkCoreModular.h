@@ -261,10 +261,11 @@ class InxVkCoreModular
      * @param queueMin Minimum render queue (inclusive)
      * @param queueMax Maximum render queue (inclusive)
      * @param lightIndex Index of the shadow-casting light (only 0 supported currently)
-     * @param shadowType Shadow quality hint ("hard" or "soft", reserved for future use)
+     * Hard/soft selection lives on the Light component (shadowParams.w in the
+     * lighting UBO), not on this pass — the shadow map itself is filter-agnostic.
      */
     void DrawShadowCasters(VkCommandBuffer cmdBuf, uint32_t width, uint32_t height, int queueMin, int queueMax,
-                           int lightIndex = 0, const std::string &shadowType = "hard");
+                           int lightIndex = 0);
 
     /// @brief Set draw calls for multi-material rendering (stores pointer, no copy)
     void SetDrawCalls(const std::vector<DrawCall> *drawCalls);
@@ -532,6 +533,17 @@ class InxVkCoreModular
     bool RenderMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
                               std::vector<unsigned char> &outPixels);
 
+    /// @brief Mesh preview with an explicit camera (no auto-fit) — interactive Timeline viewport.
+    bool RenderMeshPreviewGPUCamera(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials,
+                                    int size, const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
+                                    std::vector<unsigned char> &outPixels, bool cloneMaterials = true);
+
+    /// @brief Live mesh preview — GPU render target displayed directly in ImGui (no CPU readback).
+    uint64_t RenderMeshPreviewGPUImGuiCamera(const InxMesh &mesh,
+                                             const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
+                                             const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
+                                             bool cloneMaterials = false);
+
     /// @brief Create a per-material shadow pipeline using the material's shadow
     ///        vertex and fragment variants.
     void CreateMaterialShadowPipeline(std::shared_ptr<InxMaterial> material, const std::string &vertShaderName,
@@ -571,11 +583,12 @@ class InxVkCoreModular
     /// @brief Get per-object index buffer VkBuffer handle (VK_NULL_HANDLE if not found)
     [[nodiscard]] VkBuffer GetObjectIndexBuffer(uint64_t objectId) const;
 
-    /// @brief Get uniform buffer VkBuffer at given index (for descriptor set binding)
-    [[nodiscard]] VkBuffer GetUniformBuffer(size_t index) const;
+    /// @brief Get the scene (view/projection) UBO VkBuffer (single buffer; all
+    /// material descriptor sets bind it, updated in-command-buffer each frame).
+    [[nodiscard]] VkBuffer GetSceneUbo() const;
 
-    /// @brief Get lighting UBO VkBuffer at given index.
-    [[nodiscard]] VkBuffer GetLightingUBO(size_t index) const;
+    /// @brief Get the lighting UBO VkBuffer (single buffer, see GetSceneUbo).
+    [[nodiscard]] VkBuffer GetLightingUbo() const;
 
     /// @brief Get instance SSBO VkBuffer at given index.
     [[nodiscard]] VkBuffer GetInstanceSSBO(size_t index) const;
@@ -869,16 +882,20 @@ class InxVkCoreModular
     // Command buffers
     std::vector<VkCommandBuffer> m_commandBuffers;
 
-    // Uniform buffers
-    std::vector<std::unique_ptr<vk::VkBufferHandle>> m_uniformBuffers;
+    // Scene UBO (binding 0). Single buffer by design: every material
+    // descriptor set binds this one buffer, and per-frame updates happen
+    // inline in the command buffer via CmdUpdateUniformBuffer(), so
+    // per-frame-in-flight copies would never be read and only obscured the
+    // actual synchronization model.
+    std::unique_ptr<vk::VkBufferHandle> m_sceneUbo;
 
-    // Default material UBO buffers (binding 2)
-    std::vector<std::unique_ptr<vk::VkBufferHandle>> m_materialUboBuffers;
-    std::vector<void *> m_materialUboMapped;
+    // Default material UBO (binding 2) — single buffer, persistently mapped.
+    std::unique_ptr<vk::VkBufferHandle> m_materialUbo;
+    void *m_materialUboMapped = nullptr;
 
-    // Lighting UBO buffers (binding 1) - for scene lighting
-    std::vector<std::unique_ptr<vk::VkBufferHandle>> m_lightingUboBuffers;
-    std::vector<void *> m_lightingUboMapped;
+    // Lighting UBO (binding 1) — single buffer, persistently mapped.
+    std::unique_ptr<vk::VkBufferHandle> m_lightingUbo;
+    void *m_lightingUboMapped = nullptr;
 
     // Scene light collector
     SceneLightCollector m_lightCollector;

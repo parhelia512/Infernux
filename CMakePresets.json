@@ -41,10 +41,18 @@
       }
     },
     {
+      "name": "release-linux",
+      "displayName": "Release Preset (Linux / Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build-linux",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
       "name": "debug-linux",
       "displayName": "Debug Preset (Linux)",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/out/build",
+      "inherits": "release-linux",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo"
       }
@@ -68,6 +76,10 @@
     {
       "name": "debug-macos",
       "configurePreset": "debug-macos"
+    },
+    {
+      "name": "release-linux",
+      "configurePreset": "release-linux"
     },
     {
       "name": "debug-linux",

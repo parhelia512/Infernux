@@ -256,7 +256,8 @@ bool AppendPrefabMeshComponent(const json &componentJson, const glm::mat4 &world
 {
     if (!componentJson.is_object())
         return false;
-    if (componentJson.value("type", std::string()) != "MeshRenderer")
+    const std::string compType = componentJson.value("type", std::string());
+    if (compType != "MeshRenderer" && compType != "SkinnedMeshRenderer")
         return false;
     if (!componentJson.value("enabled", true))
         return false;
@@ -282,6 +283,39 @@ bool AppendPrefabMeshComponent(const json &componentJson, const glm::mat4 &world
                 srcVertices = &assetMesh->GetVertices();
                 srcIndices = &assetMesh->GetIndices();
                 srcSubMeshes = &assetMesh->GetSubMeshes();
+            }
+        }
+    }
+
+    // SkinnedMeshRenderer stores its source FBX separately from meshAssetGuid.
+    if ((!srcVertices || !srcIndices || !srcSubMeshes) && compType == "SkinnedMeshRenderer") {
+        auto &registry = AssetRegistry::Instance();
+        auto srcGuidIt = componentJson.find("sourceModelGuid");
+        if (srcGuidIt != componentJson.end() && srcGuidIt->is_string()) {
+            const std::string srcGuid = srcGuidIt->get<std::string>();
+            if (!srcGuid.empty()) {
+                assetMesh = registry.GetAsset<InxMesh>(srcGuid);
+                if (!assetMesh)
+                    assetMesh = registry.LoadAsset<InxMesh>(srcGuid, ResourceType::Mesh);
+                if (assetMesh) {
+                    srcVertices = &assetMesh->GetVertices();
+                    srcIndices = &assetMesh->GetIndices();
+                    srcSubMeshes = &assetMesh->GetSubMeshes();
+                }
+            }
+        }
+        if ((!srcVertices || !srcIndices || !srcSubMeshes)) {
+            auto srcPathIt = componentJson.find("sourceModelPath");
+            if (srcPathIt != componentJson.end() && srcPathIt->is_string()) {
+                const std::string srcPath = srcPathIt->get<std::string>();
+                if (!srcPath.empty()) {
+                    assetMesh = registry.LoadAssetByPath<InxMesh>(srcPath, ResourceType::Mesh);
+                    if (assetMesh) {
+                        srcVertices = &assetMesh->GetVertices();
+                        srcIndices = &assetMesh->GetIndices();
+                        srcSubMeshes = &assetMesh->GetSubMeshes();
+                    }
+                }
             }
         }
     }
@@ -632,6 +666,13 @@ void Infernux::Cleanup()
     ShutdownPreviewTaskSystem();
 
     SaveImGuiLayout();
+
+    // Destroy all scenes/GameObjects FIRST: Collider destructors release
+    // their Jolt bodies (needs a live PhysicsWorld) and AudioSource
+    // destructors detach from the AudioEngine. Singletons are intentionally
+    // leaked, so this explicit call is the only place scene teardown happens.
+    SceneManager::Instance().Shutdown();
+
     AudioEngine::Instance().Shutdown();
     PhysicsWorld::Instance().Shutdown();
 
@@ -670,7 +711,7 @@ void Infernux::InitPreviewTaskSystem(uint32_t workerCount)
                     m_previewTaskCv.wait(lock,
                                          [this]() { return m_previewStopRequested || !m_previewTaskQueue.empty(); });
 
-                    if (m_previewStopRequested && m_previewTaskQueue.empty())
+                    if (m_previewStopRequested)
                         return;
 
                     item = std::move(m_previewTaskQueue.front());
@@ -694,6 +735,8 @@ void Infernux::ShutdownPreviewTaskSystem()
     {
         std::lock_guard<std::mutex> lock(m_previewTaskMutex);
         m_previewStopRequested = true;
+        std::queue<PreviewTaskItem> empty;
+        m_previewTaskQueue.swap(empty);
     }
     m_previewTaskCv.notify_all();
 
@@ -704,20 +747,20 @@ void Infernux::ShutdownPreviewTaskSystem()
     m_previewWorkers.clear();
 
     {
-        std::lock_guard<std::mutex> lock(m_previewTaskMutex);
-        std::queue<PreviewTaskItem> empty;
-        m_previewTaskQueue.swap(empty);
-    }
-    {
         std::lock_guard<std::mutex> lock(m_previewResultMutex);
         std::queue<MaterialPreviewCompleted> empty;
         m_previewCompletedQueue.swap(empty);
         std::queue<TexturePreviewCompleted> emptyTex;
         m_texturePreviewCompletedQueue.swap(emptyTex);
+        std::queue<MeshPreviewCompleted> emptyMesh;
+        m_meshPreviewCompletedQueue.swap(emptyMesh);
         std::queue<MaterialPreviewRequest> emptyReq;
         m_previewRequestQueue.swap(emptyReq);
+        std::queue<MeshPreviewRequest> emptyMeshReq;
+        m_meshPreviewRequestQueue.swap(emptyMeshReq);
         m_materialPreviewStates.clear();
         m_texturePreviewStates.clear();
+        m_meshPreviewStates.clear();
     }
 
     m_previewTaskSystemInitialized = false;
@@ -730,6 +773,8 @@ void Infernux::EnqueuePreviewTask(std::function<void()> fn)
 
     {
         std::lock_guard<std::mutex> lock(m_previewTaskMutex);
+        if (m_previewStopRequested)
+            return;
         m_previewTaskQueue.push(PreviewTaskItem{std::move(fn)});
     }
     m_previewTaskCv.notify_one();
@@ -751,6 +796,44 @@ std::string Infernux::BuildMeshPreviewTextureName(const std::string &resourceKey
 {
     const auto hv = std::hash<std::string>{}(resourceKey);
     return std::string("__cpp_preview_mesh__") + std::to_string(static_cast<unsigned long long>(hv));
+}
+
+// Canonicalize the path portion of a preview cache key so callers that spell the
+// same file differently map to ONE cache entry. The C++ Project panel builds keys
+// with absolute forward-slash paths (FromFsPath), while the Python inspector passes
+// os.path.normpath() results (backslashes on Windows). Without this, "mat|D:/a/b.mat"
+// and "mat|D:\a\b.mat" are distinct entries, so the inspector can never reuse the
+// Project panel's rendered texture (the long-standing flaky-preview bug). Only the
+// MAP KEY is normalized here — the real file path used for disk I/O is passed
+// separately and left untouched. Non-ASCII (UTF-8) bytes are preserved.
+/// Re-resolve the ImGui handle by stable texture name.  UploadTextureForImGui
+/// creates a new descriptor each upload and defers the old one; the numeric id
+/// stored in preview state can dangle for a frame unless refreshed here.
+static uint64_t LiveImGuiTextureId(const InxRenderer *renderer, const std::string &texName, uint64_t fallback)
+{
+    if (!renderer || texName.empty())
+        return fallback;
+    const uint64_t live = renderer->GetImGuiTextureId(texName);
+    return live != 0 ? live : fallback;
+}
+
+static std::string CanonicalizePreviewKey(const std::string &resourceKey)
+{
+    const size_t bar = resourceKey.find('|');
+    const size_t start = (bar == std::string::npos) ? 0 : bar + 1;
+    std::string out = resourceKey;
+    for (size_t i = start; i < out.size(); ++i) {
+        char &c = out[i];
+        if (c == '\\') {
+            c = '/';
+        }
+#ifdef _WIN32
+        else if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a'); // Windows paths are case-insensitive
+        }
+#endif
+    }
+    return out;
 }
 
 static void DownsampleNearestRgba(const std::vector<unsigned char> &src, int srcW, int srcH, int maxPx,
@@ -826,10 +909,12 @@ uint64_t Infernux::QueryOrScheduleMaterialPreview(const std::string &resourceKey
     if (!m_previewTaskSystemInitialized)
         InitPreviewTaskSystem(1);
 
+    const std::string key = CanonicalizePreviewKey(resourceKey);
+
     std::lock_guard<std::mutex> lock(m_previewResultMutex);
-    auto &state = m_materialPreviewStates[resourceKey];
+    auto &state = m_materialPreviewStates[key];
     if (state.textureName.empty())
-        state.textureName = BuildPreviewTextureName(resourceKey);
+        state.textureName = BuildPreviewTextureName(key);
 
     // ── Detect content changes ──────────────────────────────────
     std::string renderJson; // JSON to use if we schedule a render
@@ -851,17 +936,27 @@ uint64_t Infernux::QueryOrScheduleMaterialPreview(const std::string &resourceKey
             state.generation++;
     }
 
+    // First-ever request from a passive caller (the inspector shares this "mat|"
+    // key but passes neither JSON nor an mtime hint — the Project panel owns
+    // mtime-based change detection so the two don't fight over the generation).
+    // Force one render so the shared preview appears instead of staying blank.
+    if (state.generation == 0)
+        state.generation = 1;
+
     // ── Already up-to-date? ─────────────────────────────────────
-    if (state.readyGeneration == state.generation && state.textureId != 0)
+    if (state.readyGeneration == state.generation && state.textureId != 0) {
+        state.textureId = LiveImGuiTextureId(m_renderer.get(), state.textureName, state.textureId);
         return state.textureId;
+    }
 
     // ── Schedule render if not already in flight ────────────────
     if (!state.inFlight && state.readyGeneration < state.generation) {
         state.inFlight = true;
-        m_previewRequestQueue.push(MaterialPreviewRequest{resourceKey, matFilePath, state.generation, renderJson});
+        m_previewRequestQueue.push(MaterialPreviewRequest{key, matFilePath, state.generation, renderJson});
     }
 
     // Stale-return: keep showing old preview while new one renders (no flicker).
+    state.textureId = LiveImGuiTextureId(m_renderer.get(), state.textureName, state.textureId);
     return state.textureId;
 }
 
@@ -873,132 +968,121 @@ bool Infernux::ScheduleTexturePreviewTask(const std::string &resourceKey, const 
     return true;
 }
 
+int Infernux::PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown)
+{
+    if (!m_renderer || uploadBudget <= 0)
+        return 0;
+
+    int consumed = 0;
+    size_t queueSize = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_previewResultMutex);
+        queueSize = m_previewRequestQueue.size();
+    }
+
+    if (queueSize == 0)
+        return 0;
+
+    const bool batchMode = (queueSize >= 2);
+    constexpr int kMaterialCooldownMs = 100;
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastMaterialRenderTime);
+
+    int maxRenders = 0;
+    if (batchMode) {
+        maxRenders = std::min(uploadBudget, std::min(static_cast<int>(queueSize), 2));
+    } else if (ignoreCooldown || elapsed.count() >= kMaterialCooldownMs) {
+        maxRenders = std::min(uploadBudget, 1);
+    }
+
+    for (int renderIdx = 0; renderIdx < maxRenders; ++renderIdx) {
+        MaterialPreviewRequest req;
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            if (m_previewRequestQueue.empty())
+                break;
+            req = std::move(m_previewRequestQueue.front());
+            m_previewRequestQueue.pop();
+        }
+        if (req.resourceKey.empty())
+            continue;
+
+        std::vector<unsigned char> pixels;
+        AssetDatabase *adb = GetAssetDatabase();
+        bool ok = false;
+        if (!req.materialJson.empty()) {
+            ok = MaterialPreviewer::RenderFromJson(req.materialJson, 256, pixels, adb, m_renderer.get());
+        } else {
+            std::string embedModel;
+            int embedSlot = -1;
+            if (ParseModelEmbeddedMaterialSlot(req.matFilePath, embedModel, embedSlot)) {
+                ok = MaterialPreviewer::RenderModelEmbeddedMaterialToPixels(
+                    embedModel, static_cast<uint32_t>(embedSlot), 256, pixels, adb, m_renderer.get());
+            } else {
+                ok = MaterialPreviewer::RenderToPixels(req.matFilePath, 256, pixels, adb, m_renderer.get());
+            }
+        }
+
+        if (!ok || pixels.empty()) {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            auto it = m_materialPreviewStates.find(req.resourceKey);
+            if (it != m_materialPreviewStates.end())
+                it->second.inFlight = false;
+            continue;
+        }
+
+        std::string texName;
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            auto it = m_materialPreviewStates.find(req.resourceKey);
+            if (it == m_materialPreviewStates.end())
+                continue;
+            it->second.inFlight = false;
+            if (it->second.textureName.empty())
+                it->second.textureName = BuildPreviewTextureName(req.resourceKey);
+            texName = it->second.textureName;
+        }
+        if (texName.empty())
+            continue;
+
+        const uint64_t texId = m_renderer->UploadTextureForImGui(texName, pixels.data(), 256, 256, VK_FILTER_LINEAR);
+        const uint64_t liveTexId = LiveImGuiTextureId(m_renderer.get(), texName, texId);
+
+        {
+            std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            auto it = m_materialPreviewStates.find(req.resourceKey);
+            if (it != m_materialPreviewStates.end() && liveTexId != 0) {
+                it->second.textureId = liveTexId;
+                it->second.readyGeneration = req.generation;
+                it->second.readySize = 256;
+            }
+        }
+        ++consumed;
+        m_lastMaterialRenderTime = now;
+    }
+
+    return consumed;
+}
+
 void Infernux::PumpPreviewTasks()
 {
     if (!m_renderer)
         return;
 
-    // ── Per-frame guard ──────────────────────────────────────────
-    // Multiple call-sites (ProjectPanel::PreRender, Python inspector,
-    // Python texture queries) may invoke PumpPreviewTasks within the
-    // same ImGui frame.  Only the first call per frame does real work.
     const int currentFrame = ImGui::GetFrameCount();
-    if (m_lastPumpFrame == currentFrame)
-        return;
-    m_lastPumpFrame = currentFrame;
+    const bool firstPumpThisFrame = (m_lastPumpFrame != currentFrame);
+    if (firstPumpThisFrame)
+        m_lastPumpFrame = currentFrame;
 
-    // Global per-frame budget for GPU uploads (each UploadTextureForImGui
-    // does BeginSingleTimeCommands + fence wait ~1-2 ms).  We cap total
-    // uploads (material + texture) to keep the frame under budget.
-    // Raised to 3 so startup batch can upload 2 materials + 1 texture.
+    if (!firstPumpThisFrame) {
+        PumpTimelineCubePreviewIfDirty();
+        return;
+    }
+
     constexpr int kMaxUploadsPerFrame = 3;
     int uploadBudget = kMaxUploadsPerFrame;
 
-    // ── Material render + upload (inline, single-phase) ──────────
-    // Material rendering is synchronous on the main thread (needs Vulkan
-    // GPU context), so there is no benefit in a 2-phase render→completed→
-    // upload pipeline — that only added 1 frame of latency per material.
-    // We now render AND upload in the same frame.
-    //
-    // Batch mode  (queueSize ≥ 2): render+upload up to 2 per frame,
-    //   no cooldown.  This covers bootstrap prewarm and multi-material
-    //   invalidation — N materials finish in ~⌈N/2⌉ frames.
-    // Interactive (queueSize < 2): render+upload 1 with 300 ms cooldown
-    //   to avoid stalling the UI during continuous slider dragging.
-    {
-        size_t queueSize = 0;
-        {
-            std::lock_guard<std::mutex> lock(m_previewResultMutex);
-            queueSize = m_previewRequestQueue.size();
-        }
-
-        if (queueSize > 0 && uploadBudget > 0) {
-            const bool batchMode = (queueSize >= 2);
-            constexpr int kMaterialCooldownMs = 300;
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastMaterialRenderTime);
-
-            int maxRenders = 0;
-            if (batchMode) {
-                // Startup / batch: render multiple, no cooldown.
-                maxRenders = std::min(uploadBudget, std::min(static_cast<int>(queueSize), 2));
-            } else if (elapsed.count() >= kMaterialCooldownMs) {
-                // Interactive: single render with cooldown.
-                maxRenders = std::min(uploadBudget, 1);
-            }
-
-            for (int renderIdx = 0; renderIdx < maxRenders; ++renderIdx) {
-                MaterialPreviewRequest req;
-                {
-                    std::lock_guard<std::mutex> lock(m_previewResultMutex);
-                    if (m_previewRequestQueue.empty())
-                        break;
-                    req = std::move(m_previewRequestQueue.front());
-                    m_previewRequestQueue.pop();
-                }
-                if (req.resourceKey.empty())
-                    continue;
-
-                // ── Render to pixels (synchronous GPU, ~5-10 ms) ─────
-                std::vector<unsigned char> pixels;
-                AssetDatabase *adb = GetAssetDatabase();
-                bool ok = false;
-                if (!req.materialJson.empty()) {
-                    // Render from in-memory JSON snapshot (Inspector live edits).
-                    ok = MaterialPreviewer::RenderFromJson(req.materialJson, 256, pixels, adb, m_renderer.get());
-                } else {
-                    std::string embedModel;
-                    int embedSlot = -1;
-                    if (ParseModelEmbeddedMaterialSlot(req.matFilePath, embedModel, embedSlot)) {
-                        ok = MaterialPreviewer::RenderModelEmbeddedMaterialToPixels(
-                            embedModel, static_cast<uint32_t>(embedSlot), 256, pixels, adb, m_renderer.get());
-                    } else {
-                        // Render from disk file (ProjectPanel thumbnails).
-                        ok = MaterialPreviewer::RenderToPixels(req.matFilePath, 256, pixels, adb, m_renderer.get());
-                    }
-                }
-
-                if (!ok || pixels.empty()) {
-                    std::lock_guard<std::mutex> lock(m_previewResultMutex);
-                    auto it = m_materialPreviewStates.find(req.resourceKey);
-                    if (it != m_materialPreviewStates.end()) {
-                        it->second.inFlight = false;
-                    }
-                    continue;
-                }
-
-                // ── Upload to ImGui (synchronous GPU, ~1-2 ms) ───────
-                std::string texName;
-                {
-                    std::lock_guard<std::mutex> lock(m_previewResultMutex);
-                    auto it = m_materialPreviewStates.find(req.resourceKey);
-                    if (it == m_materialPreviewStates.end())
-                        continue;
-                    it->second.inFlight = false;
-                    if (it->second.textureName.empty())
-                        it->second.textureName = BuildPreviewTextureName(req.resourceKey);
-                    texName = it->second.textureName;
-                }
-                if (texName.empty())
-                    continue;
-
-                const uint64_t texId =
-                    m_renderer->UploadTextureForImGui(texName, pixels.data(), 256, 256, VK_FILTER_LINEAR);
-
-                {
-                    std::lock_guard<std::mutex> lock(m_previewResultMutex);
-                    auto it = m_materialPreviewStates.find(req.resourceKey);
-                    if (it != m_materialPreviewStates.end() && texId != 0) {
-                        it->second.textureId = texId;
-                        it->second.readyGeneration = req.generation;
-                        it->second.readySize = 256;
-                    }
-                }
-                --uploadBudget;
-                m_lastMaterialRenderTime = now;
-            }
-        }
-    }
+    uploadBudget -= PumpMaterialPreviewUploads(uploadBudget, false);
 
     // ── Process completed texture uploads ────────────────────────
     {
@@ -1156,6 +1240,8 @@ void Infernux::PumpPreviewTasks()
             }
         }
     }
+
+    PumpTimelineCubePreviewIfDirty();
 }
 
 void Infernux::FlushAllMaterialPreviews()
@@ -1219,12 +1305,13 @@ void Infernux::FlushAllMaterialPreviews()
             continue;
 
         const uint64_t texId = m_renderer->UploadTextureForImGui(texName, pixels.data(), 256, 256, VK_FILTER_LINEAR);
+        const uint64_t liveTexId = LiveImGuiTextureId(m_renderer.get(), texName, texId);
 
         {
             std::lock_guard<std::mutex> lock(m_previewResultMutex);
             auto it = m_materialPreviewStates.find(req.resourceKey);
-            if (it != m_materialPreviewStates.end() && texId != 0) {
-                it->second.textureId = texId;
+            if (it != m_materialPreviewStates.end() && liveTexId != 0) {
+                it->second.textureId = liveTexId;
                 it->second.readyGeneration = req.generation;
                 it->second.readySize = 256;
             }
@@ -1237,10 +1324,10 @@ void Infernux::FlushAllMaterialPreviews()
 uint64_t Infernux::GetMaterialPreviewTextureId(const std::string &resourceKey) const
 {
     std::lock_guard<std::mutex> lock(m_previewResultMutex);
-    auto it = m_materialPreviewStates.find(resourceKey);
+    auto it = m_materialPreviewStates.find(CanonicalizePreviewKey(resourceKey));
     if (it == m_materialPreviewStates.end())
         return 0;
-    return it->second.textureId;
+    return LiveImGuiTextureId(m_renderer.get(), it->second.textureName, it->second.textureId);
 }
 
 uint64_t Infernux::GetTexturePreviewTextureId(const std::string &resourceKey) const
@@ -1270,7 +1357,7 @@ void Infernux::InvalidateMaterialPreviewTask(const std::string &resourceKey)
     // stale-return anti-flicker.  Reset content hashes so both sources
     // (JSON and mtime) re-evaluate on next call.
     std::lock_guard<std::mutex> lock(m_previewResultMutex);
-    auto it = m_materialPreviewStates.find(resourceKey);
+    auto it = m_materialPreviewStates.find(CanonicalizePreviewKey(resourceKey));
     if (it != m_materialPreviewStates.end()) {
         it->second.generation++;
         it->second.lastJsonHash = 0;
@@ -1504,6 +1591,207 @@ uint64_t Infernux::QueryOrScheduleMeshPreview(const std::string &resourceKey, co
 
     // Stale-return: keep showing old preview while new one renders (no flicker).
     return state.textureId;
+}
+
+void Infernux::PumpTimelineCubePreviewIfDirty()
+{
+    if (!m_renderer || !m_timelineCubeDirty)
+        return;
+    if (m_pendingCubePreviewHash == m_lastCubePreviewHash) {
+        m_timelineCubeDirty = false;
+        return;
+    }
+    m_timelineCubeDirty = false;
+
+    ExecuteTimelineCubePreviewRender(m_pendingCubePx, m_pendingCubePy, m_pendingCubePz, m_pendingCubeRx,
+                                     m_pendingCubeRy, m_pendingCubeRz, m_pendingCubeSx, m_pendingCubeSy,
+                                     m_pendingCubeSz, m_pendingCubeCamYaw, m_pendingCubeCamPitch, m_pendingCubeCamDist,
+                                     m_pendingCubeSize, m_pendingCubePreviewHash);
+}
+
+bool Infernux::ExecuteTimelineCubePreviewRender(float px, float py, float pz, float rx, float ry, float rz, float sx,
+                                                float sy, float sz, float camYaw, float camPitch, float camDistance,
+                                                int size, uint64_t hash)
+{
+    if (!m_renderer || size <= 0)
+        return false;
+
+    // ── Build the transformed cube + a fullscreen grid quad as one mesh ──
+    auto makeVert = [](const glm::vec3 &p, const glm::vec3 &n) {
+        Vertex v{};
+        v.pos = p;
+        v.normal = n;
+        v.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+        v.color = glm::vec3(1.0f);
+        v.texCoord = glm::vec2(0.0f);
+        return v;
+    };
+
+    // Persistent dedicated preview materials (built once → cached pipeline reused).
+    auto &registry = AssetRegistry::Instance();
+    if (!m_cubePreviewCubeMat) {
+        auto defaultLit = registry.GetBuiltinMaterial("DefaultLit");
+        if (!defaultLit)
+            return false;
+        m_cubePreviewCubeMat = defaultLit->Clone();
+        if (!m_cubePreviewCubeMat)
+            return false;
+        m_cubePreviewCubeMat->SetColor("baseColor", glm::vec4(0.62f, 0.63f, 0.66f, 1.0f));
+        m_cubePreviewCubeMat->SetFloat("metallic", 0.0f);
+        m_cubePreviewCubeMat->SetFloat("smoothness", 0.35f);
+    }
+    if (!m_cubePreviewFloorMat) {
+        auto floorSrc = registry.GetBuiltinMaterial("DefaultLit");
+        if (floorSrc) {
+            m_cubePreviewFloorMat = floorSrc->Clone();
+            if (m_cubePreviewFloorMat)
+                m_cubePreviewFloorMat->SetColor("baseColor", glm::vec4(0.20f, 0.21f, 0.23f, 1.0f));
+        }
+    }
+    auto cubeMat = m_cubePreviewCubeMat;
+    auto floorMat = m_cubePreviewFloorMat;
+
+    std::vector<Vertex> verts;
+    std::vector<uint32_t> indices;
+    std::vector<SubMesh> subs;
+    std::vector<std::shared_ptr<InxMaterial>> materials;
+
+    // Cube (slot 0, drawn first / opaque): unit cube with the transform baked in.
+    {
+        const glm::quat q = glm::quat(glm::vec3(glm::radians(rx), glm::radians(ry), glm::radians(rz)));
+        const glm::mat3 R = glm::mat3_cast(q);
+        const glm::vec3 scl(sx, sy, sz);
+        const glm::vec3 off(px, 0.5f * sy + py, pz);
+
+        struct Face
+        {
+            glm::vec3 n;
+            glm::vec3 p[4];
+        };
+        const Face faces[6] = {
+            {{0, 0, 1}, {{-0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}}},
+            {{0, 0, -1}, {{0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}}},
+            {{1, 0, 0}, {{0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, 0.5f}}},
+            {{-1, 0, 0}, {{-0.5f, -0.5f, -0.5f}, {-0.5f, -0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, -0.5f}}},
+            {{0, 1, 0}, {{-0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, 0.5f}, {0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f}}},
+            {{0, -1, 0}, {{-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, 0.5f}, {-0.5f, -0.5f, 0.5f}}},
+        };
+        const uint32_t cubeIdxStart = static_cast<uint32_t>(indices.size());
+        for (const auto &f : faces) {
+            const glm::vec3 nW = glm::normalize(R * f.n);
+            const uint32_t base = static_cast<uint32_t>(verts.size());
+            for (int k = 0; k < 4; ++k)
+                verts.push_back(makeVert(R * (f.p[k] * scl) + off, nW));
+            const uint32_t fi[6] = {base, base + 1, base + 2, base, base + 2, base + 3};
+            for (uint32_t i : fi)
+                indices.push_back(i);
+        }
+        SubMesh sm;
+        sm.indexStart = cubeIdxStart;
+        sm.indexCount = static_cast<uint32_t>(indices.size()) - cubeIdxStart;
+        sm.vertexStart = 0;
+        sm.vertexCount = static_cast<uint32_t>(verts.size());
+        sm.materialSlot = 0;
+        subs.push_back(sm);
+        materials.push_back(cubeMat);
+    }
+
+    // Simple floor plane (DefaultLit) — avoids the fullscreen GridMaterial pass
+    // which is far too heavy for a per-frame interactive preview.
+    if (floorMat) {
+        if (!m_cubePreviewFloorBuilt) {
+            const glm::vec3 n(0.0f, 1.0f, 0.0f);
+            const float half = 12.0f;
+            m_cubePreviewFloorVerts.clear();
+            m_cubePreviewFloorIndices.clear();
+            m_cubePreviewFloorVerts.push_back(makeVert({-half, 0.0f, -half}, n));
+            m_cubePreviewFloorVerts.push_back(makeVert({half, 0.0f, -half}, n));
+            m_cubePreviewFloorVerts.push_back(makeVert({half, 0.0f, half}, n));
+            m_cubePreviewFloorVerts.push_back(makeVert({-half, 0.0f, half}, n));
+            m_cubePreviewFloorIndices = {0, 1, 2, 0, 2, 3};
+            m_cubePreviewFloorBuilt = true;
+        }
+        const uint32_t fBase = static_cast<uint32_t>(verts.size());
+        const uint32_t fIdxStart = static_cast<uint32_t>(indices.size());
+        verts.insert(verts.end(), m_cubePreviewFloorVerts.begin(), m_cubePreviewFloorVerts.end());
+        for (uint32_t fi : m_cubePreviewFloorIndices)
+            indices.push_back(fi + fBase);
+        SubMesh sm;
+        sm.indexStart = fIdxStart;
+        sm.indexCount = static_cast<uint32_t>(m_cubePreviewFloorIndices.size());
+        sm.vertexStart = fBase;
+        sm.vertexCount = static_cast<uint32_t>(m_cubePreviewFloorVerts.size());
+        sm.materialSlot = 1;
+        subs.push_back(sm);
+        materials.push_back(floorMat);
+    }
+
+    InxMesh mesh("__timeline_cube__");
+    mesh.SetData(std::move(verts), std::move(indices), std::move(subs));
+
+    const glm::vec3 target(0.0f, 0.35f, 0.0f);
+    const float dist = std::max(1.5f, camDistance);
+    const float cp = glm::cos(camPitch);
+    const glm::vec3 dir(cp * glm::sin(camYaw), glm::sin(camPitch), cp * glm::cos(camYaw));
+    const glm::vec3 camPos = target + dir * dist;
+    glm::mat4 view = glm::lookAt(camPos, target, glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::mat4 proj = glm::perspective(glm::radians(35.0f), 1.0f, 0.05f, 100.0f);
+    proj[1][1] *= -1.0f;
+
+    std::vector<unsigned char> pixels;
+    const uint64_t texId =
+        m_renderer->RenderMeshPreviewGPUImGuiCamera(mesh, materials, size, view, proj, camPos, false);
+    if (texId != 0) {
+        m_cubePreviewTexId = texId;
+        m_lastCubePreviewHash = hash;
+    }
+    return texId != 0;
+}
+
+uint64_t Infernux::RenderTimelineCubePreview(float px, float py, float pz, float rx, float ry, float rz, float sx,
+                                             float sy, float sz, float camYaw, float camPitch, float camDistance,
+                                             int size)
+{
+    if (!m_renderer || size <= 0)
+        return m_cubePreviewTexId;
+
+    auto qi = [](float f) -> long long { return static_cast<long long>(f * 1000.0f + (f >= 0.0f ? 0.5f : -0.5f)); };
+    uint64_t hash = 1469598103934665603ull;
+    auto mix = [&hash](long long v) { hash = (hash ^ static_cast<uint64_t>(v)) * 1099511628211ull; };
+    mix(qi(px));
+    mix(qi(py));
+    mix(qi(pz));
+    mix(qi(rx));
+    mix(qi(ry));
+    mix(qi(rz));
+    mix(qi(sx));
+    mix(qi(sy));
+    mix(qi(sz));
+    mix(qi(camYaw));
+    mix(qi(camPitch));
+    mix(qi(camDistance));
+    mix(size);
+
+    if (m_cubePreviewTexId != 0 && hash == m_lastCubePreviewHash)
+        return m_cubePreviewTexId;
+
+    m_pendingCubePx = px;
+    m_pendingCubePy = py;
+    m_pendingCubePz = pz;
+    m_pendingCubeRx = rx;
+    m_pendingCubeRy = ry;
+    m_pendingCubeRz = rz;
+    m_pendingCubeSx = sx;
+    m_pendingCubeSy = sy;
+    m_pendingCubeSz = sz;
+    m_pendingCubeCamYaw = camYaw;
+    m_pendingCubeCamPitch = camPitch;
+    m_pendingCubeCamDist = camDistance;
+    m_pendingCubeSize = size;
+    m_pendingCubePreviewHash = hash;
+    m_timelineCubeDirty = true;
+
+    return m_cubePreviewTexId;
 }
 
 bool Infernux::ScheduleMaterialSaveSnapshotTask(const std::string &key, const std::string &filePath,
@@ -2270,15 +2558,24 @@ void Infernux::ReloadTexture(const std::string &texturePath)
         return;
     }
 
-    // Resolve path → GUID so that InvalidateTextureCache can match GUID-based cache keys
+    // Boundary adapter: this is the only place where the texture hot-reload
+    // path crosses from the file-system domain (paths, from file watchers)
+    // into the renderer domain (GUID-only). Resolve here or bail out.
     auto &registry = AssetRegistry::Instance();
     auto *adb = registry.GetAssetDatabase();
     std::string guid;
-    if (adb)
+    if (adb) {
         guid = adb->GetGuidFromPath(texturePath);
+        if (guid.empty()) {
+            // Unregistered texture (e.g. just created) — register to mint a GUID.
+            guid = adb->RegisterResource(texturePath, ResourceType::Texture);
+        }
+    }
 
     if (guid.empty()) {
-        INXLOG_WARN("Infernux::ReloadTexture: could not resolve GUID for '", texturePath, "'");
+        INXLOG_WARN("Infernux::ReloadTexture: could not resolve GUID for '", texturePath,
+                    "' — skipping GPU cache invalidation (GUID-only contract).");
+        return;
     }
 
     // Reload InxTexture metadata in AssetRegistry (import settings may have changed)
@@ -2294,12 +2591,12 @@ void Infernux::ReloadTexture(const std::string &texturePath)
         }
     }
 
-    // InvalidateTextureCache accepts both GUID and path — prefer GUID
-    m_renderer->InvalidateTextureCache(!guid.empty() ? guid : texturePath);
+    // GUID-only invalidation (path fallback removed by design).
+    m_renderer->InvalidateTextureCache(guid);
 
     // Fire graph notification so dependent materials get their pipelines
     // invalidated via the Texture Modified callback.
-    if (!guid.empty()) {
+    {
         auto dependents = AssetDependencyGraph::Instance().GetDependents(guid);
         INXLOG_INFO("Infernux::ReloadTexture: NotifyEvent guid=", guid, " dependents=", dependents.size());
         AssetDependencyGraph::Instance().NotifyEvent(guid, ResourceType::Texture, AssetEvent::Modified);

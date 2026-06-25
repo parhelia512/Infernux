@@ -255,6 +255,8 @@ class AssetManager:
         cls.register_save_strategy("animclip", cls._save_animclip_resource)
         cls.register_save_strategy("animclip3d", cls._save_animclip3d_resource)
         cls.register_save_strategy("animfsm", cls._save_animfsm_resource)
+        cls.register_save_strategy("animtimeline", cls._save_animtimeline_resource)
+        cls.register_save_strategy("timelinefsm", cls._save_animfsm_resource)
 
         cls._execution_strategies_initialized = True
 
@@ -466,6 +468,14 @@ class AssetManager:
         return save()
 
     @classmethod
+    def _save_animtimeline_resource(cls, resource_obj):
+        """Save an AnimationTimeline resource."""
+        save = getattr(resource_obj, "save", None)
+        if not callable(save):
+            return False
+        return save()
+
+    @classmethod
     def flush_scheduled_saves(cls, key: Optional[str] = None):
         """Execute due scheduled saves. If key is given, only flush that key."""
         now = time.perf_counter()
@@ -657,8 +667,9 @@ class AssetManager:
         guid = cls._get_guid_from_path(path)
         native = cls._native_engine()
         if native is not None and hasattr(native, 'reload_texture'):
-            # Always pass the file path — C++ ReloadTexture() calls
-            # GetGuidFromPath() internally, which fails if given a GUID string.
+            # ReloadTexture(path) is the designated file-system → GUID boundary
+            # adapter: it resolves (or registers) the GUID once, then the whole
+            # renderer-side invalidation chain runs GUID-only.
             native.reload_texture(path)
         # Evict from the Python-side strong cache
         if guid:
@@ -683,6 +694,22 @@ class AssetManager:
             native.reload_mesh(path)
         if guid:
             cls._cache.pop(guid, None)
+
+    @classmethod
+    def _invalidate_project_panel_cache(cls) -> None:
+        """Refresh Project Panel listing (embedded materials/animations depend on .meta)."""
+        try:
+            from Infernux.engine.bootstrap import EditorBootstrap
+            bs = EditorBootstrap.instance()
+            pp = getattr(bs, "project_panel", None) if bs else None
+            if pp is not None:
+                pp.invalidate_dir_cache()
+                native = cls._native_engine()
+                if native is not None and hasattr(native, "request_full_speed_frame"):
+                    native.request_full_speed_frame()
+        except Exception as exc:
+            from Infernux.debug import Debug
+            Debug.log_suppressed("AssetManager._invalidate_project_panel_cache", exc)
 
     @staticmethod
     def _normalize_asset_path(path: str) -> str:
@@ -918,3 +945,14 @@ class AssetManager:
         if ext in IMAGE_EXTENSIONS:
             cls._invalidate_texture_ui_cache(path)
             cls._schedule_gpu_texture_reload(path)
+
+        from Infernux.core.asset_types import MESH_EXTENSIONS
+        if ext in MESH_EXTENSIONS:
+            cls._reload_mesh_asset(path)
+
+        cls._emit_editor_asset_changed(path, "modified")
+
+    @classmethod
+    def invalidate_project_panel_cache(cls) -> None:
+        """Refresh Project Panel listing after meta/import changes (explicit call only)."""
+        cls._invalidate_project_panel_cache()

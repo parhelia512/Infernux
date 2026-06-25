@@ -134,8 +134,19 @@ def _snapshot_value(val: Any) -> Any:
     """Return a simple deep-ish copy suitable for undo storage."""
     if val is None or isinstance(val, (int, float, str, bool)):
         return val
-    if isinstance(val, (list, tuple)):
-        return type(val)(_snapshot_value(v) for v in val)
+
+    # RGBA colour fields: material ptype-7 ``[r,g,b,a]`` lists (and legacy tuple Color).
+    try:
+        from Infernux.components.serialized_field import is_rgba_storage, snapshot_rgba
+        if is_rgba_storage(val):
+            return snapshot_rgba(val)
+    except Exception:
+        pass
+
+    if isinstance(val, list):
+        return [_snapshot_value(v) for v in val]
+    if isinstance(val, tuple):
+        return tuple(_snapshot_value(v) for v in val)
     if isinstance(val, dict):
         return {k: _snapshot_value(v) for k, v in val.items()}
 

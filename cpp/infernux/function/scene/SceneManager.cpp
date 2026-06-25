@@ -30,8 +30,12 @@ namespace infernux
 
 SceneManager &SceneManager::Instance()
 {
-    static SceneManager instance;
-    return instance;
+    // Intentionally leaked: scene teardown is driven explicitly by
+    // Infernux::Cleanup() -> Shutdown(); never by C++ static destruction,
+    // whose cross-TU ordering vs the ECS stores is undefined (was the root
+    // cause of the shutdown heap corruption / DLL-unload access violations).
+    static SceneManager *instance = new SceneManager();
+    return *instance;
 }
 
 SceneManager::SceneManager()
@@ -122,6 +126,31 @@ void SceneManager::UnloadScene(Scene *scene)
     if (!m_activeScene && !m_scenes.empty()) {
         m_activeScene = m_scenes[0].get();
     }
+}
+
+void SceneManager::Shutdown()
+{
+    // No play-mode restore logic here — this is irreversible engine teardown.
+    m_isPlaying = false;
+    m_isPaused = false;
+
+    // Persistent roots live outside any scene; destroy them first so their
+    // colliders release Jolt bodies while PhysicsWorld is still initialized.
+    m_persistentObjects.clear();
+
+    // Destroy all scenes (GameObjects → Components → Colliders → bodies).
+    UnloadAllScenes();
+
+    // Destroy the editor camera object (its Camera component must leave the
+    // component registry before any later teardown step).
+    m_editorCamera.SetCamera(nullptr);
+    m_editorCameraComponent = nullptr;
+    m_editorCameraObject.reset();
+
+    // Drop callbacks so nothing external fires into a dead engine.
+    m_onSceneLoaded = nullptr;
+    m_onSceneUnloaded = nullptr;
+    m_onPlayStateChanged = nullptr;
 }
 
 void SceneManager::UnloadAllScenes()

@@ -74,6 +74,162 @@ def _call_field_did_change(instance: 'InxComponent', field_name: str, old_value:
         )
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  Unity-style Annotated[] markers
+#
+#  These mirror Unity's field attributes and attach to plain type-annotated
+#  fields without requiring serialized_field()::
+#
+#      from typing import Annotated
+#      from Infernux.components import InxComponent, Range, Tooltip, Header
+#
+#      class Player(InxComponent):
+#          health: int = 100                                    # auto-serialized
+#          speed: Annotated[float, Range(0, 20), Tooltip("m/s")] = 5.0
+#          title: Annotated[str, Header("UI"), Multiline] = ""
+#          debug_id: Annotated[int, HideInInspector] = 0        # serialized, hidden
+#          scratch: Annotated[int, NonSerialized] = 0           # not serialized
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True)
+class Range:
+    """Numeric range constraint → slider (or bounded drag with slider=False)."""
+    lo: float
+    hi: float
+    slider: bool = True
+
+
+@dataclass(frozen=True)
+class Tooltip:
+    """Hover text shown in the Inspector."""
+    text: str
+
+
+@dataclass(frozen=True)
+class Header:
+    """Bold group header rendered above this field."""
+    text: str
+
+
+@dataclass(frozen=True)
+class Space:
+    """Vertical spacing before this field."""
+    height: float = 8.0
+
+
+@dataclass(frozen=True)
+class Group:
+    """Collapsible group; consecutive fields with the same name fold together."""
+    name: str
+
+
+@dataclass(frozen=True)
+class InfoText:
+    """Dimmed description line rendered below the field."""
+    text: str
+
+
+@dataclass(frozen=True)
+class DragSpeed:
+    """Override the default drag speed for numeric fields."""
+    speed: float
+
+
+@dataclass(frozen=True)
+class RequiredComponent:
+    """GAME_OBJECT fields: only accept objects carrying this C++ component."""
+    type_name: str
+
+
+class _MarkerSentinel:
+    """Base for value-less markers usable as ``Marker`` or ``Marker()``."""
+    def __init_subclass__(cls, **kw):
+        super().__init_subclass__(**kw)
+
+    def __repr__(self):  # pragma: no cover - cosmetic
+        return type(self).__name__
+
+
+class Multiline(_MarkerSentinel):
+    """STRING fields: render a multiline text box."""
+
+
+class ReadOnly(_MarkerSentinel):
+    """Field is visible but not editable in the Inspector."""
+
+
+class HideInInspector(_MarkerSentinel):
+    """Unity semantics: field IS serialized but not shown in the Inspector."""
+
+
+class NonSerialized(_MarkerSentinel):
+    """Field is neither serialized nor shown (annotation-level hide_field)."""
+
+
+class HDR(_MarkerSentinel):
+    """COLOR fields: allow HDR (> 1.0) values in the colour picker."""
+
+
+# Canonical RGBA storage — identical to material property ptype-7:
+# a plain Python ``list[float]`` of length 4: ``[r, g, b, a]``.
+RGBA_DEFAULT: list[float] = [1.0, 1.0, 1.0, 1.0]
+
+
+def normalize_rgba(value: Any) -> list[float]:
+    """Normalize any RGBA input to material-compatible ``[r, g, b, a]``."""
+    if value is None:
+        return list(RGBA_DEFAULT)
+    if isinstance(value, (list, tuple)) and not isinstance(value, (str, bytes)):
+        if len(value) >= 3:
+            r, g, b = float(value[0]), float(value[1]), float(value[2])
+            a = float(value[3]) if len(value) > 3 else 1.0
+            return [r, g, b, a]
+    return list(RGBA_DEFAULT)
+
+
+def snapshot_rgba(value: Any) -> list[float]:
+    """Return a fresh RGBA list for undo / copy storage."""
+    return list(normalize_rgba(value))
+
+
+def rgba_equal(a: Any, b: Any) -> bool:
+    """Compare two RGBA values (list/tuple/material JSON)."""
+    return normalize_rgba(a) == normalize_rgba(b)
+
+
+def is_rgba_storage(value: Any) -> bool:
+    """True when *value* is canonical or legacy RGBA component storage."""
+    if isinstance(value, (str, bytes)):
+        return False
+    if type(value) is list and len(value) == 4:
+        return all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in value)
+    # Legacy tuple-subclass Color instances from older engine builds.
+    if isinstance(value, tuple) and type(value) is not tuple and len(value) in (3, 4):
+        return all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in value)
+    return False
+
+
+class Color:
+    """Type annotation + factory for ``FieldType.COLOR`` fields.
+
+    **Runtime storage is always** ``[r, g, b, a]`` **(plain list)** — the same
+    representation as material shader properties (ptype 7).  Call
+    ``Color(r, g, b, a)`` to build a default; the return value is a list, not
+    a ``Color`` instance.
+
+    Example::
+
+        class MyComp(InxComponent):
+            tint: Color = Color(1.0, 0.5, 0.2)
+    """
+
+    def __new__(cls, r: float = 1.0, g: float = 1.0, b: float = 1.0, a: float = 1.0):
+        if isinstance(r, (tuple, list)) and not isinstance(r, (str, bytes)):
+            return normalize_rgba(r)
+        return [float(r), float(g), float(b), float(a)]
+
+
 class FieldType(Enum):
     """Supported field types for serialization and inspector rendering."""
     INT = auto()
@@ -122,6 +278,7 @@ class FieldMetadata:
     component_type: Optional[str] = None       # For COMPONENT (ComponentRef): target component type name
     hdr: bool = False                            # For COLOR: allow HDR mode toggle
     asset_type: Optional[str] = None             # For ASSET: registered asset type name (e.g. "AudioClip", "AnimStateMachine")
+    hidden: bool = False                         # Unity HideInInspector: serialized but not rendered
 
     # For internal use
     python_type: Optional[Type] = None
@@ -592,6 +749,8 @@ def normalize_runtime_field_value(value: Any, field_meta_or_type) -> Any:
             return [_ensure_shader_ref(v) for v in value]
         if element_type == FieldType.ASSET:
             return [_ensure_audio_clip_ref(v) for v in value]
+    if field_type == FieldType.COLOR:
+        return normalize_rgba(value)
     return value
 
 
@@ -729,6 +888,8 @@ def _infer_field_type(python_type: Optional[Type], default: Any) -> FieldType:
             return FieldType.FLOAT
         if isinstance(default, str):
             return FieldType.STRING
+        if is_rgba_storage(default):
+            return FieldType.COLOR
         if hasattr(default, 'x') and hasattr(default, 'y'):
             if hasattr(default, 'z') and hasattr(default, 'w'):
                 return FieldType.VEC4
@@ -794,6 +955,12 @@ def resolve_annotation(annotation) -> Optional['FieldMetadata']:
             return None
 
         simple_name = text.split('.')[-1]
+        if simple_name == 'Color':
+            return FieldMetadata(
+                name="",
+                field_type=FieldType.COLOR,
+                default=list(RGBA_DEFAULT),
+            )
         _vec_ft = _VEC_ANNOTATION_MAP.get(simple_name)
         if _vec_ft is not None:
             return FieldMetadata(name="", field_type=_vec_ft, default=_make_vec_default(_vec_ft))
@@ -838,14 +1005,28 @@ def resolve_annotation(annotation) -> Optional['FieldMetadata']:
     type_name = annotation.__name__
 
     # ── Basic value types ──
+    if annotation is bool:  # bool before int: bool is an int subclass
+        return FieldMetadata(name="", field_type=FieldType.BOOL, default=False)
     if annotation is int:
         return FieldMetadata(name="", field_type=FieldType.INT, default=0)
     if annotation is float:
         return FieldMetadata(name="", field_type=FieldType.FLOAT, default=0.0)
-    if annotation is bool:
-        return FieldMetadata(name="", field_type=FieldType.BOOL, default=False)
     if annotation is str:
         return FieldMetadata(name="", field_type=FieldType.STRING, default="")
+
+    # ── Color (RGBA tuple subclass) ──
+    if annotation is Color or type_name == 'Color':
+        return FieldMetadata(name="", field_type=FieldType.COLOR, default=list(RGBA_DEFAULT))
+
+    # ── Enum subclass → ENUM field (default: first member) ──
+    if issubclass(annotation, Enum):
+        members = list(annotation)
+        return FieldMetadata(
+            name="",
+            field_type=FieldType.ENUM,
+            default=members[0] if members else None,
+            enum_type=annotation,
+        )
 
     # ── Vector types ──
     _vec_ft = _VEC_ANNOTATION_MAP.get(type_name)
@@ -892,6 +1073,153 @@ def resolve_annotation(annotation) -> Optional['FieldMetadata']:
         )
 
     return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Annotation-driven field construction (v2)
+#
+#  Single entry point used by InxComponent.__init_subclass__ to turn a type
+#  annotation (+ optional class-level default value) into a serialized field.
+#  Handles typing.Annotated markers and Optional[X] unwrapping on top of
+#  resolve_annotation().
+# ═══════════════════════════════════════════════════════════════════════════
+
+_UNSET = object()
+
+#: Sentinel returned by build_field_from_annotation when the annotation is
+#: explicitly marked NonSerialized — distinct from None ("annotation
+#: unsupported"), so callers must NOT fall back to value inference.
+NON_SERIALIZED_FIELD = object()
+
+
+def _unwrap_annotation(annotation) -> tuple:
+    """Strip ``Annotated[...]`` and ``Optional[...]`` wrappers.
+
+    Returns ``(base_annotation, markers)`` where *markers* is the flat list of
+    ``Annotated`` metadata objects collected at any nesting level.
+    """
+    import typing as _typing
+
+    markers: list = []
+    for _ in range(8):  # defensive bound against pathological nesting
+        # Annotated[X, m1, m2, ...] — detected via __metadata__ (stable API)
+        if hasattr(annotation, '__metadata__') and hasattr(annotation, '__origin__'):
+            markers.extend(annotation.__metadata__)
+            annotation = annotation.__origin__
+            continue
+        # Optional[X] / Union[X, None] / X | None (PEP 604)
+        import types as _types
+        origin = _typing.get_origin(annotation)
+        if origin is _typing.Union or origin is getattr(_types, 'UnionType', None):
+            args = [a for a in _typing.get_args(annotation) if a is not type(None)]
+            if len(args) == 1:
+                annotation = args[0]
+                continue
+            break  # true unions are unsupported
+        break
+    return annotation, markers
+
+
+def _is_marker(obj, marker_cls) -> bool:
+    """Marker may appear as the class itself or an instance of it."""
+    return obj is marker_cls or isinstance(obj, marker_cls)
+
+
+def _apply_markers(meta: 'FieldMetadata', markers: list) -> Optional['FieldMetadata']:
+    """Fold Annotated[] markers into *meta*. Returns None for NonSerialized."""
+    for m in markers:
+        if _is_marker(m, NonSerialized):
+            return None
+        if _is_marker(m, HideInInspector):
+            meta.hidden = True
+        elif isinstance(m, Range):
+            meta.range = (m.lo, m.hi)
+            meta.slider = m.slider
+        elif isinstance(m, Tooltip):
+            meta.tooltip = m.text
+        elif isinstance(m, Header):
+            meta.header = m.text
+        elif isinstance(m, Space):
+            meta.space = m.height
+        elif isinstance(m, Group):
+            meta.group = m.name
+        elif isinstance(m, InfoText):
+            meta.info_text = m.text
+        elif isinstance(m, DragSpeed):
+            meta.drag_speed = m.speed
+        elif isinstance(m, RequiredComponent):
+            meta.required_component = m.type_name
+        elif _is_marker(m, Multiline):
+            meta.multiline = True
+        elif _is_marker(m, ReadOnly):
+            meta.readonly = True
+        elif _is_marker(m, HDR):
+            meta.hdr = True
+    return meta
+
+
+def _coerce_default(meta: 'FieldMetadata', default: Any) -> Any:
+    """Coerce a user-provided default to match the annotated field type."""
+    ft = meta.field_type
+    try:
+        if ft == FieldType.FLOAT and isinstance(default, int) and not isinstance(default, bool):
+            return float(default)
+        if ft == FieldType.INT and isinstance(default, float) and default.is_integer():
+            return int(default)
+        if ft == FieldType.COLOR:
+            return normalize_rgba(default)
+        if ft == FieldType.STRING and default is None:
+            return ""
+    except Exception as exc:
+        Debug.log_suppressed(f"serialized_field._coerce_default[{meta.name}]", exc)
+    return default
+
+
+def build_field_from_annotation(annotation, default: Any = _UNSET) -> Optional['FieldMetadata']:
+    """Build FieldMetadata from a type annotation plus optional default value.
+
+    This is the v2 entry point powering Unity-style declarations::
+
+        health: int = 100
+        speed: Annotated[float, Range(0, 20)] = 5.0
+        mat: Material = None
+        state: PlayerState                       # Enum → dropdown
+
+    Returns None when the annotation is unsupported, or NON_SERIALIZED_FIELD
+    when explicitly excluded via the NonSerialized marker.
+    """
+    base, markers = _unwrap_annotation(annotation)
+    # NonSerialized must win regardless of whether the base type resolves —
+    # otherwise the caller's value-inference fallback would resurrect it.
+    for m in markers:
+        if _is_marker(m, NonSerialized):
+            return NON_SERIALIZED_FIELD
+    meta = resolve_annotation(base)
+    if meta is None:
+        # Annotation type unsupported — fall back to value inference so
+        # ``foo: SomeAlias = 3.0`` still serializes as FLOAT.
+        if default is _UNSET or default is None:
+            return None
+        ft = infer_field_type_from_value(default)
+        if ft == FieldType.UNKNOWN:
+            return None
+        meta = FieldMetadata(
+            name="",
+            field_type=ft,
+            default=default,
+            enum_type=type(default) if isinstance(default, Enum) else None,
+        )
+    if default is not _UNSET and default is not None:
+        meta.default = _coerce_default(meta, default)
+        if meta.field_type == FieldType.ENUM and isinstance(default, Enum):
+            meta.enum_type = type(default)
+    elif default is None and meta.field_type in {
+        FieldType.GAME_OBJECT, FieldType.COMPONENT, FieldType.MATERIAL,
+        FieldType.TEXTURE, FieldType.SHADER, FieldType.ASSET,
+    }:
+        # ``mat: Material = None`` keeps the empty-ref default from resolve.
+        pass
+    return _apply_markers(meta, markers)
 
 
 def get_annotation_default(annotation) -> Any:

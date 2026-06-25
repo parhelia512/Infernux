@@ -60,7 +60,11 @@ if(WIN32)
     include(InstallRequiredSystemLibraries)
 endif()
 
-pybind11_add_module(_Infernux MODULE
+# NO_EXTRAS: pybind11 would otherwise inject -flto=auto, which conflicts with
+# this project's deliberate LTO opt-out (see the Release flags below). On GCC
+# the mix (-fno-lto objects compiled as LTO-IR, non-LTO link) silently drops
+# every object file and produces a 14 KB empty module.
+pybind11_add_module(_Infernux MODULE NO_EXTRAS
     ${ENGINE_SOURCES}
     ${BINDING_SOURCES}
 )
@@ -75,6 +79,7 @@ target_include_directories(_Infernux PRIVATE
 if(MSVC)
     target_compile_options(_Infernux PRIVATE
         /utf-8
+        /bigobj   # pybind11 binding TUs exceed the default COFF section limit
     )
 
     target_link_options(_Infernux PRIVATE
@@ -82,8 +87,11 @@ if(MSVC)
         $<$<CONFIG:Release>:/OPT:NOICF>
     )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    # Optimized but LTO-free, matching the MSVC Release configuration.
+    # (The historical -O0 here was a leftover from a crash investigation and
+    # made Linux Release builds unoptimized.)
     target_compile_options(_Infernux PRIVATE
-        $<$<CONFIG:Release>:-O0>
+        $<$<CONFIG:Release>:-O2>
         $<$<CONFIG:Release>:-fno-lto>
     )
 
@@ -202,11 +210,18 @@ configure_file(
 )
 
 add_custom_command(TARGET _Infernux POST_BUILD
+    # Remove native modules from other Python ABIs/builds first so wheels can
+    # never ship two _Infernux modules (GitHub issue #47).
+    COMMAND ${CMAKE_COMMAND}
+        -DTARGET_DIR=${PYTHON_TARGET_DIR}
+        -DKEEP_NAME=$<TARGET_FILE_NAME:_Infernux>
+        -P "${CMAKE_SOURCE_DIR}/cmake/clean_stale_native_modules.cmake"
+
     # Copy the native module (.pyd on Windows, .so on macOS/Linux)
     COMMAND ${CMAKE_COMMAND} -E copy
         "$<TARGET_FILE:_Infernux>"
         "${PYTHON_TARGET_DIR}/$<TARGET_FILE_NAME:_Infernux>"
-    
+
     COMMENT "Copy _Infernux native module to python/Infernux/lib"
 )
 

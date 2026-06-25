@@ -144,8 +144,10 @@ class ComponentSerializationMixin:
         if isinstance(value, (bool, int, float, str, type(None))):
             return value
 
-        # Recursively serialize list/dict so that nested refs/enums survive
-        if isinstance(value, list):
+        # Recursively serialize list/tuple/dict so nested refs/enums survive.
+        # tuple covers Color (a tuple subclass) and plain tuples — stored as
+        # JSON arrays, which COLOR/VEC deserialization already accepts.
+        if isinstance(value, (list, tuple)):
             return [self._serialize_value(item) for item in value]
         if isinstance(value, dict):
             return {k: self._serialize_value(v) for k, v in value.items()}
@@ -306,6 +308,9 @@ class ComponentSerializationMixin:
             return self._to_vec(value, 3, Vector3)
         if field_type == FieldType.VEC4:
             return self._to_vec(value, 4, vec4f)
+        if field_type == FieldType.COLOR:
+            from .serialized_field import normalize_rgba
+            return normalize_rgba(value)
         if field_type == FieldType.ENUM and isinstance(value, dict) and "__enum__" in value:
             return self._deserialize_enum(value)
 

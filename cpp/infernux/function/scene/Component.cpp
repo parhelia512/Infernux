@@ -195,8 +195,10 @@ Component *Component::FindByComponentId(uint64_t id)
 
 std::unordered_map<uint64_t, Component *> &Component::GetInstanceRegistry()
 {
-    static std::unordered_map<uint64_t, Component *> s_registry;
-    return s_registry;
+    // Intentionally leaked — Component destructors erase from this map and
+    // may run late in explicit Cleanup; static teardown order must not matter.
+    static auto *s_registry = new std::unordered_map<uint64_t, Component *>();
+    return *s_registry;
 }
 
 Transform *Component::GetTransform() const

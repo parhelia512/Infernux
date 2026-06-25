@@ -49,8 +49,10 @@ glm::vec3 QuatToEulerYXZ(const glm::quat &rotation)
 
 TransformECSStore &TransformECSStore::Instance()
 {
-    static TransformECSStore instance;
-    return instance;
+    // Intentionally leaked (see SceneManager::Instance) — Transform
+    // destructors run during explicit Cleanup, never after static teardown.
+    static TransformECSStore *instance = new TransformECSStore();
+    return *instance;
 }
 
 TransformECSStore::Handle TransformECSStore::Allocate(Transform *owner)

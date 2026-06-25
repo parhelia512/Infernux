@@ -457,6 +457,17 @@ void RegisterSceneBindings(py::module_ &m)
         .def_property(
             "local_scale", [](Transform *t) { return t->GetLocalScale(); },
             [](Transform *t, const glm::vec3 &v) { t->SetLocalScale(v.x, v.y, v.z); }, "Scale in local space")
+        // Combined local TRS setter — single boundary crossing + one subtree
+        // invalidation. Per-frame animation fast path (TimelineAction etc.).
+        .def(
+            "set_local_trs",
+            [](Transform *t, float px, float py, float pz, float rx, float ry, float rz, float sx, float sy, float sz) {
+                t->SetLocalTRS(glm::vec3(px, py, pz), glm::vec3(rx, ry, rz), glm::vec3(sx, sy, sz));
+            },
+            py::arg("px"), py::arg("py"), py::arg("pz"), py::arg("rx"), py::arg("ry"), py::arg("rz"), py::arg("sx"),
+            py::arg("sy"), py::arg("sz"),
+            "Set local position+euler(deg)+scale in one call (single dirty/invalidate). "
+            "Fast path for per-frame animation; avoids 3 separate setters + Vector3 allocations.")
         .def_property_readonly(
             "lossy_scale", [](Transform *t) { return t->GetWorldScale(); },
             "Approximate world-space scale (read-only, like Unity lossyScale)")
@@ -866,8 +877,9 @@ void RegisterSceneBindings(py::module_ &m)
              "Get imported animation take duration in seconds")
         .def("submit_animation_pose", &SkinnedMeshRenderer::SubmitAnimationPose, py::arg("take_name"),
              py::arg("time_seconds"), py::arg("normalized_time"), py::arg("blend_take_name") = "",
-             py::arg("blend_time_seconds") = 0.0f, py::arg("blend_weight") = 0.0f,
-             "Submit active and blend animation state in one native call")
+             py::arg("blend_time_seconds") = 0.0f, py::arg("blend_weight") = 0.0f, py::arg("loop") = true,
+             "Submit active and blend animation state in one native call. "
+             "Empty take_name renders the bind pose; loop=False holds the end pose.")
         .def_property("runtime_animation_time", &SkinnedMeshRenderer::GetRuntimeAnimationTime,
                       &SkinnedMeshRenderer::SetRuntimeAnimationTime,
                       "Current clip time in seconds (runtime; driven by SkeletalAnimator)")
@@ -881,7 +893,38 @@ void RegisterSceneBindings(py::module_ &m)
                       "Secondary animation time in seconds used for runtime pose blending")
         .def_property("blend_weight", &SkinnedMeshRenderer::GetBlendWeight, &SkinnedMeshRenderer::SetBlendWeight,
                       "Runtime pose blend weight from active take to blend take")
-        .def("clear_animation_blend", &SkinnedMeshRenderer::ClearAnimationBlend, "Clear runtime pose blending state");
+        .def("clear_animation_blend", &SkinnedMeshRenderer::ClearAnimationBlend, "Clear runtime pose blending state")
+        .def(
+            "submit_pose_stack",
+            [](SkinnedMeshRenderer &sr, const py::list &layers) {
+                std::vector<PoseStackLayer> stack;
+                stack.reserve(py::len(layers));
+                for (const auto &item : layers) {
+                    py::dict d = item.cast<py::dict>();
+                    PoseStackLayer layer;
+                    if (d.contains("take_name"))
+                        layer.takeName = d["take_name"].cast<std::string>();
+                    if (d.contains("time"))
+                        layer.timeSeconds = d["time"].cast<float>();
+                    if (d.contains("weight"))
+                        layer.weight = d["weight"].cast<float>();
+                    if (d.contains("additive"))
+                        layer.additive = d["additive"].cast<bool>();
+                    if (d.contains("loop"))
+                        layer.loop = d["loop"].cast<bool>();
+                    if (d.contains("bone_mask"))
+                        layer.boneMask = d["bone_mask"].cast<std::vector<std::string>>();
+                    stack.push_back(std::move(layer));
+                }
+                sr.SubmitPoseStack(stack);
+            },
+            py::arg("layers"),
+            "Submit a multi-layer pose stack (AnimationTree output). Each layer is a dict: "
+            "{take_name:str, time:float, weight:float, additive:bool, loop:bool, bone_mask:list[str]}. "
+            "Enables N-way weighted + additive + bone-masked blending beyond the 2-clip crossfade.")
+        .def("clear_pose_stack", &SkinnedMeshRenderer::ClearPoseStack,
+             "Clear the pose stack and revert to the single-clip / crossfade path")
+        .def("has_pose_stack", &SkinnedMeshRenderer::HasPoseStack, "Whether a pose stack is currently active");
 
     // ========================================================================
     // SpriteRenderer — inherits MeshRenderer for rendering, adds sprite props
@@ -947,6 +990,8 @@ void RegisterSceneBindings(py::module_ &m)
         .def_property("shadows", &Light::GetShadows, &Light::SetShadows, "Shadow type (None, Hard, Soft)")
         .def_property("shadow_strength", &Light::GetShadowStrength, &Light::SetShadowStrength, "Shadow strength (0-1)")
         .def_property("shadow_bias", &Light::GetShadowBias, &Light::SetShadowBias, "Shadow depth bias")
+        .def_property("shadow_normal_bias", &Light::GetShadowNormalBias, &Light::SetShadowNormalBias,
+                      "Shadow normal-offset bias (world units along the surface normal)")
 
         // Shadow mapping matrices
         .def("get_light_view_matrix", &Light::GetLightViewMatrix, "Get the light's view matrix for shadow mapping")

@@ -35,7 +35,6 @@ enum class GraphPassActionType
     None,              ///< No rendering (resource-only pass)
     DrawRenderers,     ///< Draw scene renderers filtered by queue range
     DrawSkybox,        ///< Draw the procedural skybox
-    Compute,           ///< Dispatch a compute shader (no render pass)
     Custom,            ///< Reserved for future Python callback support
     DrawShadowCasters, ///< Draw shadow casters into a depth-only shadow map
     DrawScreenUI,      ///< Draw screen-space UI (Camera or Overlay list)
@@ -97,15 +96,8 @@ struct GraphPassDesc
     std::string passTag;          ///< Filter draw calls by shader pass tag (empty = no filter)
     std::string overrideMaterial; ///< Force all objects to use this material name (empty = per-object)
 
-    // Compute parameters
-    std::string computeShaderName; ///< Compute shader name (for Compute action)
-    uint32_t dispatchX = 1;        ///< Compute dispatch group count X
-    uint32_t dispatchY = 1;        ///< Compute dispatch group count Y
-    uint32_t dispatchZ = 1;        ///< Compute dispatch group count Z
-
     // DrawShadowCasters parameters
-    int32_t lightIndex = 0;          ///< Index of the shadow-casting light (0 = first directional)
-    std::string shadowType = "hard"; ///< Shadow quality: "hard", "soft"
+    int32_t lightIndex = 0; ///< Index of the shadow-casting light (0 = first directional)
 
     // DrawScreenUI parameters
     int screenUIList = 0; ///< 0 = Camera list (before post-process), 1 = Overlay list (after post-process)

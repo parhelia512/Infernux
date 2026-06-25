@@ -98,7 +98,10 @@ def _try_get_cpp_material_preview_texture(native: Any, norm_path: str,
     if native is None:
         return 0
 
-    cache_key = f"mat|{norm_path}"
+    # Single shared "mat|" key for the Project-panel thumbnail (mtime-driven).
+    # Inspector live edits use a separate "matedit|" key so JSON and disk saves
+    # do not fight over the same generation counter.
+    cache_key = f"matedit|{norm_path}" if material_json else f"mat|{norm_path}"
     try:
         if hasattr(native, "pump_preview_tasks"):
             native.pump_preview_tasks()
@@ -139,21 +142,21 @@ def get_resource_preview_texture_id(panel: Any, file_path: str, preview_size: in
     ext = os.path.splitext(norm_path)[1].lower()
 
     if "::submat:" in norm_path:
-        base_model = norm_path.split("::submat:", 1)[0]
-        mtime = 0 if material_json else safe_mtime_ns(base_model)
+        # Passive read of the shared "mat|" key (mtime=0): the C++ Project panel
+        # owns mtime-based change detection. Python and C++ compute mtimes on
+        # different epochs, so if both passed a hint the generation would ping-pong
+        # and re-render every frame. Live edits still use the JSON ("matedit|") key.
         return _try_get_cpp_material_preview_texture(
-            native, norm_path, material_json=material_json, file_mtime_hint=mtime)
+            native, norm_path, material_json=material_json, file_mtime_hint=0)
 
     if ext in _IMAGE_EXTS:
         tex_id, _, _ = _try_get_cpp_texture_preview(native, norm_path, texture_settings)
         return tex_id
 
     if ext in _MATERIAL_EXTS:
-        # C++ handles all change detection internally via generation counter.
-        # Pass JSON if available (Inspector live edits), otherwise mtime hint.
-        mtime = 0 if material_json else safe_mtime_ns(norm_path)
+        # Passive read (mtime=0) of the shared "mat|" key — see note above.
         return _try_get_cpp_material_preview_texture(
-            native, norm_path, material_json=material_json, file_mtime_hint=mtime)
+            native, norm_path, material_json=material_json, file_mtime_hint=0)
 
     if ext in _MODEL_EXTS or ext in _PREFAB_EXTS:
         return _try_get_cpp_mesh_preview(native, norm_path)
@@ -180,10 +183,10 @@ def render_resource_preview_rect(ctx: Any, panel: Any, file_path: str, width: fl
     src_h = 0
 
     if "::submat:" in norm_path:
-        base_model = norm_path.split("::submat:", 1)[0]
-        mtime = 0 if cache_tag else safe_mtime_ns(base_model)
+        # Passive read of the shared "mat|" key (mtime=0); C++ Project panel owns
+        # mtime change detection. Live edits use the JSON ("matedit|") key.
         tex_id = _try_get_cpp_material_preview_texture(
-            native, norm_path, material_json=cache_tag, file_mtime_hint=mtime)
+            native, norm_path, material_json=cache_tag, file_mtime_hint=0)
         if tex_id != 0:
             src_w = 256
             src_h = 256
@@ -196,10 +199,10 @@ def render_resource_preview_rect(ctx: Any, panel: Any, file_path: str, width: fl
     elif ext in _IMAGE_EXTS:
         tex_id, src_w, src_h = _try_get_cpp_texture_preview(native, norm_path, texture_settings)
     elif ext in _MATERIAL_EXTS:
-        # C++ handles change detection internally; just pass JSON or mtime hint.
-        mtime = 0 if cache_tag else safe_mtime_ns(norm_path)
+        # Passive read (mtime=0) of the shared "mat|" key; C++ Project panel owns
+        # mtime change detection. Live edits use the JSON ("matedit|") key.
         tex_id = _try_get_cpp_material_preview_texture(
-            native, norm_path, material_json=cache_tag, file_mtime_hint=mtime)
+            native, norm_path, material_json=cache_tag, file_mtime_hint=0)
         if preserve_aspect:
             src_w = 256
             src_h = 256

@@ -192,8 +192,11 @@ struct PhysicsWorld::LayerInterfaces
 
 PhysicsWorld &PhysicsWorld::Instance()
 {
-    static PhysicsWorld instance;
-    return instance;
+    // Intentionally leaked: Shutdown() is called explicitly from
+    // Infernux::Cleanup(); a static destructor would re-run it after
+    // dependent singletons may already be gone.
+    static PhysicsWorld *instance = new PhysicsWorld();
+    return *instance;
 }
 
 PhysicsWorld::~PhysicsWorld()
@@ -305,11 +308,27 @@ void PhysicsWorld::Shutdown()
 
     INXLOG_INFO("PhysicsWorld: Shutting down...");
 
-    // Step 1: drop contact pair tracking and the body→collider lookup before
-    // any body dies, so callbacks racing the teardown can't dereference
-    // freed Collider* pointers.
+    // Step 1: drop contact pair tracking before any body dies, so callbacks
+    // racing the teardown can't dereference freed Collider* pointers.
     if (m_contactListener)
         m_contactListener->ClearAll();
+
+    // Step 1b: destroy any bodies that still exist. Scenes should already be
+    // gone (SceneManager::Shutdown runs first in Infernux::Cleanup), so a
+    // non-empty map here indicates a teardown-ordering bug — sweep it anyway
+    // so Jolt's PhysicsSystem is destroyed with zero live bodies.
+    if (m_physicsSystem && !m_bodyToCollider.empty()) {
+        INXLOG_WARN("PhysicsWorld: ", m_bodyToCollider.size(),
+                    " bodies still alive at shutdown — destroying them (check teardown order).");
+        JPH::BodyInterface &bi = m_physicsSystem->GetBodyInterface();
+        for (const auto &[id, collider] : m_bodyToCollider) {
+            (void)collider;
+            JPH::BodyID bodyId(id);
+            if (bi.IsAdded(bodyId))
+                bi.RemoveBody(bodyId);
+            bi.DestroyBody(bodyId);
+        }
+    }
     m_bodyToCollider.clear();
 
     // Step 2: tear down subsystems in dependency order (newest first).

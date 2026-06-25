@@ -215,7 +215,7 @@ class VkDeviceContext
     }
 
     /// @brief Whether timeline semaphores were enabled at device creation —
-    /// reserved for future async-transfer / async-compute integrations.
+    /// reserved for future async-transfer integrations.
     [[nodiscard]] bool IsTimelineSemaphoreEnabled() const
     {
         return m_timelineSemaphoreEnabled;

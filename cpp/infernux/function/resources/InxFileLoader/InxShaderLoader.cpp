@@ -150,8 +150,6 @@ void InxShaderLoader::CreateMeta(const char *content, size_t contentSize, const 
         type = "fragment";
     else if (desc.fileExtension == ".geom")
         type = "geometry";
-    else if (desc.fileExtension == ".comp")
-        type = "compute";
     else if (desc.fileExtension == ".tesc")
         type = "tess_control";
     else if (desc.fileExtension == ".tese")
@@ -273,7 +271,6 @@ ShaderDescriptor InxShaderLoader::ParseShaderSource(const std::string &source, c
         desc.fileExtension = FromFsPath(fsPath.extension());
         desc.isVertexShader = (desc.fileExtension == ".vert");
         desc.isFragmentShader = (desc.fileExtension == ".frag");
-        desc.isComputeShader = (desc.fileExtension == ".comp");
         desc.isLibrary = (desc.fileExtension == ".glsl");
         desc.isShadingModel = (desc.fileExtension == ".shadingmodel");
 
@@ -1213,8 +1210,6 @@ EShLanguage InxShaderLoader::GetShaderType(const std::string &typeStr)
         return EShLangFragment;
     } else if (typeStr == "geometry") {
         return EShLangGeometry;
-    } else if (typeStr == "compute") {
-        return EShLangCompute;
     } else if (typeStr == "tess_control") {
         return EShLangTessControl;
     } else if (typeStr == "tess_evaluation") {

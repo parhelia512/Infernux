@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal, QObject
 
-from version_manager import VersionManager, EngineVersion
+from version_manager import VersionManager, EngineVersion, DownloadCancelled
 
 
 # ─── Version card (one per installed version) ────────────────────────
@@ -84,22 +84,32 @@ class _FetchWorker(QObject):
 
 
 class _DownloadWorker(QObject):
-    """Download a version wheel on a background thread."""
+    """Download a version wheel on a background thread (cancellable)."""
     progress = Signal(int, int)  # downloaded, total
     finished = Signal(str)  # wheel path
+    cancelled = Signal()
     error = Signal(str)
 
     def __init__(self, vm: VersionManager, version: str):
         super().__init__()
         self._vm = vm
         self._version = version
+        self._cancel_requested = False
+
+    def cancel(self):
+        """Request cooperative cancellation (checked per 64 KB chunk)."""
+        self._cancel_requested = True
 
     def run(self):
         try:
             path = self._vm.download_version(
-                self._version, on_progress=lambda d, t: self.progress.emit(d, t)
+                self._version,
+                on_progress=lambda d, t: self.progress.emit(d, t),
+                should_cancel=lambda: self._cancel_requested,
             )
             self.finished.emit(path)
+        except DownloadCancelled:
+            self.cancelled.emit()
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -228,6 +238,8 @@ class InstallEditorDialog(QDialog):
         self._vm = version_manager
         self._selected: EngineVersion | None = None
         self._rows: list[tuple[EngineVersion, _VersionRow]] = []
+        self._dl_thread: QThread | None = None
+        self._dl_worker: _DownloadWorker | None = None
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -313,6 +325,8 @@ class InstallEditorDialog(QDialog):
     def _on_install(self):
         if not self._selected or self._selected.installed:
             return
+        if self._dl_thread is not None and self._dl_thread.isRunning():
+            return  # one download at a time
         # Start download
         self._btn_install.setEnabled(False)
         self._progress_bar.setRange(0, 100)
@@ -325,10 +339,33 @@ class InstallEditorDialog(QDialog):
         self._dl_thread.started.connect(self._dl_worker.run)
         self._dl_worker.progress.connect(self._on_dl_progress)
         self._dl_worker.finished.connect(self._on_dl_finished)
+        self._dl_worker.cancelled.connect(self._on_dl_cancelled)
         self._dl_worker.error.connect(self._on_dl_error)
         self._dl_worker.finished.connect(self._dl_thread.quit)
+        self._dl_worker.cancelled.connect(self._dl_thread.quit)
         self._dl_worker.error.connect(self._dl_thread.quit)
         self._dl_thread.start()
+
+    def _cancel_active_download(self, *, wait_ms: int = 10000) -> None:
+        """Cooperatively stop the in-flight download and wait for the thread.
+
+        The worker deletes its partial temp file before exiting, so closing
+        the dialog mid-download can no longer corrupt the version cache
+        (issue #43).
+        """
+        if self._dl_worker is not None:
+            self._dl_worker.cancel()
+        if self._dl_thread is not None and self._dl_thread.isRunning():
+            self._dl_thread.quit()
+            self._dl_thread.wait(wait_ms)
+
+    def reject(self):
+        self._cancel_active_download()
+        super().reject()
+
+    def closeEvent(self, event):
+        self._cancel_active_download()
+        super().closeEvent(event)
 
     def _on_dl_progress(self, downloaded: int, total: int):
         if total > 0:
@@ -337,6 +374,10 @@ class InstallEditorDialog(QDialog):
     def _on_dl_finished(self, _path: str):
         self._progress_bar.hide()
         self.accept()
+
+    def _on_dl_cancelled(self):
+        self._progress_bar.hide()
+        self._btn_install.setEnabled(True)
 
     def _on_dl_error(self, msg: str):
         self._progress_bar.hide()

@@ -88,6 +88,7 @@ __all__ = [
     "component_list_field",
     "hide_field",
     "FieldType",
+    "Color",
     "GameObjectRef",
     "MaterialRef",
     "ComponentRef",

@@ -45,12 +45,11 @@ struct ShaderDescriptor
     // Identity
     std::string shaderId;
     std::string filePath;
-    std::string fileExtension; // ".vert", ".frag", ".glsl", ".shadingmodel", ".comp"
+    std::string fileExtension; // ".vert", ".frag", ".glsl", ".shadingmodel"
 
     // Shader stage
     bool isVertexShader = false;
     bool isFragmentShader = false;
-    bool isComputeShader = false;
     bool isLibrary = false;      // .glsl
     bool isShadingModel = false; // .shadingmodel
 

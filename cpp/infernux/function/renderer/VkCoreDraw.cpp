@@ -161,14 +161,14 @@ void InxVkCoreModular::SetShadowDrawCalls(const std::vector<DrawCall> *drawCalls
 
 void InxVkCoreModular::CmdUpdateUniformBuffer(VkCommandBuffer cmdBuf, const glm::mat4 &view, const glm::mat4 &proj)
 {
-    // All material descriptor sets reference m_uniformBuffers[0] (hardcoded
-    // in MaterialDescriptorManager). Always target buffer 0 regardless of
-    // m_currentFrame so the shaders see the updated VP matrices.
-    if (m_uniformBuffers.empty() || !m_uniformBuffers[0]) {
+    // All material descriptor sets reference the single scene UBO; the
+    // in-command-buffer update below is what makes one buffer safe across
+    // frames in flight (no CPU-side write can race the GPU).
+    if (!m_sceneUbo) {
         return;
     }
 
-    VkBuffer buffer = m_uniformBuffers[0]->GetBuffer();
+    VkBuffer buffer = m_sceneUbo->GetBuffer();
 
     UniformBufferObject ubo{};
     ubo.model = glm::mat4(1.0f);
@@ -827,7 +827,7 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
 // ============================================================================
 
 void InxVkCoreModular::DrawShadowCasters(VkCommandBuffer cmdBuf, uint32_t width, uint32_t height, int queueMin,
-                                         int queueMax, int lightIndex, const std::string &shadowType)
+                                         int queueMax, int lightIndex)
 {
 #if INFERNUX_FRAME_PROFILE
     using Clock = std::chrono::high_resolution_clock;
@@ -835,14 +835,18 @@ void InxVkCoreModular::DrawShadowCasters(VkCommandBuffer cmdBuf, uint32_t width,
     auto stageStart = totalStart;
 #endif
 
+    // NOTE: hard/soft shadow selection is NOT a property of this pass.
+    // The shadow map only stores depth; filtering (16-tap Vogel-disk PCF for
+    // LightShadows::Soft) happens in the lit pass via shadowParams.w, driven
+    // by the Light component. A former "shadowType" string parameter here was
+    // a dead end and has been removed.
+
     // Currently only light index 0 (first directional light) is supported.
     // Log a warning if callers request a different index so the mismatch is visible.
     if (lightIndex != 0) {
         INXLOG_WARN("DrawShadowCasters: lightIndex=", lightIndex,
                     " requested but only index 0 is supported; using light 0");
     }
-    // shadowType is stored for future soft-shadow filtering but not yet consumed.
-    (void)shadowType;
 
     // Skip if shadow pipeline infrastructure not ready (lazy init)
     if (!m_shadowPipelineReady) {

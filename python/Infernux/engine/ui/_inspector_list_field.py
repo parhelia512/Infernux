@@ -40,7 +40,8 @@ def _make_list_default_element(metadata, element_type):
     if element_type == FieldType.VEC4:
         return vec4f(0.0, 0.0, 0.0, 0.0)
     if element_type == FieldType.COLOR:
-        return [1.0, 1.0, 1.0, 1.0]
+        from Infernux.components.serialized_field import RGBA_DEFAULT
+        return list(RGBA_DEFAULT)
     if element_type == FieldType.ENUM and metadata.enum_type is not None:
         members = _get_enum_members(metadata.enum_type)
         return members[0] if members else metadata.default
@@ -77,7 +78,11 @@ def _infer_list_element_type(metadata, current_value):
     if metadata.element_type is not None:
         return metadata.element_type
 
+    from Infernux.components.serialized_field import is_rgba_storage
+
     for container in (current_value, metadata.default):
+        if is_rgba_storage(container):
+            return FieldType.COLOR
         if not isinstance(container, (list, tuple)):
             continue
         for item in container:

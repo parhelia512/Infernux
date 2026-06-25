@@ -186,6 +186,30 @@ class AnimStateMachineRef(AssetRefBase):
         return None
 
 
+class TimelineFSMRef(AssetRefBase):
+    """Reference to a Timeline state machine (.timelinefsm) asset.
+
+    Stored as an AnimStateMachine with ``mode == 'timeline'`` (nodes are all
+    timeline states); resolved the same way as an .animfsm.
+    """
+
+    def _do_resolve(self):
+        if not self._guid and self._path_hint:
+            from Infernux.core.anim_state_machine import AnimStateMachine
+            return AnimStateMachine.load(self._path_hint)
+        db = _get_asset_database()
+        if db and self._guid:
+            try:
+                from Infernux.core.animation_clip3d import resolve_disk_path_for_guid_string
+                path = resolve_disk_path_for_guid_string(db, self._guid) or db.get_path_from_guid(self._guid)
+                if path:
+                    from Infernux.core.anim_state_machine import AnimStateMachine
+                    return AnimStateMachine.load(path)
+            except Exception:
+                pass
+        return None
+
+
 class AnimationClipRef(AssetRefBase):
     """Reference to an AnimationClip (.animclip2d) asset."""
 
@@ -219,6 +243,25 @@ class AnimationClip3DRef(AssetRefBase):
                 if path:
                     from Infernux.core.animation_clip3d import AnimationClip3D
                     return AnimationClip3D.load(path)
+            except Exception:
+                pass
+        return None
+
+
+class AnimationTimelineRef(AssetRefBase):
+    """Reference to an AnimationTimeline (.animtimeline) asset."""
+
+    def _do_resolve(self):
+        if not self._guid and self._path_hint:
+            from Infernux.core.animation_timeline import AnimationTimeline
+            return AnimationTimeline.load(self._path_hint)
+        db = _get_asset_database()
+        if db and self._guid:
+            try:
+                path = db.get_path_from_guid(self._guid)
+                if path:
+                    from Infernux.core.animation_timeline import AnimationTimeline
+                    return AnimationTimeline.load(path)
             except Exception:
                 pass
         return None
@@ -275,6 +318,22 @@ def _ensure_registry():
             "extensions": ("*.animclip3d",),
             "display":    "AnimClip3D",
             "prefix":     "aclip3d",
+        },
+        "AnimationTimeline": {
+            "ref_class":  AnimationTimelineRef,
+            "dict_key":   "__animtimeline_ref__",
+            "drag_type":  "ANIMTIMELINE_FILE",
+            "extensions": ("*.animtimeline",),
+            "display":    "Timeline",
+            "prefix":     "atl",
+        },
+        "TimelineFSM": {
+            "ref_class":  TimelineFSMRef,
+            "dict_key":   "__timelinefsm_ref__",
+            "drag_type":  "TIMELINEFSM_FILE",
+            "extensions": ("*.timelinefsm",),
+            "display":    "TimelineFSM",
+            "prefix":     "tlfsm",
         },
     })
 

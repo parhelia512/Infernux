@@ -76,6 +76,15 @@ class SceneManager
     /// @brief Unload all scenes
     void UnloadAllScenes();
 
+    /// @brief Full engine-shutdown teardown.
+    ///
+    /// Destroys every scene, persistent (DontDestroyOnLoad) object, and the
+    /// editor camera while the physics world and ECS stores are still alive.
+    /// Must be called from Infernux::Cleanup() BEFORE PhysicsWorld::Shutdown();
+    /// the SceneManager singleton itself is intentionally leaked so no scene
+    /// teardown ever happens during C++ static destruction.
+    void Shutdown();
+
     /// @brief Get a scene by name
     [[nodiscard]] Scene *GetScene(const std::string &name) const;
 

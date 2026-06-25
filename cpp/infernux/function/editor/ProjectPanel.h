@@ -91,6 +91,10 @@ class ProjectPanel : public EditorPanel
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimClip3D;
     /// Create animation state machine: (currentPath, name) → (ok, errorMsg)
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimFsm;
+    /// Create transform timeline: (currentPath, name) → (ok, errorMsg)
+    std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimTimeline;
+    /// Create timeline state machine: (currentPath, name) → (ok, errorMsg)
+    std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createTimelineFsm;
     /// Create prefab from hierarchy gameobject: (objId, currentPath)
     std::function<void(uint64_t, const std::string &)> createPrefabFromHierarchy;
 
@@ -115,6 +119,10 @@ class ProjectPanel : public EditorPanel
     std::function<void(const std::string &)> openAnimClip;
     /// Open animation state machine: (filePath)
     std::function<void(const std::string &)> openAnimFsm;
+    /// Open transform timeline: (filePath)
+    std::function<void(const std::string &)> openAnimTimeline;
+    /// Open timeline state machine: (filePath)
+    std::function<void(const std::string &)> openTimelineFsm;
     /// Reveal in file explorer: (path)
     std::function<void(const std::string &)> revealInExplorer;
 
@@ -240,6 +248,7 @@ class ProjectPanel : public EditorPanel
     void ProcessPendingThumbnails();
     uint64_t GetThumbnail(const std::string &filePath, uint64_t cachedMtimeNs);
     uint64_t GetMaterialThumbnail(const std::string &filePath);
+    uint64_t GetEmbeddedMaterialThumbnail(const FileItem &item);
     uint64_t GetModelThumbnail(const std::string &filePath);
     uint64_t GetPrefabThumbnail(const std::string &filePath);
     uint64_t GetMaterialMtimeNs(const std::string &filePath);
@@ -252,6 +261,8 @@ class ProjectPanel : public EditorPanel
 
     void EnsureTypeIconsLoaded();
     uint64_t GetTypeIconId(const FileItem &item) const;
+    uint64_t GetModel3dIconId() const;
+    static bool IsUiPrefabFile(const std::string &filePath);
 
     // ── Drag-drop maps ───────────────────────────────────────────────
     struct DragDropInfo
@@ -281,6 +292,10 @@ class ProjectPanel : public EditorPanel
     // ── Panel state ──────────────────────────────────────────────────
     std::string m_rootPath;
     std::string m_currentPath;
+    /// Default browse folder (usually `<project>/Assets`); also the navigation floor.
+    std::string m_preferredNavPath;
+    /// When true, bare project root is not a valid browse target ([..] stops at subfolders).
+    bool m_navHasSubfolders = false;
     std::string m_lastNotifiedPath;
 
     // Breadcrumb
@@ -309,6 +324,8 @@ class ProjectPanel : public EditorPanel
     // mid-render (CommitRename, Delete, Paste, Move) so that the file grid's item
     // pointer stays valid for the remainder of the frame.
     bool m_pendingCacheInvalidation = false;
+    // Model expand/collapse only needs augmented sub-asset rows rebuilt — not a full dir rescan.
+    bool m_pendingAugmentedCacheInvalidation = false;
 
     // Clipboard
     std::vector<std::string> m_clipboardPaths;
@@ -316,7 +333,7 @@ class ProjectPanel : public EditorPanel
 
     // ── Focus tracking ───────────────────────────────────────────────
     bool m_wasFocused = false;
-    
+
     // Model expansion
     std::unordered_set<std::string> m_expandedModels;
 
@@ -373,6 +390,14 @@ class ProjectPanel : public EditorPanel
     // ── Path utility ─────────────────────────────────────────────────
     static std::string NormalizePath(const std::string &path);
     static bool IsPathWithin(const std::string &path, const std::string &parent);
+    /// Directory depth relative to m_rootPath (root=0, Assets=1, Assets/Mats=2, …).
+    int GetPathDepthFromRoot(const std::string &path) const;
+    /// Lowest folder users may browse (Assets/Logs when present, else project root).
+    std::string GetMinimumBrowsePath() const;
+    void ClampNavigationPath();
+    void AssignCurrentPath(const std::string &path);
+    /// True when [..] may move to the parent folder (blocked at project-root subfolders).
+    bool CanNavigateUpFromCurrent() const;
     static uint64_t GetMtimeNs(const std::string &path);
 
     // ── Grid layout ──────────────────────────────────────────────────

@@ -27,8 +27,10 @@ namespace infernux
 
 PhysicsECSStore &PhysicsECSStore::Instance()
 {
-    static PhysicsECSStore instance;
-    return instance;
+    // Intentionally leaked (see SceneManager::Instance) — Collider
+    // destructors must always find a live store.
+    static PhysicsECSStore *instance = new PhysicsECSStore();
+    return *instance;
 }
 
 // ============================================================================

@@ -311,8 +311,10 @@ void RegisterResourceBindings(py::module_ &m)
                         mat.ClearTexture(name);
                         return;
                     }
-                    std::string guid = resolveGuidFromPath(text);
-                    mat.SetTextureGuid(name, guid.empty() ? text : guid);
+                    // SetTextureGuid normalizes GUIDs, registered paths, raw
+                    // file paths, and builtin-resource relative refs to a GUID
+                    // (GUID-only contract enforced in one place).
+                    mat.SetTextureGuid(name, text);
                 };
 
                 if (py::isinstance<py::str>(value)) {

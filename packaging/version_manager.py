@@ -19,10 +19,16 @@ import re
 import time
 import urllib.error
 import urllib.request
+import uuid
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 import logging
+
+
+class DownloadCancelled(Exception):
+    """Raised when a version download is cancelled by the user."""
 
 
 # ── Configuration ────────────────────────────────────────────────────
@@ -110,21 +116,53 @@ class VersionManager:
     def is_installed(self, version: str) -> bool:
         return bool(self.get_wheel_path(version))
 
+    @staticmethod
+    def _is_valid_wheel(path: str) -> bool:
+        """A wheel is a zip — reject truncated/corrupted files outright."""
+        try:
+            return os.path.getsize(path) > 0 and zipfile.is_zipfile(path)
+        except OSError:
+            return False
+
     def get_wheel_path(self, version: str) -> Optional[str]:
-        """Return path to the cached wheel for *version*, or None."""
+        """Return path to a VALID cached wheel for *version*, or None.
+
+        Corrupted wheels (e.g. left over from an interrupted install before
+        atomic installs existed) are deleted on sight so they neither appear
+        in the version list nor block a clean re-download (issue #43).
+        """
         ver_dir = _VERSIONS_DIR / version
         if not ver_dir.is_dir():
             return None
-        wheels = glob.glob(str(ver_dir / "infernux-*.whl"))
-        return wheels[0] if wheels else None
+        for wheel in glob.glob(str(ver_dir / "infernux-*.whl")):
+            if self._is_valid_wheel(wheel):
+                return wheel
+            try:
+                os.remove(wheel)
+                logging.getLogger(__name__).warning(
+                    "Removed corrupted cached wheel: %s", wheel
+                )
+            except OSError:
+                pass
+        return None
 
     def download_version(
         self,
         version: str,
         *,
-        on_progress: Optional[callable] = None,
+        on_progress: Optional[Callable] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
     ) -> str:
-        """Download a specific version's wheel.  Returns the local wheel path."""
+        """Download a specific version's wheel.  Returns the local wheel path.
+
+        Cancellation-safe and concurrency-safe (issue #43):
+        - data streams into a unique ``*.tmp-<uuid>`` file, so a second
+          download attempt can never interleave writes with an abandoned one;
+        - the final ``os.replace`` is atomic — the destination either does
+          not exist or is a complete wheel;
+        - when *should_cancel* returns True the partial file is deleted and
+          ``DownloadCancelled`` is raised.
+        """
         versions = self.list_versions(include_prerelease=True)
         ev = next((v for v in versions if v.version == version), None)
         if ev is None:
@@ -139,30 +177,57 @@ class VersionManager:
         dest = ver_dir / filename
 
         if dest.exists():
-            return str(dest)
+            if self._is_valid_wheel(str(dest)):
+                return str(dest)
+            dest.unlink(missing_ok=True)  # heal corrupted leftovers
 
-        # Stream download
+        # Stream download to a unique temp file
         req = urllib.request.Request(ev.wheel_url)
         req.add_header("Accept", "application/octet-stream")
         req.add_header("User-Agent", "Infernux-Hub/1.0")
 
-        with urllib.request.urlopen(req) as resp:
-            total = int(resp.headers.get("Content-Length", 0)) or ev.wheel_size
-            downloaded = 0
-            chunk_size = 64 * 1024
+        tmp_path = f"{dest}.tmp-{uuid.uuid4().hex[:8]}"
+        try:
+            with urllib.request.urlopen(req) as resp:
+                total = int(resp.headers.get("Content-Length", 0)) or ev.wheel_size
+                downloaded = 0
+                chunk_size = 64 * 1024
 
-            tmp_path = str(dest) + ".tmp"
-            with open(tmp_path, "wb") as f:
-                while True:
-                    chunk = resp.read(chunk_size)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if on_progress and total:
-                        on_progress(downloaded, total)
+                with open(tmp_path, "wb") as f:
+                    while True:
+                        if should_cancel is not None and should_cancel():
+                            raise DownloadCancelled(version)
+                        chunk = resp.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if on_progress and total:
+                            on_progress(downloaded, total)
 
-        os.replace(tmp_path, str(dest))
+            if not zipfile.is_zipfile(tmp_path):
+                raise ValueError(
+                    f"Downloaded file for {version} is not a valid wheel "
+                    "(truncated or corrupted transfer)."
+                )
+            os.replace(tmp_path, str(dest))
+        finally:
+            # Cancel/error path: never leave partial temp files behind.
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+        # If the cancelled/failed download left an empty version dir, drop it
+        # so it does not show up as an installed version.
+        if not dest.exists():
+            try:
+                if not any(ver_dir.iterdir()):
+                    ver_dir.rmdir()
+            except OSError:
+                pass
+
         return str(dest)
 
     def remove_version(self, version: str) -> bool:
@@ -282,14 +347,17 @@ class VersionManager:
         return releases
 
     def _local_versions(self) -> List[str]:
-        """List versions that are already downloaded locally."""
+        """List versions with a VALID wheel downloaded locally.
+
+        Uses get_wheel_path() so corrupted leftovers from interrupted
+        installs are healed and never listed (issue #43).
+        """
         result = []
         if not _VERSIONS_DIR.is_dir():
             return result
         for entry in _VERSIONS_DIR.iterdir():
             if entry.is_dir() and not entry.name.startswith("_"):
-                wheels = glob.glob(str(entry / "infernux-*.whl"))
-                if wheels:
+                if self.get_wheel_path(entry.name):
                     result.append(entry.name)
         return result
 

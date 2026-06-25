@@ -716,12 +716,11 @@ QueueFamilyIndices VkDeviceContext::FindQueueFamilies(VkPhysicalDevice device) c
 
         if ((flags & VK_QUEUE_GRAPHICS_BIT) && !indices.graphicsFamily.has_value()) {
             indices.graphicsFamily = i;
-            // The graphics queue is always implicitly transfer+compute capable
-            // per the Vulkan spec — seed those as the conservative fallback so
+            // The graphics queue is always implicitly transfer capable per the
+            // Vulkan spec — seed it as the conservative fallback so
             // FindQueueFamilies always returns a complete set even on devices
             // that expose only a single queue family.
             indices.transferFamily = i;
-            indices.computeFamily = i;
         }
 
         VkBool32 presentSupport = VK_FALSE;
@@ -743,19 +742,6 @@ QueueFamilyIndices VkDeviceContext::FindQueueFamilies(VkPhysicalDevice device) c
         const bool hasCompute = (flags & VK_QUEUE_COMPUTE_BIT) != 0;
         if (hasTransfer && !hasGraphics && !hasCompute) {
             indices.transferFamily = i;
-            break;
-        }
-    }
-
-    // Third pass: prefer an async-compute family (compute-only, no graphics).
-    // Reserved for future Phase 5e compute work; today the engine still uses
-    // the graphics queue for compute dispatches.
-    for (uint32_t i = 0; i < queueFamilyCount; i++) {
-        const auto flags = queueFamilies[i].queueFlags;
-        const bool hasCompute = (flags & VK_QUEUE_COMPUTE_BIT) != 0;
-        const bool hasGraphics = (flags & VK_QUEUE_GRAPHICS_BIT) != 0;
-        if (hasCompute && !hasGraphics) {
-            indices.computeFamily = i;
             break;
         }
     }

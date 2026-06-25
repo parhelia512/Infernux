@@ -15,7 +15,9 @@ from Infernux.components.component import InxComponent
 from Infernux.components.serialized_field import serialized_field
 from Infernux.components.decorators import require_component, disallow_multiple, add_component_menu
 from Infernux.components.builtin.skinned_mesh_renderer import SkinnedMeshRenderer
-from Infernux.core.anim_state_machine import AnimStateMachine, AnimState, AnimTransition
+from Infernux.core.anim_state_machine import (
+    AnimStateMachine, AnimState, AnimTransition, evaluate_anim_condition,
+)
 from Infernux.core.animation_clip3d import AnimationClip3D, resolve_disk_path_for_guid_string
 from Infernux.core.asset_ref import AnimStateMachineRef
 from Infernux.debug import Debug
@@ -122,23 +124,48 @@ def _get_asset_database():
     return None
 
 
-def _resolve_clip_path(state: AnimState) -> Optional[str]:
-    if state.clip_guid:
+def _resolve_clip_path_from(guid: str, path_hint: str) -> Optional[str]:
+    """Resolve a clip GUID / path-hint to a usable disk path (or embedded take id)."""
+    if guid:
         db = _get_asset_database()
         if db:
             try:
-                path = resolve_disk_path_for_guid_string(db, state.clip_guid)
-                if path:
-                    return path
+                p = resolve_disk_path_for_guid_string(db, guid)
+                if p:
+                    return p
             except Exception:
                 pass
-    raw = (state.clip_path or "").strip()
+    raw = (path_hint or "").strip()
     # Project panel: embedded FBX take as "<guid>::subanim:<index>" (not a file path).
     if raw and "::subanim:" in raw:
         return raw
     if raw and os.path.isfile(raw):
         return raw
     return None
+
+
+def _resolve_clip_path(state: AnimState) -> Optional[str]:
+    return _resolve_clip_path_from(state.clip_guid, state.clip_path)
+
+
+def _resolve_clip_b_path(state: AnimState) -> Optional[str]:
+    return _resolve_clip_path_from(getattr(state, "clip_b_guid", ""), getattr(state, "clip_b_path", ""))
+
+
+def _resolve_timeline_path(state: AnimState) -> Optional[str]:
+    """Resolve a timeline state's ``.animtimeline`` asset to a disk path."""
+    guid = getattr(state, "timeline_guid", "") or ""
+    path = (getattr(state, "timeline_path", "") or "").strip()
+    if guid:
+        db = _get_asset_database()
+        if db:
+            try:
+                p = db.get_path_from_guid(guid)
+                if p:
+                    return p
+            except Exception:
+                pass
+    return path or None
 
 
 def _clip_duration_hint(clip: Optional[AnimationClip3D]) -> float:
@@ -202,11 +229,17 @@ class SkeletalAnimator(InxComponent):
     _blend_duration: float = 0.0
     _last_native_take_name: str = ""
     _duration_cache: Dict[str, float] = {}
+    _current_timeline = None
+    _timeline_cache: Dict[str, object] = {}
+    _timeline_base = None
 
     def awake(self):
         self._parameters = {}
         self._clip_cache = {}
         self._duration_cache = {}
+        self._timeline_cache = {}
+        self._current_timeline = None
+        self._timeline_base = None
         self._last_native_take_name = ""
         self._current_state_name = ""
         self._current_clip = None
@@ -226,6 +259,9 @@ class SkeletalAnimator(InxComponent):
             self.play(self._fsm.default_state)
 
     def update(self, delta_time: float):
+        if self._current_timeline is not None:
+            self._update_timeline(delta_time)
+            return
         if not self._playing or not self._current_clip:
             self._sync_native_runtime_playback()
             return
@@ -236,22 +272,45 @@ class SkeletalAnimator(InxComponent):
         self._elapsed += delta_time * speed
         self._advance_blend(delta_time)
 
+        prev_norm = getattr(self, "_prev_event_norm", 0.0)
         duration = self._clip_duration(clip)
         if duration > 0.0 and self._elapsed >= duration:
             should_loop = state.loop if state else True
             if should_loop:
+                post = self._elapsed % duration
+                post_norm = post / duration
+                self._dispatch_clip_events(clip, prev_norm, post_norm, True)
+                self._prev_event_norm = post_norm
                 self._try_auto_transition()
-                self._elapsed %= duration
+                if self._current_clip is clip and self._playing:
+                    self._elapsed = post
             else:
                 self._elapsed = duration
+                self._dispatch_clip_events(clip, prev_norm, 1.0, False)
+                self._prev_event_norm = 1.0
                 self._playing = False
                 self._try_auto_transition()
                 self._sync_native_runtime_playback()
                 return
+        else:
+            curr_norm = (self._elapsed / duration) if duration > 0.0 else 0.0
+            self._dispatch_clip_events(clip, prev_norm, curr_norm, False)
+            self._prev_event_norm = curr_norm
 
         self._apply_active_take()
         self._try_auto_transition()
         self._sync_native_runtime_playback()
+
+    def _dispatch_clip_events(self, clip, prev_norm: float, curr_norm: float, looped: bool):
+        """Fire any animation events on *clip* crossed this frame."""
+        events = getattr(clip, "events", None)
+        if not events:
+            return
+        try:
+            from Infernux.core.animation_event import dispatch_animation_events
+            dispatch_animation_events(self.game_object, events, prev_norm, curr_norm, looped)
+        except Exception as exc:
+            Debug.log_warning(f"[SkeletalAnimator] event dispatch error: {exc}")
 
     @property
     def current_state(self) -> str:
@@ -269,6 +328,11 @@ class SkeletalAnimator(InxComponent):
 
     @property
     def normalized_time(self) -> float:
+        if self._current_timeline is not None:
+            dur = max(1e-6, float(self._current_timeline.duration))
+            if bool(getattr(self._current_timeline, "loop", True)):
+                return (self._elapsed % dur) / dur
+            return min(self._elapsed / dur, 1.0)
         duration = self._clip_duration(self._current_clip)
         if duration > 0.0:
             return min(self._elapsed / duration, 1.0)
@@ -283,6 +347,10 @@ class SkeletalAnimator(InxComponent):
         if not name:
             return False
         return self._enter_state(name)
+
+    def cross_fade(self, state_name: str, duration: float) -> bool:
+        """Enter *state_name* blending over *duration* seconds (Unity-style)."""
+        return self._enter_state(state_name, fade_duration=max(float(duration), 0.0))
 
     def stop(self):
         self._playing = False
@@ -324,6 +392,9 @@ class SkeletalAnimator(InxComponent):
     def on_after_deserialize(self):
         self._clip_cache = {}
         self._duration_cache = {}
+        self._timeline_cache = {}
+        self._current_timeline = None
+        self._timeline_base = None
         self._last_native_take_name = ""
         self._parameters = {}
         self._clear_blend_state()
@@ -332,6 +403,7 @@ class SkeletalAnimator(InxComponent):
         self._fsm = None
         self._clip_cache = {}
         self._duration_cache = {}
+        self._timeline_cache = {}
 
         fsm = self.controller
         if fsm is None:
@@ -374,7 +446,155 @@ class SkeletalAnimator(InxComponent):
         self._clip_cache[key] = clip
         return clip
 
-    def _enter_state(self, state_name: str) -> bool:
+    def _resolve_clip_b(self, state: AnimState) -> Optional[AnimationClip3D]:
+        """Resolve the second clip (B) of a blend state."""
+        key = state.name + "::B"
+        if key in self._clip_cache:
+            return self._clip_cache[key]
+        clip_path = _resolve_clip_b_path(state)
+        clip = AnimationClip3D.load(clip_path) if clip_path else None
+        self._clip_cache[key] = clip
+        return clip
+
+    def _resolve_timeline(self, state: AnimState):
+        """Resolve and cache the ``.animtimeline`` asset for a timeline state."""
+        key = state.name
+        if key in self._timeline_cache:
+            return self._timeline_cache[key]
+        tl = None
+        path = _resolve_timeline_path(state)
+        if path:
+            try:
+                from Infernux.core.animation_timeline import AnimationTimeline
+                tl = AnimationTimeline.load(path)
+            except Exception as exc:
+                Debug.log_suppressed("SkeletalAnimator._resolve_timeline", exc)
+            if tl is None:
+                Debug.log_warning(f"[SkeletalAnimator] Failed to load timeline for state '{state.name}': {path}")
+        self._timeline_cache[key] = tl
+        return tl
+
+    def _update_timeline(self, delta_time: float):
+        """Advance + apply a timeline state, driving the owner GameObject transform."""
+        tl = self._current_timeline
+        if tl is None:
+            return
+        state = self._get_current_state()
+        # Looping is decided by the owning FSM state, not the timeline asset.
+        loop = bool(state.loop) if state is not None else True
+        if self._playing:
+            speed = self.playback_speed * (state.speed if state else 1.0)
+            self._elapsed += delta_time * speed
+            dur = max(1e-6, float(tl.duration))
+            if self._elapsed >= dur:
+                # Reached the end: hold the final pose and evaluate transitions
+                # while progress == 1.0 *before* wrapping, so a looping timeline
+                # can still leave via exit-time (fixes timeline->next stalls).
+                self._apply_timeline(tl, dur)
+                self._try_auto_transition()
+                if self._current_timeline is tl and self._playing:
+                    if loop:
+                        self._elapsed = self._elapsed % dur
+                    else:
+                        self._elapsed = dur
+                        self._playing = False
+                    self._apply_timeline(tl, self._elapsed)
+                return
+        self._apply_timeline(tl, self._elapsed)
+        self._try_auto_transition()
+
+    def _capture_timeline_base(self):
+        """Snapshot the owner's local transform as the additive base for a timeline."""
+        tr = getattr(self.game_object, "transform", None)
+        if tr is None:
+            self._timeline_base = ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+            return
+        try:
+            p, r, s = tr.local_position, tr.local_euler_angles, tr.local_scale
+            self._timeline_base = (
+                [float(p.x), float(p.y), float(p.z)],
+                [float(r.x), float(r.y), float(r.z)],
+                [float(s.x), float(s.y), float(s.z)],
+            )
+        except Exception:
+            self._timeline_base = ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+
+    def _apply_timeline(self, tl, t: float):
+        """Sample *tl* at time *t* and write the local transform of the owner."""
+        sampled = tl.sample(t)
+        if sampled is None:
+            return
+        pos, rot, scl = sampled
+        if getattr(tl, "apply_mode", "additive") == "additive":
+            bp, br, bs = self._timeline_base or ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
+            pos = [bp[0] + pos[0], bp[1] + pos[1], bp[2] + pos[2]]
+            rot = [br[0] + rot[0], br[1] + rot[1], br[2] + rot[2]]
+            scl = [bs[0] * scl[0], bs[1] * scl[1], bs[2] * scl[2]]
+        tr = getattr(self.game_object, "transform", None)
+        if tr is None:
+            return
+        try:
+            trs = getattr(tr, "set_local_trs", None)
+            if trs is not None:
+                # Single boundary crossing + one subtree invalidate (no Vector3 allocs).
+                trs(float(pos[0]), float(pos[1]), float(pos[2]),
+                    float(rot[0]), float(rot[1]), float(rot[2]),
+                    float(scl[0]), float(scl[1]), float(scl[2]))
+                return
+            from Infernux.lib import Vector3
+            tr.local_position = Vector3(float(pos[0]), float(pos[1]), float(pos[2]))
+            tr.local_euler_angles = Vector3(float(rot[0]), float(rot[1]), float(rot[2]))
+            tr.local_scale = Vector3(float(scl[0]), float(scl[1]), float(scl[2]))
+        except Exception as exc:
+            Debug.log_suppressed("SkeletalAnimator._apply_timeline", exc)
+
+    def _blend_state_lerp(self, state: AnimState) -> float:
+        """Per-node Lerp (authored ``blend_value``), overridable via param ``<state>/Lerp``."""
+        lerp = float(getattr(state, "blend_value", 0.5) or 0.0)
+        pkey = f"{state.name}/Lerp"
+        if pkey in self._parameters:
+            try:
+                lerp = float(self._parameters[pkey])
+            except (TypeError, ValueError):
+                pass
+        return max(0.0, min(1.0, lerp))
+
+    def _submit_blend_state(self, cpp, state: AnimState) -> bool:
+        """Submit a blend-state pose (clip A lerp clip B). Returns True if handled."""
+        clip_a = self._current_clip
+        take_a = str(getattr(clip_a, "take_name", "") or "") if clip_a is not None else ""
+        clip_b = self._resolve_clip_b(state)
+        take_b = str(getattr(clip_b, "take_name", "") or "") if clip_b is not None else ""
+        if not take_a and not take_b:
+            return False
+        lerp = self._blend_state_lerp(state)
+        loop = bool(getattr(state, "loop", True))
+        t = float(self._elapsed)
+        normalized = float(self.normalized_time)
+
+        # Preferred: a 2-layer pose stack (correct per-bone N-way blend, needs the
+        # native pose-stack API); otherwise fall back to the 2-clip crossfade slot.
+        submit_stack = getattr(cpp, "submit_pose_stack", None)
+        if callable(submit_stack) and take_a and take_b:
+            try:
+                submit_stack([
+                    {"take_name": take_a, "time": t, "weight": 1.0 - lerp, "loop": loop},
+                    {"take_name": take_b, "time": t, "weight": lerp, "loop": loop},
+                ])
+                self._last_native_take_name = take_a
+                return True
+            except Exception as exc:
+                Debug.log_suppressed("SkeletalAnimator._submit_blend_state.pose_stack", exc)
+
+        submit_pose = getattr(cpp, "submit_animation_pose", None)
+        if callable(submit_pose):
+            submit_pose(take_a or take_b, t, normalized,
+                        take_b if take_a else "", t, lerp if take_a else 0.0, loop)
+            self._last_native_take_name = take_a or take_b
+            return True
+        return False
+
+    def _enter_state(self, state_name: str, fade_duration: Optional[float] = None) -> bool:
         if not self._fsm:
             return False
         state = self._fsm.get_state(state_name)
@@ -386,16 +606,35 @@ class SkeletalAnimator(InxComponent):
             if self._playing and self._current_state_name == state_name:
                 return True
 
+        # Timeline state: drives the owner transform instead of a skeletal clip.
+        if getattr(state, "kind", "clip") == "timeline":
+            self._clear_blend_state()
+            self._current_state_name = state_name
+            self._current_clip = None
+            self._current_timeline = self._resolve_timeline(state)
+            self._elapsed = 0.0
+            self._prev_event_norm = 0.0
+            self._playing = True
+            self._capture_timeline_base()  # additive deltas apply on top of this
+            self._apply_active_take()  # clear skeletal take → bind pose
+            if self._current_timeline is not None:
+                self._apply_timeline(self._current_timeline, 0.0)
+            self._sync_native_runtime_playback()
+            return True
+
+        self._current_timeline = None
         previous_state = self._get_current_state()
         previous_clip = self._current_clip if self._playing else None
         previous_elapsed = self._elapsed
         previous_speed = self._clip_effective_speed(previous_state, previous_clip)
 
         clip = self._resolve_clip(state)
-        self._start_blend_if_needed(previous_clip, previous_elapsed, previous_speed, clip)
+        self._start_blend_if_needed(previous_clip, previous_elapsed, previous_speed, clip,
+                                    fade_duration=fade_duration)
         self._current_state_name = state_name
         self._current_clip = clip
         self._elapsed = 0.0
+        self._prev_event_norm = 0.0
         self._playing = True
         self._apply_active_take()
         self._sync_native_runtime_playback()
@@ -435,14 +674,22 @@ class SkeletalAnimator(InxComponent):
         previous_elapsed: float,
         previous_speed: float,
         next_clip: Optional[AnimationClip3D],
+        fade_duration: Optional[float] = None,
     ) -> None:
         self._clear_blend_state()
         if previous_clip is None or next_clip is None:
             return
         prev_take = str(getattr(previous_clip, "take_name", "") or "")
         next_take = str(getattr(next_clip, "take_name", "") or "")
-        duration = max(float(getattr(self, "cross_fade_duration", 0.0) or 0.0), 0.0)
-        if duration <= 0.0 or not prev_take or not next_take or prev_take == next_take:
+        # Per-transition duration (AnimTransition.duration / cross_fade()) wins;
+        # the component-level cross_fade_duration is only the fallback.
+        if fade_duration is not None:
+            duration = max(float(fade_duration), 0.0)
+        else:
+            duration = max(float(getattr(self, "cross_fade_duration", 0.0) or 0.0), 0.0)
+        # Same-take fades are supported natively (different sample times), so
+        # only an actually-missing take disables blending.
+        if duration <= 0.0 or not prev_take or not next_take:
             return
         self._blend_from_clip = previous_clip
         self._blend_from_take_name = prev_take
@@ -498,9 +745,21 @@ class SkeletalAnimator(InxComponent):
         cpp = getattr(r, "_cpp_component", None)
         if cpp is None:
             return
+        # Blend states output a continuous A↔B lerp via their own Lerp value,
+        # independent of transition crossfades.
+        state = self._get_current_state()
+        if state is not None and getattr(state, "kind", "clip") == "blend":
+            if self._submit_blend_state(cpp, state):
+                return
         submit_pose = getattr(cpp, "submit_animation_pose", None)
         if callable(submit_pose):
-            take_name = self.current_take_name if self._playing and self._current_clip is not None else ""
+            # A finished non-looping clip keeps submitting its take with
+            # loop=False so the native sampler holds the END pose; an empty
+            # take renders the bind pose (mesh always stays visible).
+            has_clip = self._current_clip is not None and bool(self.current_take_name)
+            take_name = self.current_take_name if has_clip else ""
+            state = self._get_current_state()
+            loop = bool(state.loop) if state is not None else True
             normalized = float(self.normalized_time) if take_name else 0.0
             blend_take = ""
             blend_time = 0.0
@@ -517,6 +776,7 @@ class SkeletalAnimator(InxComponent):
                 blend_take,
                 blend_time,
                 blend_weight,
+                loop,
             )
             self._last_native_take_name = take_name
             return
@@ -546,6 +806,11 @@ class SkeletalAnimator(InxComponent):
         return None
 
     def _exit_time_gate_ok(self, state: AnimState) -> bool:
+        if self._current_timeline is not None:
+            dur = max(1e-6, float(self._current_timeline.duration))
+            thr = max(0.0, min(1.0, float(getattr(state, "exit_time_normalized", 1.0))))
+            progress = min(max(self._elapsed / dur, 0.0), 1.0)
+            return progress + 1e-7 >= thr
         duration = self._clip_duration(self._current_clip)
         if duration <= 0.0:
             return True
@@ -563,7 +828,11 @@ class SkeletalAnimator(InxComponent):
         for tr in state.transitions:
             if self._evaluate_condition(tr):
                 self._consume_triggers(tr.condition)
-                self._enter_state(tr.target_state)
+                # AnimTransition.duration (authored in the FSM editor) drives
+                # this specific fade; <= 0 falls back to cross_fade_duration.
+                tr_duration = float(getattr(tr, "duration", 0.0) or 0.0)
+                self._enter_state(tr.target_state,
+                                  fade_duration=tr_duration if tr_duration > 0.0 else None)
                 return
 
     def _evaluate_condition(self, transition: AnimTransition) -> bool:
@@ -584,16 +853,21 @@ class SkeletalAnimator(InxComponent):
         ctx["normalized_time"] = self.normalized_time
         ctx["state"] = self._current_state_name
 
+        # Safe structured evaluation — no eval()/builtins/attribute access.
         try:
-            return bool(eval(cond, {"__builtins__": {}}, ctx))  # noqa: S307
+            return evaluate_anim_condition(cond, ctx)
         except Exception as exc:
             Debug.log_warning(
-                f"[SkeletalAnimator] Condition eval error in '{self._current_state_name}': "
+                f"[SkeletalAnimator] Condition error in '{self._current_state_name}': "
                 f"'{cond}' -> {exc}"
             )
             return False
 
     def _consume_triggers(self, condition: str):
+        # Identifier-boundary matching: a trigger named "attack" must NOT be
+        # consumed by a condition that references "is_attacking".
+        import re
+        identifiers = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", condition or ""))
         for name, val in list(self._parameters.items()):
-            if val is True and name in condition:
+            if val is True and name in identifiers:
                 self._parameters[name] = False

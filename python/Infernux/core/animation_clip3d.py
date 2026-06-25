@@ -5,8 +5,10 @@ Serialized as ``.animclip3d`` JSON files.  This is the authoring-side
 counterpart to 2D :class:`AnimationClip` — it references a source model
 (typically ``.fbx``) and names an animation take embedded in that file.
 
-Runtime sampling / skinning lives in C++ (future milestones); this asset
-is intentionally simple and stable for Python workflows + AI tooling.
+This asset is a *take pointer*, not a keyframe container: runtime sampling,
+blending, and GPU skinning are implemented in C++ (``InxSkinnedMesh`` builds
+the bone palette; the vertex shader applies 4-influence skinning). Keep this
+class simple and stable for Python workflows + AI tooling.
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+from Infernux.core.animation_event import AnimationEvent, events_from_list
 
 
 def is_asset_guid_string(s: str) -> bool:
@@ -96,6 +100,9 @@ class AnimationClip3D:
     # Optional seconds (authoring or tooling); 0.0 = unknown. Embedded takes may be unknown.
     duration_hint: float = 0.0
 
+    # Animation events keyed by normalized time (0..1); dispatched at runtime.
+    events: List[AnimationEvent] = field(default_factory=list)
+
     file_path: str = field(default="", repr=False, compare=False)
 
     # ── Serialization ───────────────────────────────────────────────
@@ -109,6 +116,7 @@ class AnimationClip3D:
             "take_name": self.take_name,
             "bind_pose_bone_names": list(self.bind_pose_bone_names),
             "duration_hint": float(self.duration_hint),
+            "events": [e.to_dict() for e in self.events],
         }
 
     @classmethod
@@ -124,6 +132,7 @@ class AnimationClip3D:
             take_name=str(d.get("take_name", "")),
             bind_pose_bone_names=[str(x) for x in bones],
             duration_hint=float(d.get("duration_hint", 0.0) or 0.0),
+            events=events_from_list(d.get("events", [])),
         )
 
     def copy(self) -> "AnimationClip3D":
@@ -247,13 +256,6 @@ class AnimationClip3D:
 
 
 def _read_asset_guid_from_meta_sidecar(asset_path: str) -> str:
-    """Return GUID from a ``.meta`` file's root (not the metadata{} map)."""
-    meta_path = asset_path + ".meta"
-    if not os.path.isfile(meta_path):
-        return ""
-    try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            root = json.load(f)
-        return str(root.get("guid", "") or "")
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        return ""
+    """Return GUID from a ``.meta`` sidecar (metadata map or legacy root field)."""
+    from Infernux.core.asset_types import read_meta_guid
+    return read_meta_guid(asset_path)

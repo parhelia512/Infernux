@@ -34,8 +34,9 @@ struct AudioEngine::AudioVoiceState
 
 AudioEngine &AudioEngine::Instance()
 {
-    static AudioEngine instance;
-    return instance;
+    // Intentionally leaked — shut down explicitly in Infernux::Cleanup().
+    static AudioEngine *instance = new AudioEngine();
+    return *instance;
 }
 
 AudioEngine::~AudioEngine()

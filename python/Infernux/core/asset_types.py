@@ -203,14 +203,14 @@ class ShaderAssetInfo:
 
     guid: str = ""
     source_path: str = ""
-    shader_type: str = ""  # "vertex", "fragment", "geometry", "compute", etc.
+    shader_type: str = ""  # "vertex", "fragment", "geometry", "tess_control", etc.
 
     @classmethod
     def from_path(cls, path: str, guid: str = "") -> "ShaderAssetInfo":
         ext = os.path.splitext(path)[1].lower()
         _type_map = {
             ".vert": "vertex", ".frag": "fragment", ".geom": "geometry",
-            ".comp": "compute", ".tesc": "tess_control", ".tese": "tess_eval",
+            ".tesc": "tess_control", ".tese": "tess_eval",
         }
         return cls(guid=guid, source_path=path, shader_type=_type_map.get(ext, "unknown"))
 
@@ -315,6 +315,27 @@ def read_meta_file(asset_path: str) -> Optional[Dict[str, Any]]:
         from Infernux.debug import Debug
         Debug.log_warning(f"Failed to read meta file '{meta_path}': {e}")
         return None
+
+
+def read_meta_guid(asset_path: str) -> str:
+    """Return the asset GUID stored in the ``.meta`` sidecar (metadata map or legacy root)."""
+    meta_path = asset_path + ".meta"
+    if not os.path.isfile(meta_path):
+        return ""
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            root = json.load(f)
+        root_guid = root.get("guid")
+        if isinstance(root_guid, str) and root_guid.strip():
+            return root_guid.strip()
+        meta = read_meta_file(asset_path)
+        if meta:
+            guid = meta.get("guid")
+            if isinstance(guid, str):
+                return guid.strip()
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return ""
 
 
 def write_meta_fields(asset_path: str, updates: Dict[str, Any]) -> bool:
@@ -490,7 +511,7 @@ IMAGE_EXTENSIONS = frozenset({
 
 # Shader extensions supported by ShaderImporter
 SHADER_EXTENSIONS = frozenset({
-    ".vert", ".frag", ".geom", ".comp", ".tesc", ".tese",
+    ".vert", ".frag", ".geom", ".tesc", ".tese",
 })
 
 # Material extension
@@ -519,6 +540,12 @@ ANIMCLIP3D_EXTENSIONS = frozenset({".animclip3d"})
 # Animation state machine extension
 ANIMFSM_EXTENSIONS = frozenset({".animfsm"})
 
+# Transform timeline extension
+ANIMTIMELINE_EXTENSIONS = frozenset({".animtimeline"})
+
+# Timeline state machine extension (FSM whose nodes are all timelines)
+TIMELINEFSM_EXTENSIONS = frozenset({".timelinefsm"})
+
 
 def asset_category_from_extension(ext: str) -> Optional[str]:
     """Return 'material' | 'texture' | 'shader' | 'audio' | 'font' | 'mesh' | 'prefab' | None for a file extension."""
@@ -543,4 +570,8 @@ def asset_category_from_extension(ext: str) -> Optional[str]:
         return "animclip3d"
     if ext in ANIMFSM_EXTENSIONS:
         return "animfsm"
+    if ext in ANIMTIMELINE_EXTENSIONS:
+        return "animtimeline"
+    if ext in TIMELINEFSM_EXTENSIONS:
+        return "timelinefsm"
     return None
