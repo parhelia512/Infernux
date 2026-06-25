@@ -99,7 +99,7 @@ jobs:
             "--accept-licenses","--default-answer","--confirm-command","install"
 
       - name: Install Python build dependencies
-        run: pip install pybind11>=2.11 numpy build wheel setuptools pyinstaller PySide6
+        run: python -m pip install "pybind11>=2.11" numpy build wheel setuptools pyinstaller PySide6 Pillow
 
       - name: Configure (CMake preset release)
         shell: pwsh

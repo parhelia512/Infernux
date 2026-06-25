@@ -56,7 +56,6 @@ a = Analysis(
         "_hashlib",
         "database",
         "splash_screen",
-        "Infernux.runtime_utf8",
         "style",
         "ui_project_list",
         "model",
