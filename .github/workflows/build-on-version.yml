@@ -4,14 +4,15 @@ name: Build on Version Bump
 # pyproject.toml changes on master/main (plus manual dispatch).
 #
 # Outputs:
-# - Windows wheel uploaded as a workflow artifact
-# - GitHub Release v<version> with the generated wheels attached
+# - Windows wheel + InfernuxHubInstaller.exe uploaded as workflow artifacts
+# - GitHub Release v<version> using UpdateLog.md as the release notes
 
 on:
   push:
     branches: [master, main]
     paths:
       - "pyproject.toml"
+      - "UpdateLog.md"
       - ".github/workflows/build-on-version.yml"
   workflow_dispatch: {}
 
@@ -46,14 +47,20 @@ jobs:
               OLD_VER=$(get_ver /tmp/old_pyproject.toml) || OLD_VER=""
           fi
           echo "version=$NEW_VER" >> "$GITHUB_OUTPUT"
+          UPDATELOG_CHANGED=false
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            if git diff --name-only HEAD^ HEAD | grep -qx "UpdateLog.md"; then
+              UPDATELOG_CHANGED=true
+            fi
+          fi
           RELEASE_EXISTS=false
           if gh release view "v$NEW_VER" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             RELEASE_EXISTS=true
           fi
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$NEW_VER" != "$OLD_VER" ] || [ "$RELEASE_EXISTS" != "true" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$NEW_VER" != "$OLD_VER" ] || [ "$UPDATELOG_CHANGED" = "true" ] || [ "$RELEASE_EXISTS" != "true" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Build requested. event='${{ github.event_name }}', old='$OLD_VER', new='$NEW_VER', release_exists='$RELEASE_EXISTS'"
+            echo "Build requested. event='${{ github.event_name }}', old='$OLD_VER', new='$NEW_VER', update_log_changed='$UPDATELOG_CHANGED', release_exists='$RELEASE_EXISTS'"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "Version unchanged and release v$NEW_VER already exists; skipping build."
@@ -92,7 +99,7 @@ jobs:
             "--accept-licenses","--default-answer","--confirm-command","install"
 
       - name: Install Python build dependencies
-        run: pip install pybind11>=2.11 numpy build wheel setuptools
+        run: pip install pybind11>=2.11 numpy build wheel setuptools pyinstaller PySide6
 
       - name: Configure (CMake preset release)
         shell: pwsh
@@ -111,10 +118,25 @@ jobs:
           INFERNUX_SOURCE_DIR: ${{ github.workspace }}
         run: python -m build --wheel --no-isolation --outdir dist
 
+      - name: Build Hub installer
+        shell: pwsh
+        run: |
+          $env:VULKAN_SDK = "C:\VulkanSDK\$env:VULKAN_SDK_VERSION"
+          cmake --build --preset release --target infernux_hub_installer --parallel
+          if (!(Test-Path "dist/installer/InfernuxHubInstaller.exe")) {
+            throw "Expected installer not found: dist/installer/InfernuxHubInstaller.exe"
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: infernux-${{ needs.detect-version-change.outputs.version }}-windows
           path: dist/*.whl
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: infernux-${{ needs.detect-version-change.outputs.version }}-hub-installer
+          path: dist/installer/InfernuxHubInstaller.exe
           if-no-files-found: error
 
   publish-github-release:
@@ -126,6 +148,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.detect-version-change.outputs.version }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download wheel artifacts
         uses: actions/download-artifact@v4
         with:
@@ -133,13 +157,29 @@ jobs:
           path: release-dist
           merge-multiple: true
 
+      - name: Download Hub installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: infernux-${{ needs.detect-version-change.outputs.version }}-hub-installer
+          path: release-dist
+          merge-multiple: true
+
       - name: Verify release assets
         shell: bash
         run: |
-          find release-dist -type f -name '*.whl' -print | sort
-          count=$(find release-dist -type f -name '*.whl' | wc -l | tr -d ' ')
-          if [ "$count" -lt 1 ]; then
-            echo "Expected at least 1 Windows wheel file, found $count" >&2
+          find release-dist -type f \( -name '*.whl' -o -name 'InfernuxHubInstaller.exe' \) -print | sort
+          wheel_count=$(find release-dist -type f -name '*.whl' | wc -l | tr -d ' ')
+          installer_count=$(find release-dist -type f -name 'InfernuxHubInstaller.exe' | wc -l | tr -d ' ')
+          if [ "$wheel_count" -lt 1 ]; then
+            echo "Expected at least 1 Windows wheel file, found $wheel_count" >&2
+            exit 1
+          fi
+          if [ "$installer_count" -lt 1 ]; then
+            echo "Expected InfernuxHubInstaller.exe, found $installer_count" >&2
+            exit 1
+          fi
+          if [ ! -s UpdateLog.md ]; then
+            echo "UpdateLog.md is required and must not be empty; it is used as the GitHub Release body." >&2
             exit 1
           fi
 
@@ -147,18 +187,18 @@ jobs:
         shell: bash
         run: |
           tag="v${VERSION}"
-          mapfile -t files < <(find release-dist -type f -name '*.whl' | sort)
+          mapfile -t files < <(find release-dist -type f \( -name '*.whl' -o -name 'InfernuxHubInstaller.exe' \) | sort)
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $tag already exists; uploading assets with --clobber."
             gh release upload "$tag" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit "$tag" --latest --repo "$GITHUB_REPOSITORY"
+            gh release edit "$tag" --notes-file UpdateLog.md --latest --repo "$GITHUB_REPOSITORY"
           else
             echo "Creating release $tag."
             gh release create "$tag" "${files[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "Infernux v${VERSION}" \
-              --generate-notes \
+              --notes-file UpdateLog.md \
               --latest
           fi
