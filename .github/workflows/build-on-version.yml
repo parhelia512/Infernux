@@ -3,8 +3,9 @@ name: Build on Version Bump
 # Builds the native module + wheel whenever the project version in
 # pyproject.toml changes on master/main (plus manual dispatch).
 #
-# Outputs: platform wheels uploaded as workflow artifacts
-# (infernux-<version>-cp312-win_amd64 / linux_x86_64).
+# Outputs:
+# - platform wheels uploaded as workflow artifacts
+# - GitHub Release v<version> with the generated wheels attached
 
 on:
   push:
@@ -12,6 +13,9 @@ on:
     paths:
       - "pyproject.toml"
   workflow_dispatch: {}
+
+permissions:
+  contents: write
 
 concurrency:
   group: build-on-version-${{ github.ref }}
@@ -151,3 +155,49 @@ jobs:
           name: infernux-${{ needs.detect-version-change.outputs.version }}-linux
           path: dist/*.whl
           if-no-files-found: error
+
+  publish-github-release:
+    needs: [detect-version-change, build-windows, build-linux]
+    if: needs.detect-version-change.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.detect-version-change.outputs.version }}
+    steps:
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: infernux-${{ needs.detect-version-change.outputs.version }}-*
+          path: release-dist
+          merge-multiple: true
+
+      - name: Verify release assets
+        shell: bash
+        run: |
+          find release-dist -type f -name '*.whl' -print | sort
+          count=$(find release-dist -type f -name '*.whl' | wc -l | tr -d ' ')
+          if [ "$count" -lt 2 ]; then
+            echo "Expected at least 2 wheel files (Windows + Linux), found $count" >&2
+            exit 1
+          fi
+
+      - name: Create or update GitHub Release
+        shell: bash
+        run: |
+          tag="v${VERSION}"
+          mapfile -t files < <(find release-dist -type f -name '*.whl' | sort)
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists; uploading assets with --clobber."
+            gh release upload "$tag" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$tag" --latest --repo "$GITHUB_REPOSITORY"
+          else
+            echo "Creating release $tag."
+            gh release create "$tag" "${files[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Infernux v${VERSION}" \
+              --generate-notes \
+              --latest
+          fi
