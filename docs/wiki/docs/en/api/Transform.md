@@ -54,6 +54,7 @@ Transform component — position, rotation, scale, hierarchy.
 | `set_sibling_index(index: int) → None` |  |
 | `set_as_first_sibling() → None` |  |
 | `set_as_last_sibling() → None` |  |
+| `set_local_trs(px: float, py: float, pz: float, rx: float, ry: float, rz: float, sx: float, sy: float, sz: float) → None` |  |
 | `look_at(target: Vector3) → None` |  |
 | `translate(delta: Vector3, space: int = ...) → None` |  |
 | `translate_local(delta: Vector3) → None` |  |
