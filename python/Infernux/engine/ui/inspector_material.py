@@ -102,10 +102,9 @@ def _query_material_preview_tex(panel, native_mat, mat_data, state, cache_tag, p
     # Prefab/scene instance overrides often have no saved .mat on disk — render from JSON.
     if json_blob and not disk_ok:
         guid = (getattr(native_mat, "guid", "") or "").strip()
-        resource_key = f"matedit|inline|{guid or id(native_mat)}"
         path_hint = preview_path or f"inline:{guid or id(native_mat)}"
         tex = int(_try_get_cpp_material_preview_texture(
-            native, resource_key, path_hint, material_json=json_blob, file_mtime_hint=0) or 0)
+            native, path_hint, material_json=json_blob, file_mtime_hint=0) or 0)
         if tex:
             return tex
 
