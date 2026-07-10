@@ -1,7 +1,7 @@
 """Animation Timeline data model (``.animtimeline``).
 
 A minimal, Unity-Timeline-style asset for animating a single GameObject's
-transform over time.  This is the 0.2.0 "most basic" timeline: ONE track of
+transform over time.  This is the 0.2.1 "most basic" timeline: ONE track of
 transform keyframes (position / euler-rotation / scale), each keyframe carrying
 the transition curve used to interpolate *into* it from the previous keyframe.
 

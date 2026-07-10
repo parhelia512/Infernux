@@ -11,7 +11,7 @@ from typing import Any, Callable
 from Infernux.mcp.threading import MainThreadCommandQueue
 
 MCP_PROTOCOL_VERSION = "2025-03-26"
-MCP_SERVER_VERSION = "0.2.0"
+MCP_SERVER_VERSION = "0.2.1"
 
 _TOOL_METADATA: dict[str, dict[str, Any]] = {}
 _KNOWLEDGE_TOKENS: dict[str, dict[str, Any]] = {}

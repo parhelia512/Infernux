@@ -1,7 +1,7 @@
 # Infernux 脚本 API
 
 <div class="class-info">
-版本 0.2.0
+版本 0.2.1
  &nbsp;|&nbsp; <a href="../../en/api/index.html">English</a>
 </div>
 

@@ -254,8 +254,8 @@ void *MeshCollider::CreateJoltShapeRaw() const
         useConvex = true;
     }
 
-    INXLOG_INFO("MeshCollider: creating shape — verts=", vertices.size(), ", tris=", indices.size() / 3,
-                ", convex=", (useConvex ? "true" : "false"), " (requested=", (m_convex ? "true" : "false"), ")");
+    // INXLOG_INFO("MeshCollider: creating shape — verts=", vertices.size(), ", tris=", indices.size() / 3,
+    //             ", convex=", (useConvex ? "true" : "false"), " (requested=", (m_convex ? "true" : "false"), ")");
 
     JPH::Shape *shape = nullptr;
     if (useConvex) {
@@ -344,8 +344,8 @@ void *MeshCollider::CreateJoltShapeRaw() const
         size_t origVerts = vertices.size();
         size_t origTris = indices.size() / 3;
         CookMeshGeometry(vertices, indices);
-        INXLOG_INFO("MeshCollider: mesh cooking — verts ", origVerts, "→", vertices.size(), ", tris ", origTris, "→",
-                    indices.size() / 3);
+        // INXLOG_INFO("MeshCollider: mesh cooking — verts ", origVerts, "→", vertices.size(), ", tris ", origTris, "→",
+        //             indices.size() / 3);
         // Ensure outward-facing winding for correct collision normals.
         glm::vec3 meshScale(1.0f);
         if (auto *go = GetGameObject()) {
