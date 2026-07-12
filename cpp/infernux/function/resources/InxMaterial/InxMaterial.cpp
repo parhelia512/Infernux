@@ -54,7 +54,7 @@ std::string ResolveEngineTextureGuid(const std::string &textureRef)
                 const std::string resolved = FromFsPath(fs::weakly_canonical(candidate, error));
                 std::string guid = database->GetGuidFromPath(resolved);
                 if (guid.empty())
-                    guid = database->ImportAsset(resolved);
+                    guid = database->ImportAsset(resolved).guid;
                 if (!guid.empty())
                     return guid;
             }
@@ -348,6 +348,9 @@ size_t InxMaterial::GetRuntimeMemoryBytes() const noexcept
         if (const auto *text = std::get_if<std::string>(&property.value))
             bytes += text->capacity();
     }
+    bytes += m_shaderPropertyOrder.capacity() * sizeof(std::string);
+    for (const auto &name : m_shaderPropertyOrder)
+        bytes += name.capacity();
     return bytes;
 }
 
@@ -364,8 +367,8 @@ InxMaterial::InxMaterial(const InxMaterial &other)
     : m_name(other.m_name), m_guid(other.m_guid), m_filePath(other.m_filePath), m_builtin(other.m_builtin),
       m_vertShaderName(other.m_vertShaderName), m_fragShaderName(other.m_fragShaderName), m_passTag(other.m_passTag),
       m_renderState(other.m_renderState), m_renderStateOverrides(other.m_renderStateOverrides),
-      m_properties(other.m_properties), m_pipelineDirty(true), m_propertiesDirty(true), m_version(0),
-      m_isDeleted(other.m_isDeleted)
+      m_properties(other.m_properties), m_shaderPropertyOrder(other.m_shaderPropertyOrder), m_pipelineDirty(true),
+      m_propertiesDirty(true), m_version(0), m_isDeleted(other.m_isDeleted)
 {
     // GPU-transient state must never be copied across logical material instances.
 }
@@ -386,6 +389,7 @@ InxMaterial &InxMaterial::operator=(const InxMaterial &other)
     m_renderState = other.m_renderState;
     m_renderStateOverrides = other.m_renderStateOverrides;
     m_properties = other.m_properties;
+    m_shaderPropertyOrder = other.m_shaderPropertyOrder;
 
     // Reset runtime-only GPU state so this instance cannot retain stale handles.
     ClearAllPassPipelines();
@@ -401,53 +405,48 @@ InxMaterial &InxMaterial::operator=(const InxMaterial &other)
     return *this;
 }
 
-void InxMaterial::SetFloat(const std::string &name, float value)
+void InxMaterial::SetPropertyValue(const std::string &name, MaterialPropertyType type, MaterialPropertyValue value)
 {
-    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Float, value};
+    const auto existing = m_properties.find(name);
+    const bool hdr = existing != m_properties.end() && existing->second.hdr;
+    m_properties[name] = MaterialProperty{name, type, std::move(value), hdr};
     m_propertiesDirty = true;
     ++m_version;
+}
+
+void InxMaterial::SetFloat(const std::string &name, float value)
+{
+    SetPropertyValue(name, MaterialPropertyType::Float, value);
 }
 
 void InxMaterial::SetVector2(const std::string &name, const glm::vec2 &value)
 {
-    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Float2, value};
-    m_propertiesDirty = true;
-    ++m_version;
+    SetPropertyValue(name, MaterialPropertyType::Float2, value);
 }
 
 void InxMaterial::SetVector3(const std::string &name, const glm::vec3 &value)
 {
-    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Float3, value};
-    m_propertiesDirty = true;
-    ++m_version;
+    SetPropertyValue(name, MaterialPropertyType::Float3, value);
 }
 
 void InxMaterial::SetVector4(const std::string &name, const glm::vec4 &value)
 {
-    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Float4, value};
-    m_propertiesDirty = true;
-    ++m_version;
+    SetPropertyValue(name, MaterialPropertyType::Float4, value);
 }
 
 void InxMaterial::SetColor(const std::string &name, const glm::vec4 &color)
 {
-    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Color, color};
-    m_propertiesDirty = true;
-    ++m_version;
+    SetPropertyValue(name, MaterialPropertyType::Color, color);
 }
 
 void InxMaterial::SetInt(const std::string &name, int value)
 {
-    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Int, value};
-    m_propertiesDirty = true;
-    ++m_version;
+    SetPropertyValue(name, MaterialPropertyType::Int, value);
 }
 
 void InxMaterial::SetMatrix(const std::string &name, const glm::mat4 &matrix)
 {
-    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Mat4, matrix};
-    m_propertiesDirty = true;
-    ++m_version;
+    SetPropertyValue(name, MaterialPropertyType::Mat4, matrix);
 }
 
 std::string InxMaterial::RequireTextureGuid(const std::string &textureGuid)
@@ -473,7 +472,9 @@ void InxMaterial::SetTextureGuid(const std::string &name, const std::string &tex
 
     auto it = m_properties.find(name);
     std::string previousGuid;
+    bool hdr = false;
     if (it != m_properties.end() && it->second.type == MaterialPropertyType::Texture2D) {
+        hdr = it->second.hdr;
         const auto *existing = std::get_if<std::string>(&it->second.value);
         if (existing) {
             if (*existing == validatedGuid)
@@ -485,7 +486,7 @@ void InxMaterial::SetTextureGuid(const std::string &name, const std::string &tex
     if (!m_guid.empty() && !previousGuid.empty() && !IsBuiltinTextureToken(previousGuid))
         AssetDependencyGraph::Instance().RemoveAssetDependency(m_guid, previousGuid);
 
-    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Texture2D, validatedGuid};
+    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Texture2D, validatedGuid, hdr};
     m_propertiesDirty = true;
     ++m_version;
 
@@ -698,6 +699,8 @@ nlohmann::json InxMaterial::SerializeDocument() const
             continue;
         json propJson;
         propJson["type"] = static_cast<int>(prop.type);
+        if (prop.hdr)
+            propJson["hdr"] = true;
 
         switch (prop.type) {
         case MaterialPropertyType::Float:
@@ -740,6 +743,9 @@ nlohmann::json InxMaterial::SerializeDocument() const
         props[propName] = propJson;
     }
     j["properties"] = props;
+
+    if (!m_shaderPropertyOrder.empty())
+        j["_shader_property_order"] = m_shaderPropertyOrder;
 
     return j;
 }
@@ -816,6 +822,7 @@ bool InxMaterial::DeserializeDocument(const nlohmann::json &document)
     m_renderState = staged.m_renderState;
     m_renderStateOverrides = staged.m_renderStateOverrides;
     m_properties = std::move(staged.m_properties);
+    m_shaderPropertyOrder = std::move(staged.m_shaderPropertyOrder);
     m_pipelineDirty = true;
     m_propertiesDirty = true;
     ++m_version;
@@ -877,6 +884,7 @@ bool InxMaterial::ApplyDocument(const nlohmann::json &j)
 
         m_passTag = j.value("passTag", std::string());
         m_renderStateOverrides = j.value("renderStateOverrides", uint32_t{0});
+        m_shaderPropertyOrder = j.value("_shader_property_order", std::vector<std::string>{});
 
         m_properties.clear();
         for (const auto &[propName, propJson] : j["properties"].items()) {
@@ -884,6 +892,7 @@ bool InxMaterial::ApplyDocument(const nlohmann::json &j)
             MaterialProperty prop;
             prop.name = propName;
             prop.type = static_cast<MaterialPropertyType>(typeValue);
+            prop.hdr = propJson.value("hdr", false);
 
             switch (prop.type) {
             case MaterialPropertyType::Float:
@@ -992,6 +1001,29 @@ std::shared_ptr<InxMaterial> InxMaterial::CreateDefaultUnlit()
     // Default property from shader annotation: baseColor
     material->SetColor("baseColor", glm::vec4(1.0f, 1.0f, 1.0f, 1.0f));
 
+    return material;
+}
+
+std::shared_ptr<InxMaterial> InxMaterial::CreateParticleBillboardMaterial()
+{
+    auto material = std::make_shared<InxMaterial>("ParticleBillboardMaterial");
+    material->SetShader("particle_billboard");
+
+    RenderState state;
+    state.cullMode = VK_CULL_MODE_NONE;
+    state.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    state.depthTestEnable = true;
+    state.depthWriteEnable = false;
+    state.blendEnable = true;
+    state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    state.colorBlendOp = VK_BLEND_OP_ADD;
+    state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    state.alphaBlendOp = VK_BLEND_OP_ADD;
+    state.renderQueue = 3000;
+    material->SetRenderState(state);
+    material->SetBuiltin(true);
     return material;
 }
 

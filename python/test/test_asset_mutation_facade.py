@@ -3,6 +3,22 @@ from __future__ import annotations
 import importlib
 
 from Infernux.core.assets import AssetManager
+from Infernux.lib import AssetMutationErrorCode, AssetMutationResult
+
+
+def _result(operation, path, *, succeeded=True, guid="guid", previous_path=""):
+    result = AssetMutationResult()
+    result.operation = operation
+    result.path = path
+    result.previous_path = previous_path
+    result.guid = guid
+    result.succeeded = succeeded
+    result.database_committed = succeeded
+    result.changed = succeeded
+    if not succeeded:
+        result.error_code = AssetMutationErrorCode.NOT_FOUND
+        result.error = "not found"
+    return result
 
 
 class _Database:
@@ -16,11 +32,11 @@ class _Database:
     def import_asset(self, path):
         self.order.append("db-import")
         self.paths[path] = "new-guid"
-        return "new-guid"
+        return _result("import", path, guid="new-guid")
 
     def reimport_asset(self, path):
         self.order.append("db-reimport")
-        return path in self.paths
+        return _result("reimport", path, succeeded=path in self.paths)
 
     def get_meta_by_guid(self, guid):
         return _Metadata() if guid == "guid" else None
@@ -28,15 +44,15 @@ class _Database:
     def delete_asset(self, path):
         self.order.append("db-delete")
         self.paths.pop(path, None)
-        return True
+        return _result("delete", path)
 
     def move_asset(self, old_path, new_path):
         self.order.append("db-move")
         guid = self.paths.pop(old_path, "")
         if not guid:
-            return False
+            return _result("move", new_path, succeeded=False, previous_path=old_path)
         self.paths[new_path] = guid
-        return True
+        return _result("move", new_path, guid=guid, previous_path=old_path)
 
 
 class _Registry:
@@ -79,6 +95,12 @@ class _NativeEngine:
         return ""
 
 
+class _FailingNativeEngine(_NativeEngine):
+    def reload_shader_runtime(self, path, previous_shader_id):
+        super().reload_shader_runtime(path, previous_shader_id)
+        return "shader compile failed"
+
+
 def _isolate_side_effects(monkeypatch, order):
     AssetManager._watcher_echo_suppression.clear()
     registry = _Registry(order)
@@ -92,13 +114,14 @@ def _isolate_side_effects(monkeypatch, order):
     monkeypatch.setattr(AssetManager, "_invalidate_project_panel_cache", classmethod(lambda _cls: None))
 
 
-def test_reimport_reloads_registry_before_dependency_publication(monkeypatch):
+def test_reimport_rebuilds_database_before_registry_reload(monkeypatch):
     order = []
     database = _Database(order)
     _isolate_side_effects(monkeypatch, order)
 
-    assert AssetManager.reimport_asset("old.txt", database=database) is True
-    assert order == ["registry-reload", "db-reimport", "py-evict", "editor-modified"]
+    result = AssetManager.reimport_asset("old.txt", database=database)
+    assert result and result.guid == "guid"
+    assert order == ["db-reimport", "registry-reload", "py-evict", "editor-modified"]
 
 
 def test_delete_evicts_registry_before_database_event(monkeypatch):
@@ -106,7 +129,8 @@ def test_delete_evicts_registry_before_database_event(monkeypatch):
     database = _Database(order)
     _isolate_side_effects(monkeypatch, order)
 
-    assert AssetManager.delete_asset("old.txt", database=database) is True
+    result = AssetManager.delete_asset("old.txt", database=database)
+    assert result and result.database_committed
     assert order == ["registry-remove", "py-evict", "db-delete", "editor-deleted"]
 
 
@@ -115,7 +139,8 @@ def test_move_commits_mapping_before_patching_loaded_path(monkeypatch):
     database = _Database(order)
     _isolate_side_effects(monkeypatch, order)
 
-    assert AssetManager.move_asset("old.txt", "new.txt", database=database) is True
+    result = AssetManager.move_asset("old.txt", "new.txt", database=database)
+    assert result and result.previous_path == "old.txt"
     assert order == ["db-move", "registry-move", "py-evict", "editor-moved"]
 
 
@@ -129,5 +154,26 @@ def test_shader_reimport_mutates_database_once_before_runtime_compile(monkeypatc
     shader_utils = importlib.import_module("Infernux.engine.ui.inspector_shader_utils")
     monkeypatch.setattr(shader_utils, "bump_shader_property_generation", lambda: None)
 
-    assert AssetManager.reimport_asset("old.vert", database=database) is True
+    result = AssetManager.reimport_asset("old.vert", database=database)
+    assert result and result.guid == "guid"
     assert order == ["db-reimport", "shader-runtime", "py-evict", "editor-modified"]
+
+
+def test_shader_runtime_failure_reports_committed_database_state(monkeypatch):
+    order = []
+    database = _Database(order)
+    database.paths = {"old.vert": "guid"}
+    _isolate_side_effects(monkeypatch, order)
+    monkeypatch.setattr(
+        AssetManager,
+        "_native_engine",
+        classmethod(lambda _cls: _FailingNativeEngine(order)),
+    )
+
+    result = AssetManager.reimport_asset("old.vert", database=database)
+
+    assert not result
+    assert result.database_committed is True
+    assert result.error_code == AssetMutationErrorCode.RUNTIME_APPLY_FAILED
+    assert result.error == "shader compile failed"
+    assert order == ["db-reimport", "shader-runtime"]

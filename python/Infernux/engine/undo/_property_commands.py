@@ -195,6 +195,71 @@ class MaterialDocumentCommand(UndoCommand):
             self._refresh_callback(self._material)
 
 
+class ResourceDocumentCommand(UndoCommand):
+    """Undo/redo a strict resource document and publish it through one callback."""
+
+    _is_property_edit = False
+    MERGE_WINDOW: float = 0.3
+    marks_dirty: bool = False
+
+    def __init__(self, resource: Any, old_document: dict, new_document: dict,
+                 description: str = "Edit Resource",
+                 publish_callback: Optional[Callable[[Any], None]] = None,
+                 edit_key: str = ""):
+        super().__init__(description)
+        self._resource = resource
+        self._old_document = copy.deepcopy(old_document)
+        self._new_document = copy.deepcopy(new_document)
+        self._publish_callback = publish_callback
+        self._resource_id = self._stable_id(resource)
+        self._edit_key = edit_key
+
+    @staticmethod
+    def _stable_id(resource: Any) -> int:
+        guid = getattr(resource, "guid", "")
+        if guid:
+            return hash((type(resource), "guid", guid))
+        native = getattr(resource, "native", None)
+        file_path = getattr(resource, "file_path", "") or getattr(native, "file_path", "")
+        if file_path:
+            return hash((type(resource), "file", file_path))
+        return id(resource)
+
+    def execute(self) -> None:
+        self._apply(self._new_document)
+
+    def undo(self) -> None:
+        self._apply(self._old_document)
+
+    def redo(self) -> None:
+        self._apply(self._new_document)
+
+    def can_merge(self, other: UndoCommand) -> bool:
+        if not isinstance(other, ResourceDocumentCommand):
+            return False
+        return (self._resource_id == other._resource_id
+                and self._edit_key == other._edit_key
+                and (other.timestamp - self.timestamp) <= self.MERGE_WINDOW)
+
+    def merge(self, other: ResourceDocumentCommand) -> None:
+        self._new_document = copy.deepcopy(other._new_document)
+        self.timestamp = other.timestamp
+
+    def _apply(self, document: dict) -> None:
+        result = self._resource.deserialize_document(document)
+        if result is False:
+            raise RuntimeError("resource document restore failed")
+        if self._publish_callback is not None:
+            self._publish_callback(self._resource)
+            return
+        save = getattr(self._resource, "save", None)
+        if not callable(save):
+            raise RuntimeError("resource document command requires a publish callback or save()")
+        save_result = save()
+        if save_result is False:
+            raise RuntimeError("resource document save failed")
+
+
 class SetMaterialSlotCommand(UndoCommand):
     """Undo/redo for MeshRenderer material-slot assignment."""
 

@@ -146,7 +146,7 @@ def main() -> None:
                 "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
                 encoding="ascii",
             )
-            cpu_model_guid = database.import_asset(str(cpu_model))
+            cpu_model_guid = database.import_asset(str(cpu_model)).guid
             assert cpu_model_guid
             shutdown_load = AssetRegistry.instance().begin_load_mesh_by_guid(cpu_model_guid)
 
@@ -197,6 +197,27 @@ def main() -> None:
         assert second_lifetime_guids == [first_builtin_guid]
         assert second_lifetime_models[0][0]
         assert second_lifetime_models[0][1] == 1
+
+        class ExpectedUpdateFailure(RuntimeError):
+            pass
+
+        def fail_update(_engine, _frame):
+            raise ExpectedUpdateFailure("intentional headless callback failure")
+
+        try:
+            run_headless(str(project), update=fail_update, max_frames=1)
+        except ExpectedUpdateFailure:
+            pass
+        else:
+            raise AssertionError("headless update exception was swallowed")
+
+        restarted_frames = run_headless(
+            str(project),
+            update=lambda _engine, _frame: True,
+            fixed_delta=0.01,
+            max_frames=1,
+        )
+        assert restarted_frames == 1
 
     builtin_meta_after = {str(path) for path in Path(resources_path).rglob("*.meta")}
     assert builtin_meta_after == builtin_meta_before

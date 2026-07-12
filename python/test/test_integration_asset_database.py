@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from Infernux.lib import AssetDependencyGraph
+from Infernux.lib import AssetDependencyGraph, AssetMutationErrorCode
 
 
 def test_dependency_graph_separates_asset_and_runtime_domains():
@@ -45,8 +45,9 @@ def test_asset_database_canonical_crud_preserves_guid(engine, tmp_path: Path):
     source = tmp_path / "canonical_asset.txt"
     source.write_text("first", encoding="utf-8")
 
-    guid = asset_db.import_asset(str(source))
-    assert guid
+    import_result = asset_db.import_asset(str(source))
+    assert import_result
+    guid = import_result.guid
     assert asset_db.get_guid_from_path(str(source)) == guid
     assert Path(asset_db.get_path_from_guid(guid)).resolve() == source.resolve()
     assert asset_db.get_meta_by_path(str(source)).get_guid() == guid
@@ -98,8 +99,8 @@ def test_metadata_creation_uses_the_submitted_source_bytes(engine, tmp_path: Pat
     texture.write_bytes(texture_bytes)
 
     try:
-        text_guid = asset_db.import_asset(str(text))
-        texture_guid = asset_db.import_asset(str(texture))
+        text_guid = asset_db.import_asset(str(text)).guid
+        texture_guid = asset_db.import_asset(str(texture)).guid
         assert text_guid and texture_guid
 
         text_meta = asset_db.get_meta_by_guid(text_guid)
@@ -135,8 +136,8 @@ def test_material_import_artifact_commits_metadata_and_dependencies_atomically(
     material = tmp_path / "artifact.mat"
     vertex.write_text("void main() {}", encoding="utf-8")
     fragment.write_text("void main() {}", encoding="utf-8")
-    vertex_guid = asset_db.import_asset(str(vertex))
-    fragment_guid = asset_db.import_asset(str(fragment))
+    vertex_guid = asset_db.import_asset(str(vertex)).guid
+    fragment_guid = asset_db.import_asset(str(fragment)).guid
     assert vertex_guid and fragment_guid
 
     def write_material(shader_paths: list[Path]) -> None:
@@ -151,11 +152,15 @@ def test_material_import_artifact_commits_metadata_and_dependencies_atomically(
 
     try:
         material.write_text("{ invalid first import", encoding="utf-8")
-        assert asset_db.import_asset(str(material)) == ""
+        failed_import = asset_db.import_asset(str(material))
+        assert not failed_import
+        assert failed_import.error_code == AssetMutationErrorCode.IMPORT_FAILED
+        assert failed_import.database_committed is False
+        assert failed_import.error
         assert not asset_db.contains_path(str(material))
 
         write_material([vertex, fragment])
-        material_guid = asset_db.import_asset(str(material))
+        material_guid = asset_db.import_asset(str(material)).guid
         assert material_guid
         assert set(graph.get_dependencies(material_guid)) == {
             vertex_guid,
@@ -165,7 +170,7 @@ def test_material_import_artifact_commits_metadata_and_dependencies_atomically(
         generation_before = asset_db.query_generation
 
         material.write_text("{ invalid material", encoding="utf-8")
-        assert asset_db.reimport_asset(str(material)) is False
+        assert not asset_db.reimport_asset(str(material))
         assert asset_db.query_generation == generation_before
         assert set(graph.get_dependencies(material_guid)) == {
             vertex_guid,
@@ -177,7 +182,7 @@ def test_material_import_artifact_commits_metadata_and_dependencies_atomically(
         )
 
         write_material([vertex])
-        assert asset_db.reimport_asset(str(material)) is True
+        assert asset_db.reimport_asset(str(material))
         assert set(graph.get_dependencies(material_guid)) == {vertex_guid}
     finally:
         if asset_db.contains_path(str(material)):
@@ -190,15 +195,18 @@ def test_asset_database_explicit_reimport_preserves_guid(engine, tmp_path: Path)
     asset_db = engine.get_asset_database()
     source = tmp_path / "reimport.txt"
     source.write_text("first", encoding="utf-8")
-    guid = asset_db.import_asset(str(source))
+    guid = asset_db.import_asset(str(source)).guid
 
     source.write_text("second", encoding="utf-8")
-    assert asset_db.reimport_asset(str(source)) is True
+    assert asset_db.reimport_asset(str(source))
     assert asset_db.get_guid_from_path(str(source)) == guid
 
     unregistered = tmp_path / "unregistered.txt"
     unregistered.write_text("content", encoding="utf-8")
-    assert asset_db.reimport_asset(str(unregistered)) is False
+    missing = asset_db.reimport_asset(str(unregistered))
+    assert not missing
+    assert missing.error_code == AssetMutationErrorCode.NOT_FOUND
+    assert missing.error
 
 
 def test_asset_database_rejects_worker_thread_mutation(engine, tmp_path: Path):
@@ -226,7 +234,7 @@ def test_asset_database_publishes_concurrent_reader_snapshots(engine, tmp_path: 
     asset_db = engine.get_asset_database()
     stable_path = tmp_path / "stable-reader.txt"
     stable_path.write_text("stable", encoding="utf-8")
-    stable_guid = asset_db.import_asset(str(stable_path))
+    stable_guid = asset_db.import_asset(str(stable_path)).guid
     initial_generation = asset_db.query_generation
 
     start = threading.Event()
@@ -261,7 +269,7 @@ def test_asset_database_publishes_concurrent_reader_snapshots(engine, tmp_path: 
     for index in range(32):
         transient = tmp_path / f"transient-{index}.txt"
         transient.write_text(str(index), encoding="utf-8")
-        transient_guid = asset_db.import_asset(str(transient))
+        transient_guid = asset_db.import_asset(str(transient)).guid
         assert transient_guid
         assert asset_db.delete_asset(str(transient))
         transient.unlink()
@@ -514,7 +522,7 @@ def test_asset_database_rejects_stale_async_scan(engine, tmp_path: Path):
 
     mutation = tmp_path / "mutation-during-scan.txt"
     mutation.write_text("newer owner state", encoding="utf-8")
-    guid = asset_db.import_asset(str(mutation))
+    guid = asset_db.import_asset(str(mutation)).guid
     assert guid
 
     deadline = time.monotonic() + 10.0

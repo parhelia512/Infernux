@@ -41,6 +41,13 @@ from .anim_state_machine import (
     AnimParameter,
 )
 from .assets import AssetManager
+from .vfx_system import VfxAttribute, VfxEmitter, VfxRenderer, VfxSchemaError, VfxSystem
+from .parallel_backend import (
+    ParallelBackend,
+    ParallelBufferView,
+    ParallelCapabilities,
+    ParallelTaskState,
+)
 from .asset_types import (
     TextureImportSettings, TextureType, WrapMode, FilterMode, SpriteFrame,
     ShaderAssetInfo, FontAssetInfo, asset_category_from_extension,
@@ -59,6 +66,7 @@ from .asset_ref import (
     AnimationClip3DRef,
     AnimStateMachineRef,
     PhysicMaterialRef,
+    VfxSystemRef,
 )
 
 __all__ = [
@@ -74,6 +82,15 @@ __all__ = [
     "AnimTransition",
     "AnimParameter",
     "AssetManager",
+    "VfxAttribute",
+    "VfxEmitter",
+    "VfxRenderer",
+    "VfxSchemaError",
+    "VfxSystem",
+    "ParallelBackend",
+    "ParallelBufferView",
+    "ParallelCapabilities",
+    "ParallelTaskState",
     "TextureImportSettings",
     "TextureType",
     "WrapMode",
@@ -90,4 +107,5 @@ __all__ = [
     "AnimationClip3DRef",
     "AnimStateMachineRef",
     "PhysicMaterialRef",
+    "VfxSystemRef",
 ]

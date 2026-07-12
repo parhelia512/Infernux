@@ -22,6 +22,7 @@
 #include "function/scene/Light.h"
 #include "function/scene/MeshCollider.h"
 #include "function/scene/MeshRenderer.h"
+#include "function/scene/ObjectHandle.h"
 #include "function/scene/PrimitiveMeshes.h"
 #include "function/scene/PyComponentProxy.h"
 #include "function/scene/Rigidbody.h"
@@ -129,6 +130,26 @@ static void GetPrimitiveMeshData(PrimitiveType type, const std::vector<Vertex> *
     }
 }
 
+static void AddPrimitiveCollider(GameObject &object, PrimitiveType type)
+{
+    switch (type) {
+    case PrimitiveType::Cube:
+        object.AddComponent<BoxCollider>();
+        break;
+    case PrimitiveType::Sphere:
+        object.AddComponent<SphereCollider>();
+        break;
+    case PrimitiveType::Capsule:
+        object.AddComponent<CapsuleCollider>();
+        break;
+    case PrimitiveType::Cylinder:
+    case PrimitiveType::Plane:
+    case PrimitiveType::Quad:
+        object.AddComponent<MeshCollider>();
+        break;
+    }
+}
+
 /**
  * @brief Helper function to create a primitive GameObject.
  * Auto-reserves capacity when rapid creation is detected.
@@ -165,6 +186,7 @@ static GameObject *CreatePrimitiveObject(Scene *scene, PrimitiveType type, const
         MeshRenderer *renderer = obj->AddComponent<MeshRenderer>();
         if (renderer) {
             renderer->SetSharedPrimitiveMesh(*vertices, *indices, objectName);
+            AddPrimitiveCollider(*obj, type);
         }
     }
     return obj;
@@ -199,6 +221,7 @@ static py::list CreatePrimitiveObjectsBatch(Scene *scene, PrimitiveType type, si
             MeshRenderer *renderer = obj->AddComponent<MeshRenderer>();
             if (renderer) {
                 renderer->SetSharedPrimitiveMesh(*vertices, *indices, prefix);
+                AddPrimitiveCollider(*obj, type);
             }
         }
         result[i] = py::cast(obj, py::return_value_policy::reference);
@@ -410,12 +433,26 @@ void RegisterSceneBindings(py::module_ &m)
         .value("World", CoordinateSpace::World)
         .export_values();
 
+    py::class_<ObjectHandle>(m, "ObjectHandle")
+        .def(py::init<>())
+        .def(py::init<uint64_t, uint64_t, uint64_t>(), py::arg("id"), py::arg("generation"), py::arg("world_id"))
+        .def_readonly("id", &ObjectHandle::id)
+        .def_readonly("generation", &ObjectHandle::generation)
+        .def_property_readonly("world_id", [](const ObjectHandle &handle) { return handle.worldId; })
+        .def_property_readonly("is_valid", &ObjectHandle::IsValid)
+        .def("__bool__", &ObjectHandle::IsValid)
+        .def("__eq__", [](const ObjectHandle &lhs, const ObjectHandle &rhs) { return lhs == rhs; })
+        .def("__hash__", [](const ObjectHandle &handle) {
+            return py::hash(py::make_tuple(handle.id, handle.generation, handle.worldId));
+        });
+
     // ========================================================================
     // Component binding
     // ========================================================================
     py::class_<Component>(m, "Component")
         .def_property_readonly("type_name", &Component::GetTypeName)
         .def_property_readonly("component_id", &Component::GetComponentID)
+        .def_property_readonly("handle", &Component::GetHandle)
         .def("_set_component_id", &Component::SetComponentID, py::arg("component_id"),
              "Internal transactional restore hook")
         .def_property("enabled", &Component::IsEnabled, &Component::SetEnabled)
@@ -1141,6 +1178,7 @@ void RegisterSceneBindings(py::module_ &m)
         .def_property_readonly("active_in_hierarchy", &GameObject::IsActiveInHierarchy,
                                "Is active in hierarchy? (Unity: gameObject.activeInHierarchy)")
         .def_property_readonly("id", &GameObject::GetID)
+        .def_property_readonly("handle", &GameObject::GetHandle)
         .def_property("tag", &GameObject::GetTag, &GameObject::SetTag, "Tag string for this GameObject")
         .def_property("layer", &GameObject::GetLayer, &GameObject::SetLayer, "Layer index (0-31) for this GameObject")
         .def_property("is_static", &GameObject::IsStatic, &GameObject::SetStatic,
@@ -1448,11 +1486,11 @@ void RegisterSceneBindings(py::module_ &m)
             py::arg("component_instance"), "Add a Python InxComponent instance to this GameObject")
         .def(
             "_attach_prepared_py_component",
-            [](GameObject *obj, py::object instance) -> py::object {
+            [](GameObject *obj, py::object instance, size_t componentIndex) -> py::object {
                 if (!py::hasattr(instance, "_bind_native_component"))
                     throw py::type_error("prepared Python component requires _bind_native_component");
                 auto proxy = std::make_unique<PyComponentProxy>(instance);
-                Component *added = obj->AddPreparedPythonComponent(std::move(proxy));
+                Component *added = obj->AddPreparedPythonComponent(std::move(proxy), componentIndex);
                 try {
                     instance.attr("_bind_native_component")(py::cast(added, py::return_value_policy::reference),
                                                             py::cast(obj, py::return_value_policy::reference));
@@ -1462,7 +1500,8 @@ void RegisterSceneBindings(py::module_ &m)
                 }
                 return instance;
             },
-            py::arg("component_instance"), "Internal deferred Python component publication hook")
+            py::arg("component_instance"), py::arg("component_index"),
+            "Internal deferred Python component publication hook")
         .def("_activate_prepared_py_component", &GameObject::ActivatePreparedPythonComponent,
              py::arg("native_component"), "Internal prepared Python component activation hook")
         .def("_remove_prepared_py_component", &GameObject::RemovePreparedPythonComponent, py::arg("native_component"),
@@ -1697,7 +1736,9 @@ void RegisterSceneBindings(py::module_ &m)
         .def_property_readonly(
             "fields_document",
             [](const Scene::PendingPyComponent &pending) { return JsonToPython(pending.fieldsDocument); })
-        .def_readonly("enabled", &Scene::PendingPyComponent::enabled);
+        .def_readonly("enabled", &Scene::PendingPyComponent::enabled)
+        .def_readonly("execution_order", &Scene::PendingPyComponent::executionOrder)
+        .def_readonly("component_index", &Scene::PendingPyComponent::componentIndex);
 
     py::class_<SceneDocumentReadTicket>(m, "_SceneDocumentReadTicket")
         .def_property_readonly("is_complete", &SceneDocumentReadTicket::IsComplete)
@@ -1719,6 +1760,11 @@ void RegisterSceneBindings(py::module_ &m)
     // ========================================================================
     // Scene binding
     // ========================================================================
+    py::class_<SceneCommitToken, std::shared_ptr<SceneCommitToken>>(m, "_SceneCommitToken")
+        .def_property_readonly("is_active", &SceneCommitToken::IsActive)
+        .def("rollback", &SceneCommitToken::Rollback)
+        .def("finalize", &SceneCommitToken::Finalize);
+
     py::class_<Scene>(m, "Scene")
         .def_property("name", &Scene::GetName, &Scene::SetName)
         .def("set_playing", &Scene::SetPlaying, py::arg("playing"), "Set the scene play-state flag")
@@ -1760,6 +1806,17 @@ void RegisterSceneBindings(py::module_ &m)
         .def("find", &Scene::Find, py::return_value_policy::reference, py::arg("name"), "Find a GameObject by name")
         .def("find_by_id", &Scene::FindByID, py::return_value_policy::reference, py::arg("id"),
              "Find a GameObject by ID")
+        .def("resolve_game_object", &Scene::ResolveGameObject, py::return_value_policy::reference, py::arg("handle"),
+             "Resolve a stable GameObject handle, or return None when stale")
+        .def(
+            "resolve_component",
+            [](Scene &scene, const ObjectHandle &handle) -> py::object {
+                Component *component = scene.ResolveComponent(handle);
+                if (!component)
+                    return py::none();
+                return ComponentBindingRegistry::Instance().CastToPython(component);
+            },
+            py::arg("handle"), "Resolve a stable Component or Transform handle, or return None when stale")
         .def("find_object_by_id", &Scene::FindByID, py::return_value_policy::reference, py::arg("id"),
              "Alias for find_by_id. Find a GameObject by ID")
         .def("find_with_tag", &Scene::FindWithTag, py::return_value_policy::reference, py::arg("tag"),
@@ -1792,6 +1849,12 @@ void RegisterSceneBindings(py::module_ &m)
             "_commit_document",
             [](Scene &scene, py::handle document) { return scene.DeserializeDocument(PythonToJson(document)); },
             py::arg("document"), "Internal native staging commit; Python callers must preflight first")
+        .def(
+            "_commit_document_retaining_world",
+            [](Scene &scene, py::handle document) {
+                return scene.CommitDocumentRetainingCurrentWorld(PythonToJson(document));
+            },
+            py::arg("document"), "Commit a candidate and retain the previous native world until finalized")
         .def("save_to_file", &Scene::SaveToFile, py::arg("path"), "Save scene to a JSON file")
         .def("has_pending_py_components", &Scene::HasPendingPyComponents,
              "Check if there are pending Python components to restore")
@@ -1801,6 +1864,7 @@ void RegisterSceneBindings(py::module_ &m)
              "Get and clear pending Python components for restoration")
         .def_property_readonly("structure_version", &Scene::GetStructureVersion,
                                "Monotonic counter bumped on structural changes (add/remove/reparent)")
+        .def_property_readonly("world_id", &Scene::GetWorldId, "Unique identity of this native Scene world")
         // Camera management
         .def_property("main_camera", &Scene::GetMainCamera, &Scene::SetMainCamera, py::return_value_policy::reference,
                       "Get/set the main Camera component for this scene (used by Game View)");

@@ -14,7 +14,12 @@ except ImportError:
 
 from Infernux.lib import Infernux
 from Infernux.engine.script_compiler import get_script_compiler
-from Infernux.engine.import_coordinator import AssetFsEvent, AssetFsEventKind, ImportCoordinator
+from Infernux.engine.import_coordinator import (
+    AssetFsEvent,
+    AssetFsEventKind,
+    ImportCoordinator,
+    is_document_store_temporary_path,
+)
 from Infernux.core.asset_types import read_meta_guid
 from Infernux.debug import Debug
 
@@ -46,7 +51,12 @@ class ResourceChangeHandler(FileSystemEventHandler):
     def _should_ignore(self, file_path: str) -> bool:
         """Ignore meta/temp/cache files to avoid GUID churn and noisy events."""
         lower = file_path.replace("\\", "/").lower()
-        if lower.endswith(".meta") or lower.endswith(".meta.tmp") or lower.endswith(".tmp"):
+        if (
+            lower.endswith(".meta")
+            or lower.endswith(".meta.tmp")
+            or lower.endswith(".tmp")
+            or is_document_store_temporary_path(file_path)
+        ):
             return True
         if "/__pycache__/" in lower or lower.endswith(".pyc"):
             return True
@@ -89,6 +99,18 @@ class ResourceChangeHandler(FileSystemEventHandler):
     def on_moved(self, event):
         if event.is_directory:
             return
+        source_is_document_temp = is_document_store_temporary_path(event.src_path)
+        destination_is_document_temp = is_document_store_temporary_path(event.dest_path)
+        if source_is_document_temp:
+            if destination_is_document_temp or self._should_ignore(event.dest_path):
+                return
+            self._coordinator.submit(
+                AssetFsEventKind.MOVED,
+                event.src_path,
+                destination=event.dest_path,
+                guid_hint=self._asset_database.get_guid_from_path(event.dest_path),
+            )
+            return
         if self._is_meta_sidecar_path(event.src_path) and self._is_meta_sidecar_path(event.dest_path):
             return
         if self._should_ignore(event.src_path) or self._should_ignore(event.dest_path):
@@ -118,15 +140,18 @@ class ResourceChangeHandler(FileSystemEventHandler):
         return len(events)
 
     def _dispatch_event(self, event: AssetFsEvent) -> None:
-        if event.kind is not AssetFsEventKind.META_DELETED:
-            from Infernux.core.assets import AssetManager
-            if AssetManager.is_watcher_echo_suppressed(
-                event.kind.value,
-                event.path,
-                event.destination,
-            ):
-                Debug.log_internal(f"[AssetManager] suppressed watcher echo: {event}")
+        from Infernux.core.assets import AssetManager
+        if event.kind is AssetFsEventKind.META_DELETED:
+            if AssetManager.is_meta_watcher_suppressed(event.path):
+                Debug.log_internal(f"[AssetManager] suppressed meta watcher echo: {event}")
                 return
+        elif AssetManager.is_watcher_echo_suppressed(
+            event.kind.value,
+            event.path,
+            event.destination,
+        ):
+            Debug.log_internal(f"[AssetManager] suppressed watcher echo: {event}")
+            return
         if event.kind is AssetFsEventKind.CREATED:
             self._commit_created(event.path)
         elif event.kind is AssetFsEventKind.MODIFIED:
@@ -163,9 +188,6 @@ class ResourceChangeHandler(FileSystemEventHandler):
         if not os.path.isfile(path):
             raise _AssetImportNotReady(f"modified file is not ready: {path}")
         from Infernux.core.assets import AssetManager
-        if AssetManager.is_meta_watcher_suppressed(path):
-            Debug.log_internal(f"[AssetManager] suppressed watcher echo for '{path}'")
-            return
         if self._asset_database.contains_path(path):
             if not AssetManager.reimport_asset(
                 path,
@@ -186,6 +208,12 @@ class ResourceChangeHandler(FileSystemEventHandler):
 
     def _commit_deleted(self, path: str) -> None:
         from Infernux.core.assets import AssetManager
+        # A replace-in-place write may surface as a delete followed by a move
+        # or create. Watcher delivery can be reordered, so never let a stale
+        # delete event remove a newly published asset from disk/database.
+        if os.path.isfile(path):
+            self._commit_modified(path)
+            return
         if not AssetManager.delete_asset(
             path,
             database=self._asset_database,
@@ -230,24 +258,43 @@ class ResourceChangeHandler(FileSystemEventHandler):
         """Handle a deleted .meta sidecar (watchdog-driven, main thread).
 
         Deleting a .meta while the engine runs should immediately:
-          1. Reload any cached instance from current source/default settings.
-          2. Reimport through the canonical AssetDatabase transaction, which
-             regenerates the sidecar while preserving the in-memory GUID.
-          3. Reload the live resource + GPU caches so the change takes effect now
-             (AssetRegistry in-place reload, mesh palette/SkinnedModelCache refresh,
-             texture GPU re-upload, dependent material refresh).
+          1. Reimport (or import) through the canonical AssetDatabase transaction,
+             which regenerates the sidecar while preserving the in-memory GUID.
+          2. Reload the live resource + GPU caches so the change takes effect now.
         """
         Debug.log_internal(f"[Meta Missing] regenerate + reload for {owner_path}")
         if not owner_path or not os.path.isfile(owner_path):
             return
+        if os.path.isfile(owner_path + ".meta"):
+            return
 
         from Infernux.core.assets import AssetManager
-        if not AssetManager.reimport_asset(
-            owner_path,
-            database=self._asset_database,
-            suppress_watcher_echo=False,
-        ):
-            raise RuntimeError(f"failed to rebuild missing metadata: {owner_path}")
+        if AssetManager.is_meta_watcher_suppressed(owner_path):
+            Debug.log_internal(f"[Meta Missing] suppressed rebuild echo for {owner_path}")
+            return
+
+        if self._asset_database.contains_path(owner_path):
+            result = AssetManager.reimport_asset(
+                owner_path,
+                database=self._asset_database,
+                suppress_watcher_echo=False,
+            )
+        else:
+            result = AssetManager.import_asset(
+                owner_path,
+                database=self._asset_database,
+                suppress_watcher_echo=False,
+            )
+        if not result:
+            # DocumentStore may have already republished the sidecar even when
+            # a subsequent runtime reload failed; treat that as recovered.
+            if os.path.isfile(owner_path + ".meta"):
+                AssetManager.invalidate_project_panel_cache()
+                return
+            detail = getattr(result, "error", "") or "asset mutation failed"
+            raise _AssetImportNotReady(
+                f"failed to rebuild missing metadata: {owner_path}: {detail}"
+            )
         AssetManager.invalidate_project_panel_cache()
 
     @staticmethod

@@ -39,10 +39,7 @@ def _assert_runtime_ids_removed(document: dict) -> None:
     assert "component_id" not in document["transform"]
     assert "instance_guid" not in document["transform"]
     for component in document["components"]:
-        assert "component_id" not in component
-        assert "instance_guid" not in component
-    for component in document["py_components"]:
-        assert "component_id" not in component
+        assert type(component["component_id"]) is int and component["component_id"] > 0
         assert "instance_guid" not in component
     for child in document["children"]:
         _assert_runtime_ids_removed(child)
@@ -105,7 +102,11 @@ def test_prefab_remaps_internal_python_references(scene, tmp_path):
 
     assert save_prefab(root, str(path)) is True
     document = json.loads(path.read_text(encoding="utf-8"))["root_object"]
-    assert document["py_components"][0]["py_fields"]["target_object"] == make_game_object_ref(
+    reference_record = next(
+        record for record in document["components"]
+        if record["type_id"].endswith(":_PrefabReferenceComponent")
+    )
+    assert reference_record["data"]["target_object"] == make_game_object_ref(
         document["children"][0]["local_id"]
     )
 

@@ -831,13 +831,14 @@ uint64_t GPUMeshPreview::RenderToImGuiTextureCamera(const InxMesh &mesh,
     if (!m_vkCore || size <= 0)
         return 0;
     if (m_activeReadback && !m_activeReadback->IsDone()) {
-        EnsureImGuiDisplayDescriptor();
-        return reinterpret_cast<uint64_t>(m_displayDescriptorSet);
+        // The caller uses zero as backpressure and keeps only its latest
+        // request pending. Returning the stale display texture here falsely
+        // reports that a new camera/transform state was rendered.
+        return 0;
     }
     m_activeReadback.reset();
     if (m_activeSubmission && !m_activeSubmission->IsComplete()) {
-        EnsureImGuiDisplayDescriptor();
-        return reinterpret_cast<uint64_t>(m_displayDescriptorSet);
+        return 0;
     }
     m_activeSubmission.reset();
 

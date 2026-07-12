@@ -19,6 +19,7 @@ VERTEX_SHADER_TEMPLATE: str
 FRAGMENT_SHADER_TEMPLATE: str
 SCENE_TEMPLATE: str
 MATERIAL_TEMPLATE: str
+VFXSYSTEM_TEMPLATE: str
 
 
 # ── Public API ──────────────────────────────────────────────────────
@@ -51,6 +52,11 @@ def create_material(
     material_name: str,
     asset_database: Optional[object] = None,
 ) -> None: ...
+def create_vfxsystem(
+    current_path: str,
+    system_name: str,
+    asset_database: Optional[object] = None,
+) -> tuple[bool, str]: ...
 def create_prefab_from_gameobject(
     game_object: object,
     current_path: str,

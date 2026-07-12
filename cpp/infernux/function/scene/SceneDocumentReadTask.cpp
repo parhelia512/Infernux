@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <function/scene/ComponentFactory.h>
+#include <function/scene/ComponentRecord.h>
 #include <functional>
 #include <stdexcept>
 #include <thread>
@@ -70,38 +71,30 @@ void ValidateNativeComponentRecord(const json &component, const std::string &pat
     componentTypes.emplace(id, type);
 }
 
-void ValidatePythonComponentRecord(const json &component, const std::string &path,
-                                   std::unordered_set<uint64_t> &componentIds)
+void ValidateUnifiedComponentRecord(const json &component, const std::string &path,
+                                    std::unordered_set<uint64_t> &componentIds,
+                                    std::unordered_map<uint64_t, std::string> &componentTypes)
 {
-    static const std::unordered_set<std::string> allowed = {
-        "schema_version", "type",      "enabled",     "execution_order", "component_id",
-        "py_type_name",   "type_guid", "script_guid", "py_fields",
-    };
-    RequireExactFields(component, allowed, path);
-    if (!component.contains("schema_version") || !component["schema_version"].is_number_integer() ||
-        component["schema_version"].get<int>() != 1 || !component.contains("type") || !component["type"].is_string() ||
-        !component.contains("py_type_name") || !component["py_type_name"].is_string() ||
-        component["type"] != component["py_type_name"] || component["type"].get_ref<const std::string &>().empty() ||
-        !component.contains("type_guid") || !component["type_guid"].is_string() ||
-        component["type_guid"].get_ref<const std::string &>().empty() || !component.contains("script_guid") ||
-        !component["script_guid"].is_string() || component["script_guid"].get_ref<const std::string &>().empty() ||
-        !component.contains("enabled") || !component["enabled"].is_boolean() ||
-        !component.contains("execution_order") || !component["execution_order"].is_number_integer() ||
-        !component.contains("py_fields") || !component["py_fields"].is_object()) {
-        throw std::invalid_argument(path + " has invalid Python component fields");
+    DecodedComponentRecord record;
+    try {
+        record = DecodeComponentRecord(component);
+    } catch (const std::exception &error) {
+        throw std::invalid_argument(path + ": " + error.what());
     }
-
-    const uint64_t id = RequirePositiveId(component, "component_id", path);
-    if (!componentIds.insert(id).second)
-        throw std::invalid_argument(path + " duplicates component_id " + std::to_string(id));
-    const json &fields = component["py_fields"];
-    if (!fields.contains("__schema_version__") || !fields["__schema_version__"].is_number_integer() ||
-        fields["__schema_version__"].get<int>() <= 0 || !fields.contains("__type_name__") ||
-        !fields["__type_name__"].is_string() || fields["__type_name__"] != component["py_type_name"] ||
-        !fields.contains("__component_id__") || !fields["__component_id__"].is_number_unsigned() ||
-        fields["__component_id__"].get<uint64_t>() != id) {
-        throw std::invalid_argument(path + ".py_fields identity metadata is inconsistent");
+    if (!componentIds.insert(record.componentId).second)
+        throw std::invalid_argument(path + " duplicates component_id " + std::to_string(record.componentId));
+    if (record.kind == ComponentRecordKind::Python)
+        return;
+    if (!ComponentFactory::IsRegistered(record.nativeTypeName)) {
+        throw std::invalid_argument(path + " references unregistered native component type '" + record.nativeTypeName +
+                                    "'");
     }
+    try {
+        ComponentFactory::ValidateDocument(record.nativeTypeName, BuildNativeComponentDocument(record));
+    } catch (const std::exception &error) {
+        throw std::invalid_argument(path + ": " + error.what());
+    }
+    componentTypes.emplace(record.componentId, record.nativeTypeName);
 }
 
 void ValidateObject(const json &object, const std::string &path, std::unordered_set<uint64_t> &objectIds,
@@ -109,17 +102,17 @@ void ValidateObject(const json &object, const std::string &path, std::unordered_
                     std::unordered_map<uint64_t, std::string> &componentTypes)
 {
     static const std::unordered_set<std::string> allowed = {
-        "schema_version", "name",        "id",        "active",     "is_static",     "tag",      "layer",
-        "prefab_guid",    "prefab_root", "transform", "components", "py_components", "children",
+        "schema_version", "name",        "id",          "active",    "is_static",  "tag",
+        "layer",          "prefab_guid", "prefab_root", "transform", "components", "children",
     };
     RequireExactFields(object, allowed, path);
     if (!object.contains("schema_version") || !object["schema_version"].is_number_integer() ||
-        object["schema_version"].get<int>() != 1 || !object.contains("name") || !object["name"].is_string() ||
+        object["schema_version"].get<int>() != 2 || !object.contains("name") || !object["name"].is_string() ||
         !object.contains("active") || !object["active"].is_boolean() || !object.contains("is_static") ||
         !object["is_static"].is_boolean() || !object.contains("tag") || !object["tag"].is_string() ||
         !object.contains("layer") || !object["layer"].is_number_integer() || !object.contains("transform") ||
-        !object.contains("components") || !object["components"].is_array() || !object.contains("py_components") ||
-        !object["py_components"].is_array() || !object.contains("children") || !object["children"].is_array()) {
+        !object.contains("components") || !object["components"].is_array() || !object.contains("children") ||
+        !object["children"].is_array()) {
         throw std::invalid_argument(path + " has invalid GameObject fields");
     }
     const int layer = object["layer"].get<int>();
@@ -138,11 +131,8 @@ void ValidateObject(const json &object, const std::string &path, std::unordered_
     if (object["transform"].value("type", std::string()) != "Transform")
         throw std::invalid_argument(path + ".transform must have type Transform");
     for (size_t index = 0; index < object["components"].size(); ++index)
-        ValidateNativeComponentRecord(object["components"][index], path + ".components[" + std::to_string(index) + "]",
-                                      componentIds, componentTypes);
-    for (size_t index = 0; index < object["py_components"].size(); ++index)
-        ValidatePythonComponentRecord(object["py_components"][index],
-                                      path + ".py_components[" + std::to_string(index) + "]", componentIds);
+        ValidateUnifiedComponentRecord(object["components"][index], path + ".components[" + std::to_string(index) + "]",
+                                       componentIds, componentTypes);
     for (size_t index = 0; index < object["children"].size(); ++index)
         ValidateObject(object["children"][index], path + ".children[" + std::to_string(index) + "]", objectIds,
                        componentIds, componentTypes);
@@ -155,7 +145,7 @@ void ValidateSceneDocument(const json &document)
     };
     RequireExactFields(document, allowed, "Scene");
     if (!document.contains("schema_version") || !document["schema_version"].is_number_integer() ||
-        document["schema_version"].get<int>() != 1 || !document.contains("name") || !document["name"].is_string() ||
+        document["schema_version"].get<int>() != 2 || !document.contains("name") || !document["name"].is_string() ||
         !document.contains("isPlaying") || !document["isPlaying"].is_boolean() || !document.contains("objects") ||
         !document["objects"].is_array()) {
         throw std::invalid_argument("Scene has invalid required fields");

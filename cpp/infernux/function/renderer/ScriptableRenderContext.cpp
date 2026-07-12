@@ -4,8 +4,10 @@
 #include "EditorTools.h"
 #include "GizmosDrawCallBuffer.h"
 #include "InxVkCoreModular.h"
+#include "ParticleDrawCallBuffer.h"
 #include "SceneRenderGraph.h"
 #include "TransientResourcePool.h"
+#include "vk/RhiVulkanTypes.h"
 #include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <function/resources/InxMaterial/InxMaterial.h>
 #include <function/scene/SceneRenderer.h>
@@ -241,6 +243,19 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
         g_srcProfileSnapshot.submitEditorAppendMs +=
             std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 #endif
+    }
+
+    if (m_gizmoCtx.particles && m_gizmoCtx.particles->GetParticleCount() > 0) {
+        glm::vec3 cameraRight(1.0f, 0.0f, 0.0f);
+        glm::vec3 cameraUp(0.0f, 1.0f, 0.0f);
+        if (m_activeCamera && m_activeCamera->GetGameObject() && m_activeCamera->GetGameObject()->GetTransform()) {
+            Transform *cameraTransform = m_activeCamera->GetGameObject()->GetTransform();
+            cameraRight = cameraTransform->GetWorldRight();
+            cameraUp = cameraTransform->GetWorldUp();
+        }
+        DrawCallResult particleResult = m_gizmoCtx.particles->GetDrawCalls(cameraRight, cameraUp);
+        for (auto &drawCall : particleResult.drawCalls)
+            m_orderedDrawCalls.push_back(drawCall);
     }
 
     // Auto-append editor gizmos
@@ -504,7 +519,8 @@ void ScriptableRenderContext::ProcessPendingCommandBuffers()
                 if (m_transientPool) {
                     const auto &params = std::get<GetTemporaryRTParams>(command.data);
                     uint32_t slotId =
-                        m_transientPool->Acquire(params.width, params.height, params.format, params.samples);
+                        m_transientPool->Acquire(params.width, params.height, rhi::ToVkFormat(params.format),
+                                                 rhi::ToVkSampleCount(params.samples));
                     m_handleToSlotMap[params.handleId] = slotId;
                 }
                 break;

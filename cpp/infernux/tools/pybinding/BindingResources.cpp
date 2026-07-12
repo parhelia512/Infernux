@@ -19,17 +19,34 @@ namespace infernux
 void RegisterResourceBindings(py::module_ &m)
 {
     py::register_exception<DocumentWriteSuperseded>(m, "DocumentWriteSuperseded");
+    py::register_exception<DocumentWriteCancelled>(m, "DocumentWriteCancelled");
+
+    py::class_<DocumentWriteOptions>(m, "DocumentWriteOptions")
+        .def(py::init<>())
+        .def_readwrite("create_backup", &DocumentWriteOptions::createBackup);
+
+    py::class_<DocumentPathMetrics>(m, "DocumentPathMetrics")
+        .def_readonly("latest_submitted_generation", &DocumentPathMetrics::latestSubmittedGeneration)
+        .def_readonly("latest_succeeded_generation", &DocumentPathMetrics::latestSucceededGeneration)
+        .def_readonly("latest_failed_generation", &DocumentPathMetrics::latestFailedGeneration)
+        .def_readonly("pending_generation", &DocumentPathMetrics::pendingGeneration)
+        .def_readonly("active_generation", &DocumentPathMetrics::activeGeneration);
 
     py::class_<DocumentWriteTicket, std::shared_ptr<DocumentWriteTicket>>(m, "DocumentWriteTicket")
         .def_property_readonly("path", &DocumentWriteTicket::GetPath)
         .def_property_readonly("generation", &DocumentWriteTicket::GetGeneration)
+        .def_property_readonly("is_complete", &DocumentWriteTicket::IsComplete)
+        .def_property_readonly("status", &DocumentWriteTicket::GetStatusName)
         .def("wait", &DocumentWriteTicket::Wait, py::call_guard<py::gil_scoped_release>());
 
     py::class_<DocumentStore>(m, "NativeDocumentStore")
         .def_static("instance", &DocumentStore::Instance, py::return_value_policy::reference)
-        .def("submit", &DocumentStore::Submit, py::arg("path"), py::arg("content"))
+        .def("submit", &DocumentStore::Submit, py::arg("path"), py::arg("content"),
+             py::arg("options") = DocumentWriteOptions{})
         .def("write_and_wait", &DocumentStore::WriteAndWait, py::arg("path"), py::arg("content"),
-             py::call_guard<py::gil_scoped_release>())
+             py::arg("options") = DocumentWriteOptions{}, py::call_guard<py::gil_scoped_release>())
+        .def("cancel", &DocumentStore::Cancel, py::arg("ticket"))
+        .def("get_metrics", &DocumentStore::GetMetrics, py::arg("path"))
         .def("flush_all", py::overload_cast<>(&DocumentStore::Flush), py::call_guard<py::gil_scoped_release>())
         .def("flush_path", py::overload_cast<const std::string &>(&DocumentStore::Flush), py::arg("path"),
              py::call_guard<py::gil_scoped_release>())

@@ -931,9 +931,8 @@ PhysicsWorld *Rigidbody::GetActivePhysicsWorld(GameObject *&outGo) const
 
 void Rigidbody::NotifyCollidersBodyTypeChanged()
 {
-    GameObject *go = nullptr;
-    auto *pw = GetActivePhysicsWorld(go);
-    if (!pw)
+    GameObject *go = GetGameObject();
+    if (!go)
         return;
 
     const auto &d = Data();
@@ -944,6 +943,11 @@ void Rigidbody::NotifyCollidersBodyTypeChanged()
                 meshCollider->SetConvex(true);
         }
     }
+
+    auto &physicsWorld = PhysicsWorld::Instance();
+    if (!physicsWorld.IsInitialized())
+        return;
+    auto *pw = &physicsWorld;
 
     // Rebuild shapes first — some colliders (e.g. MeshCollider) produce
     // different shape types depending on whether a dynamic Rigidbody exists.

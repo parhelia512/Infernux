@@ -42,8 +42,9 @@ KEY_RIGHT_CTRL = 531 # Right Ctrl
 
 
 def _empty_scene_document(name: str) -> dict:
+    # Must match Scene::DeserializeDocument / GameObject schema_version 2.
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "name": name,
         "isPlaying": False,
         "objects": [],
@@ -427,9 +428,10 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
         if self._current_scene_path:
             save_ok = self._do_save(self._current_scene_path)
         else:
-            default_path = self._default_scene_save_path()
-            if default_path:
-                save_ok = self._do_save(default_path)
+            self._pending_action = 'close'
+            self._post_save_callback = self._execute_pending_action
+            self._show_save_as_dialog()
+            return
 
         if save_ok:
             if native:

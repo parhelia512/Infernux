@@ -73,15 +73,17 @@ class GameObjectRef:
             self.target.name
     """
 
-    __slots__ = ("_persistent_id", "_cached_obj")
+    __slots__ = ("_persistent_id", "_cached_obj", "_cached_handle")
 
     def __init__(self, game_object=None, *, persistent_id: int = 0):
         if game_object is not None:
             self._persistent_id: int = int(game_object.id)
             self._cached_obj = game_object
+            self._cached_handle = getattr(game_object, "handle", None)
         else:
             self._persistent_id = int(persistent_id)
             self._cached_obj = None
+            self._cached_handle = None
 
     # -- resolution --------------------------------------------------------
 
@@ -89,6 +91,7 @@ class GameObjectRef:
         """Try to resolve the live object from the current scene."""
         if self._persistent_id == 0:
             self._cached_obj = None
+            self._cached_handle = None
             return None
         try:
             from Infernux.lib import SceneManager as _SM
@@ -96,6 +99,7 @@ class GameObjectRef:
             if scene is not None:
                 obj = scene.find_by_id(self._persistent_id)
                 self._cached_obj = obj
+                self._cached_handle = getattr(obj, "handle", None) if obj is not None else None
                 return obj
         except (ImportError, RuntimeError):
             # pybind11 raises RuntimeError when the C++ object behind a
@@ -105,6 +109,7 @@ class GameObjectRef:
         except Exception as exc:
             _log.warning("GameObjectRef._resolve failed: %s", exc)
         self._cached_obj = None
+        self._cached_handle = None
         return None
 
     # -- public API --------------------------------------------------------
@@ -117,13 +122,26 @@ class GameObjectRef:
     def resolve(self):
         """Return the live GameObject, or ``None`` if destroyed/missing."""
         obj = self._cached_obj
-        # Quick validity check: the C++ side exposes `.id`; if it throws
-        # the wrapper has been invalidated.
-        if obj is not None:
+        handle = self._cached_handle
+        if obj is not None and handle is not None:
             try:
-                _ = obj.id
-                return obj
-            except RuntimeError:
+                from Infernux.lib import SceneManager as _SM
+                scene = _SM.instance().get_active_scene()
+                if scene is not None:
+                    resolved = scene.resolve_game_object(handle)
+                    if resolved is not None:
+                        self._cached_obj = resolved
+                        return resolved
+            except (ImportError, RuntimeError):
+                pass
+            self._cached_obj = None
+            self._cached_handle = None
+        elif obj is not None:
+            # Non-native stand-ins used by tooling/tests do not expose handles.
+            try:
+                if int(obj.id) == self._persistent_id:
+                    return obj
+            except (RuntimeError, AttributeError, TypeError, ValueError):
                 self._cached_obj = None
         return self._resolve()
 
@@ -441,6 +459,27 @@ def _infer_component_type_on_game_object(game_object) -> str:
         return ""
     return getattr(resolved, "type_name", type(resolved).__name__) or ""
 
+
+def _get_component_handle(component):
+    """Return the native ObjectHandle behind a component wrapper, if any."""
+    if component is None:
+        return None
+    try:
+        handle = getattr(component, "handle", None)
+        if handle is not None:
+            return handle
+    except (RuntimeError, AttributeError):
+        return None
+
+    get_native = getattr(component, "_get_bound_native_component", None)
+    if callable(get_native):
+        try:
+            native = get_native()
+            return getattr(native, "handle", None) if native is not None else None
+        except (RuntimeError, AttributeError):
+            return None
+    return None
+
 class ComponentRef:
     """Null-safe reference to a component on a specific GameObject.
 
@@ -460,12 +499,13 @@ class ComponentRef:
     Serialization uses the current typed value-document schema.
     """
 
-    __slots__ = ("_go_id", "_component_type", "_cached")
+    __slots__ = ("_go_id", "_component_type", "_cached", "_cached_handle")
 
     def __init__(self, *, go_id: int = 0, component_type: str = ""):
         self._go_id: int = int(go_id)
         self._component_type: str = component_type
         self._cached = None
+        self._cached_handle = None
 
     # -- resolution --------------------------------------------------------
 
@@ -473,6 +513,7 @@ class ComponentRef:
         """Try to resolve the live component from the current scene."""
         if self._go_id == 0:
             self._cached = None
+            self._cached_handle = None
             return None
 
         try:
@@ -480,29 +521,35 @@ class ComponentRef:
             scene = _SM.instance().get_active_scene()
             if scene is None:
                 self._cached = None
+                self._cached_handle = None
                 return None
 
             go = scene.find_by_id(self._go_id)
             if go is None:
                 self._cached = None
+                self._cached_handle = None
                 return None
 
             if self._component_type:
                 found = _resolve_component_on_game_object(go, self._component_type)
                 if found is not None:
                     self._cached = found
+                    self._cached_handle = _get_component_handle(found)
                     return found
             else:
                 found = _resolve_component_on_game_object(go, "")
                 if found is not None:
                     self._cached = found
+                    self._cached_handle = _get_component_handle(found)
                     return found
 
             self._cached = None
+            self._cached_handle = None
             return None
         except (ImportError, RuntimeError) as exc:
             _log.warning("ComponentRef._resolve failed: %s", exc)
             self._cached = None
+            self._cached_handle = None
             return None
 
     def resolve(self):
@@ -510,12 +557,21 @@ class ComponentRef:
         # Quick validity check on cached value
         if self._cached is not None:
             try:
-                if hasattr(self._cached, '_is_destroyed') and self._cached._is_destroyed:
+                if self._cached_handle is not None:
+                    from Infernux.lib import SceneManager as _SM
+                    scene = _SM.instance().get_active_scene()
+                    if scene is None or scene.resolve_component(self._cached_handle) is None:
+                        self._cached = None
+                        self._cached_handle = None
+                    else:
+                        return self._cached
+                elif hasattr(self._cached, '_is_destroyed') and self._cached._is_destroyed:
                     self._cached = None
                 else:
                     return self._cached
-            except (RuntimeError, AttributeError):
+            except (ImportError, RuntimeError, AttributeError):
                 self._cached = None
+                self._cached_handle = None
         return self._resolve()
 
     def __copy__(self):

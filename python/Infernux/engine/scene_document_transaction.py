@@ -81,8 +81,7 @@ class SceneDocumentTransaction:
         self._state = SceneDocumentTransactionState.CREATED
         self._ticket: Optional[_SceneDocumentReadTicket] = None
         self._prepared_graph = None
-        self._rollback_document: Optional[dict[str, Any]] = None
-        self._rollback_graph = None
+        self._commit_token = None
         self._native_committed = False
         self._rolled_back = False
         self._rollback_error = ""
@@ -139,53 +138,38 @@ class SceneDocumentTransaction:
             self._error = str(error) or type(error).__name__
         else:
             self._error = error
-        for graph in (self._prepared_graph, self._rollback_graph):
-            if graph is not None:
-                graph.discard()
+        if self._prepared_graph is not None:
+            self._prepared_graph.discard()
         self._prepared_graph = None
-        self._rollback_graph = None
-        self._rollback_document = None
         self._state = SceneDocumentTransactionState.FAILED
 
-    def _prepare_rollback_snapshot(self) -> None:
-        from Infernux.engine.component_restore import preflight_scene_python_components
+    def _rebuild_python_registries(self) -> None:
+        if not self._clear_registries:
+            return
+        from Infernux.components.component import InxComponent
+        from Infernux.components.builtin_component import BuiltinComponent
+        from Infernux.gizmos.collector import notify_scene_changed
 
-        rollback_document = self._scene.serialize_document()
-        if not isinstance(rollback_document, dict):
-            raise SceneDocumentTransactionError("live scene returned a non-object rollback document")
-        _preflight_scene_resource_dependencies(rollback_document)
-        rollback_graph = preflight_scene_python_components(
-            rollback_document,
-            asset_database=self._asset_database,
-        )
-        self._rollback_document = rollback_document
-        self._rollback_graph = rollback_graph
-
-    def _discard_rollback_snapshot(self) -> None:
-        if self._rollback_graph is not None:
-            self._rollback_graph.discard()
-        self._rollback_graph = None
-        self._rollback_document = None
+        InxComponent._clear_all_instances()
+        BuiltinComponent._clear_cache()
+        for game_object in self._scene.get_all_objects():
+            for component in game_object.get_py_components() or []:
+                component._set_game_object(game_object)
+                component._refresh_native_handle()
+        notify_scene_changed()
 
     def _rollback_after_commit(self, cause: BaseException) -> None:
-        from Infernux.engine.component_restore import publish_prepared_scene_python_components
-
         self._state = SceneDocumentTransactionState.ROLLING_BACK
         if self._prepared_graph is not None:
             self._prepared_graph.discard()
             self._prepared_graph = None
         try:
-            if self._rollback_document is None or self._rollback_graph is None:
-                raise SceneDocumentTransactionError("rollback snapshot is unavailable")
-            if not self._scene._commit_document(self._rollback_document):
-                raise SceneDocumentTransactionError("native rollback document commit was rejected")
-            publish_prepared_scene_python_components(
-                self._scene,
-                self._rollback_graph,
-                clear_registries=self._clear_registries,
-            )
-            self._rollback_graph = None
-            self._rollback_document = None
+            if self._commit_token is None or not self._commit_token.is_active:
+                raise SceneDocumentTransactionError("retained native world is unavailable")
+            if not self._commit_token.rollback():
+                raise SceneDocumentTransactionError("retained native world rollback was rejected")
+            self._commit_token = None
+            self._rebuild_python_registries()
             self._native_committed = False
             self._rolled_back = True
         except Exception as rollback_exc:
@@ -261,10 +245,10 @@ class SceneDocumentTransaction:
                 assert self._document is not None
                 assert self._prepared_graph is not None
                 self._state = SceneDocumentTransactionState.COMMITTING
-                self._prepare_rollback_snapshot()
                 if self._before_commit is not None:
                     self._before_commit()
-                if not self._scene._commit_document(self._document):
+                self._commit_token = self._scene._commit_document_retaining_world(self._document)
+                if self._commit_token is None:
                     self._fail("native scene document commit was rejected")
                     return True
                 self._native_committed = True
@@ -276,8 +260,9 @@ class SceneDocumentTransaction:
                 self._prepared_graph = None
                 if self._after_publish is not None:
                     self._after_publish()
+                self._commit_token.finalize()
+                self._commit_token = None
                 self._native_committed = False
-                self._discard_rollback_snapshot()
                 self._state = SceneDocumentTransactionState.COMPLETED
                 return True
 

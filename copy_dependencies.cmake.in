@@ -1,5 +1,7 @@
 # Auto-generated script to copy DLL dependencies
-set(TARGET_DIR "@PYTHON_TARGET_DIR@")
+if(NOT TARGET_DIR)
+    set(TARGET_DIR "@PYTHON_TARGET_DIR@")
+endif()
 set(BUILD_DIR "@CMAKE_BINARY_DIR@")
 set(SOURCE_DIR "@CMAKE_SOURCE_DIR@")
 set(MSVC_RUNTIME_DLLS "@CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS@")

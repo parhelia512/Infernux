@@ -245,9 +245,10 @@ def load_all_components_from_file(file_path: str) -> List[Type[InxComponent]]:
 def load_component_class_from_file(file_path: str, type_name: str = "") -> Optional[Type[InxComponent]]:
     """Load a specific component class from a Python file.
 
-    When ``type_name`` is provided, only a class with that exact name is
-    accepted.  This avoids restoring the wrong class when a script file
-    defines multiple components or changed since the snapshot was recorded.
+    When ``type_name`` is provided, prefer an exact class-name match. If the
+    authored name is missing but the file still defines exactly one
+    ``InxComponent`` subclass, return that class so a pure class rename
+    (same script GUID / one-component-per-file) keeps scene references alive.
     """
     components = load_all_components_from_file(file_path)
     if not components:
@@ -257,6 +258,8 @@ def load_component_class_from_file(file_path: str, type_name: str = "") -> Optio
         for component_class in components:
             if component_class.__name__ == type_name:
                 return component_class
+        if len(components) == 1:
+            return components[0]
         return None
 
     if len(components) != 1:
@@ -317,15 +320,17 @@ def load_and_create_component(file_path: str, asset_database=None,
     guid = asset_database.get_guid_from_path(file_path)
     if not guid:
         from Infernux.core.assets import AssetManager
-        guid = AssetManager.import_asset(
+        mutation = AssetManager.import_asset(
             file_path,
             database=asset_database,
             suppress_watcher_echo=False,
         )
+        guid = mutation.guid
     if not guid:
         raise ScriptLoadError(f"Failed to resolve GUID for script: {file_path}")
+    from Infernux.components.component_identity import bind_asset_script_guid
+    bind_asset_script_guid(component_class, guid)
     instance._script_guid = guid
-    component_class._asset_script_guid_ = guid
     return instance
 
 

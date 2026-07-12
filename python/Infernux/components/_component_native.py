@@ -141,6 +141,9 @@ class ComponentNativeMixin:
     def _bind_native_component(self, cpp_component, game_object=None):
         """Bind this Python instance to its native lifecycle authority."""
         self._cpp_component = cpp_component
+        self._native_handle = getattr(cpp_component, "handle", None) if cpp_component is not None else None
+        self._native_scene = getattr(game_object, "scene", None) if game_object is not None else None
+        self._native_game_object_handle = getattr(game_object, "handle", None) if game_object is not None else None
         self._native_generation += 1
         if game_object is not None:
             self._set_game_object(game_object)
@@ -177,9 +180,20 @@ class ComponentNativeMixin:
         self._is_destroyed = bool(is_destroyed)
         self._execution_order = int(execution_order)
 
+    def _refresh_native_handle(self):
+        """Refresh identity after an explicit native component-ID re-key."""
+        cpp_component = getattr(self, '_cpp_component', None)
+        if cpp_component is None:
+            self._native_handle = None
+            return
+        self._native_handle = cpp_component.handle
+
     def _invalidate_native_binding(self):
         """Invalidate native references after scene rebuild/destruction."""
         self._cpp_component = None
+        self._native_handle = None
+        self._native_scene = None
+        self._native_game_object_handle = None
         self._enabled = False
         self._awake_called = False
         self._has_started = False
@@ -193,6 +207,18 @@ class ComponentNativeMixin:
         cpp_component = getattr(self, '_cpp_component', None)
         if cpp_component is None:
             return None
+        handle = getattr(self, '_native_handle', None)
+        scene = getattr(self, '_native_scene', None)
+        if handle is not None and scene is not None:
+            try:
+                resolved = scene.resolve_component(handle)
+            except (RuntimeError, AttributeError):
+                resolved = None
+            if resolved is None:
+                self._invalidate_native_binding()
+                return None
+            self._cpp_component = resolved
+            return resolved
         try:
             comp_id = int(cpp_component.component_id)
         except RuntimeError:

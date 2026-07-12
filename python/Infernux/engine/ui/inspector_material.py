@@ -622,7 +622,8 @@ def _apply_material_changes(panel, state, mat_data, native_mat,
         # native setters in render_material_property. Full JSON deserialize is
         # only needed when material structure changed (shader sync/texture slots).
         if requires_deserialize:
-            native_mat.deserialize_document(mat_data)
+            if not native_mat.deserialize_document(mat_data):
+                raise RuntimeError("material document was rejected by the native v3 schema")
         if requires_pipeline_refresh:
             _refresh_pipeline(panel)
 
@@ -1055,23 +1056,6 @@ def _get_inline_material_extra(panel, native_mat) -> dict:
         fresh = native_mat.serialize_document()
     except (RuntimeError, ValueError, TypeError):
         fresh = {}
-
-    old_data = extra.get("cached_data", {}) if isinstance(extra, dict) else {}
-    if isinstance(old_data, dict) and fresh:
-        if "_shader_property_order" in old_data and "_shader_property_order" not in fresh:
-            fresh["_shader_property_order"] = old_data["_shader_property_order"]
-        old_props = old_data.get("properties") if isinstance(old_data.get("properties"), dict) else {}
-        new_props = fresh.get("properties") if isinstance(fresh.get("properties"), dict) else {}
-        for prop_name, fresh_prop in new_props.items():
-            if isinstance(fresh_prop, dict) and prop_name in old_props and isinstance(old_props[prop_name], dict):
-                for meta_key, meta_value in old_props[prop_name].items():
-                    if meta_key not in ("value", "guid"):
-                        fresh_prop[meta_key] = meta_value
-        shader_order = old_data.get("_shader_property_order", [])
-        for prop_name in set(shader_order) if shader_order else set():
-            if prop_name not in new_props and prop_name in old_props:
-                new_props[prop_name] = old_props[prop_name]
-        fresh["properties"] = new_props
 
     shader_cache = extra.get("shader_cache") if isinstance(extra, dict) else None
     if not isinstance(shader_cache, dict):

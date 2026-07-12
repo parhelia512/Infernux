@@ -37,7 +37,7 @@ class Override:
 # ─── Core diff ────────────────────────────────────────────────────────────
 
 _SKIP_KEYS = frozenset({
-    "id", "local_id", "schema_version", "children", "components", "py_components",
+    "id", "local_id", "schema_version", "children", "components",
     "transform", "prefab_guid", "prefab_root",
 })
 
@@ -190,11 +190,6 @@ def _diff_node(instance: dict, prefab: dict, path: str,
         prefab.get("components", []),
         current_path, "components", out,
     )
-    _diff_components(
-        instance.get("py_components", []),
-        prefab.get("py_components", []),
-        current_path, "py_components", out,
-    )
 
     # Recurse children (match by index → name)
     i_children = instance.get("children", [])
@@ -220,16 +215,14 @@ def _diff_components(instance_comps: list, prefab_comps: list,
                      node_path: str, section: str,
                      out: List[Override]):
     """Diff component lists by type_name matching."""
-    type_key = "type" if section == "components" else "py_type_name"
-
     p_by_type: Dict[str, dict] = {}
     for c in prefab_comps:
-        tn = c.get(type_key, "")
+        tn = c.get("type_id", "")
         if tn:
             p_by_type[tn] = c
 
     for ic in instance_comps:
-        tn = ic.get(type_key, "")
+        tn = ic.get("type_id", "")
         if not tn:
             continue
         pc = p_by_type.get(tn)
@@ -237,7 +230,7 @@ def _diff_components(instance_comps: list, prefab_comps: list,
             out.append(Override(node_path, f"added_{section}:{tn}", None, tn))
             continue
         # Compare fields within this component
-        skip = {"type", "py_type_name", "component_id", "script_guid", "enabled"}
+        skip = {"type_id", "component_id"}
         for key in set(ic.keys()) | set(pc.keys()):
             if key in skip:
                 continue
@@ -245,8 +238,8 @@ def _diff_components(instance_comps: list, prefab_comps: list,
                 out.append(Override(node_path, f"{section}:{tn}.{key}",
                                    pc.get(key), ic.get(key)))
 
-    i_types = {c.get(type_key, "") for c in instance_comps}
+    i_types = {c.get("type_id", "") for c in instance_comps}
     for pc in prefab_comps:
-        tn = pc.get(type_key, "")
+        tn = pc.get("type_id", "")
         if tn and tn not in i_types:
             out.append(Override(node_path, f"removed_{section}:{tn}", tn, None))

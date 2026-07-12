@@ -7,7 +7,18 @@ from types import SimpleNamespace
 from Infernux.core.assets import AssetManager
 from Infernux.engine.engine import Engine
 from Infernux.engine.resources_manager import ResourceChangeHandler, ResourcesManager
-from Infernux.lib import RuntimeMode
+from Infernux.lib import AssetMutationResult, RuntimeMode
+
+
+def _mutation(operation, path, guid=""):
+    result = AssetMutationResult()
+    result.succeeded = True
+    result.database_committed = True
+    result.changed = True
+    result.operation = operation
+    result.path = path
+    result.guid = guid
+    return result
 
 
 class _AssetDatabaseProbe:
@@ -23,26 +34,28 @@ class _AssetDatabaseProbe:
     def import_asset(self, path):
         self.mutations.append(("import", path, threading.get_ident()))
         self.guid_by_path[path] = "created-guid"
-        return "created-guid"
+        return _mutation("import", path, "created-guid")
 
     def contains_path(self, path):
         return path in self.guid_by_path
 
     def reimport_asset(self, path):
         self.mutations.append(("modified", path, threading.get_ident()))
-        return True
+        return _mutation("reimport", path, self.guid_by_path.get(path, ""))
 
     def delete_asset(self, path):
         self.mutations.append(("deleted", path, threading.get_ident()))
         self.guid_by_path.pop(path, None)
-        return True
+        return _mutation("delete", path)
 
     def move_asset(self, old_path, new_path):
         self.mutations.append(("moved", old_path, new_path, threading.get_ident()))
         guid = self.guid_by_path.pop(old_path, "")
         if guid:
             self.guid_by_path[new_path] = guid
-        return True
+        result = _mutation("move", new_path, guid)
+        result.previous_path = old_path
+        return result
 
 
 class _EngineProbe:
@@ -62,6 +75,7 @@ def _event(path, *, destination=""):
 
 def _patch_asset_manager(monkeypatch, calls):
     AssetManager._watcher_echo_suppression.clear()
+    AssetManager._meta_write_suppression.clear()
     monkeypatch.setattr(
         AssetManager,
         "_get_registry",
@@ -82,6 +96,62 @@ def _patch_asset_manager(monkeypatch, calls):
         ),
     )
     monkeypatch.setattr(AssetManager, "_invalidate_project_panel_cache", classmethod(lambda _cls: None))
+
+
+def test_reimport_meta_write_suppresses_meta_deleted_echo(monkeypatch, tmp_path):
+    database = _AssetDatabaseProbe()
+    handler = ResourceChangeHandler(_EngineProbe(database))
+    asset_calls = []
+    _patch_asset_manager(monkeypatch, asset_calls)
+
+    owner = tmp_path / "newmaterial.mat"
+    meta = tmp_path / "newmaterial.mat.meta"
+    owner.write_text("content", encoding="utf-8")
+    meta.write_text("meta", encoding="utf-8")
+    owner_path = str(owner.resolve())
+    database.guid_by_path[owner_path] = "stable-guid"
+
+    assert AssetManager.reimport_asset(owner_path, database=database)
+    assert [entry[0] for entry in database.mutations] == ["modified"]
+
+    meta.unlink()
+    handler.on_deleted(_event(meta))
+    assert handler.process_pending_reloads(force=True) == 1
+    # META_DELETED must be treated as DocumentStore echo, not a second reimport.
+    assert [entry[0] for entry in database.mutations] == ["modified"]
+
+
+def test_missing_meta_rebuild_imports_unregistered_owner(monkeypatch, tmp_path):
+    database = _AssetDatabaseProbe()
+    handler = ResourceChangeHandler(_EngineProbe(database))
+    asset_calls = []
+    _patch_asset_manager(monkeypatch, asset_calls)
+
+    owner = tmp_path / "orphan.mat"
+    meta = tmp_path / "orphan.mat.meta"
+    owner.write_text("content", encoding="utf-8")
+    handler.on_deleted(_event(meta))
+
+    assert handler.process_pending_reloads(force=True) == 1
+    assert [entry[0] for entry in database.mutations] == ["import"]
+    assert database.guid_by_path[str(owner.resolve())] == "created-guid"
+
+
+def test_material_save_suppresses_watcher_modified_echo(monkeypatch, tmp_path):
+    database = _AssetDatabaseProbe()
+    handler = ResourceChangeHandler(_EngineProbe(database))
+    asset_calls = []
+    _patch_asset_manager(monkeypatch, asset_calls)
+
+    path = tmp_path / "live.mat"
+    path.write_text("content", encoding="utf-8")
+    path_str = str(path.resolve())
+    database.guid_by_path[path_str] = "stable-guid"
+
+    AssetManager.on_material_saved(path_str)
+    handler.on_modified(_event(path))
+    assert handler.process_pending_reloads(force=True) == 1
+    assert database.mutations == []
 
 
 def test_watcher_thread_only_submits_and_main_thread_commits(monkeypatch, tmp_path):
@@ -139,6 +209,76 @@ def test_move_query_may_run_on_watcher_but_mutation_waits_for_owner(monkeypatch,
     assert database.mutations[0][-1] == threading.get_ident()
     assert [entry[0] for entry in asset_calls] == ["invalidate", "asset-moved"]
     assert all(entry[-1] == threading.get_ident() for entry in asset_calls)
+
+
+def test_document_store_atomic_replace_ignores_temp_events_and_reimports_target(monkeypatch, tmp_path):
+    database = _AssetDatabaseProbe()
+    handler = ResourceChangeHandler(_EngineProbe(database))
+    asset_calls = []
+    _patch_asset_manager(monkeypatch, asset_calls)
+
+    target = tmp_path / "atomic.mat"
+    temporary = tmp_path / "atomic.mat.tmp.123456.7"
+    temporary.write_text("staged", encoding="utf-8")
+    database.guid_by_path[str(target)] = "stable-guid"
+
+    handler.on_created(_event(temporary))
+    handler.on_modified(_event(temporary))
+    target.write_text("published", encoding="utf-8")
+    temporary.unlink()
+    handler.on_moved(_event(temporary, destination=target))
+    handler.on_deleted(_event(temporary))
+
+    assert handler.pending_count == 1
+    assert handler.process_pending_reloads(force=True) == 1
+    assert [entry[0] for entry in database.mutations] == ["modified"]
+    assert database.mutations[0][1] == str(target.resolve())
+    assert [entry[0] for entry in asset_calls] == ["invalidate", "asset-modified"]
+    assert all(str(temporary) not in str(entry) for entry in database.mutations)
+
+
+def test_document_store_atomic_replace_does_not_delete_republished_target(monkeypatch, tmp_path):
+    database = _AssetDatabaseProbe()
+    handler = ResourceChangeHandler(_EngineProbe(database))
+    asset_calls = []
+    _patch_asset_manager(monkeypatch, asset_calls)
+
+    target = tmp_path / "atomic.mat"
+    temporary = tmp_path / "atomic.mat.tmp.123456.8"
+    target.write_text("old", encoding="utf-8")
+    temporary.write_text("new", encoding="utf-8")
+    database.guid_by_path[str(target)] = "stable-guid"
+
+    # MoveFileEx(REPLACE_EXISTING) may be observed as deletion of the old
+    # target followed by publication of the DocumentStore temporary file.
+    handler.on_deleted(_event(target))
+    target.write_text("new", encoding="utf-8")
+    temporary.unlink()
+    handler.on_moved(_event(temporary, destination=target))
+
+    assert handler.pending_count == 1
+    assert handler.process_pending_reloads(force=True) == 1
+    assert target.read_text(encoding="utf-8") == "new"
+    assert [entry[0] for entry in database.mutations] == ["modified"]
+    assert [entry[0] for entry in asset_calls] == ["invalidate", "asset-modified"]
+
+
+def test_stale_delete_event_reimports_existing_target_instead_of_deleting_it(monkeypatch, tmp_path):
+    database = _AssetDatabaseProbe()
+    handler = ResourceChangeHandler(_EngineProbe(database))
+    asset_calls = []
+    _patch_asset_manager(monkeypatch, asset_calls)
+
+    target = tmp_path / "atomic.mat"
+    target.write_text("republished", encoding="utf-8")
+    database.guid_by_path[str(target)] = "stable-guid"
+
+    handler.on_deleted(_event(target))
+
+    assert handler.process_pending_reloads(force=True) == 1
+    assert target.is_file()
+    assert [entry[0] for entry in database.mutations] == ["modified"]
+    assert [entry[0] for entry in asset_calls] == ["invalidate", "asset-modified"]
 
 
 def test_recreated_meta_sidecar_cancels_missing_meta_rebuild(monkeypatch, tmp_path):

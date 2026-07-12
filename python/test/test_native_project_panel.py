@@ -3,8 +3,8 @@ import os
 import json
 import tempfile
 import pytest
-from Infernux.lib import ProjectPanel
-from Infernux.engine.ui.project_file_ops import create_physic_material
+from Infernux.lib import AssetMutationResult, ProjectPanel
+from Infernux.engine.ui.project_file_ops import create_physic_material, create_vfxsystem, create_material
 
 
 class TestProjectPanelCreation:
@@ -33,7 +33,12 @@ class TestProjectPanelCreation:
 
             def import_asset(self, path):
                 self.paths.append(path)
-                return "physic-material-guid"
+                result = AssetMutationResult()
+                result.succeeded = True
+                result.database_committed = True
+                result.changed = True
+                result.guid = "physic-material-guid"
+                return result
 
         database = RecordingAssetDatabase()
         ok, error = create_physic_material(str(tmp_path), "Ice", database)
@@ -48,6 +53,46 @@ class TestProjectPanelCreation:
             "friction_combine": 0,
             "bounce_combine": 0,
         }
+
+    def test_create_vfxsystem_writes_loadable_strict_document(self, tmp_path):
+        from Infernux.core.vfx_system import VfxSystem
+
+        ok, error = create_vfxsystem(str(tmp_path), "Fire")
+
+        assert ok is True, error
+        system = VfxSystem.load(str(tmp_path / "Fire.vfxsystem"))
+        assert system.name == "Fire"
+        assert system.emitters[0].graph.graph_kind == "vfx"
+
+    def test_create_material_writes_schema_v3_document(self, tmp_path, engine):
+        from Infernux.lib import InxMaterial
+
+        class RecordingAssetDatabase:
+            def __init__(self):
+                self.paths = []
+
+            def import_asset(self, path):
+                self.paths.append(path)
+                result = AssetMutationResult()
+                result.succeeded = True
+                result.database_committed = True
+                result.changed = True
+                result.guid = "material-guid"
+                return result
+
+        database = RecordingAssetDatabase()
+        ok, error = create_material(str(tmp_path), "NewMaterial", database)
+
+        assert ok is True, error
+        path = tmp_path / "NewMaterial.mat"
+        assert database.paths == [str(path)]
+        document = json.loads(path.read_text(encoding="utf-8"))
+        assert document["material_version"] == 3
+        assert document["name"] == "NewMaterial"
+        assert document["builtin"] is False
+        material = InxMaterial()
+        assert material.deserialize(json.dumps(document)) is True
+        assert material.name == "NewMaterial"
 
 
 class TestProjectPanelPaths:
@@ -140,6 +185,16 @@ class TestProjectPanelCallbacks:
         pp.create_scene = lambda cur, name: (True, "")
         ok, err = pp.create_scene("/path", "Main")
         assert ok is True
+
+    def test_vfx_system_callbacks(self):
+        pp = ProjectPanel()
+        pp.create_vfxsystem = lambda cur, name: (True, "")
+        opened = []
+        pp.open_vfx_system = lambda path: opened.append(path)
+
+        assert pp.create_vfxsystem("/path", "Fire") == (True, "")
+        pp.open_vfx_system("/path/Fire.vfxsystem")
+        assert opened == ["/path/Fire.vfxsystem"]
 
     def test_delete_items_callback(self):
         pp = ProjectPanel()

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ObjectHandle.h"
 #include <cstdint>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -207,6 +208,14 @@ class Component
         return m_componentId;
     }
 
+    /// @brief Get the stable handle for this component's current native lifetime.
+    [[nodiscard]] ObjectHandle GetHandle() const;
+
+    [[nodiscard]] uint64_t GetLifetimeGeneration() const
+    {
+        return m_lifetimeGeneration;
+    }
+
     /// @brief Set component ID (used during deserialization to restore ID)
     void SetComponentID(uint64_t id);
 
@@ -379,6 +388,7 @@ class Component
     bool m_isBeingDestroyed = false;
     int m_executionOrder = 0;
     uint64_t m_componentId = 0;
+    uint64_t m_lifetimeGeneration = 0;
 
   private:
     static uint64_t GenerateComponentID();
@@ -388,6 +398,7 @@ class Component
     static std::unordered_map<uint64_t, Component *> &GetInstanceRegistry();
 
     friend class Scene; // Scene needs to call Start
+    friend class SceneCommitToken;
     friend class GameObject;
 };
 

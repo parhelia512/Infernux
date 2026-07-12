@@ -1455,27 +1455,39 @@ void AssetDatabase::FlushDerivedIndex()
     m_assetIndexDirty = false;
 }
 
-std::string AssetDatabase::ImportAsset(const std::string &path)
+AssetMutationResult AssetDatabase::ImportAsset(const std::string &path)
 {
     AssertMutationThread("ImportAsset");
     AssertNoPendingCommit("ImportAsset");
+    AssetMutationResult result;
+    result.operation = "import";
+    result.path = path;
+    result.resourceType = GetResourceTypeForPath(path);
     std::filesystem::path fsPath = ToFsPath(path);
     if (!std::filesystem::exists(fsPath) || !std::filesystem::is_regular_file(fsPath)) {
-        return "";
+        result.errorCode = AssetMutationErrorCode::InvalidPath;
+        result.error = "asset path is not a regular file";
+        return result;
     }
 
     if (IsMetaFile(fsPath)) {
-        return "";
+        result.errorCode = AssetMutationErrorCode::UnsupportedType;
+        result.error = "metadata sidecars cannot be imported as assets";
+        return result;
     }
 
-    ResourceType type = GetResourceTypeForPath(path);
+    const ResourceType type = result.resourceType;
     if (type == ResourceType::Meta) {
-        return "";
+        result.errorCode = AssetMutationErrorCode::UnsupportedType;
+        result.error = "metadata resources cannot be imported directly";
+        return result;
     }
 
     std::string guid = CreateOrLoadMetadata(path, type, false, true, NormalizePath(path));
     if (guid.empty()) {
-        return "";
+        result.errorCode = AssetMutationErrorCode::ImportFailed;
+        result.error = "asset metadata could not be created or loaded";
+        return result;
     }
 
     UpdateMapping(guid, path);
@@ -1483,26 +1495,43 @@ std::string AssetDatabase::ImportAsset(const std::string &path)
         m_metas.erase(guid);
         RemoveMappingByGuid(guid);
         m_importResults.erase(guid);
-        return {};
+        result.errorCode = AssetMutationErrorCode::ImportFailed;
+        result.error = "asset importer failed";
+        return result;
     }
     UpdateCachedFileState(path, IsReadOnlyPath(NormalizePath(path)));
     m_assetIndexDirty = true;
     PublishQuerySnapshot();
-    return guid;
+    result.succeeded = true;
+    result.databaseCommitted = true;
+    result.changed = true;
+    result.guid = std::move(guid);
+    result.queryGeneration = GetQueryGeneration();
+    return result;
 }
 
-bool AssetDatabase::ReimportAsset(const std::string &path)
+AssetMutationResult AssetDatabase::ReimportAsset(const std::string &path)
 {
     AssertMutationThread("ReimportAsset");
     AssertNoPendingCommit("ReimportAsset");
+    AssetMutationResult result;
+    result.operation = "reimport";
+    result.path = path;
+    result.resourceType = GetResourceTypeForPath(path);
     const std::filesystem::path fsPath = ToFsPath(path);
-    if (!std::filesystem::is_regular_file(fsPath) || IsMetaFile(fsPath) ||
-        GetResourceTypeForPath(path) == ResourceType::Meta)
-        return false;
+    if (!std::filesystem::is_regular_file(fsPath) || IsMetaFile(fsPath) || result.resourceType == ResourceType::Meta) {
+        result.errorCode = AssetMutationErrorCode::InvalidPath;
+        result.error = "registered asset path is not a supported regular file";
+        return result;
+    }
 
     const std::string guid = GetGuidFromPath(path);
-    if (guid.empty())
-        return false;
+    if (guid.empty()) {
+        result.errorCode = AssetMutationErrorCode::NotFound;
+        result.error = "asset is not registered";
+        return result;
+    }
+    result.guid = guid;
 
     const auto previousMeta = GetMetaByGuid(guid);
     if (!previousMeta)
@@ -1525,26 +1554,39 @@ bool AssetDatabase::ReimportAsset(const std::string &path)
         if (!rebuiltGuid.empty() && rebuiltGuid != guid)
             m_metas.erase(rebuiltGuid);
         restoreMetadata();
-        return false;
+        result.errorCode = AssetMutationErrorCode::ImportFailed;
+        result.error = "metadata rebuild did not preserve the registered GUID";
+        return result;
     }
     UpdateMapping(guid, path);
     if (!RunImporter(guid, path, true)) {
         restoreMetadata();
-        return false;
+        result.errorCode = AssetMutationErrorCode::ImportFailed;
+        result.error = "asset importer failed";
+        return result;
     }
     UpdateCachedFileState(path, IsReadOnlyPath(NormalizePath(path)));
     m_assetIndexDirty = true;
     PublishQuerySnapshot();
     AssetDependencyGraph::Instance().NotifyEvent(guid, GetResourceTypeForPath(path), AssetEvent::Modified);
-    return true;
+    result.succeeded = true;
+    result.databaseCommitted = true;
+    result.changed = true;
+    result.queryGeneration = GetQueryGeneration();
+    return result;
 }
 
-bool AssetDatabase::DeleteAsset(const std::string &path)
+AssetMutationResult AssetDatabase::DeleteAsset(const std::string &path)
 {
     AssertMutationThread("DeleteAsset");
     AssertNoPendingCommit("DeleteAsset");
     std::string guid = GetGuidFromPath(path);
     ResourceType type = GetResourceTypeForPath(path);
+    AssetMutationResult result;
+    result.operation = "delete";
+    result.guid = guid;
+    result.path = path;
+    result.resourceType = type;
 
     if (!guid.empty()) {
         std::vector<std::string> artifactPaths;
@@ -1579,13 +1621,22 @@ bool AssetDatabase::DeleteAsset(const std::string &path)
     m_fileStates.erase(NormalizePath(path));
     m_assetIndexDirty = true;
     PublishQuerySnapshot();
-    return true;
+    result.succeeded = true;
+    result.databaseCommitted = true;
+    result.changed = !guid.empty();
+    result.queryGeneration = GetQueryGeneration();
+    return result;
 }
 
-bool AssetDatabase::MoveAsset(const std::string &oldPath, const std::string &newPath)
+AssetMutationResult AssetDatabase::MoveAsset(const std::string &oldPath, const std::string &newPath)
 {
     AssertMutationThread("MoveAsset");
     AssertNoPendingCommit("MoveAsset");
+    AssetMutationResult result;
+    result.operation = "move";
+    result.path = newPath;
+    result.previousPath = oldPath;
+    result.resourceType = GetResourceTypeForPath(newPath);
     const std::string normalizedOldPath = NormalizePath(oldPath);
     std::string guid = GetGuidFromPath(oldPath);
     if (guid.empty()) {
@@ -1610,12 +1661,22 @@ bool AssetDatabase::MoveAsset(const std::string &oldPath, const std::string &new
         // Notify dependents — GUID unchanged, but path changed
         ResourceType type = GetResourceTypeForPath(newPath);
         AssetDependencyGraph::Instance().NotifyEvent(guid, type, AssetEvent::Moved);
-        return true;
+        result.succeeded = true;
+        result.databaseCommitted = true;
+        result.changed = true;
+        result.guid = std::move(guid);
+        result.resourceType = type;
+        result.queryGeneration = GetQueryGeneration();
+        return result;
     }
 
     // If GUID not found, attempt to re-import
-    std::string newGuid = ImportAsset(newPath);
-    return !newGuid.empty();
+    result = ImportAsset(newPath);
+    result.operation = "move";
+    result.previousPath = oldPath;
+    if (!result)
+        result.error = "move could not recover metadata and reimport failed: " + result.error;
+    return result;
 }
 
 bool AssetDatabase::ContainsGuid(const std::string &guid) const

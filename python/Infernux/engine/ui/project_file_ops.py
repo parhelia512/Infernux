@@ -5,6 +5,7 @@ Functions accept the required state as explicit parameters so they don't
 depend on ``ProjectPanel`` internals.
 """
 
+import json
 import os
 import shutil
 
@@ -51,23 +52,30 @@ void surface(out SurfaceData s) {{
 '''
 
 SCENE_TEMPLATE = '''{{
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "{scene_name}",
   "isPlaying": false,
   "objects": []
 }}
 '''
 MATERIAL_TEMPLATE = '''{{
+  "material_version": 3,
   "name": "{material_name}",
-  "guid": "",
+  "builtin": false,
   "shaders": {{
-        "vertex": "standard",
+    "vertex": "standard",
     "fragment": "unlit"
   }},
   "renderState": {{
-    "cullMode": 2,
-        "frontFace": 1,
+    "cullMode": 1,
+    "frontFace": 1,
     "polygonMode": 0,
+    "lineWidth": 1.0,
+    "depthBiasEnable": false,
+    "depthBiasConstantFactor": 0.0,
+    "depthBiasSlopeFactor": 0.0,
+    "depthBiasClamp": 0.0,
+    "topology": 3,
     "depthTestEnable": true,
     "depthWriteEnable": true,
     "depthCompareOp": 1,
@@ -75,7 +83,13 @@ MATERIAL_TEMPLATE = '''{{
     "srcColorBlendFactor": 6,
     "dstColorBlendFactor": 7,
     "colorBlendOp": 0,
-    "renderQueue": 2000
+    "srcAlphaBlendFactor": 0,
+    "dstAlphaBlendFactor": 1,
+    "alphaBlendOp": 0,
+    "alphaClipEnabled": false,
+    "alphaClipThreshold": 0.5,
+    "renderQueue": 2000,
+    "stencilTestEnable": false
   }},
   "properties": {{
     "baseColor": {{
@@ -121,6 +135,30 @@ ANIMFSM_TEMPLATE = '''{
   "default_state": "",
   "mode": "2d",
   "states": [],
+  "parameters": []
+}
+'''
+
+VFXSYSTEM_TEMPLATE = '''{
+  "$format": "infernux.vfx_system",
+  "$version": 1,
+  "name": "{system_name}",
+  "emitters": [
+    {
+      "name": "Emitter",
+      "capacity": 1000,
+      "graph": {
+        "nodes": [],
+        "links": []
+      },
+      "renderer": {
+        "mode": "billboard",
+        "material": "",
+        "blend": "alpha"
+      },
+      "attributes": []
+    }
+  ],
   "parameters": []
 }
 '''
@@ -294,7 +332,7 @@ def _write_new_text_asset(path: str, content: str) -> tuple[bool, str]:
 def _import_new_asset(path: str, asset_database) -> str:
     from Infernux.core.assets import AssetManager
 
-    return AssetManager.import_asset(path, database=asset_database)
+    return AssetManager.import_asset(path, database=asset_database).guid
 
 def create_folder(current_path: str, folder_name: str):
     """Create a folder and return ``(True, "")`` or ``(False, error_msg)``."""
@@ -614,6 +652,37 @@ def create_animfsm(current_path: str, fsm_name: str, asset_database=None):
     return True, ""
 
 
+def create_vfxsystem(current_path: str, system_name: str, asset_database=None):
+    """Create a strict ``.vfxsystem`` authoring asset."""
+    if not system_name or not current_path:
+        return False, "Invalid VFX system name"
+
+    system_name = system_name.strip()
+    if not system_name:
+        return False, "VFX system name cannot be empty"
+    if system_name.lower().endswith(".vfxsystem"):
+        system_name = system_name[:-10]
+
+    file_name = system_name + ".vfxsystem"
+    file_path = os.path.join(current_path, file_name)
+    if os.path.exists(file_path):
+        return False, f"'{file_name}' already exists"
+
+    from Infernux.core.vfx_system import VfxSystem
+
+    content = json.dumps(VfxSystem(name=system_name).to_dict(), indent=2, ensure_ascii=False) + "\n"
+    written, error = _write_new_text_asset(file_path, content)
+    if not written:
+        return False, error
+
+    if asset_database:
+        try:
+            _import_new_asset(file_path, asset_database)
+        except Exception as exc:
+            return False, str(exc)
+    return True, ""
+
+
 def create_animtimeline(current_path: str, timeline_name: str, asset_database=None):
     """Create a ``.animtimeline`` file from template. Returns ``(True, "")`` or ``(False, error_msg)``."""
     if not timeline_name or not current_path:
@@ -804,4 +873,43 @@ def do_rename(old_path: str, new_name: str, asset_database=None):
             Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
             return None
 
+    if ext.lower() == '.py' and os.path.isfile(old_path):
+        try:
+            _sync_python_script_class_name_on_rename(old_path, new_path)
+        except OSError as _exc:
+            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+            return None
+
     return move_path(old_path, new_path, asset_database)
+
+
+def _sync_python_script_class_name_on_rename(old_path: str, new_path: str) -> None:
+    """When renaming ``Foo.py`` → ``Bar.py``, also rename ``class Foo`` → ``class Bar``.
+
+    Only rewrites when the file's primary class name matches the old stem, so
+    hand-authored multi-class scripts are left untouched.
+    """
+    import re
+
+    old_stem = os.path.splitext(os.path.basename(old_path))[0]
+    new_stem = os.path.splitext(os.path.basename(new_path))[0]
+    if not old_stem.isidentifier() or not new_stem.isidentifier() or old_stem == new_stem:
+        return
+
+    with open(old_path, "r", encoding="utf-8") as handle:
+        content = handle.read()
+
+    pattern = re.compile(
+        rf"^class\s+{re.escape(old_stem)}\b",
+        re.MULTILINE,
+    )
+    matches = list(pattern.finditer(content))
+    if len(matches) != 1:
+        return
+
+    updated = pattern.sub(f"class {new_stem}", content, count=1)
+    if updated == content:
+        return
+
+    from Infernux.core.document_store import write_document_text
+    write_document_text(old_path, updated)

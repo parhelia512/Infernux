@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from enum import IntEnum
 from typing import Mapping, Optional, Tuple, List, Dict
 
 from Infernux.lib import (
@@ -8,31 +7,10 @@ from Infernux.lib import (
     GraphPassDesc,
     GraphTextureDesc,
     GraphPassActionType,
-    VkFormat,
+    PixelFormat,
 )
 
-
-class Format(IntEnum):
-    """Texture format for render targets."""
-
-    RGBA8_UNORM = 37
-    RGBA8_SRGB = 43
-    BGRA8_UNORM = 44
-    RGBA16_SFLOAT = 97
-    RGBA32_SFLOAT = 109
-    R32_SFLOAT = 100
-    R8_UNORM = 9
-    R8G8_UNORM = 16
-    RG16_SFLOAT = 83
-    A2R10G10B10_UNORM = 58
-    R16_SFLOAT = 76
-    D32_SFLOAT = 126
-    D24_UNORM_S8_UINT = 129
-
-    @property
-    def is_depth(self) -> bool:
-        """Returns True if this format is a depth format."""
-        ...
+Format = PixelFormat
 
 
 class TextureHandle:

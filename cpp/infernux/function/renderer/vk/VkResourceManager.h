@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "../rhi/RhiUpload.h"
 #include "AsyncTransferContext.h"
 #include "VkHandle.h"
 #include "VkTypes.h"
@@ -313,8 +314,7 @@ class VkResourceManager
      */
     [[nodiscard]] std::unique_ptr<VkBufferHandle> CreateIndexBuffer(const void *data, VkDeviceSize size);
 
-    [[nodiscard]] std::shared_ptr<BufferUploadTicket> BeginBufferUpload(const void *data, VkDeviceSize size,
-                                                                        VkBufferUsageFlags finalUsage);
+    [[nodiscard]] std::shared_ptr<BufferUploadTicket> BeginBufferUpload(const rhi::BufferUploadRequest &request);
     [[nodiscard]] bool TryPublishBufferUpload(const std::shared_ptr<BufferUploadTicket> &ticket);
     void DrainBufferUploads() noexcept;
 

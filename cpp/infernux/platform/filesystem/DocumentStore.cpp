@@ -49,6 +49,30 @@ std::optional<DocumentFileState> DocumentWriteTicket::GetCommittedFileState() co
     return m_fileState;
 }
 
+bool DocumentWriteTicket::IsComplete() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_status != Status::Pending;
+}
+
+std::string DocumentWriteTicket::GetStatusName() const
+{
+    std::lock_guard lock(m_mutex);
+    switch (m_status) {
+    case Status::Pending:
+        return "pending";
+    case Status::Succeeded:
+        return "succeeded";
+    case Status::Superseded:
+        return "superseded";
+    case Status::Cancelled:
+        return "cancelled";
+    case Status::Failed:
+        return "failed";
+    }
+    return "invalid";
+}
+
 void DocumentWriteTicket::Complete(Status status, std::string error, std::optional<DocumentFileState> fileState)
 {
     {
@@ -67,6 +91,8 @@ void DocumentWriteTicket::ThrowIfFailed() const
     std::lock_guard lock(m_mutex);
     if (m_status == Status::Superseded)
         throw DocumentWriteSuperseded(m_error);
+    if (m_status == Status::Cancelled)
+        throw DocumentWriteCancelled(m_error);
     if (m_status == Status::Failed)
         throw std::runtime_error(m_error);
 }
@@ -77,9 +103,9 @@ DocumentStore::DocumentStore(Writer writer, size_t workerCount)
     if (m_workerCount == 0)
         throw std::invalid_argument("DocumentStore requires at least one worker");
     if (!m_writer) {
-        m_writer = [](const std::string &path, const std::string &content) {
+        m_writer = [](const std::string &path, const std::string &content, const DocumentWriteOptions &options) {
             std::string error;
-            if (!WriteTextFileAtomically(path, content, error))
+            if (!WriteTextFileAtomically(path, content, error, AtomicWriteOptions{options.createBackup}))
                 throw std::runtime_error("atomic write failed for '" + path + "': " + error);
         };
     }
@@ -96,7 +122,8 @@ DocumentStore &DocumentStore::Instance()
     return *instance;
 }
 
-std::shared_ptr<DocumentWriteTicket> DocumentStore::Submit(const std::string &path, std::string content)
+std::shared_ptr<DocumentWriteTicket> DocumentStore::Submit(const std::string &path, std::string content,
+                                                           DocumentWriteOptions options)
 {
     const std::string normalizedPath = NormalizePath(path);
     std::shared_ptr<DocumentWriteTicket> superseded;
@@ -114,7 +141,8 @@ std::shared_ptr<DocumentWriteTicket> DocumentStore::Submit(const std::string &pa
         if (const auto existing = m_pending.find(normalizedPath); existing != m_pending.end())
             superseded = existing->second.ticket;
 
-        m_pending.insert_or_assign(normalizedPath, Request{normalizedPath, normalizedPath, std::move(content), ticket});
+        m_pending.insert_or_assign(normalizedPath,
+                                   Request{normalizedPath, normalizedPath, std::move(content), options, ticket});
         if (m_activePaths.find(normalizedPath) == m_activePaths.end() &&
             m_queuedPaths.find(normalizedPath) == m_queuedPaths.end()) {
             m_readyPaths.push_back(normalizedPath);
@@ -132,11 +160,57 @@ std::shared_ptr<DocumentWriteTicket> DocumentStore::Submit(const std::string &pa
     return ticket;
 }
 
-uint64_t DocumentStore::WriteAndWait(const std::string &path, std::string content)
+uint64_t DocumentStore::WriteAndWait(const std::string &path, std::string content, DocumentWriteOptions options)
 {
-    auto ticket = Submit(path, std::move(content));
+    auto ticket = Submit(path, std::move(content), options);
     ticket->Wait();
     return ticket->GetGeneration();
+}
+
+bool DocumentStore::Cancel(const std::shared_ptr<DocumentWriteTicket> &ticket)
+{
+    if (!ticket)
+        return false;
+
+    std::shared_ptr<DocumentWriteTicket> cancelled;
+    {
+        std::lock_guard lock(m_mutex);
+        const auto pending = m_pending.find(ticket->GetPath());
+        if (pending == m_pending.end() || pending->second.ticket != ticket)
+            return false;
+
+        cancelled = pending->second.ticket;
+        m_pending.erase(pending);
+        if (m_activePaths.find(ticket->GetPath()) == m_activePaths.end()) {
+            m_readyPaths.erase(std::remove(m_readyPaths.begin(), m_readyPaths.end(), ticket->GetPath()),
+                               m_readyPaths.end());
+            m_queuedPaths.erase(ticket->GetPath());
+        }
+    }
+
+    cancelled->Complete(DocumentWriteTicket::Status::Cancelled,
+                        "document generation " + std::to_string(cancelled->GetGeneration()) + " for '" +
+                            cancelled->GetPath() + "' was cancelled before IO began");
+    m_condition.notify_all();
+    return true;
+}
+
+DocumentPathMetrics DocumentStore::GetMetrics(const std::string &path) const
+{
+    const std::string key = NormalizePath(path);
+    std::lock_guard lock(m_mutex);
+    DocumentPathMetrics metrics;
+    if (const auto generation = m_generations.find(key); generation != m_generations.end())
+        metrics.latestSubmittedGeneration = generation->second;
+    if (const auto generation = m_succeededGenerations.find(key); generation != m_succeededGenerations.end())
+        metrics.latestSucceededGeneration = generation->second;
+    if (const auto generation = m_failedGenerations.find(key); generation != m_failedGenerations.end())
+        metrics.latestFailedGeneration = generation->second;
+    if (const auto pending = m_pending.find(key); pending != m_pending.end())
+        metrics.pendingGeneration = pending->second.ticket->GetGeneration();
+    if (const auto active = m_activeGenerations.find(key); active != m_activeGenerations.end())
+        metrics.activeGeneration = active->second;
+    return metrics;
 }
 
 void DocumentStore::Flush()
@@ -224,12 +298,13 @@ void DocumentStore::WorkerMain()
             request = std::move(pending->second);
             m_pending.erase(pending);
             m_activePaths.insert(key);
+            m_activeGenerations.insert_or_assign(key, request.ticket->GetGeneration());
         }
 
         std::string error;
         std::optional<DocumentFileState> fileState;
         try {
-            m_writer(request.path, request.content);
+            m_writer(request.path, request.content, request.options);
             std::error_code stateError;
             const uintmax_t size = std::filesystem::file_size(std::filesystem::u8path(request.path), stateError);
             if (!stateError && size <= std::numeric_limits<uint64_t>::max()) {
@@ -246,6 +321,11 @@ void DocumentStore::WorkerMain()
         {
             std::lock_guard lock(m_mutex);
             m_activePaths.erase(request.key);
+            m_activeGenerations.erase(request.key);
+            if (error.empty())
+                m_succeededGenerations.insert_or_assign(request.key, request.ticket->GetGeneration());
+            else
+                m_failedGenerations.insert_or_assign(request.key, request.ticket->GetGeneration());
             if (m_pending.find(request.key) != m_pending.end() &&
                 m_queuedPaths.find(request.key) == m_queuedPaths.end()) {
                 m_readyPaths.push_back(request.key);

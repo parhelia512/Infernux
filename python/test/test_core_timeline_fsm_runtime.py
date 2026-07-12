@@ -190,6 +190,34 @@ def test_runtime_update_no_transform_safe(tmp_path):
     rt.update(0.1, transform=None)  # must not raise
 
 
+def test_first_native_handle_does_not_compare_against_none(tmp_path):
+    class StrictHandle:
+        def __eq__(self, other):
+            if other is None:
+                raise TypeError("native handle cannot compare with None")
+            return self is other
+
+    class Transform:
+        def __init__(self):
+            self.handle = StrictHandle()
+            self.calls = []
+            self.position = self.local_position = type("V", (), {"x": 0.0, "y": 0.0, "z": 0.0})()
+            self.euler_angles = self.local_euler_angles = self.position
+            self.local_scale = type("V", (), {"x": 1.0, "y": 1.0, "z": 1.0})()
+
+        def set_local_trs(self, *values):
+            self.calls.append(values)
+
+    rt = TimelineFSMRuntime()
+    rt.set_fsm(_fsm([_state(tmp_path, "A")]))
+    transform = Transform()
+
+    assert rt.play(transform=transform)
+    rt.update(0.1, transform=transform)
+
+    assert transform.calls
+
+
 def test_runtime_update_without_play_is_noop(tmp_path):
     rt = TimelineFSMRuntime()
     rt.set_fsm(_fsm([_state(tmp_path, "A")]))

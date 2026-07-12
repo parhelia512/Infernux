@@ -126,9 +126,37 @@ class PreparedPythonComponent:
     script_guid: str
     type_guid: str
     enabled: bool
+    execution_order: int
     component_id: Optional[int]
     fields_document: dict
     instance: Any
+
+
+_COMPONENT_RECORD_FIELDS = {
+    "component_id", "type_id", "type_version", "enabled", "execution_order", "data",
+}
+_NATIVE_TYPE_PREFIX = "native:infernux."
+_PYTHON_TYPE_PREFIX = "python:"
+
+
+def _decode_python_component_record(record: dict, path: str) -> tuple[str, str, str, str, str]:
+    if not isinstance(record, dict) or set(record) != _COMPONENT_RECORD_FIELDS:
+        raise PythonComponentRestoreError(f"{path} must be an exact ComponentRecord")
+    type_id = record.get("type_id")
+    if not isinstance(type_id, str) or not type_id.startswith(_PYTHON_TYPE_PREFIX):
+        raise PythonComponentRestoreError(f"{path}.type_id is not a Python component identity")
+    parts = type_id[len(_PYTHON_TYPE_PREFIX):].split(":")
+    if len(parts) != 4 or any(not part for part in parts):
+        raise PythonComponentRestoreError(
+            f"{path}.type_id must encode script GUID, type GUID, module, and qualname"
+        )
+    script_guid, type_guid, module_name, qualified_name = parts
+    data = record.get("data")
+    if isinstance(data, dict) and {
+        "__schema_version__", "__type_name__", "__component_id__",
+    }.intersection(data):
+        raise PythonComponentRestoreError(f"{path}.data contains reserved component metadata")
+    return script_guid, type_guid, module_name, qualified_name, qualified_name.rsplit(".", 1)[-1]
 
 
 @dataclass
@@ -179,17 +207,19 @@ def _collect_scene_document_python_descriptors(document: dict):
         if not isinstance(components, list):
             raise PythonComponentRestoreError(f"{path}.components must be an array")
         for index, component in enumerate(components):
-            if not isinstance(component, dict) or not isinstance(component.get("type"), str):
-                raise PythonComponentRestoreError(f"{path}.components[{index}] has no typed component record")
-            native_types.add((object_id, component["type"]))
-
-        py_components = obj.get("py_components")
-        if not isinstance(py_components, list):
-            raise PythonComponentRestoreError(f"{path}.py_components must be an array")
-        for index, descriptor in enumerate(py_components):
-            if not isinstance(descriptor, dict):
-                raise PythonComponentRestoreError(f"{path}.py_components[{index}] must be an object")
-            descriptors.append((object_id, f"{path}.py_components[{index}]", descriptor))
+            component_path = f"{path}.components[{index}]"
+            if not isinstance(component, dict) or not isinstance(component.get("type_id"), str):
+                raise PythonComponentRestoreError(f"{component_path} has no typed component identity")
+            type_id = component["type_id"]
+            if type_id.startswith(_NATIVE_TYPE_PREFIX):
+                native_type = type_id[len(_NATIVE_TYPE_PREFIX):]
+                if not native_type:
+                    raise PythonComponentRestoreError(f"{component_path}.type_id has no native type")
+                native_types.add((object_id, native_type))
+            elif type_id.startswith(_PYTHON_TYPE_PREFIX):
+                descriptors.append((object_id, component_path, component))
+            else:
+                raise PythonComponentRestoreError(f"{component_path}.type_id has an unknown namespace")
 
         children = obj.get("children")
         if not isinstance(children, list):
@@ -211,58 +241,57 @@ def _prepare_python_component_records(
     pending_types: set[tuple[int, str]] = set()
     component_type_counts: dict[tuple[int, str], int] = {}
     python_component_ids: set[int] = set()
-    parsed: list[tuple[Optional[int], str, str, str, str, bool, Optional[int], dict]] = []
+    parsed: list[
+        tuple[Optional[int], str, str, str, str, str, str, bool, int, int, dict]
+    ] = []
 
     for object_id, document_path, descriptor in raw_descriptors:
-        type_name = descriptor.get("py_type_name")
-        script_guid = descriptor.get("script_guid")
-        type_guid = descriptor.get("type_guid")
+        script_guid, type_guid, module_name, qualified_name, type_name = _decode_python_component_record(
+            descriptor, document_path
+        )
         enabled = descriptor.get("enabled")
-        fields = descriptor.get("py_fields")
-        if not isinstance(type_name, str) or not type_name:
-            raise PythonComponentRestoreError("Python component requires a non-empty py_type_name")
-        if descriptor.get("type") != type_name:
-            raise PythonComponentRestoreError(f"Python component type mismatch for {type_name!r}")
+        execution_order = descriptor.get("execution_order")
+        type_version = descriptor.get("type_version")
+        data = descriptor.get("data")
         if (
-            not isinstance(script_guid, str)
-            or not script_guid
-            or not isinstance(type_guid, str)
-            or not type_guid
-            or type(enabled) is not bool
-            or not isinstance(fields, dict)
+            type(enabled) is not bool
+            or type(execution_order) is not int
+            or type(type_version) is not int
+            or type_version <= 0
+            or not isinstance(data, dict)
         ):
             raise PythonComponentRestoreError(f"Python component '{type_name}' has invalid typed fields")
         component_id = descriptor.get("component_id")
-        fields_component_id = fields.get("__component_id__")
-        if component_id is not None and (type(component_id) is not int or component_id <= 0):
+        if type(component_id) is not int or component_id <= 0:
             raise PythonComponentRestoreError(f"Python component '{type_name}' has invalid component_id")
-        if fields_component_id is not None and (
-            type(fields_component_id) is not int or fields_component_id <= 0
-        ):
-            raise PythonComponentRestoreError(
-                f"Python component '{type_name}' has invalid __component_id__"
-            )
-        if component_id != fields_component_id:
-            raise PythonComponentRestoreError(
-                f"Python component '{type_name}' component_id metadata does not match py_fields"
-            )
-        if component_id is not None and component_id in python_component_ids:
+        if component_id in python_component_ids:
             raise PythonComponentRestoreError(
                 f"Python component '{type_name}' uses a duplicate component_id"
             )
-        if component_id is not None:
-            python_component_ids.add(component_id)
+        python_component_ids.add(component_id)
+        fields = {
+            "__schema_version__": type_version,
+            "__type_name__": type_name,
+            "__component_id__": component_id,
+            **data,
+        }
         if object_id is not None:
             pending_types.add((object_id, type_name))
             key = (object_id, type_name)
             component_type_counts[key] = component_type_counts.get(key, 0) + 1
         parsed.append(
-            (object_id, document_path, type_name, script_guid, type_guid, enabled, component_id, fields)
+            (
+                object_id, document_path, type_name, script_guid, type_guid,
+                module_name, qualified_name, enabled, execution_order, component_id, fields,
+            )
         )
 
     graph = PreparedPythonComponentGraph([])
     try:
-        for object_id, document_path, type_name, script_guid, type_guid, enabled, component_id, fields in parsed:
+        for (
+            object_id, document_path, type_name, script_guid, type_guid,
+            module_name, qualified_name, enabled, execution_order, component_id, fields,
+        ) in parsed:
             _validate_reference_documents(
                 fields,
                 f"{document_path}.py_fields",
@@ -272,6 +301,8 @@ def _prepare_python_component_records(
                 document_native_types=native_types,
             )
             instance = None
+            script_path = None
+            construct_error = ""
             try:
                 instance, script_path = create_component_instance(
                     script_guid,
@@ -280,17 +311,51 @@ def _prepare_python_component_records(
                     asset_database,
                 )
             except Exception as exc:
-                raise PythonComponentRestoreError(
-                    f"failed to construct Python component '{type_name}' at {document_path}: {exc}"
-                ) from exc
+                construct_error = str(exc)
+                instance = None
             if instance is None:
+                from Infernux.components.missing_script import create_missing_script_component
+
                 location = script_path or script_guid or "<unresolved>"
-                raise PythonComponentRestoreError(
-                    f"cannot resolve Python component '{type_name}' from {location}"
+                detail = construct_error or f"cannot resolve Python component from {location}"
+                instance = create_missing_script_component(
+                    type_name=type_name,
+                    script_guid=script_guid,
+                    type_guid=type_guid,
+                    module_name=module_name,
+                    qualified_name=qualified_name,
+                    fields=fields,
+                    error=f"Missing script '{type_name}': {detail}",
                 )
+            instance_type = type(instance)
+            is_broken = bool(getattr(instance, "_is_broken", False))
+            # Script file renames change the import module path. Class renames
+            # change __qualname__/__name__ while the AssetDatabase script GUID
+            # stays stable. Accept the live class when it came from that GUID;
+            # rewrite authored __type_name__ so field restore can proceed.
+            if (
+                not is_broken
+                and instance_type.__qualname__ != qualified_name
+                and instance_type.__name__ != type_name
+            ):
+                # Only tolerate identity drift for asset-backed script loads.
+                # Intrinsic/registry components must still match exactly.
+                script_path = resolve_script_from_guid(script_guid, asset_database)
+                if not (script_path and os.path.exists(script_path)):
+                    instance._call_on_destroy()
+                    raise PythonComponentRestoreError(
+                        f"Python component '{type_name}' resolved to {instance_type.__module__}."
+                        f"{instance_type.__qualname__}, expected {module_name}.{qualified_name}"
+                    )
+            if not is_broken and fields.get("__type_name__") != instance_type.__name__:
+                live_fields = dict(fields)
+                live_fields["__type_name__"] = instance_type.__name__
+            else:
+                live_fields = fields
             component_type = type(instance)
             if (
-                object_id is not None
+                not is_broken
+                and object_id is not None
                 and getattr(component_type, "_disallow_multiple_", False)
                 and component_type_counts[(object_id, type_name)] != 1
             ):
@@ -298,35 +363,36 @@ def _prepare_python_component_records(
                 raise PythonComponentRestoreError(
                     f"Python component '{type_name}' disallows multiple instances on one GameObject"
                 )
-            for required_type in getattr(component_type, "_require_components_", ()):
-                if isinstance(required_type, str):
-                    required_name = required_type
-                    required_is_native = (object_id, required_name) in native_types
-                elif hasattr(required_type, "_cpp_type_name"):
-                    required_name = str(required_type._cpp_type_name)
-                    required_is_native = True
-                elif isinstance(required_type, type):
-                    required_name = required_type.__name__
-                    required_is_native = False
-                else:
-                    instance._call_on_destroy()
-                    raise PythonComponentRestoreError(
-                        f"Python component '{type_name}' has an invalid required component declaration"
-                    )
-                if not required_name:
-                    instance._call_on_destroy()
-                    raise PythonComponentRestoreError(
-                        f"Python component '{type_name}' has an empty required component type"
-                    )
-                available_types = native_types if required_is_native else pending_types
-                if object_id is None or (object_id, required_name) not in available_types:
-                    instance._call_on_destroy()
-                    raise PythonComponentRestoreError(
-                        f"Python component '{type_name}' requires missing component '{required_name}'"
-                    )
+            if not is_broken:
+                for required_type in getattr(component_type, "_require_components_", ()):
+                    if isinstance(required_type, str):
+                        required_name = required_type
+                        required_is_native = (object_id, required_name) in native_types
+                    elif hasattr(required_type, "_cpp_type_name"):
+                        required_name = str(required_type._cpp_type_name)
+                        required_is_native = True
+                    elif isinstance(required_type, type):
+                        required_name = required_type.__name__
+                        required_is_native = False
+                    else:
+                        instance._call_on_destroy()
+                        raise PythonComponentRestoreError(
+                            f"Python component '{type_name}' has an invalid required component declaration"
+                        )
+                    if not required_name:
+                        instance._call_on_destroy()
+                        raise PythonComponentRestoreError(
+                            f"Python component '{type_name}' has an empty required component type"
+                        )
+                    available_types = native_types if required_is_native else pending_types
+                    if object_id is None or (object_id, required_name) not in available_types:
+                        instance._call_on_destroy()
+                        raise PythonComponentRestoreError(
+                            f"Python component '{type_name}' requires missing component '{required_name}'"
+                        )
             try:
                 instance._deserialize_fields_document(
-                    fields,
+                    live_fields,
                     _skip_on_after_deserialize=True,
                 )
             except Exception as exc:
@@ -348,6 +414,7 @@ def _prepare_python_component_records(
                     script_guid,
                     type_guid,
                     enabled,
+                    execution_order,
                     component_id,
                     fields,
                     instance,
@@ -404,18 +471,20 @@ def preflight_game_object_python_components(
         if not isinstance(components, list):
             raise PythonComponentRestoreError(f"{path}.components must be an array")
         for index, component in enumerate(components):
-            if not isinstance(component, dict) or not isinstance(component.get("type"), str):
-                raise PythonComponentRestoreError(f"{path}.components[{index}] has no typed component record")
-            if object_id is not None:
-                native_types.add((object_id, component["type"]))
-
-        py_components = obj.get("py_components")
-        if not isinstance(py_components, list):
-            raise PythonComponentRestoreError(f"{path}.py_components must be an array")
-        for index, descriptor in enumerate(py_components):
-            if not isinstance(descriptor, dict):
-                raise PythonComponentRestoreError(f"{path}.py_components[{index}] must be an object")
-            descriptors.append((object_id, f"{path}.py_components[{index}]", descriptor))
+            component_path = f"{path}.components[{index}]"
+            if not isinstance(component, dict) or not isinstance(component.get("type_id"), str):
+                raise PythonComponentRestoreError(f"{component_path} has no typed component identity")
+            type_id = component["type_id"]
+            if type_id.startswith(_NATIVE_TYPE_PREFIX):
+                native_type = type_id[len(_NATIVE_TYPE_PREFIX):]
+                if not native_type:
+                    raise PythonComponentRestoreError(f"{component_path}.type_id has no native type")
+                if object_id is not None:
+                    native_types.add((object_id, native_type))
+            elif type_id.startswith(_PYTHON_TYPE_PREFIX):
+                descriptors.append((object_id, component_path, component))
+            else:
+                raise PythonComponentRestoreError(f"{component_path}.type_id has an unknown namespace")
 
         children = obj.get("children")
         if not isinstance(children, list):
@@ -433,6 +502,8 @@ def preflight_game_object_python_components(
     if not preserve_document_ids:
         for component in prepared.components:
             component.game_object_id = None
+            component.component_id = None
+            component.fields_document.pop("__component_id__", None)
     return prepared
 
 
@@ -523,13 +594,17 @@ def _publish_prepared_scene_python_components(
         fields = pc.fields_document
         if not isinstance(fields, dict):
             raise PythonComponentRestoreError("native pending fields document must be an object")
+        comparable_fields = dict(fields)
+        if item.component_id is None:
+            comparable_fields.pop("__component_id__", None)
         if (
             (item.game_object_id is not None and pc.game_object_id != item.game_object_id)
             or pc.type_name != item.type_name
             or (getattr(pc, "script_guid", "") or "") != item.script_guid
             or (getattr(pc, "type_guid", "") or "") != item.type_guid
             or bool(pc.enabled) != item.enabled
-            or fields != item.fields_document
+            or int(pc.execution_order) != item.execution_order
+            or comparable_fields != item.fields_document
         ):
             raise PythonComponentRestoreError("native pending Python descriptor changed after preflight")
         target = scene.find_by_id(pc.game_object_id)
@@ -570,8 +645,11 @@ def _publish_prepared_scene_python_components(
 
     attached = []
     try:
-        for (target, instance), item in zip(targets, prepared):
-            published_instance = target._attach_prepared_py_component(instance)
+        for prepared_index, ((target, instance), item) in enumerate(zip(targets, prepared)):
+            published_instance = target._attach_prepared_py_component(
+                instance,
+                pending[prepared_index].component_index,
+            )
             if published_instance is not instance:
                 raise PythonComponentRestoreError(
                     f"Python component '{item.type_name}' was rejected by its target GameObject"
@@ -585,6 +663,8 @@ def _publish_prepared_scene_python_components(
             if item.component_id is not None:
                 native_component._set_component_id(item.component_id)
                 instance._component_id = item.component_id
+                instance._refresh_native_handle()
+            native_component.execution_order = item.execution_order
         for _target, instance, _native_component in attached:
             instance._call_on_after_deserialize()
         for target, _instance, native_component in attached:
@@ -829,7 +909,9 @@ def create_component_instance(
     script_path = resolve_script_from_guid(script_guid, asset_database)
 
     instance = None
+    loaded_from_asset = False
     if script_path and os.path.exists(script_path):
+        loaded_from_asset = True
         if asset_database is not None:
             from Infernux.components.script_loader import load_and_create_component
             instance = load_and_create_component(
@@ -842,9 +924,10 @@ def create_component_instance(
                 create_component_instance as construct_component,
                 load_component_class_from_file,
             )
+            from Infernux.components.component_identity import bind_asset_script_guid
             component_type = load_component_class_from_file(script_path, type_name=type_name)
             if component_type is not None:
-                component_type._asset_script_guid_ = script_guid
+                bind_asset_script_guid(component_type, script_guid)
                 instance = construct_component(component_type)
         if instance is not None:
             instance._script_guid = script_guid
@@ -855,7 +938,14 @@ def create_component_instance(
             instance = comp_class()
             instance._script_guid = script_guid
 
-    if instance is not None and instance.__class__._get_type_guid() != type_guid:
+    # Asset-backed loads rebind type_guid to the script GUID. Documents written
+    # before a rename may still carry the old module-based type_guid — accept
+    # those as long as the class was resolved from the preserved script GUID.
+    if (
+        instance is not None
+        and not loaded_from_asset
+        and instance.__class__._get_type_guid() != type_guid
+    ):
         instance = None
 
     return instance, script_path

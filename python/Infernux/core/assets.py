@@ -40,6 +40,7 @@ from Infernux.core.asset_types import (
 from Infernux.core.animation_clip import AnimationClip
 from Infernux.core.animation_clip3d import AnimationClip3D
 from Infernux.core.anim_state_machine import AnimStateMachine
+from Infernux.debug import Debug
 
 # ── Constants ──
 _META_SUPPRESSION_TIMEOUT: float = 2.0  # seconds
@@ -273,18 +274,17 @@ class AssetManager:
         if apply_fn is None:
             return False
 
-        # Suppress the file-watcher echo for this .meta write
-        normalized = cls._normalize_asset_path(path)
-        if normalized:
-            cls._meta_write_suppression[normalized] = time.monotonic() + _META_SUPPRESSION_TIMEOUT
+        # Import-settings writes go through DocumentStore atomic replace of the
+        # .meta sidecar; suppress only META_DELETED echoes for that path.
+        cls._suppress_meta_watcher(path)
 
         ok = apply_fn(path, settings_obj)
         if not ok:
-            cls._meta_write_suppression.pop(normalized, None)
+            cls._meta_write_suppression.pop(cls._normalize_asset_path(path), None)
             return False
         if cls.reimport_asset(path):
             return True
-        cls._meta_write_suppression.pop(normalized, None)
+        cls._meta_write_suppression.pop(cls._normalize_asset_path(path), None)
         return False
 
     @classmethod
@@ -294,26 +294,53 @@ class AssetManager:
             raise RuntimeError("AssetManager requires an initialized AssetDatabase")
         return result
 
+    @staticmethod
+    def _mutation_failure(operation: str, path: str, error_code, error: str, *, guid: str = "", previous_path: str = ""):
+        from Infernux.lib import AssetMutationResult
+
+        result = AssetMutationResult()
+        result.operation = operation
+        result.path = path
+        result.previous_path = previous_path
+        result.guid = guid
+        result.error_code = error_code
+        result.error = error
+        return result
+
     @classmethod
-    def import_asset(cls, path: str, *, database=None, suppress_watcher_echo: bool = True) -> str:
+    def _suppress_meta_watcher(cls, path: str) -> None:
+        """Ignore transient META_DELETED echoes from DocumentStore meta writes."""
+        normalized = cls._normalize_asset_path(path)
+        if normalized:
+            cls._meta_write_suppression[normalized] = time.monotonic() + _META_SUPPRESSION_TIMEOUT
+
+    @classmethod
+    def import_asset(cls, path: str, *, database=None, suppress_watcher_echo: bool = True):
         """Import one new asset and publish its editor-visible creation."""
         asset_database = cls._mutation_database(database)
-        guid = asset_database.import_asset(path)
-        if not guid:
-            raise RuntimeError(f"AssetDatabase failed to import '{path}'")
+        # Meta sidecars are written through DocumentStore atomic replace, which
+        # briefly deletes the previous .meta and must not trigger rebuild work.
+        cls._suppress_meta_watcher(path)
+        result = asset_database.import_asset(path)
+        if not result:
+            cls._meta_write_suppression.pop(cls._normalize_asset_path(path), None)
+            return result
         if suppress_watcher_echo:
             cls._suppress_watcher_echo("created", path)
         cls._invalidate_project_panel_cache()
         cls._emit_editor_asset_changed(path, "created")
-        return guid
+        return result
 
     @classmethod
-    def reimport_asset(cls, path: str, *, database=None, suppress_watcher_echo: bool = True) -> bool:
-        """Reload cached state, then reimport and publish dependency events."""
+    def reimport_asset(cls, path: str, *, database=None, suppress_watcher_echo: bool = True):
+        """Reimport through AssetDatabase, then refresh any loaded runtime copy."""
         asset_database = cls._mutation_database(database)
         guid = asset_database.get_guid_from_path(path)
         if not guid:
-            return False
+            from Infernux.lib import AssetMutationErrorCode
+            return cls._mutation_failure(
+                "reimport", path, AssetMutationErrorCode.NOT_FOUND, "asset is not registered"
+            )
 
         ext = os.path.splitext(path)[1].lower()
         previous_shader_id = ""
@@ -326,27 +353,37 @@ class AssetManager:
             ext in SHADER_EXTENSIONS and native is not None and native.has_renderer
         )
 
-        registry = cls._get_registry()
-        if (
-            not has_shader_runtime
-            and registry
-            and registry.is_loaded(guid)
-            and not registry.reload_asset(guid)
-        ):
-            return False
-        if not asset_database.reimport_asset(path):
-            return False
+        # Persist metadata before touching runtime state. Pre-reload used to run
+        # first and could abort reimport (and meta rebuild) on transient IO races
+        # while DocumentStore was still publishing the asset or its .meta sidecar.
+        cls._suppress_meta_watcher(path)
+        result = asset_database.reimport_asset(path)
+        if not result:
+            cls._meta_write_suppression.pop(cls._normalize_asset_path(path), None)
+            return result
 
         if has_shader_runtime:
             error = native.reload_shader_runtime(path, previous_shader_id)
             if error:
                 Debug.log_error(error)
-                return False
+                from Infernux.lib import AssetMutationErrorCode
+                result.succeeded = False
+                result.error_code = AssetMutationErrorCode.RUNTIME_APPLY_FAILED
+                result.error = error
+                return result
             try:
                 from Infernux.engine.ui import inspector_shader_utils
                 inspector_shader_utils.bump_shader_property_generation()
             except ImportError:
                 pass
+        else:
+            registry = cls._get_registry()
+            if registry and registry.is_loaded(guid) and not registry.reload_asset(guid):
+                from Infernux.lib import AssetMutationErrorCode
+                result.succeeded = False
+                result.error_code = AssetMutationErrorCode.RUNTIME_APPLY_FAILED
+                result.error = "loaded asset registry rejected reload"
+                return result
 
         cls.invalidate(guid)
         if ext in IMAGE_EXTENSIONS:
@@ -358,7 +395,7 @@ class AssetManager:
         if suppress_watcher_echo:
             cls._suppress_watcher_echo("modified", path)
         cls._emit_editor_asset_changed(path, "modified")
-        return True
+        return result
 
     @classmethod
     def _emit_editor_asset_changed(cls, path: str, event_type: str = "modified") -> None:
@@ -380,12 +417,13 @@ class AssetManager:
         *,
         database=None,
         suppress_watcher_echo: bool = True,
-    ) -> bool:
+    ):
         """Commit a GUID-stable move, then patch all loaded path-bearing state."""
         asset_database = cls._mutation_database(database)
         guid = asset_database.get_guid_from_path(old_path)
-        if not asset_database.move_asset(old_path, new_path):
-            return False
+        result = asset_database.move_asset(old_path, new_path)
+        if not result:
+            return result
 
         registry = cls._get_registry()
         if registry:
@@ -398,10 +436,10 @@ class AssetManager:
             cls._suppress_watcher_echo("moved", old_path, new_path)
         cls._invalidate_project_panel_cache()
         cls._emit_editor_asset_changed(new_path, "moved")
-        return True
+        return result
 
     @classmethod
-    def delete_asset(cls, path: str, *, database=None, suppress_watcher_echo: bool = True) -> bool:
+    def delete_asset(cls, path: str, *, database=None, suppress_watcher_echo: bool = True):
         """Evict loaded state before deleting the database record and metadata."""
         from Infernux.core.asset_types import MATERIAL_EXTENSIONS
 
@@ -424,13 +462,14 @@ class AssetManager:
             cls._clear_deleted_texture_from_active_ui(path)
             cls._schedule_gpu_texture_reload(path)
 
-        if not asset_database.delete_asset(path):
-            return False
+        result = asset_database.delete_asset(path)
+        if not result:
+            return result
         if suppress_watcher_echo:
             cls._suppress_watcher_echo("deleted", path)
         cls._invalidate_project_panel_cache()
         cls._emit_editor_asset_changed(path, "deleted")
-        return True
+        return result
 
     @classmethod
     def schedule_save(cls, key: str, save_fn: Callable[[], object], debounce_sec: float = _DEFAULT_DEBOUNCE_SEC):
@@ -542,6 +581,10 @@ class AssetManager:
         """Invalidate caches that depend on a material asset's file contents."""
         if not path:
             return
+        # Inspector already holds the live material. Suppress the DocumentStore
+        # publish echo; match_any covers async writes whose mtime changes after
+        # this call returns.
+        cls._suppress_watcher_echo("modified", path, match_any=True)
         cls.invalidate_path(path)
         cls._invalidate_material_ui_cache(path)
 
@@ -801,14 +844,24 @@ class AssetManager:
         )
 
     @classmethod
-    def _suppress_watcher_echo(cls, event_type: str, path: str, destination: str = "") -> None:
+    def _suppress_watcher_echo(
+        cls,
+        event_type: str,
+        path: str,
+        destination: str = "",
+        *,
+        match_any: bool = False,
+    ) -> None:
         key = cls._watcher_echo_key(event_type, path, destination)
-        target = destination if event_type == "moved" else path
-        try:
-            stat = os.stat(target)
-            fingerprint = (stat.st_size, stat.st_mtime_ns)
-        except FileNotFoundError:
+        if match_any:
             fingerprint = None
+        else:
+            target = destination if event_type == "moved" else path
+            try:
+                stat = os.stat(target)
+                fingerprint = (stat.st_size, stat.st_mtime_ns)
+            except FileNotFoundError:
+                fingerprint = False
         cls._watcher_echo_suppression[key] = (
             time.monotonic() + _META_SUPPRESSION_TIMEOUT,
             fingerprint,
@@ -825,12 +878,16 @@ class AssetManager:
         if suppression is None:
             return False
         _expiry, expected_fingerprint = suppression
+        # match_any: time-window suppression for async DocumentStore publishes
+        # whose final mtime is not known yet when the save is scheduled.
+        if expected_fingerprint is None:
+            return True
         target = destination if event_type == "moved" else path
         try:
             stat = os.stat(target)
             current_fingerprint = (stat.st_size, stat.st_mtime_ns)
         except FileNotFoundError:
-            current_fingerprint = None
+            current_fingerprint = False
         if current_fingerprint == expected_fingerprint:
             return True
         cls._watcher_echo_suppression.pop(key, None)

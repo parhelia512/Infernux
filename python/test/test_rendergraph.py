@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import pytest
+import Infernux.lib as native
 
 from Infernux.lib import (
+    CommandBuffer,
     RenderGraphDescription, GraphPassDesc, GraphTextureDesc,
-    GraphPassActionType, VkFormat,
+    GraphPassActionType, PixelFormat, SampleCount,
 )
 from Infernux.rendergraph.graph import RenderGraph, Format, TextureHandle
 
@@ -26,13 +28,36 @@ def _make_graph():
 
 class TestFormat:
     def test_color_formats(self):
-        assert Format.RGBA8_UNORM == 37
-        assert Format.RGBA16_SFLOAT == 97
+        assert Format is PixelFormat
+        assert Format.RGBA8_UNORM.name == "RGBA8_UNORM"
+        assert Format.RGBA16_SFLOAT.name == "RGBA16_SFLOAT"
 
     def test_depth_formats(self):
         assert Format.D32_SFLOAT.is_depth
         assert Format.D24_UNORM_S8_UINT.is_depth
         assert not Format.RGBA8_UNORM.is_depth
+
+    def test_native_rendering_surface_has_no_vulkan_format_types(self):
+        assert not hasattr(native, "VkFormat")
+        assert not hasattr(native, "VkSampleCount")
+
+    def test_native_description_and_command_buffer_use_rhi_types(self):
+        graph = _make_graph()
+        with graph.add_pass("Opaque") as render_pass:
+            render_pass.write_color("color")
+            render_pass.write_depth("depth")
+            render_pass.draw_renderers()
+        graph.set_output("color")
+        description = graph.build()
+        assert description.textures[0].format == PixelFormat.RGBA8_UNORM
+        assert description.textures[1].format == PixelFormat.D32_SFLOAT
+
+        commands = CommandBuffer("RHI contract")
+        handle = commands.get_temporary_rt(
+            64, 64, PixelFormat.RGBA16_SFLOAT, SampleCount.COUNT_4
+        )
+        assert handle.is_valid()
+        assert commands.command_count == 1
 
 
 # ══════════════════════════════════════════════════════════════════════

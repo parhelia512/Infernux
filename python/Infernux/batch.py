@@ -281,7 +281,7 @@ def batch_read(targets: Sequence, prop: Any) -> NDArray:
     return _component_gather(targets, prop_name)
 
 
-def batch_write(targets: Sequence, data: NDArray, prop: Any) -> None:
+def batch_write(targets: Sequence, data: NDArray, prop: Any):
     """Write a numpy array back to a property on all *targets*.
 
     Parameters
@@ -300,8 +300,7 @@ def batch_write(targets: Sequence, data: NDArray, prop: Any) -> None:
     lib = _get_lib()
     if isinstance(targets, lib.TransformBatchHandle):
         if prop_name in _TRANSFORM_ALL_PROPS:
-            lib._transform_batch_write(targets, data, prop_name)
-            return
+            return lib._transform_batch_write(targets, data, prop_name)
         raise ValueError(
             f"Unknown Transform property '{prop_name}'. "
             f"Supported: {sorted(_TRANSFORM_ALL_PROPS)}"
@@ -324,12 +323,22 @@ def batch_write(targets: Sequence, data: NDArray, prop: Any) -> None:
     _component_scatter(targets, data, prop_name)
 
 
-def create_batch_handle(targets: list) -> "TransformBatchHandle":
+def create_batch_handle(targets: list, *, mode: str = "strict") -> "TransformBatchHandle":
     """Create a validated ``TransformBatchHandle`` for *targets*.
 
     Re-use the handle across ``batch_read`` / ``batch_write`` calls to avoid
     repeated pybind11 extraction overhead. Every operation validates the
-    stored ECS generations and rejects transforms destroyed since creation.
+    stored ECS generations and scene world IDs. ``mode="strict"`` rejects any
+    stale transform. ``mode="compact"`` skips stale entries and makes reads
+    return ``(values, valid_mask)`` while writes return ``valid_mask``.
     """
     lib = _get_lib()
-    return lib.TransformBatchHandle(targets)
+    modes = {
+        "strict": lib.TransformBatchMode.STRICT,
+        "compact": lib.TransformBatchMode.COMPACT,
+    }
+    try:
+        validation_mode = modes[mode]
+    except KeyError as exc:
+        raise ValueError("batch handle mode must be 'strict' or 'compact'") from exc
+    return lib.TransformBatchHandle(targets, validation_mode)

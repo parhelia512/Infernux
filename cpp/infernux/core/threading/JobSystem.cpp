@@ -43,6 +43,7 @@ void JobSystem::Initialize(uint32_t workerCount)
     }
 
     auto *instance = new JobSystem();
+    instance->m_state.store(State::Running, std::memory_order_release);
     g_instance.store(instance, std::memory_order_release);
 
     const uint32_t resolved = ResolveWorkerCount(workerCount);
@@ -172,6 +173,8 @@ void JobSystem::Wait(const JobHandle &handle)
     if (failure) {
         std::rethrow_exception(failure);
     }
+    if (handle.IsCancellationRequested())
+        throw JobCancelled("job group was cancelled");
 }
 
 void JobSystem::WaitPassive(const JobHandle &handle)
@@ -187,6 +190,14 @@ void JobSystem::WaitPassive(const JobHandle &handle)
     }
     if (failure)
         std::rethrow_exception(failure);
+    if (handle.IsCancellationRequested())
+        throw JobCancelled("job group was cancelled");
+}
+
+size_t JobSystem::GetQueuedTaskCount() const
+{
+    std::lock_guard<std::mutex> guard(m_queueMutex);
+    return m_queue.size();
 }
 
 bool JobSystem::TryRunOne()
@@ -227,8 +238,10 @@ void JobSystem::WorkerLoop()
 
 void JobSystem::Execute(Task task) noexcept
 {
+    m_activeTasks.fetch_add(1, std::memory_order_acq_rel);
     try {
-        task.fn();
+        if (!task.state->cancelRequested.load(std::memory_order_acquire))
+            task.fn();
     } catch (...) {
         std::lock_guard<std::mutex> lock(task.state->completionMutex);
         if (!task.state->failure) {
@@ -236,13 +249,22 @@ void JobSystem::Execute(Task task) noexcept
         }
     }
 
+    m_activeTasks.fetch_sub(1, std::memory_order_acq_rel);
+
     if (task.state->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        // Synchronize the final predicate transition with wait(lock, pred).
+        // Without this lock, a waiter can observe remaining > 0, then miss a
+        // notify issued just before it actually blocks.
+        std::lock_guard<std::mutex> lock(task.state->completionMutex);
         task.state->completionCv.notify_all();
     }
 }
 
 void JobSystem::StopAndJoin() noexcept
 {
+    State expected = State::Running;
+    if (!m_state.compare_exchange_strong(expected, State::Draining, std::memory_order_acq_rel))
+        return;
     {
         std::lock_guard<std::mutex> guard(m_queueMutex);
         m_accepting = false;
@@ -256,6 +278,7 @@ void JobSystem::StopAndJoin() noexcept
         }
     }
     m_workers.clear();
+    m_state.store(State::Stopped, std::memory_order_release);
 }
 
 } // namespace infernux

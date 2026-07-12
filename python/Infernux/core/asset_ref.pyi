@@ -65,6 +65,11 @@ class AudioClipRef(AssetRefBase):
     ...
 
 
+class VfxSystemRef(AssetRefBase):
+    """Reference to a VFX system asset."""
+    ...
+
+
 class MaterialRef(AssetRefBase):
     """GUID-based reference to a Material asset."""
 

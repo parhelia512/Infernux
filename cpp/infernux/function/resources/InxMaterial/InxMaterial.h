@@ -134,6 +134,7 @@ struct MaterialProperty
     std::string name;
     MaterialPropertyType type;
     MaterialPropertyValue value;
+    bool hdr = false;
 };
 
 /**
@@ -499,6 +500,9 @@ class InxMaterial
     /// @brief Create a default unlit opaque material
     static std::shared_ptr<InxMaterial> CreateDefaultUnlit();
 
+    /// @brief Create the default alpha-blended billboard particle material.
+    static std::shared_ptr<InxMaterial> CreateParticleBillboardMaterial();
+
     /// @brief Create a gizmo material (uses gizmo shader, unlit, no depth write)
     static std::shared_ptr<InxMaterial> CreateGizmoMaterial();
 
@@ -545,6 +549,7 @@ class InxMaterial
   private:
     static uint64_t AllocateRuntimeId() noexcept;
     bool ApplyDocument(const nlohmann::json &document);
+    void SetPropertyValue(const std::string &name, MaterialPropertyType type, MaterialPropertyValue value);
 
     friend class MaterialLoader;
 
@@ -570,6 +575,7 @@ class InxMaterial
 
     // Material properties
     std::unordered_map<std::string, MaterialProperty> m_properties;
+    std::vector<std::string> m_shaderPropertyOrder;
 
     // Multi-pass pipeline storage
     // Indexed by ShaderCompileTarget: 0=Forward, 1=GBuffer, 2=Shadow

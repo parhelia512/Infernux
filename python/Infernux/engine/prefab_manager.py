@@ -32,7 +32,7 @@ def _validate_game_object_document(
         local_ids = set()
     required = {
         "schema_version", "local_id", "name", "active", "is_static", "tag", "layer",
-        "transform", "components", "py_components", "children",
+        "transform", "components", "children",
     }
     if set(document) != required:
         missing = sorted(required - set(document))
@@ -40,8 +40,8 @@ def _validate_game_object_document(
         raise PrefabDocumentError(
             f"{location} fields do not match the current schema; missing={missing}, unknown={unknown}"
         )
-    if type(document["schema_version"]) is not int or document["schema_version"] != 1:
-        raise PrefabDocumentError(f"{location}.schema_version must be 1")
+    if type(document["schema_version"]) is not int or document["schema_version"] != 2:
+        raise PrefabDocumentError(f"{location}.schema_version must be 2")
     local_id = document["local_id"]
     if type(local_id) is not int or local_id <= 0 or local_id in local_ids:
         raise PrefabDocumentError(f"{location}.local_id must be a unique positive integer")
@@ -54,7 +54,7 @@ def _validate_game_object_document(
         raise PrefabDocumentError(f"{location}.layer must be an integer in [0, 31]")
     if not isinstance(document["transform"], dict):
         raise PrefabDocumentError(f"{location}.transform must be an object")
-    for field in ("components", "py_components", "children"):
+    for field in ("components", "children"):
         if not isinstance(document[field], list):
             raise PrefabDocumentError(f"{location}.{field} must be an array")
     for index, child in enumerate(document["children"]):
@@ -241,20 +241,13 @@ def _strip_prefab_runtime_fields(obj_data: dict):
         transform = node.get("transform")
         if isinstance(transform, dict):
             transform.pop("component_id", None)
-        for comp in node.get("components", []):
-            if isinstance(comp, dict):
-                comp.pop("component_id", None)
-        for index, py_comp in enumerate(node.get("py_components", [])):
-            if not isinstance(py_comp, dict):
+        for index, component in enumerate(node.get("components", [])):
+            if not isinstance(component, dict) or not isinstance(component.get("data"), dict):
                 continue
-            py_comp.pop("component_id", None)
-            py_fields = py_comp.get("py_fields")
-            if isinstance(py_fields, dict):
-                py_fields.pop("__component_id__", None)
-                py_comp["py_fields"] = rewrite_references(
-                    py_fields,
-                    f"{location}.py_components[{index}].py_fields",
-                )
+            component["data"] = rewrite_references(
+                component["data"],
+                f"{location}.components[{index}].data",
+            )
 
 
 def read_prefab_source_canvas(file_path: str = None, guid: str = None,
@@ -325,7 +318,10 @@ def save_prefab(game_object, file_path: str, asset_database=None,
     if asset_database:
         try:
             from Infernux.core.assets import AssetManager
-            guid = AssetManager.import_asset(file_path, database=asset_database)
+            mutation = AssetManager.import_asset(file_path, database=asset_database)
+            if not mutation:
+                raise RuntimeError(mutation.error)
+            guid = mutation.guid
             Debug.log_internal(f"Registered prefab: {os.path.basename(file_path)} -> {guid}")
             _invalidate_prefab_template_cache(file_path, guid)
         except Exception as exc:

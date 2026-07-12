@@ -23,7 +23,6 @@ Design: builder pattern with a fluent API for straightforward authoring.
 from __future__ import annotations
 
 import warnings
-from enum import IntEnum
 from typing import Mapping, Optional, Tuple, List, Dict
 
 # Try to import the native types. If unavailable, we define stubs so the
@@ -33,42 +32,16 @@ from Infernux.lib import (
     GraphPassDesc,
     GraphTextureDesc,
     GraphPassActionType,
-    VkFormat,
+    PixelFormat,
 )
 _HAS_NATIVE = True
 
 
 # ============================================================================
-# Format enum — Pythonic wrapper around VkFormat subset
+# Public format type
 # ============================================================================
 
-class Format(IntEnum):
-    """Common texture formats for RenderGraph resources.
-
-    Maps to VkFormat values used by the C++ backend. This subset covers
-    the most common render target formats.
-    """
-    # Color formats
-    RGBA8_UNORM = 37       # VK_FORMAT_R8G8B8A8_UNORM
-    RGBA8_SRGB = 43        # VK_FORMAT_R8G8B8A8_SRGB
-    BGRA8_UNORM = 44       # VK_FORMAT_B8G8R8A8_UNORM
-    RGBA16_SFLOAT = 97     # VK_FORMAT_R16G16B16A16_SFLOAT
-    RGBA32_SFLOAT = 109    # VK_FORMAT_R32G32B32A32_SFLOAT
-    R32_SFLOAT = 100       # VK_FORMAT_R32_SFLOAT
-    R8_UNORM = 9           # VK_FORMAT_R8_UNORM
-    R8G8_UNORM = 16        # VK_FORMAT_R8G8_UNORM
-    RG16_SFLOAT = 83       # VK_FORMAT_R16G16_SFLOAT
-    A2R10G10B10_UNORM = 58 # VK_FORMAT_A2R10G10B10_UNORM_PACK32
-    R16_SFLOAT = 76        # VK_FORMAT_R16_SFLOAT
-
-    # Depth formats
-    D32_SFLOAT = 126       # VK_FORMAT_D32_SFLOAT
-    D24_UNORM_S8_UINT = 129  # VK_FORMAT_D24_UNORM_S8_UINT
-
-    @property
-    def is_depth(self) -> bool:
-        """Check if this is a depth/stencil format."""
-        return self in (Format.D32_SFLOAT, Format.D24_UNORM_S8_UINT)
+Format = PixelFormat
 
 
 # ============================================================================
@@ -877,35 +850,13 @@ class RenderGraph:
         desc = RenderGraphDescription()
         desc.name = self._name
 
-        # Map Python Format → VkFormat. Only formats registered in the
-        # native binding can be used as VkFormat values.
-        _format_to_vk = {}
-        if VkFormat is not None:
-            _format_to_vk = {
-                Format.RGBA8_UNORM: VkFormat.R8G8B8A8_UNORM,
-                Format.RGBA8_SRGB: VkFormat.R8G8B8A8_SRGB,
-                Format.BGRA8_UNORM: VkFormat.B8G8R8A8_UNORM,
-                Format.RGBA16_SFLOAT: VkFormat.R16G16B16A16_SFLOAT,
-                Format.RGBA32_SFLOAT: VkFormat.R32G32B32A32_SFLOAT,
-                Format.R32_SFLOAT: VkFormat.R32_SFLOAT,
-                Format.R8_UNORM: VkFormat.R8_UNORM,
-                Format.R8G8_UNORM: VkFormat.R8G8_UNORM,
-                Format.RG16_SFLOAT: VkFormat.R16G16_SFLOAT,
-                Format.A2R10G10B10_UNORM: VkFormat.A2R10G10B10_UNORM_PACK32,
-                Format.R16_SFLOAT: VkFormat.R16_SFLOAT,
-                Format.D32_SFLOAT: VkFormat.D32_SFLOAT,
-                Format.D24_UNORM_S8_UINT: VkFormat.D24_UNORM_S8_UINT,
-            }
-
         # Build texture list — construct full list then assign (pybind11
         # vectors return copies, so append() on a property doesn't work).
         tex_list = []
         for tex in self._textures:
             td = GraphTextureDesc()
             td.name = tex.name
-            vk_fmt = _format_to_vk.get(tex.format)
-            if vk_fmt is not None:
-                td.format = vk_fmt
+            td.format = tex.format
             td.is_backbuffer = tex.is_camera_target
             td.is_depth = tex.is_depth
             if tex.size is not None:

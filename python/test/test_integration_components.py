@@ -43,7 +43,7 @@ def test_mesh_cpu_payload_prepares_on_worker_and_rejects_stale_publish(engine):
         "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
         encoding="ascii",
     )
-    guid = asset_database.import_asset(str(source))
+    guid = asset_database.import_asset(str(source)).guid
     assert guid
     artifact = Path(asset_database.get_runtime_artifact_path(guid, ResourceType.Mesh))
     skin_artifact = (
@@ -97,7 +97,7 @@ def test_mesh_cpu_payload_prepares_on_worker_and_rejects_stale_publish(engine):
         assert registry.get_asset_version(guid) == 2
 
         registry.invalidate_asset(guid)
-        assert asset_database.reimport_asset(str(source)) is True
+        assert asset_database.reimport_asset(str(source))
         asset_database.flush_derived_index()
         artifact.unlink()
         asset_database.refresh()
@@ -144,7 +144,7 @@ def test_skinned_mesh_companion_artifact_is_atomic_worker_loaded_and_rebuilt(eng
     original_bytes = fixture.read_bytes()
     source = Path(asset_database.assets_root) / "skinned-artifact-probe.fbx"
     source.write_bytes(original_bytes)
-    guid = asset_database.import_asset(str(source))
+    guid = asset_database.import_asset(str(source)).guid
     assert guid
     mesh_artifact = Path(asset_database.get_runtime_artifact_path(guid, ResourceType.Mesh))
     skin_artifact = (
@@ -187,7 +187,7 @@ def test_skinned_mesh_companion_artifact_is_atomic_worker_loaded_and_rebuilt(eng
         assert fallback.has_skinned_data is True
 
         registry.invalidate_asset(guid)
-        assert asset_database.reimport_asset(str(source)) is True
+        assert asset_database.reimport_asset(str(source))
         assert skin_artifact.is_file()
         skin_artifact.unlink()
         asset_database.refresh()
@@ -232,7 +232,7 @@ def test_texture_cpu_artifact_prepares_on_worker_and_validates_cache(engine):
         )
     )
     source.write_bytes(source_bytes)
-    guid = asset_database.import_asset(str(source))
+    guid = asset_database.import_asset(str(source)).guid
     assert guid
     artifact = Path(asset_database.get_runtime_artifact_path(guid, ResourceType.Texture))
     assert artifact.is_file()
@@ -280,7 +280,7 @@ def test_asset_registry_cpu_residency_budget_respects_live_and_explicit_pins(eng
     for index, source in enumerate(sources):
         source.write_bytes(payload[:-1] + bytes((index,)))
 
-    guids = [asset_database.import_asset(str(source)) for source in sources]
+    guids = [asset_database.import_asset(str(source)).guid for source in sources]
     assert all(guids)
     original_budget = registry.cpu_budget_bytes
     baseline_cpu_bytes = registry.total_cpu_bytes
@@ -294,7 +294,7 @@ def test_asset_registry_cpu_residency_budget_respects_live_and_explicit_pins(eng
 
     larger_payload = b"P6\n4 2\n255\n" + bytes(range(24))
     sources[0].write_bytes(larger_payload)
-    assert asset_database.reimport_asset(str(sources[0])) is True
+    assert asset_database.reimport_asset(str(sources[0]))
     assert registry.reload_asset(guids[0]) is True
     updated_first_record = registry.get_asset_residency(guids[0])
     assert first.cpu_byte_size == 44
@@ -364,7 +364,7 @@ class TestComponentLifecycle:
         game_object = scene.create_game_object("InvalidReferenceRestore")
         game_object.add_py_component(_RestoreReference())
         document = game_object.serialize_document()
-        document["py_components"][0]["py_fields"]["target"] = make_game_object_ref(999_999_999)
+        document["components"][0]["data"]["target"] = make_game_object_ref(999_999_999)
 
         with pytest.raises(PythonComponentRestoreError, match="does not exist"):
             deserialize_game_object_document_transactionally(game_object, document)
@@ -407,7 +407,7 @@ class TestComponentLifecycle:
         game_object.add_py_component(_RestoreFirst())
         game_object.add_py_component(_RestoreSecond())
         document = game_object.serialize_document()
-        document["py_components"][1]["py_fields"]["value"] = "invalid"
+        document["components"][1]["data"]["value"] = "invalid"
 
         with pytest.raises(PythonComponentRestoreError, match="invalid fields"):
             deserialize_game_object_document_transactionally(game_object, document)
@@ -415,23 +415,25 @@ class TestComponentLifecycle:
         assert len(game_object.get_py_components()) == 2
         assert scene.has_pending_py_components() is False
 
-    def test_missing_python_component_type_is_a_hard_restore_failure(self, scene):
-        from Infernux.engine.component_restore import (
-            PythonComponentRestoreError,
-            deserialize_game_object_document_transactionally,
-        )
+    def test_missing_python_component_type_restores_as_data_preserving_placeholder(self, scene):
+        from Infernux.components.missing_script import MissingScript
+        from Infernux.engine.component_restore import deserialize_game_object_document_transactionally
 
         game_object = scene.create_game_object("MissingPythonType")
         game_object.add_py_component(_RestoreFirst())
         document = game_object.serialize_document()
-        descriptor = document["py_components"][0]
-        descriptor["type"] = "RemovedPythonComponent"
-        descriptor["py_type_name"] = "RemovedPythonComponent"
-        descriptor["py_fields"]["__type_name__"] = "RemovedPythonComponent"
+        descriptor = document["components"][0]
+        parts = descriptor["type_id"].split(":")
+        parts[-1] = "RemovedPythonComponent"
+        descriptor["type_id"] = ":".join(parts)
 
-        with pytest.raises(PythonComponentRestoreError, match="cannot resolve"):
-            deserialize_game_object_document_transactionally(game_object, document)
-        assert len(game_object.get_py_components()) == 1
+        assert deserialize_game_object_document_transactionally(game_object, document)
+        components = game_object.get_py_components()
+        assert len(components) == 1
+        assert isinstance(components[0], MissingScript)
+        assert components[0]._is_broken is True
+        assert components[0]._component_name == "RemovedPythonComponent"
+        assert components[0]._serialize_fields_document()["value"] == 1
         assert scene.has_pending_py_components() is False
 
     def test_add_and_get_component(self, scene):
@@ -561,7 +563,7 @@ class TestComponentLifecycle:
     def test_remove_box_collider_with_mesh_collider_and_rigidbody(self, scene):
         go = scene.create_primitive(PrimitiveType.Cube, "ColliderHost")
         mesh = go.add_component("MeshCollider")
-        box = go.add_component("BoxCollider")
+        box = go.get_component("BoxCollider")
         go.add_component("Rigidbody")
         assert mesh.convex is True
 
@@ -569,6 +571,92 @@ class TestComponentLifecycle:
         assert go.get_component("BoxCollider") is None
         assert go.get_component("MeshCollider") is mesh
         assert go.get_component("Rigidbody") is not None
+
+    def test_rigidbody_does_not_invent_a_box_collider(self, scene):
+        owner = scene.create_game_object("ShapeLessRigidbody")
+        owner.add_component("Rigidbody")
+        assert owner.get_component("BoxCollider") is None
+        assert owner.get_component("Collider") is None
+
+    def test_dynamic_rigidbody_forces_mesh_collider_convex_in_both_component_orders(self, scene):
+        mesh_first = scene.create_primitive(PrimitiveType.Cube, "MeshFirst")
+        first_mesh = mesh_first.add_component("MeshCollider")
+        mesh_first.add_component("Rigidbody")
+        assert first_mesh.convex is True
+
+        rigidbody_first = scene.create_primitive(PrimitiveType.Cube, "RigidbodyFirst")
+        rigidbody_first.add_component("Rigidbody")
+        second_mesh = rigidbody_first.add_component("MeshCollider")
+        assert second_mesh.convex is True
+
+        with pytest.raises(ValueError, match="dynamic Rigidbody requires MeshCollider.convex"):
+            second_mesh.convex = False
+        assert second_mesh.convex is True
+
+    def test_undo_adding_dynamic_rigidbody_restores_mesh_collider_convex(self, scene):
+        from Infernux.engine.ui._inspector_undo import (
+            _get_component_ids,
+            _get_native_component_documents,
+            _record_add_component_compound,
+        )
+        from Infernux.engine.undo import UndoManager
+
+        previous_manager = UndoManager.instance()
+        manager = UndoManager()
+        try:
+            owner = scene.create_primitive(PrimitiveType.Cube, "UndoDynamicMesh")
+            mesh = owner.add_component("MeshCollider")
+            assert mesh.convex is False
+            before_documents = _get_native_component_documents(owner)
+            before_ids = _get_component_ids(owner)
+
+            rigidbody = owner.add_component("Rigidbody")
+            _record_add_component_compound(
+                owner,
+                "Rigidbody",
+                rigidbody,
+                before_ids,
+                before_documents=before_documents,
+            )
+            assert mesh.convex is True
+
+            manager.undo()
+            assert owner.get_component("Rigidbody") is None
+            assert mesh.convex is False
+
+            manager.redo()
+            assert owner.get_component("Rigidbody") is not None
+            assert mesh.convex is True
+        finally:
+            UndoManager._instance = previous_manager
+
+    def test_dynamic_mesh_collider_survives_play_mode_document_rebuild(self, scene):
+        from Infernux.engine.play_mode import PlayModeManager
+
+        owner = scene.create_primitive(PrimitiveType.Cube, "PlayModeDynamicMesh")
+        mesh = owner.add_component("MeshCollider")
+        owner.add_component("Rigidbody")
+        snapshot = scene.serialize_document()
+        mesh_document = next(
+            component
+            for component in snapshot["objects"][0]["components"]
+            if component["type_id"] == "native:infernux.MeshCollider"
+        )
+        assert mesh_document["data"]["convex"] is True
+
+        previous_manager = PlayModeManager.instance()
+        manager = PlayModeManager()
+        manager.set_asset_database(AssetRegistry.instance().get_asset_database())
+        try:
+            assert manager._rebuild_active_scene(snapshot, for_play=True)
+            runtime_owner = SceneManager.instance().get_active_scene().find("PlayModeDynamicMesh")
+            assert runtime_owner.get_component("MeshCollider").convex is True
+
+            assert manager._rebuild_active_scene(snapshot, for_play=False)
+            restored_owner = SceneManager.instance().get_active_scene().find("PlayModeDynamicMesh")
+            assert restored_owner.get_component("MeshCollider").convex is True
+        finally:
+            PlayModeManager._instance = previous_manager
 
     def test_mesh_collider_without_mesh_reports_cooking_error(self, scene):
         go = scene.create_game_object("MissingMesh")
@@ -870,6 +958,37 @@ class TestColliders:
         assert document["friction_combine"] == 2
         assert document["bounce_combine"] == 3
 
+    def test_physic_material_inspector_edit_is_undoable_and_republishes(self):
+        from types import SimpleNamespace
+        from Infernux.core.physic_material import PhysicMaterial
+        from Infernux.engine.ui.asset_details_renderer import _apply_physic_material_edit
+        from Infernux.engine.undo import UndoManager
+
+        class _ExecutionLayer:
+            def __init__(self):
+                self.published = []
+
+            def schedule_rw_save(self, resource):
+                self.published.append(resource.serialize_document())
+
+        previous_manager = UndoManager.instance()
+        manager = UndoManager()
+        material = PhysicMaterial()
+        execution_layer = _ExecutionLayer()
+        state = SimpleNamespace(settings=material, exec_layer=execution_layer)
+        try:
+            assert _apply_physic_material_edit(state, "friction", 0.8)
+            assert material.friction == pytest.approx(0.8)
+
+            manager.undo()
+            assert material.friction == pytest.approx(0.4)
+
+            manager.redo()
+            assert material.friction == pytest.approx(0.8)
+            assert [entry["friction"] for entry in execution_layer.published] == pytest.approx([0.8, 0.4, 0.8])
+        finally:
+            UndoManager._instance = previous_manager
+
     def test_collider_rejects_invalid_material_combine(self, scene):
         material = InxPhysicMaterial()
         with pytest.raises(ValueError):
@@ -968,7 +1087,7 @@ class TestColliders:
             "friction_combine": 2,
             "bounce_combine": 3,
         }), encoding="utf-8")
-        guid = asset_database.import_asset(str(asset_path))
+        guid = asset_database.import_asset(str(asset_path)).guid
         assert guid
 
         material = registry.load_physic_material_by_guid(guid)
@@ -1002,13 +1121,13 @@ class TestColliders:
             "friction_combine": 1,
             "bounce_combine": 2,
         }), encoding="utf-8")
-        assert AssetManager.reimport_asset(str(asset_path), database=asset_database) is True
+        assert AssetManager.reimport_asset(str(asset_path), database=asset_database)
         assert registry.get_asset_version(guid) == 2
         assert restored.physic_material.resolve().native is material
         assert material.friction == pytest.approx(0.1)
         assert material.bounciness == pytest.approx(0.9)
 
-        assert AssetManager.delete_asset(str(asset_path), database=asset_database) is True
+        assert AssetManager.delete_asset(str(asset_path), database=asset_database)
         asset_path.unlink(missing_ok=True)
         assert collider.physic_material.resolve() is None
         assert collider.physic_material.guid == ""
@@ -1163,6 +1282,21 @@ class TestMaterial:
         document = json.loads(mat.serialize())
 
         assert document["material_version"] == 3
+
+        shader_metadata = json.loads(json.dumps(document))
+        shader_metadata["_shader_property_order"] = ["baseColor", "testValue"]
+        shader_metadata["properties"]["baseColor"]["hdr"] = True
+        assert mat.deserialize(json.dumps(shader_metadata)) is True
+        metadata_round_trip = json.loads(mat.serialize())
+        assert metadata_round_trip["_shader_property_order"] == ["baseColor", "testValue"]
+        assert metadata_round_trip["properties"]["baseColor"]["hdr"] is True
+        mat.set_color("baseColor", (2.0, 1.0, 0.5, 1.0))
+        assert json.loads(mat.serialize())["properties"]["baseColor"]["hdr"] is True
+
+        invalid_shader_order = json.loads(json.dumps(shader_metadata))
+        invalid_shader_order["_shader_property_order"].append("missingProperty")
+        assert mat.deserialize(json.dumps(invalid_shader_order)) is False
+        assert json.loads(mat.serialize())["_shader_property_order"] == ["baseColor", "testValue"]
 
         extended_state = json.loads(json.dumps(document))
         extended_state["renderState"].update(

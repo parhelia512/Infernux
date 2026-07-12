@@ -118,6 +118,13 @@ class Collider : public Component
     /// Remove body from the Jolt broadphase (invisible to raycasts, body kept alive).
     void RemoveFromBroadphase();
 
+    /// Temporarily remove the shared body while a Scene candidate is published.
+    /// Unlike disable/destroy this preserves the body allocation for rollback.
+    void SuspendSceneResidency();
+
+    /// Re-publish a body suspended by SuspendSceneResidency().
+    void RestoreSceneResidency();
+
     // ====================================================================
     // Type info
     // ====================================================================

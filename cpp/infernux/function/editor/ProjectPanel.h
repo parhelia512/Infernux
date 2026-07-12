@@ -93,6 +93,8 @@ class ProjectPanel : public EditorPanel
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimClip3D;
     /// Create animation state machine: (currentPath, name) → (ok, errorMsg)
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimFsm;
+    /// Create VFX system: (currentPath, name) → (ok, errorMsg)
+    std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createVfxSystem;
     /// Create transform timeline: (currentPath, name) → (ok, errorMsg)
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimTimeline;
     /// Create timeline state machine: (currentPath, name) → (ok, errorMsg)
@@ -121,6 +123,8 @@ class ProjectPanel : public EditorPanel
     std::function<void(const std::string &)> openAnimClip;
     /// Open animation state machine: (filePath)
     std::function<void(const std::string &)> openAnimFsm;
+    /// Open VFX system: (filePath)
+    std::function<void(const std::string &)> openVfxSystem;
     /// Open transform timeline: (filePath)
     std::function<void(const std::string &)> openAnimTimeline;
     /// Open timeline state machine: (filePath)
@@ -323,6 +327,9 @@ class ProjectPanel : public EditorPanel
     std::string m_renamingPath;
     char m_renameBuf[256] = {};
     bool m_renameFocusRequested = false;
+    // Skip IsItemDeactivated commit for the frame that opens rename (F2/context menu),
+    // otherwise the new InputText can deactivate immediately and cancel the rename UI.
+    int m_renameSkipDeactivateFrames = 0;
 
     // Deferred cache invalidation — set by operations that modify the filesystem
     // mid-render (CommitRename, Delete, Paste, Move) so that the file grid's item
@@ -378,6 +385,9 @@ class ProjectPanel : public EditorPanel
     void CancelRename();
     void CreateAndRename(const std::string &baseName, const std::string &extension,
                          std::function<std::pair<bool, std::string>(const std::string &)> createFn);
+    /// Immediately clear directory caches. Prefer InvalidateDirCache() which defers
+    /// until the next OnRenderContent so mid-frame item pointers stay valid.
+    void ClearDirCachesNow();
 
     // ── Clipboard helpers ────────────────────────────────────────────
     void ClipboardCopy(const std::vector<std::string> &paths);

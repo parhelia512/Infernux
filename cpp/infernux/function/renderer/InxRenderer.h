@@ -26,6 +26,7 @@ namespace infernux
 class EditorGizmos;
 class EditorTools;
 class GizmosDrawCallBuffer;
+class ParticleDrawCallBuffer;
 class InxGUI;
 class InxGUIRenderable;
 class InxMaterial;
@@ -186,6 +187,9 @@ class InxRenderer
 
     /// @brief Access the component gizmos draw call buffer used by the scripting layer
     GizmosDrawCallBuffer *GetGizmosDrawCallBuffer();
+
+    /// @brief Access the persistent particle billboard batch buffer.
+    ParticleDrawCallBuffer *GetParticleDrawCallBuffer();
 
     /// @brief Set the selected object ID for outline tracking
     void SetSelectedObjectId(uint64_t objectId)
@@ -412,6 +416,7 @@ class InxRenderer
     std::unique_ptr<EditorGizmos> m_editorGizmos;
     std::unique_ptr<EditorTools> m_editorTools;
     std::unique_ptr<GizmosDrawCallBuffer> m_componentGizmos;
+    std::unique_ptr<ParticleDrawCallBuffer> m_particleDrawCalls;
     std::unique_ptr<OutlineRenderer> m_outlineRenderer;
     std::unique_ptr<TransientResourcePool> m_transientResourcePool;
     uint64_t m_gpuResidencyBudgetBytes = 0;

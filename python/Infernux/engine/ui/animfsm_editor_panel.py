@@ -29,8 +29,10 @@ from Infernux.core.node_graph import (
     GraphNode,
     NodeGraph,
     NodeTypeDef,
+    PinCategory,
     PinDef,
     PinKind,
+    node_catalog,
 )
 from Infernux.debug import Debug
 from Infernux.engine.i18n import t
@@ -199,8 +201,14 @@ _STATE_TYPE = NodeTypeDef(
     label="State",
     header_color=(0.20, 0.20, 0.22, 1.0),
     pins=[
-        PinDef(id="in", label="In", kind=PinKind.INPUT, color=(0.50, 0.52, 0.55, 1.0)),
-        PinDef(id="out", label="Out", kind=PinKind.OUTPUT, color=(0.52, 0.54, 0.56, 1.0)),
+        PinDef(
+            id="in", label="In", kind=PinKind.INPUT,
+            color=(0.50, 0.52, 0.55, 1.0), pin_category=PinCategory.EXEC,
+        ),
+        PinDef(
+            id="out", label="Out", kind=PinKind.OUTPUT,
+            color=(0.52, 0.54, 0.56, 1.0), pin_category=PinCategory.EXEC,
+        ),
     ],
     min_width=172.0,
     body_bottom_pad=0.0,
@@ -211,7 +219,10 @@ _ENTRY_TYPE = NodeTypeDef(
     label="Entry",
     header_color=(0.22, 0.21, 0.23, 1.0),
     pins=[
-        PinDef(id="out", label="Start", kind=PinKind.OUTPUT, color=Theme.APPLY_BUTTON),
+        PinDef(
+            id="out", label="Start", kind=PinKind.OUTPUT,
+            color=Theme.APPLY_BUTTON, pin_category=PinCategory.EXEC,
+        ),
     ],
     min_width=88.0,
     deletable=False,
@@ -219,6 +230,8 @@ _ENTRY_TYPE = NodeTypeDef(
 
 _DETAIL_PANEL_W = 300.0
 _VARS_PANEL_W = 236.0
+
+node_catalog.register("anim_fsm", [_STATE_TYPE, _ENTRY_TYPE])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -243,9 +256,7 @@ class AnimFSMEditorPanel(EditorPanel):
         self._dirty: bool = False
 
         # Node graph
-        self._graph = NodeGraph()
-        self._graph.register_type(_STATE_TYPE)
-        self._graph.register_type(_ENTRY_TYPE)
+        self._graph = NodeGraph(graph_kind="anim_fsm")
 
         self._view = NodeGraphView()
         self._view.graph = self._graph
@@ -340,6 +351,26 @@ class AnimFSMEditorPanel(EditorPanel):
         self._selected_uid = ""
         self._dirty = False
         self._sync_graph_from_fsm()
+
+    def _switch_to_new_mode_resource(self, mode: str) -> None:
+        """Leave the current asset and start a new resource in *mode*."""
+        if self._dirty:
+            from ._dialogs import ask_save_discard_cancel
+
+            choice = ask_save_discard_cancel(
+                title="Unsaved State Machine",
+                message="The current state machine has unsaved changes. Save before switching mode?",
+            )
+            if choice == "cancel":
+                return
+            if choice == "save":
+                self._do_save()
+                if self._dirty:
+                    return
+        self._new_fsm()
+        self._fsm.mode = mode
+        self._sync_graph_from_fsm()
+        self._sync_project_dirty_flag()
 
     # ── Lifecycle ──────────────────────────────────────────────────────
 
@@ -736,30 +767,16 @@ class AnimFSMEditorPanel(EditorPanel):
         ctx.same_line(0, 16)
         ctx.label(f"{t('animfsm_editor.mode')}:")
         ctx.same_line(0, 8)
-        # One unified mode selector: 2D / 3D / Timeline. Switching is allowed only
-        # while the graph has no incompatible nodes, so a fresh FSM can pick any
-        # mode but you can't silently mix clip and timeline nodes.
-        has_2d, has_3d = self._clip_ext_flags()
-        has_clip_nodes = any(getattr(s, "kind", "clip") in ("clip", "blend") for s in fsm.states)
-        has_tl_nodes = any(getattr(s, "kind", "clip") == "timeline" for s in fsm.states)
+        # Modes represent different asset domains. Switching starts a new
+        # resource after resolving unsaved changes instead of mutating an
+        # incompatible graph in place.
         ctx.set_next_item_width(110)
         _MODES = ["2d", "3d", "timeline"]
         _LABELS = ["2D", "3D", t("animfsm_editor.mode_timeline")]
         mode_idx = _MODES.index(fsm.mode) if fsm.mode in _MODES else 0
         new_mode_idx = ctx.combo("##fsm_mode", mode_idx, _LABELS, 3)
         if new_mode_idx != mode_idx:
-            want = _MODES[new_mode_idx]
-            blocked = (
-                (want == "timeline" and has_clip_nodes)
-                or (want in ("2d", "3d") and has_tl_nodes)
-                or (want == "3d" and has_2d)
-                or (want == "2d" and has_3d)
-            )
-            if not blocked:
-                before = self._undo_snapshot()
-                fsm.mode = want
-                self._dirty = True
-                self._try_record_undo("Change FSM mode", before, self._undo_snapshot())
+            self._switch_to_new_mode_resource(_MODES[new_mode_idx])
 
         if self._file_path:
             ctx.same_line(0, 12)

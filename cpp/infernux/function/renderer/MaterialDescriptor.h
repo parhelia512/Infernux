@@ -139,17 +139,31 @@ struct MaterialDescriptorSet
     bool isValid = false;
 };
 
+enum class TextureResolveStatus
+{
+    Ready,
+    Pending,
+    Failed,
+};
+
+struct TextureResolveResult
+{
+    TextureResolveStatus status = TextureResolveStatus::Failed;
+    MaterialDescriptorSet::TextureBinding binding;
+};
+
 /**
  * @brief Callback type for resolving texture paths to GPU resources
  *
  * Given a texture asset GUID (from material Texture2D properties) and the
  * binding name from shader reflection (e.g.
  * "normalMap", "albedoTex"), returns the VkImageView and VkSampler for that texture. The callback should handle
- * caching, format selection (e.g. UNORM for normal maps), and GPU upload internally. Returns {VK_NULL_HANDLE,
- * VK_NULL_HANDLE} on failure.
+ * caching, format selection (e.g. UNORM for normal maps), and GPU upload internally. Pending is distinct from
+ *
+ * failure so asynchronous residency does not produce a false error while the default texture is bound.
  */
-using TextureResolver = std::function<MaterialDescriptorSet::TextureBinding(const std::string &textureGuid,
-                                                                            const std::string &bindingName)>;
+using TextureResolver =
+    std::function<TextureResolveResult(const std::string &textureGuid, const std::string &bindingName)>;
 
 /**
  * @brief MaterialDescriptorManager - Manages material-specific descriptor sets
@@ -405,8 +419,9 @@ class MaterialDescriptorManager
     [[nodiscard]] bool TryGetDefaultTextureBinding(std::string_view bindingName,
                                                    MaterialDescriptorSet::TextureBinding &outBinding) const;
 
-    [[nodiscard]] bool TryResolveExplicitTextureBinding(const std::string &texturePath, const std::string &bindingName,
-                                                        MaterialDescriptorSet::TextureBinding &outBinding) const;
+    [[nodiscard]] TextureResolveStatus
+    ResolveExplicitTextureBinding(const std::string &texturePath, const std::string &bindingName,
+                                  MaterialDescriptorSet::TextureBinding &outBinding) const;
 
     /**
      * @brief Update descriptor set bindings

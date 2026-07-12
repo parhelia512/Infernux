@@ -24,6 +24,8 @@ class MeshCollider : public Collider
         return "MeshCollider";
     }
 
+    void Awake() override;
+
     [[nodiscard]] bool IsConvex() const
     {
         return m_convex;

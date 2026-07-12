@@ -565,6 +565,9 @@ ANIMCLIP3D_EXTENSIONS = frozenset({".animclip3d"})
 # Animation state machine extension
 ANIMFSM_EXTENSIONS = frozenset({".animfsm"})
 
+# VFX system authoring asset extension
+VFXSYSTEM_EXTENSIONS = frozenset({".vfxsystem"})
+
 # Transform timeline extension
 ANIMTIMELINE_EXTENSIONS = frozenset({".animtimeline"})
 
@@ -597,6 +600,8 @@ def asset_category_from_extension(ext: str) -> Optional[str]:
         return "animclip3d"
     if ext in ANIMFSM_EXTENSIONS:
         return "animfsm"
+    if ext in VFXSYSTEM_EXTENSIONS:
+        return "vfxsystem"
     if ext in ANIMTIMELINE_EXTENSIONS:
         return "animtimeline"
     if ext in TIMELINEFSM_EXTENSIONS:

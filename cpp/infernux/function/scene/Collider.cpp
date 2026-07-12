@@ -545,6 +545,22 @@ void Collider::RemoveFromBroadphase()
     actor.bodyInBroadphase = false;
 }
 
+void Collider::SuspendSceneResidency()
+{
+    auto &actor = ActorMut();
+    if (actor.bodyId == 0xFFFFFFFF || !actor.bodyInBroadphase)
+        return;
+    PhysicsWorld::Instance().RemoveBodyFromBroadphase(actor.bodyId);
+    actor.bodyInBroadphase = false;
+}
+
+void Collider::RestoreSceneResidency()
+{
+    if (!IsEnabled() || !GetGameObject() || !GetGameObject()->IsActiveInHierarchy())
+        return;
+    AddToBroadphase();
+}
+
 void Collider::RebuildShape()
 {
     auto &actor = ActorMut();

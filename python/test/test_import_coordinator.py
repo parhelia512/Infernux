@@ -3,8 +3,10 @@ from __future__ import annotations
 import threading
 
 from Infernux.engine.import_coordinator import (
+    AssetFsEvent,
     AssetFsEventKind,
     ImportCoordinator,
+    is_document_store_temporary_path,
 )
 
 
@@ -104,6 +106,35 @@ def test_retry_is_non_blocking_and_bounded(tmp_path):
     event = coordinator.drain()[0]
     assert event.attempt == 2
     assert not coordinator.retry(event)
+
+
+def test_document_store_temporary_events_are_filtered_and_atomic_move_becomes_modified(tmp_path):
+    clock = _Clock()
+    coordinator = _coordinator(clock)
+    target = tmp_path / "atomic.mat"
+    temporary = tmp_path / "atomic.mat.tmp.123456.7"
+
+    assert is_document_store_temporary_path(str(temporary))
+    assert not is_document_store_temporary_path(str(tmp_path / "design.tmp.notes"))
+
+    for kind in (
+        AssetFsEventKind.CREATED,
+        AssetFsEventKind.MODIFIED,
+        AssetFsEventKind.DELETED,
+    ):
+        coordinator.submit(kind, str(temporary))
+    assert coordinator.pending_count == 0
+
+    coordinator.submit(AssetFsEventKind.MOVED, str(temporary), destination=str(target))
+    events = coordinator.drain(force=True)
+    assert len(events) == 1
+    assert events[0].kind is AssetFsEventKind.MODIFIED
+    assert events[0].path == str(target.resolve())
+    assert events[0].destination == ""
+
+    leaked_temporary_event = AssetFsEvent(AssetFsEventKind.MODIFIED, str(temporary.resolve()))
+    assert not coordinator.retry(leaked_temporary_event)
+    assert coordinator.pending_count == 0
 
 
 def test_concurrent_submit_is_thread_safe(tmp_path):

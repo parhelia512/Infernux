@@ -921,6 +921,7 @@ class TestIncrementalTransformSync:
         assert mesh.is_cooking is False
         assert mesh.shape_error == ""
 
+
     def test_pose_readback_only_visits_active_bodies(self, scene):
         Physics.set_gravity(Vector3(0, 0, 0))
         rigidbodies = [
@@ -987,6 +988,37 @@ class TestIncrementalTransformSync:
             for collider in Physics.overlap_sphere(Vector3(1.5, 5, 0), 0.1)
         }
         assert collider_id in scaled
+
+
+class TestPrimitiveColliderAlignment:
+    def test_sphere_and_capsule_native_shapes_match_builtin_mesh_dimensions(self, scene):
+        sphere = scene.create_primitive(PrimitiveType.Sphere, "AlignedSphere")
+        assert sphere.get_component("SphereCollider") is not None
+
+        capsule = scene.create_primitive(PrimitiveType.Capsule, "AlignedCapsule")
+        capsule.transform.position = Vector3(3, 0, 0)
+        assert capsule.get_component("CapsuleCollider") is not None
+
+        sm = SceneManager.instance()
+        sm.play()
+        sm.pause()
+        Physics.sync_transforms()
+        sm.step()
+
+        sphere_hit = Physics.raycast(Vector3(-2, 0, 0), Vector3(1, 0, 0), 4.0)
+        assert sphere_hit is not None
+        assert sphere_hit.game_object.name == "AlignedSphere"
+        assert sphere_hit.distance == pytest.approx(1.5, abs=0.02)
+
+        capsule_top_hit = Physics.raycast(Vector3(3, 3, 0), Vector3(0, -1, 0), 4.0)
+        assert capsule_top_hit is not None
+        assert capsule_top_hit.game_object.name == "AlignedCapsule"
+        assert capsule_top_hit.distance == pytest.approx(2.0, abs=0.02)
+
+        capsule_side_hit = Physics.raycast(Vector3(1, 0, 0), Vector3(1, 0, 0), 4.0)
+        assert capsule_side_hit is not None
+        assert capsule_side_hit.game_object.name == "AlignedCapsule"
+        assert capsule_side_hit.distance == pytest.approx(1.5, abs=0.02)
 
 
 class TestCompoundCollider:

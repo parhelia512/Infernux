@@ -106,6 +106,22 @@ class TestPlayModeManager:
         assert mgr._runtime_hidden_object_ids == {77}
 
     def test_rebuild_scene_does_not_materialize_prefab_refs_for_play(self, monkeypatch):
+        class _FakeCommitToken:
+            def __init__(self, scene, previous_document):
+                self._scene = scene
+                self._previous_document = previous_document
+                self.is_active = True
+
+            def rollback(self):
+                if not self.is_active:
+                    return False
+                self._scene.document = self._previous_document
+                self.is_active = False
+                return True
+
+            def finalize(self):
+                self.is_active = False
+
         class _FakeScene:
             def __init__(self):
                 self.playing = None
@@ -119,9 +135,10 @@ class TestPlayModeManager:
             def serialize_document(self):
                 return dict(self.document)
 
-            def _commit_document(self, snapshot):
+            def _commit_document_retaining_world(self, snapshot):
+                token = _FakeCommitToken(self, dict(self.document))
                 self.document = dict(snapshot)
-                return True
+                return token
 
             def set_playing(self, playing):
                 self.playing = playing

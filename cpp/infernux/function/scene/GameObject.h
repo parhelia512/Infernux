@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Component.h"
+#include "ObjectHandle.h"
 #include "Transform.h"
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -54,6 +55,14 @@ class GameObject
     [[nodiscard]] uint64_t GetID() const
     {
         return m_id;
+    }
+
+    /// @brief Get the stable handle for this object's current native lifetime.
+    [[nodiscard]] ObjectHandle GetHandle() const;
+
+    [[nodiscard]] uint64_t GetLifetimeGeneration() const
+    {
+        return m_lifetimeGeneration;
     }
 
     // ========================================================================
@@ -329,7 +338,7 @@ class GameObject
     /// Attach a deserialized Python proxy without Reset/Awake/OnEnable.
     /// Scene publication activates the complete batch only after every proxy
     /// is attached, re-keyed, and its post-deserialize hook succeeds.
-    Component *AddPreparedPythonComponent(std::unique_ptr<Component> component);
+    Component *AddPreparedPythonComponent(std::unique_ptr<Component> component, size_t componentIndex);
 
     /// Activate one proxy previously attached by AddPreparedPythonComponent.
     void ActivatePreparedPythonComponent(Component *component);
@@ -441,6 +450,7 @@ class GameObject
 
   private:
     friend class Scene;
+    friend class SceneCommitToken;
     friend class SceneManager;
     friend void InvalidateGameObjectLifecycleCaches(GameObject *gameObject);
 
@@ -458,6 +468,7 @@ class GameObject
 
     std::string m_name;
     uint64_t m_id;
+    uint64_t m_lifetimeGeneration;
     bool m_active = true;
     bool m_isDestroying = false;
     bool m_isStatic = false;

@@ -42,8 +42,9 @@ def load_component_from_file(file_path: str) -> Type[InxComponent]:
 def load_component_class_from_file(file_path: str, type_name: str = ...) -> Optional[Type[InxComponent]]:
     """Load a specific component class from a Python file.
 
-    If ``type_name`` is empty, returns the first discovered InxComponent class.
-    Returns ``None`` when the class cannot be loaded.
+    Prefers an exact ``type_name`` match. If missing and the file defines
+    exactly one ``InxComponent`` subclass, returns that class so one-file
+    class renames keep scene references alive.
     """
     ...
 

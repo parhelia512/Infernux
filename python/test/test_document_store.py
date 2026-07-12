@@ -1,6 +1,6 @@
 import pytest
 
-from Infernux.core.document_store import DocumentStore
+from Infernux.core.document_store import DocumentStore, write_document_text
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +20,24 @@ def test_native_store_writes_ordered_generations(tmp_path):
     second.wait()
 
     assert first.generation + 1 == second.generation
+    assert first.is_complete is True
+    assert first.status == "succeeded"
     assert path.read_text(encoding="utf-8") == "second"
+    metrics = store.get_metrics(str(path))
+    assert metrics.latest_submitted_generation == second.generation
+    assert metrics.latest_succeeded_generation == second.generation
+    assert metrics.latest_failed_generation == 0
+    assert metrics.pending_generation == 0
+    assert metrics.active_generation == 0
+
+
+def test_backup_contains_previous_complete_generation(tmp_path):
+    path = tmp_path / "scene.json"
+    write_document_text(str(path), "first")
+    write_document_text(str(path), "second", create_backup=True)
+
+    assert path.read_text(encoding="utf-8") == "second"
+    assert (tmp_path / "scene.json.bak").read_text(encoding="utf-8") == "first"
 
 
 def test_shutdown_drains_accepted_write_and_store_can_restart(tmp_path):
@@ -45,3 +62,4 @@ def test_native_write_failure_reaches_ticket(tmp_path):
 
     with pytest.raises(RuntimeError, match="atomic write failed"):
         ticket.wait()
+    assert ticket.status == "failed"

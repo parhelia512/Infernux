@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, replace
@@ -42,6 +43,21 @@ def _absolute_path(path: str) -> str:
 
 def _path_key(path: str) -> str:
     return os.path.normcase(path)
+
+
+_DOCUMENT_STORE_TEMP_PATTERN = re.compile(r"\.tmp\.\d+\.\d+$")
+
+
+def is_document_store_temporary_path(path: str) -> bool:
+    """Return whether *path* uses AtomicFile's exact temporary-file suffix."""
+    if not path:
+        return False
+    normalized = path.replace("\\", "/")
+    return _DOCUMENT_STORE_TEMP_PATTERN.search(normalized) is not None
+
+
+def _event_references_temporary_path(event: AssetFsEvent) -> bool:
+    return is_document_store_temporary_path(event.path) or is_document_store_temporary_path(event.destination)
 
 
 class ImportCoordinator:
@@ -87,10 +103,22 @@ class ImportCoordinator:
         if not isinstance(kind, AssetFsEventKind):
             raise TypeError("kind must be AssetFsEventKind")
         now = self._clock() if observed_at is None else observed_at
+        normalized_path = _absolute_path(path)
+        normalized_destination = _absolute_path(destination) if destination else ""
+        if kind is AssetFsEventKind.MOVED and is_document_store_temporary_path(normalized_path):
+            if not normalized_destination or is_document_store_temporary_path(normalized_destination):
+                return
+            kind = AssetFsEventKind.MODIFIED
+            normalized_path = normalized_destination
+            normalized_destination = ""
+        elif is_document_store_temporary_path(normalized_path) or is_document_store_temporary_path(
+            normalized_destination
+        ):
+            return
         event = AssetFsEvent(
             kind=kind,
-            path=_absolute_path(path),
-            destination=_absolute_path(destination) if destination else "",
+            path=normalized_path,
+            destination=normalized_destination,
             guid_hint=guid_hint.strip(),
             observed_at=now,
         )
@@ -201,7 +229,12 @@ class ImportCoordinator:
         elif event.kind is AssetFsEventKind.DELETED:
             pass
         elif previous.kind is AssetFsEventKind.DELETED:
-            event = previous
+            # Atomic replacement on Windows can report the old target as
+            # deleted before the DocumentStore temp file is moved into place.
+            # That temp move is normalized to MODIFIED above, so it must revive
+            # the pending asset instead of allowing the stale delete to win.
+            if event.kind is not AssetFsEventKind.MODIFIED:
+                event = previous
         elif previous.kind is AssetFsEventKind.MODIFIED and event.kind is AssetFsEventKind.CREATED:
             event = replace(event, kind=AssetFsEventKind.MODIFIED)
 
@@ -221,6 +254,8 @@ class ImportCoordinator:
         return [pending.event for _key, pending in ready]
 
     def retry(self, event: AssetFsEvent, *, now: float | None = None) -> bool:
+        if _event_references_temporary_path(event):
+            return False
         if event.attempt + 1 >= self._max_attempts:
             return False
         current = self._clock() if now is None else now
@@ -234,4 +269,3 @@ class ImportCoordinator:
     def clear(self) -> None:
         with self._lock:
             self._pending.clear()
-

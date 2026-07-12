@@ -14,6 +14,7 @@ Opened from Window menu → Timeline Editor, or by double-clicking a
 from __future__ import annotations
 
 import os
+import math
 import time
 from typing import Optional
 
@@ -108,6 +109,7 @@ class AnimTimelineEditorPanel(EditorPanel):
         self._cam_dist: float = 6.0
         self._orbiting: bool = False
         self._preview_tex_cache: int = 0
+        self._preview_request_signature = None
         # Panel persistence: ``load_state`` may run from bootstrap or first render.
         self._panel_state_restored_once: bool = False
         self._panel_restore_data: Optional[dict] = None
@@ -531,7 +533,9 @@ class AnimTimelineEditorPanel(EditorPanel):
 
     def _render_timeline_bar(self, ctx: InxGUIContext):
         dur = max(1e-6, float(self._timeline.duration))
-        bar_w = max(80.0, ctx.get_content_region_avail_width())
+        # Leave the same small horizontal breathing room used by the child
+        # content so the ruler does not protrude past the toolbar above it.
+        bar_w = max(80.0, ctx.get_content_region_avail_width() - 2.0)
         ctx.invisible_button("##tl_bar", bar_w, _BAR_H)
         x0 = ctx.get_item_rect_min_x()
         y0 = ctx.get_item_rect_min_y()
@@ -677,8 +681,11 @@ class AnimTimelineEditorPanel(EditorPanel):
             pos, rot, scl = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]
 
         side = min(x1 - x0, y1 - y0)
-        tex = self._cube_preview_texture(pos, rot, scl)
-        if tex:
+        realtime_preview = self._playing or self._bar_was_active or self._orbiting
+        tex = 0 if realtime_preview else self._cube_preview_texture(pos, rot, scl)
+        if realtime_preview:
+            self._draw_realtime_wire_preview(ctx, x0, y0, x1, y1, pos, rot, scl)
+        elif tex:
             cx = (x0 + x1) * 0.5
             cy = (y0 + y1) * 0.5
             ctx.draw_image_rect(tex, cx - side * 0.5, cy - side * 0.5, cx + side * 0.5, cy + side * 0.5,
@@ -687,6 +694,80 @@ class AnimTimelineEditorPanel(EditorPanel):
             ctx.draw_text(x0 + 10.0, y0 + 10.0, "renderer offline", *c["text"])
         ctx.draw_text(x0 + 8.0, y1 - 18.0, t("animtimeline_editor.preview"), *c["text"])
 
+    def _draw_realtime_wire_preview(self, ctx, x0, y0, x1, y1, pos, rot, scl):
+        """Draw a smooth CPU-projected cube while the timeline is moving."""
+        rx, ry, rz = (math.radians(float(value)) for value in rot)
+        cx, sxr = math.cos(rx), math.sin(rx)
+        cy, syr = math.cos(ry), math.sin(ry)
+        cz, szr = math.cos(rz), math.sin(rz)
+
+        def transform_point(point):
+            x, y, z = (point[i] * float(scl[i]) for i in range(3))
+            y, z = y * cx - z * sxr, y * sxr + z * cx
+            x, z = x * cy + z * syr, -x * syr + z * cy
+            x, y = x * cz - y * szr, x * szr + y * cz
+            return x + float(pos[0]), y + float(pos[1]), z + float(pos[2])
+
+        target = (0.0, 0.35, 0.0)
+        cp = math.cos(self._cam_pitch)
+        direction = (
+            cp * math.sin(self._cam_yaw),
+            math.sin(self._cam_pitch),
+            cp * math.cos(self._cam_yaw),
+        )
+        camera = tuple(target[i] + direction[i] * self._cam_dist for i in range(3))
+        forward = tuple(target[i] - camera[i] for i in range(3))
+        flen = math.sqrt(sum(value * value for value in forward)) or 1.0
+        forward = tuple(value / flen for value in forward)
+        right = (-forward[2], 0.0, forward[0])
+        rlen = math.sqrt(right[0] * right[0] + right[2] * right[2]) or 1.0
+        right = (right[0] / rlen, 0.0, right[2] / rlen)
+        up = (
+            right[1] * forward[2] - right[2] * forward[1],
+            right[2] * forward[0] - right[0] * forward[2],
+            right[0] * forward[1] - right[1] * forward[0],
+        )
+        center_x, center_y = (x0 + x1) * 0.5, (y0 + y1) * 0.5
+        focal = min(x1 - x0, y1 - y0) * 0.85
+
+        def project(point):
+            rel = tuple(point[i] - camera[i] for i in range(3))
+            depth = sum(rel[i] * forward[i] for i in range(3))
+            if depth <= 0.05:
+                return None
+            px = center_x + sum(rel[i] * right[i] for i in range(3)) * focal / depth
+            py = center_y - sum(rel[i] * up[i] for i in range(3)) * focal / depth
+            return px, py
+
+        grid_color = (*Theme.TEXT_DISABLED[:3], 0.32)
+        for grid_index in range(-4, 5):
+            for a, b in (
+                ((grid_index, 0.0, -4.0), (grid_index, 0.0, 4.0)),
+                ((-4.0, 0.0, grid_index), (4.0, 0.0, grid_index)),
+            ):
+                pa, pb = project(a), project(b)
+                if pa and pb:
+                    ctx.draw_line(*pa, *pb, *grid_color, 1.0)
+
+        corners = [
+            transform_point((x, y, z))
+            for x, y, z in (
+                (-0.5, -0.5, -0.5), (0.5, -0.5, -0.5),
+                (0.5, 0.5, -0.5), (-0.5, 0.5, -0.5),
+                (-0.5, -0.5, 0.5), (0.5, -0.5, 0.5),
+                (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5),
+            )
+        ]
+        projected = [project(point) for point in corners]
+        edge_color = Theme.APPLY_BUTTON
+        for start, end in (
+            (0, 1), (1, 2), (2, 3), (3, 0),
+            (4, 5), (5, 6), (6, 7), (7, 4),
+            (0, 4), (1, 5), (2, 6), (3, 7),
+        ):
+            if projected[start] and projected[end]:
+                ctx.draw_line(*projected[start], *projected[end], *edge_color, 2.0)
+
     def _cube_preview_texture(self, pos, rot, scl) -> int:
         """Schedule GPU cube preview; pump_preview_tasks() renders once per frame."""
         try:
@@ -694,6 +775,15 @@ class AnimTimelineEditorPanel(EditorPanel):
             native = _resolve_native_engine(self)
             if native is None or not hasattr(native, "render_timeline_cube_preview"):
                 return self._preview_tex_cache
+            signature = tuple(round(float(value), 4) for value in (
+                *pos, *rot, *scl, self._cam_yaw, self._cam_pitch, self._cam_dist
+            ))
+            # Native owns latest-wins backpressure: while one GPU submission is
+            # active, newer states overwrite one pending slot and are rendered
+            # as soon as it completes. Python only filters exact duplicates.
+            if signature == self._preview_request_signature:
+                return self._preview_tex_cache
+            self._preview_request_signature = signature
             tex = int(native.render_timeline_cube_preview(
                 float(pos[0]), float(pos[1]), float(pos[2]),
                 float(rot[0]), float(rot[1]), float(rot[2]),

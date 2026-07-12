@@ -6,6 +6,7 @@
 #include <function/resources/InxMaterial/InxMaterial.h>
 #include <function/resources/InxMaterial/MaterialDocumentValidation.h>
 #include <function/resources/InxResource/InxResourceMeta.h>
+#include <function/scene/ComponentRecord.h>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -115,16 +116,20 @@ class ResourcePreflight
 
     void ValidateComponent(const nlohmann::json &component, const std::string &path)
     {
-        const std::string type = component.at("type").get<std::string>();
+        const DecodedComponentRecord record = DecodeComponentRecord(component);
+        if (record.kind == ComponentRecordKind::Python)
+            return;
+        const std::string &type = record.nativeTypeName;
+        const nlohmann::json data = BuildNativeComponentDocument(record);
         if (type == "BoxCollider" || type == "SphereCollider" || type == "CapsuleCollider" || type == "MeshCollider") {
-            const std::string guid = component.at("physic_material_guid").get<std::string>();
+            const std::string guid = data.at("physic_material_guid").get<std::string>();
             if (!guid.empty())
                 RequireAsset(guid, ResourceType::PhysicMaterial, path + ".physic_material_guid");
             return;
         }
 
         if (type == "AudioSource") {
-            const auto &tracks = component.at("tracks");
+            const auto &tracks = data.at("tracks");
             for (size_t index = 0; index < tracks.size(); ++index) {
                 if (!tracks[index].contains("clip_guid"))
                     continue;
@@ -137,9 +142,9 @@ class ResourcePreflight
         if (type != "MeshRenderer" && type != "SkinnedMeshRenderer" && type != "SpriteRenderer")
             return;
 
-        if (component.contains("meshAssetGuid"))
-            RequireAsset(component["meshAssetGuid"].get<std::string>(), ResourceType::Mesh, path + ".meshAssetGuid");
-        const auto &materials = component.at("materials");
+        if (data.contains("meshAssetGuid"))
+            RequireAsset(data["meshAssetGuid"].get<std::string>(), ResourceType::Mesh, path + ".meshAssetGuid");
+        const auto &materials = data.at("materials");
         for (size_t index = 0; index < materials.size(); ++index) {
             const auto &slot = materials[index];
             const std::string slotPath = path + ".materials[" + std::to_string(index) + "]";
@@ -149,8 +154,8 @@ class ResourcePreflight
                 ValidateEmbeddedMaterial(slot.at("material"), slotPath + ".material");
             }
         }
-        if (type == "SpriteRenderer" && component.contains("spriteGuid"))
-            RequireAsset(component["spriteGuid"].get<std::string>(), ResourceType::Texture, path + ".spriteGuid");
+        if (type == "SpriteRenderer" && data.contains("spriteGuid"))
+            RequireAsset(data["spriteGuid"].get<std::string>(), ResourceType::Texture, path + ".spriteGuid");
     }
 
     void ValidateObject(const nlohmann::json &object, const std::string &path)

@@ -664,7 +664,8 @@ def _wire_add_remove_and_drop(ctx):
         if obj is None:
             return
         from Infernux.engine.ui.inspector_components import (
-            _record_add_component_compound, _get_component_ids
+            _record_add_component_compound, _get_component_ids,
+            _get_native_component_documents,
         )
         if is_native:
             # Block adding MeshRenderer when SpriteRenderer manages it.
@@ -683,12 +684,14 @@ def _wire_add_remove_and_drop(ctx):
                             "Cannot add SpriteRenderer — "
                             "a MeshRenderer already exists. Remove it first.")
                         return
+            before_documents = _get_native_component_documents(obj)
             before_ids = _get_component_ids(obj)
             result = obj.add_component(type_name_or_path)
             if result is not None:
                 Debug.log_internal(f"Added component: {type_name_or_path}")
                 _record_add_component_compound(
-                    obj, type_name_or_path, result, before_ids, is_py=False)
+                    obj, type_name_or_path, result, before_ids, is_py=False,
+                    before_documents=before_documents)
                 _invalidate()
                 _bump()
             else:
@@ -716,10 +719,12 @@ def _wire_add_remove_and_drop(ctx):
                             f"only one per scene is allowed")
                         return
             instance = comp_cls()
+            before_documents = _get_native_component_documents(obj)
             before_ids = _get_component_ids(obj)
             obj.add_py_component(instance)
             _record_add_component_compound(
-                obj, comp_cls.__name__, instance, before_ids, is_py=True)
+                obj, comp_cls.__name__, instance, before_ids, is_py=True,
+                before_documents=before_documents)
             _invalidate()
             _bump()
             Debug.log_internal(f"Added component {comp_cls.__name__}")
@@ -728,10 +733,12 @@ def _wire_add_remove_and_drop(ctx):
             instance = _load_script_component(script_path, adb)
             if instance is None:
                 return
+            before_documents = _get_native_component_documents(obj)
             before_ids = _get_component_ids(obj)
             obj.add_py_component(instance)
             _record_add_component_compound(
-                obj, instance.type_name, instance, before_ids, is_py=True)
+                obj, instance.type_name, instance, before_ids, is_py=True,
+                before_documents=before_documents)
             _invalidate()
             _bump()
             Debug.log_internal(f"Added component {instance.type_name}")
@@ -759,12 +766,15 @@ def _wire_add_remove_and_drop(ctx):
         if instance is None:
             return
         from Infernux.engine.ui.inspector_components import (
-            _record_add_component_compound, _get_component_ids
+            _record_add_component_compound, _get_component_ids,
+            _get_native_component_documents,
         )
+        before_documents = _get_native_component_documents(obj)
         before_ids = _get_component_ids(obj)
         obj.add_py_component(instance)
         _record_add_component_compound(
-            obj, instance.type_name, instance, before_ids, is_py=True)
+            obj, instance.type_name, instance, before_ids, is_py=True,
+            before_documents=before_documents)
         _invalidate()
         _bump()
 

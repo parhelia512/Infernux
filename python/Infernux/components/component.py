@@ -282,6 +282,9 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
         self._game_object: Optional['GameObject'] = None  # Reference to the owning GameObject
         self._game_object_ref: Optional[weakref.ref] = None  # Weak reference for safety
         self._cpp_component = None  # Native lifecycle authority (PyComponentProxy or built-in C++ component)
+        self._native_handle = None
+        self._native_scene = None
+        self._native_game_object_handle = None
         self._enabled = True
         self._execution_order = 0
         self._has_started = False

@@ -545,7 +545,7 @@ class NodeGraphView:
                    node_uid: str = "") -> None:
         color = pl.pin_def.color
         z = self.zoom
-        connected = self._is_pin_connected(pl.pin_def.id, kind == PinKind.OUTPUT)
+        connected = self._is_pin_connected(node_uid, pl.pin_def.id, kind == PinKind.OUTPUT)
         # Crisp dot: dark outline (matches the dark theme) + filled/hollow core.
         ctx.draw_filled_circle(pl.cx, pl.cy, radius + 1.2 * z, 0.08, 0.08, 0.09, 1.0)
         if connected:
@@ -560,13 +560,13 @@ class NodeGraphView:
             ctx.draw_circle(pl.cx, pl.cy, radius + 3.0 * self.zoom,
                             *_PIN_HOVER_COLOR, 1.8 * self.zoom)
 
-    def _is_pin_connected(self, pin_id: str, is_output: bool) -> bool:
+    def _is_pin_connected(self, node_uid: str, pin_id: str, is_output: bool) -> bool:
         if self.graph is None:
             return False
         for lk in self.graph.links:
-            if is_output and lk.source_pin == pin_id:
+            if is_output and lk.source_node == node_uid and lk.source_pin == pin_id:
                 return True
-            if not is_output and lk.target_pin == pin_id:
+            if not is_output and lk.target_node == node_uid and lk.target_pin == pin_id:
                 return True
         return False
 
@@ -639,12 +639,15 @@ class NodeGraphView:
         a_half = 7.0 * z
         tipx, tipy = ex - dx * gap, ey - dy * gap
         basex, basey = tipx - dx * a_len, tipy - dy * a_len
+        # Draw through the arrow base exactly. Distance-to-end trimming can
+        # stop at the previous coarse Bezier sample and leave a visible gap.
         cutoff = gap + a_len
         for i in range(len(pts) - 1):
             ax, ay = pts[i]
-            if math.hypot(ex - ax, ey - ay) <= cutoff:
-                break
             bx, by = pts[i + 1]
+            if math.hypot(ex - bx, ey - by) <= cutoff:
+                ctx.draw_line(ax, ay, basex, basey, *color, thickness)
+                break
             ctx.draw_line(ax, ay, bx, by, *color, thickness)
         self._draw_filled_arrow(ctx, tipx, tipy, basex, basey, a_half, color)
 
@@ -1037,6 +1040,8 @@ class NodeGraphView:
 
     def _find_drag_target_pin(self, mx, my):
         """Find the nearest valid target pin during a link drag."""
+        if self.graph is None:
+            return "", "", PinKind.OUTPUT
         hit_r = _PIN_HIT_RADIUS * self.zoom
         want_kind = (PinKind.INPUT if self._drag_src_kind == PinKind.OUTPUT
                      else PinKind.OUTPUT)
@@ -1047,7 +1052,16 @@ class NodeGraphView:
                     else layout.output_pins)
             for pl in pins:
                 if _dist(mx, my, pl.cx, pl.cy) <= hit_r:
-                    return uid, pl.pin_def.id, want_kind
+                    if self._drag_src_kind == PinKind.OUTPUT:
+                        endpoints = (
+                            self._drag_src_node, self._drag_src_pin, uid, pl.pin_def.id
+                        )
+                    else:
+                        endpoints = (
+                            uid, pl.pin_def.id, self._drag_src_node, self._drag_src_pin
+                        )
+                    if self.graph.validate_link(*endpoints):
+                        return uid, pl.pin_def.id, want_kind
         return "", "", PinKind.OUTPUT
 
     def _hit_test_link(self, mx, my, threshold=6.0):
@@ -1096,6 +1110,8 @@ class NodeGraphView:
         else:
             src_n, src_p = target_node, target_pin
             dst_n, dst_p = self._drag_src_node, self._drag_src_pin
+        if self.graph is not None and not self.graph.validate_link(src_n, src_p, dst_n, dst_p):
+            return
         if self.on_link_created:
             self.on_link_created(src_n, src_p, dst_n, dst_p)
         elif self.graph:

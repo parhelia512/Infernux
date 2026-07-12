@@ -241,6 +241,9 @@ class TestAssetCategory:
     def test_prefab(self):
         assert asset_category_from_extension(".prefab") == "prefab"
 
+    def test_vfx_system(self):
+        assert asset_category_from_extension(".vfxsystem") == "vfxsystem"
+
     def test_unknown(self):
         assert asset_category_from_extension(".xyz") is None
 

@@ -14,6 +14,7 @@ namespace infernux
 
 // Static component ID generator
 static std::atomic<uint64_t> s_nextComponentID{1};
+static std::atomic<uint64_t> s_nextComponentLifetimeGeneration{1};
 
 uint64_t Component::GenerateComponentID()
 {
@@ -29,25 +30,31 @@ void Component::EnsureNextComponentID(uint64_t id)
     }
 }
 
-Component::Component() : m_componentId(GenerateComponentID()), m_wasEnabled(false)
+Component::Component()
+    : m_wasEnabled(false), m_componentId(GenerateComponentID()),
+      m_lifetimeGeneration(s_nextComponentLifetimeGeneration.fetch_add(1, std::memory_order_relaxed))
 {
     GetInstanceRegistry()[m_componentId] = this;
 }
 
 Component::~Component()
 {
-    GetInstanceRegistry().erase(m_componentId);
+    auto &registry = GetInstanceRegistry();
+    const auto entry = registry.find(m_componentId);
+    if (entry != registry.end() && entry->second == this)
+        registry.erase(entry);
 }
 
 Component::Component(Component &&other) noexcept
     : m_gameObject(other.m_gameObject), m_enabled(other.m_enabled), m_wasEnabled(other.m_wasEnabled),
       m_hasAwake(other.m_hasAwake), m_hasStarted(other.m_hasStarted), m_hasDestroyed(other.m_hasDestroyed),
       m_isBeingDestroyed(other.m_isBeingDestroyed), m_executionOrder(other.m_executionOrder),
-      m_componentId(other.m_componentId)
+      m_componentId(other.m_componentId), m_lifetimeGeneration(other.m_lifetimeGeneration)
 {
     // Update registry to point to this new address
     GetInstanceRegistry()[m_componentId] = this;
     other.m_componentId = 0;
+    other.m_lifetimeGeneration = 0;
 }
 
 Component &Component::operator=(Component &&other) noexcept
@@ -63,10 +70,18 @@ Component &Component::operator=(Component &&other) noexcept
         m_isBeingDestroyed = other.m_isBeingDestroyed;
         m_executionOrder = other.m_executionOrder;
         m_componentId = other.m_componentId;
+        m_lifetimeGeneration = other.m_lifetimeGeneration;
         GetInstanceRegistry()[m_componentId] = this;
         other.m_componentId = 0;
+        other.m_lifetimeGeneration = 0;
     }
     return *this;
+}
+
+ObjectHandle Component::GetHandle() const
+{
+    const Scene *scene = m_gameObject ? m_gameObject->GetScene() : nullptr;
+    return ObjectHandle{m_componentId, m_lifetimeGeneration, scene ? scene->GetWorldId() : 0};
 }
 
 void Component::CallAwake()

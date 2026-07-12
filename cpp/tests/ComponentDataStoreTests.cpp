@@ -1,7 +1,9 @@
 #include <function/scene/ComponentDataStore.h>
 
 #include <cassert>
+#include <chrono>
 #include <cstdint>
+#include <iostream>
 #include <stdexcept>
 #include <vector>
 
@@ -67,6 +69,33 @@ int main()
     const double invalidInput[] = {111.0, 222.0};
     ExpectFailure([&] { store.ScatterFloat(classId, speedField, invalidBatch, 2, invalidInput); });
     assert(store.GetFloat(classId, speedField, handles[0]) == beforeFailedScatter);
+
+    store.Clear();
+    constexpr size_t benchmarkCount = 100000;
+    const auto benchmarkStart = std::chrono::steady_clock::now();
+    const uint32_t benchmarkClass = store.RegisterClass("tests:Batch100k");
+    const uint32_t benchmarkField = store.RegisterField(benchmarkClass, "position", ComponentDataStore::DataType::Vec3);
+    store.ReserveClass(benchmarkClass, benchmarkCount);
+    std::vector<ComponentDataStore::SlotHandle> benchmarkHandles;
+    benchmarkHandles.reserve(benchmarkCount);
+    for (size_t i = 0; i < benchmarkCount; ++i)
+        benchmarkHandles.push_back(store.AllocateSlot(benchmarkClass));
+    std::vector<float> benchmarkInput(benchmarkCount * 3);
+    std::vector<float> benchmarkOutput(benchmarkCount * 3);
+    for (size_t i = 0; i < benchmarkCount; ++i) {
+        benchmarkInput[i * 3] = static_cast<float>(i);
+        benchmarkInput[i * 3 + 1] = 2.0F;
+        benchmarkInput[i * 3 + 2] = 3.0F;
+    }
+    store.ScatterVec3(benchmarkClass, benchmarkField, benchmarkHandles.data(), benchmarkHandles.size(),
+                      benchmarkInput.data());
+    store.GatherVec3(benchmarkClass, benchmarkField, benchmarkHandles.data(), benchmarkHandles.size(),
+                     benchmarkOutput.data());
+    assert(benchmarkOutput == benchmarkInput);
+    const double benchmarkSeconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - benchmarkStart).count();
+    std::cout << "ComponentDataStore 100k reserve/allocate/scatter/gather: " << benchmarkSeconds << " s\n";
+    assert(benchmarkSeconds < 5.0);
 
     store.Clear();
     return 0;

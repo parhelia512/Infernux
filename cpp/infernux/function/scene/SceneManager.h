@@ -342,6 +342,8 @@ class SceneManager
     }
 
   private:
+    friend class SceneCommitToken;
+
     SceneManager();
     ~SceneManager() = default;
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
@@ -67,6 +68,26 @@ class _PublishBarrierComponent(InxComponent):
 
     def reset(self):
         type(self)._events.append(("reset", self.value))
+
+
+def _native_record(object_document: dict, type_name: str) -> dict:
+    type_id = f"native:infernux.{type_name}"
+    return next(record for record in object_document["components"] if record["type_id"] == type_id)
+
+
+def _python_records(object_document: dict) -> list[dict]:
+    return [
+        record for record in object_document["components"]
+        if str(record.get("type_id", "")).startswith("python:")
+    ]
+
+
+def _python_type_id(instance: InxComponent) -> str:
+    component_type = type(instance)
+    return (
+        f"python:{instance._script_guid}:{component_type._get_type_guid()}:"
+        f"{component_type.__module__}:{component_type.__qualname__}"
+    )
 
 
 @require_component("Rigidbody")
@@ -155,6 +176,42 @@ class TestGameObject:
         found = scene.find_by_id(go.id)
         assert found is not None
         assert found.name == "ById"
+
+    def test_object_handles_reject_rebuilt_scene_lifetimes(self, scene):
+        go = scene.create_game_object("HandleOwner")
+        rigidbody = go.add_component("Rigidbody")
+        reference = GameObjectRef(go)
+        component_reference = ComponentRef(go_id=go.id, component_type="Rigidbody")
+        game_object_handle = go.handle
+        transform_handle = go.transform.handle
+        component_handle = rigidbody.handle
+
+        assert game_object_handle.is_valid
+        assert game_object_handle.world_id == scene.world_id
+        assert scene.resolve_game_object(game_object_handle) is go
+        assert scene.resolve_component(transform_handle) is go.transform
+        assert scene.resolve_component(component_handle).handle == component_handle
+        assert component_reference.resolve().handle == component_handle
+
+        document = scene.serialize_document()
+        assert scene._commit_document(document) is True
+
+        restored = scene.find_by_id(game_object_handle.id)
+        assert restored is not None
+        assert restored.handle.generation != game_object_handle.generation
+        assert restored.transform.handle.generation != transform_handle.generation
+        assert restored.get_component("Rigidbody").handle.generation != component_handle.generation
+        assert scene.resolve_game_object(game_object_handle) is None
+        assert scene.resolve_component(transform_handle) is None
+        assert scene.resolve_component(component_handle) is None
+        assert reference.resolve() is restored
+        assert component_reference.resolve().handle == restored.get_component("Rigidbody").handle
+
+    def test_object_handles_are_scoped_to_the_scene_world(self, scene):
+        go = scene.create_game_object("WorldScoped")
+        wrong_world = type(go.handle)(go.id, go.handle.generation, scene.world_id + 1)
+
+        assert scene.resolve_game_object(wrong_world) is None
 
     def test_find_nonexistent_returns_none(self, scene):
         assert scene.find("$$$nonexistent$$$") is None
@@ -252,12 +309,42 @@ class TestTransform:
         angles = go.transform.euler_angles
         assert angles.y == pytest.approx(90, abs=0.5)
 
+    def test_component_writeback_on_position(self, scene):
+        go = scene.create_game_object("Writeback")
+        go.transform.position = Vector3(1, 2, 3)
+        go.transform.position.x += 4.0
+        go.transform.position.y = 9.0
+        pos = go.transform.position
+        assert (pos.x, pos.y, pos.z) == pytest.approx((5, 9, 3))
+
+    def test_inplace_add_writeback_on_position(self, scene):
+        go = scene.create_game_object("Inplace")
+        go.transform.position = Vector3(1, 0, 0)
+        go.transform.position += Vector3(2, 3, 4)
+        pos = go.transform.position
+        assert (pos.x, pos.y, pos.z) == pytest.approx((3, 3, 4))
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Primitives
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestPrimitives:
+    @staticmethod
+    def _triangle_areas(positions, indices):
+        areas = []
+        for offset in range(0, len(indices), 3):
+            a, b, c = (positions[indices[offset + corner]] for corner in range(3))
+            ab = tuple(b[axis] - a[axis] for axis in range(3))
+            ac = tuple(c[axis] - a[axis] for axis in range(3))
+            cross = (
+                ab[1] * ac[2] - ab[2] * ac[1],
+                ab[2] * ac[0] - ab[0] * ac[2],
+                ab[0] * ac[1] - ab[1] * ac[0],
+            )
+            areas.append(0.5 * math.sqrt(sum(component * component for component in cross)))
+        return areas
+
     @pytest.mark.parametrize("ptype", [
         PrimitiveType.Cube,
         PrimitiveType.Sphere,
@@ -271,6 +358,14 @@ class TestPrimitives:
         comps = [c.type_name for c in go.get_components()]
         assert "Transform" in comps
         assert "MeshRenderer" in comps
+        expected_collider = {
+            PrimitiveType.Cube: "BoxCollider",
+            PrimitiveType.Sphere: "SphereCollider",
+            PrimitiveType.Capsule: "CapsuleCollider",
+            PrimitiveType.Cylinder: "MeshCollider",
+            PrimitiveType.Plane: "MeshCollider",
+        }[ptype]
+        assert expected_collider in comps
 
     def test_primitive_has_mesh_data(self, scene):
         cube = scene.create_primitive(PrimitiveType.Cube, "Cube")
@@ -279,6 +374,62 @@ class TestPrimitives:
         indices = mr.get_indices()
         assert len(positions) > 0
         assert len(indices) > 0
+
+    def test_sphere_is_uniform_geodesic_mesh_without_degenerate_poles(self, scene):
+        sphere = scene.create_primitive(PrimitiveType.Sphere, "GeodesicSphere")
+        renderer = sphere.get_component("MeshRenderer")
+        positions = renderer.get_positions()
+        indices = renderer.get_indices()
+
+        radii = [math.sqrt(sum(component * component for component in position)) for position in positions]
+        areas = self._triangle_areas(positions, indices)
+        assert min(radii) == pytest.approx(0.5, abs=1e-5)
+        assert max(radii) == pytest.approx(0.5, abs=1e-5)
+        assert min(areas) > 1e-6
+        assert max(areas) / min(areas) < 1.5
+
+    def test_capsule_has_closed_hemispheres_and_nonzero_cylinder_section(self, scene):
+        capsule = scene.create_primitive(PrimitiveType.Capsule, "TrueCapsule")
+        renderer = capsule.get_component("MeshRenderer")
+        positions = renderer.get_positions()
+        indices = renderer.get_indices()
+        areas = self._triangle_areas(positions, indices)
+
+        assert min(position[1] for position in positions) == pytest.approx(-1.0, abs=1e-5)
+        assert max(position[1] for position in positions) == pytest.approx(1.0, abs=1e-5)
+        assert min(areas) > 1e-6
+        assert max(indices) < len(positions)
+
+        cylinder_triangles = 0
+        for offset in range(0, len(indices), 3):
+            ys = {round(positions[indices[offset + corner]][1], 5) for corner in range(3)}
+            if 0.5 in ys and -0.5 in ys:
+                cylinder_triangles += 1
+        assert cylinder_triangles == 64
+
+    @pytest.mark.parametrize(
+        "primitive_type,expected_minimum,expected_maximum",
+        [
+            (PrimitiveType.Cube, (-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)),
+            (PrimitiveType.Cylinder, (-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)),
+            (PrimitiveType.Plane, (-0.5, 0.0, -0.5), (0.5, 0.0, 0.5)),
+            (PrimitiveType.Quad, (-0.5, -0.5, 0.0), (0.5, 0.5, 0.0)),
+        ],
+    )
+    def test_other_primitive_meshes_have_documented_unit_bounds_and_no_degenerate_triangles(
+        self, scene, primitive_type, expected_minimum, expected_maximum
+    ):
+        primitive = scene.create_primitive(primitive_type, f"Audited{primitive_type.name}")
+        renderer = primitive.get_component("MeshRenderer")
+        positions = renderer.get_positions()
+        indices = renderer.get_indices()
+        minimum = tuple(min(position[axis] for position in positions) for axis in range(3))
+        maximum = tuple(max(position[axis] for position in positions) for axis in range(3))
+
+        assert minimum == pytest.approx(expected_minimum, abs=1e-5)
+        assert maximum == pytest.approx(expected_maximum, abs=1e-5)
+        assert min(self._triangle_areas(positions, indices)) > 1e-6
+        assert max(indices) < len(positions)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -397,7 +548,7 @@ class TestSceneSerialization:
             object_document["transform"].pop("scale")
             expected_path = "Scene.objects[0].transform"
         else:
-            component_document = object_document["components"][0]
+            component_document = object_document["components"][0]["data"]
             expected_path = "Scene.objects[0].components[0]"
             if corruption == "rigidbody_mass":
                 component_document["mass"] = "heavy"
@@ -481,7 +632,7 @@ class TestSceneSerialization:
         component = existing.add_component(component_type)
         original_document = scene.serialize_document()
         candidate = json.loads(json.dumps(original_document))
-        component_document = candidate["objects"][0]["components"][0]
+        component_document = candidate["objects"][0]["components"][0]["data"]
 
         if corruption == "camera_clips":
             component_document["farClip"] = component_document["nearClip"]
@@ -515,7 +666,7 @@ class TestSceneSerialization:
         renderer = existing.add_component("MeshRenderer")
         original_document = scene.serialize_document()
         candidate = json.loads(json.dumps(original_document))
-        renderer_document = candidate["objects"][0]["components"][0]
+        renderer_document = candidate["objects"][0]["components"][0]["data"]
 
         if failure == "missing_guid":
             renderer_document["meshAssetGuid"] = "missing-scene-resource-guid"
@@ -534,7 +685,7 @@ class TestSceneSerialization:
                 ),
                 encoding="utf-8",
             )
-            renderer_document["meshAssetGuid"] = asset_database.import_asset(str(asset_path))
+            renderer_document["meshAssetGuid"] = asset_database.import_asset(str(asset_path)).guid
         else:
             renderer_document["materials"] = [{"material": {}}]
 
@@ -571,9 +722,9 @@ class TestSceneSerialization:
             ),
             encoding="utf-8",
         )
-        material_guid = asset_database.import_asset(str(asset_path))
+        material_guid = asset_database.import_asset(str(asset_path)).guid
         document = scene.serialize_document()
-        document["objects"][0]["components"][0]["physic_material_guid"] = material_guid
+        document["objects"][0]["components"][0]["data"]["physic_material_guid"] = material_guid
         path = tmp_path / "valid-resource.scene"
         path.write_text(json.dumps(document), encoding="utf-8")
         transaction = SceneDocumentTransaction(scene, path=path)
@@ -763,11 +914,11 @@ class TestSceneSerialization:
         assert scene.save_to_file(str(scene_path)) is True
 
         document = json.loads(scene_path.read_text(encoding="utf-8"))
-        assert document["schema_version"] == 1
+        assert document["schema_version"] == 2
         assert document["objects"][0]["name"] == "AtomicSceneObject"
         assert list(tmp_path.glob("atomic.scene.tmp.*")) == []
 
-    @pytest.mark.parametrize("schema_version", [0, 2, "1"])
+    @pytest.mark.parametrize("schema_version", [0, 1, 3, "2"])
     def test_deserialize_rejects_non_current_schema(self, scene, schema_version):
         original_name = scene.name
         document = json.loads(scene.serialize())
@@ -775,6 +926,39 @@ class TestSceneSerialization:
 
         assert scene._commit_document(document) is False
         assert scene.name == original_name
+
+    def test_empty_scene_document_schema_v2_commits(self, scene):
+        """Editor new-scene path must use schema_version 2 (Codex left it at 1)."""
+        from Infernux.engine.scene_manager import _empty_scene_document
+
+        document = _empty_scene_document("BlankEditorScene")
+        assert document["schema_version"] == 2
+        assert scene._commit_document(document) is True
+        assert scene.name == "BlankEditorScene"
+        assert scene.get_root_objects() == []
+
+    def test_retained_world_rejects_bad_schema_without_destroying_live_graph(self, scene):
+        existing = scene.create_game_object("KeepAliveOnBadSchema")
+        transform = existing.transform
+        document = {"schema_version": 1, "name": "Bad", "isPlaying": False, "objects": []}
+
+        assert scene._commit_document_retaining_world(document) is None
+        assert scene.find("KeepAliveOnBadSchema") is existing
+        assert existing.transform is transform
+
+    def test_retained_world_restores_exact_instances_when_native_commit_fails(self, scene):
+        existing = scene.create_game_object("RetainedNativeFailure")
+        rigidbody = existing.add_component("Rigidbody")
+        collider = existing.add_component("BoxCollider")
+        transform = existing.transform
+        document = scene.serialize_document()
+        document["schema_version"] = 99
+
+        assert scene._commit_document_retaining_world(document) is None
+        assert scene.find("RetainedNativeFailure") is existing
+        assert existing.transform is transform
+        assert existing.get_component("Rigidbody") is rigidbody
+        assert existing.get_component("BoxCollider") is collider
 
     def test_deserialize_rejects_invalid_component_without_partial_scene(self, scene):
         existing = scene.create_game_object("ExistingSceneState")
@@ -784,7 +968,14 @@ class TestSceneSerialization:
         original_document = scene.serialize_document()
         document = dict(original_document)
         invalid_object["components"].append(
-            {"schema_version": 1, "type": "MissingNativeComponent"}
+            {
+                "component_id": 999999,
+                "type_id": "native:infernux.MissingNativeComponent",
+                "type_version": 1,
+                "enabled": True,
+                "execution_order": 0,
+                "data": {},
+            }
         )
         document["objects"] = [valid_object, invalid_object]
 
@@ -826,7 +1017,7 @@ class TestSceneSerialization:
         elif corruption == "duplicate_component_id":
             second_doc["transform"]["component_id"] = first_doc["transform"]["component_id"]
         elif corruption == "invalid_component_field":
-            first_doc["components"][0]["mass"] = "heavy"
+            _native_record(first_doc, "Rigidbody")["data"]["mass"] = "heavy"
         elif corruption == "invalid_main_camera":
             candidate["mainCameraComponentId"] = first_doc["components"][0]["component_id"]
         elif corruption == "unknown_scene_field":
@@ -836,11 +1027,12 @@ class TestSceneSerialization:
         elif corruption == "invalid_layer":
             first_doc["layer"] = 32
         elif corruption == "invalid_python_descriptor":
-            first_doc["py_components"][0]["legacy"] = True
+            _python_records(first_doc)[0]["legacy"] = True
         elif corruption == "empty_python_script_guid":
-            first_doc["py_components"][0]["script_guid"] = ""
+            descriptor = _python_records(first_doc)[0]
+            descriptor["type_id"] = descriptor["type_id"].replace("python:", "python::", 1)
         else:
-            first_doc["py_components"][0]["py_fields"]["__schema_version__"] = 0
+            _python_records(first_doc)[0]["type_version"] = 0
 
         assert scene._commit_document(candidate) is False
         assert scene.serialize_document() == original_document
@@ -855,7 +1047,7 @@ class TestSceneSerialization:
         alive_before = _cds_alive_count(_StrictSceneComponent)
         original_document = scene.serialize_document()
         candidate = json.loads(json.dumps(original_document))
-        candidate["objects"][0]["py_components"][0]["py_fields"]["value"] = "not-an-int"
+        _python_records(candidate["objects"][0])[0]["data"]["value"] = "not-an-int"
 
         with pytest.raises(PythonComponentRestoreError, match="INT field requires an integer"):
             deserialize_scene_document_transactionally(scene, candidate)
@@ -875,14 +1067,15 @@ class TestSceneSerialization:
 
         candidate = json.loads(json.dumps(original_document))
         candidate["objects"][0]["name"] = "RollbackCandidate"
-        descriptor = candidate["objects"][0]["py_components"][0]
+        descriptor = _python_records(candidate["objects"][0])[0]
         exploding = _ExplodingAfterDeserializeComponent()
         exploding._component_id = original_component_id
-        descriptor["type"] = type(exploding).__name__
-        descriptor["py_type_name"] = type(exploding).__name__
-        descriptor["script_guid"] = exploding._script_guid
-        descriptor["type_guid"] = type(exploding)._get_type_guid()
-        descriptor["py_fields"] = exploding._serialize_fields_document()
+        fields = exploding._serialize_fields_document()
+        descriptor["type_id"] = _python_type_id(exploding)
+        descriptor["type_version"] = fields.pop("__schema_version__")
+        fields.pop("__type_name__")
+        fields.pop("__component_id__")
+        descriptor["data"] = fields
         exploding._call_on_destroy()
         assert _cds_alive_count(_ExplodingAfterDeserializeComponent) == 0
 
@@ -896,6 +1089,8 @@ class TestSceneSerialization:
         assert scene.serialize_document() == original_document
         restored_object = scene.find("RollbackSource")
         restored_component = restored_object.get_py_component(_StrictSceneComponent)
+        assert restored_object is existing
+        assert restored_component is original_component
         assert restored_component.component_id == original_component_id
         assert restored_component.value == 29
         assert scene.find("RollbackCandidate") is None
@@ -922,9 +1117,8 @@ class TestSceneSerialization:
         assert transaction.rolled_back is True
         assert "intentional after_publish failure" in transaction.error
         assert scene.serialize_document() == original_document
-        assert scene.find("AfterPublishSource") is not None
+        assert scene.find("AfterPublishSource") is existing
         assert scene.find("AfterPublishCandidate") is None
-        assert scene.find("AfterPublishSource") is not existing
 
     def test_python_publish_uses_attach_callback_activate_barrier(self, scene):
         first = scene.create_game_object("PublishBarrierFirst")
@@ -957,7 +1151,7 @@ class TestSceneSerialization:
         candidate["objects"][0]["components"] = [
             component
             for component in candidate["objects"][0]["components"]
-            if component["type"] != "Rigidbody"
+            if component["type_id"] != "native:infernux.Rigidbody"
         ]
 
         transaction = SceneDocumentTransaction(scene, document=candidate)
@@ -972,11 +1166,10 @@ class TestSceneSerialization:
         owner.add_py_component(_SingleInstanceSceneComponent())
         original_document = scene.serialize_document()
         candidate = json.loads(json.dumps(original_document))
-        duplicate = json.loads(json.dumps(candidate["objects"][0]["py_components"][0]))
+        duplicate = json.loads(json.dumps(_python_records(candidate["objects"][0])[0]))
         duplicate_id = duplicate["component_id"] + 100000
         duplicate["component_id"] = duplicate_id
-        duplicate["py_fields"]["__component_id__"] = duplicate_id
-        candidate["objects"][0]["py_components"].append(duplicate)
+        candidate["objects"][0]["components"].append(duplicate)
 
         transaction = SceneDocumentTransaction(scene, document=candidate)
 
@@ -1008,26 +1201,54 @@ class TestSceneSerialization:
         component = _StrictSceneComponent()
         root.add_py_component(component)
 
-        descriptor = root.serialize_document()["py_components"][0]
+        descriptor = _python_records(root.serialize_document())[0]
+        script_guid, type_guid, module_name, qualified_name = descriptor["type_id"][len("python:"):].split(":")
 
-        assert descriptor["script_guid"] == component._script_guid
-        assert descriptor["type_guid"] == component.__class__._get_type_guid()
-        assert len(descriptor["script_guid"]) == 32
-        assert len(descriptor["type_guid"]) == 32
+        assert script_guid == component._script_guid
+        assert type_guid == component.__class__._get_type_guid()
+        assert module_name == component.__class__.__module__
+        assert qualified_name == component.__class__.__qualname__
+        assert len(script_guid) == 32
+        assert len(type_guid) == 32
 
-    def test_python_preflight_rejects_mismatched_type_guid_transactionally(self, scene):
+    def test_unified_component_records_preserve_order_and_python_execution_order(self, scene):
+        root = scene.create_game_object("UnifiedComponentOrder")
+        root.add_component("BoxCollider")
+        script = root.add_py_component(_StrictSceneComponent())
+        script.execution_order = 37
+        root.add_component("Light")
+
+        document = scene.serialize_document()
+        records = document["objects"][0]["components"]
+        original_type_ids = [record["type_id"] for record in records]
+        assert original_type_ids[0] == "native:infernux.BoxCollider"
+        assert original_type_ids[1].startswith("python:")
+        assert original_type_ids[2] == "native:infernux.Light"
+        assert records[1]["execution_order"] == 37
+
+        assert deserialize_scene_document_transactionally(scene, document) is True
+
+        restored = scene.find("UnifiedComponentOrder")
+        restored_records = restored.serialize_document()["components"]
+        assert [record["type_id"] for record in restored_records] == original_type_ids
+        assert restored.get_py_component(_StrictSceneComponent).execution_order == 37
+
+    def test_python_preflight_replaces_unresolvable_script_with_missing_placeholder(self, scene):
         root = scene.create_game_object("MismatchedPythonIdentity")
         component = _StrictSceneComponent()
         root.add_py_component(component)
         original_document = root.serialize_document()
         candidate = json.loads(json.dumps(original_document))
-        candidate["py_components"][0]["type_guid"] = "f" * 32
+        descriptor = _python_records(candidate)[0]
+        parts = descriptor["type_id"].split(":")
+        parts[2] = "f" * 32
+        descriptor["type_id"] = ":".join(parts)
 
-        with pytest.raises(PythonComponentRestoreError, match="cannot resolve"):
-            deserialize_game_object_document_transactionally(root, candidate)
-
-        assert root.serialize_document() == original_document
-        assert root.get_py_component(_StrictSceneComponent) is component
+        assert deserialize_game_object_document_transactionally(root, candidate) is True
+        restored = root.get_py_components()[0]
+        assert getattr(restored, "_is_broken", False) is True
+        assert restored._script_guid == parts[1]
+        assert "Missing script" in (getattr(restored, "_broken_error", "") or "")
 
     def test_native_pending_python_record_uses_structured_fields_document(self, scene):
         root = scene.create_game_object("StructuredPendingRecord")
@@ -1040,8 +1261,15 @@ class TestSceneSerialization:
 
         pending = scene.get_pending_py_components()
         assert len(pending) == 1
-        assert pending[0].fields_document == document["objects"][0]["py_components"][0]["py_fields"]
-        assert pending[0].type_guid == document["objects"][0]["py_components"][0]["type_guid"]
+        descriptor = _python_records(document["objects"][0])[0]
+        expected_fields = {
+            "__schema_version__": descriptor["type_version"],
+            "__type_name__": "_StrictSceneComponent",
+            "__component_id__": descriptor["component_id"],
+            **descriptor["data"],
+        }
+        assert pending[0].fields_document == expected_fields
+        assert pending[0].type_guid == descriptor["type_id"].split(":")[2]
         assert not hasattr(pending[0], "fields_json")
         scene.take_pending_py_components()
 
@@ -1069,10 +1297,9 @@ class TestSceneSerialization:
         second.add_py_component(second_component)
         original_document = scene.serialize_document()
         candidate = json.loads(json.dumps(original_document))
-        first_descriptor = candidate["objects"][0]["py_components"][0]
-        second_descriptor = candidate["objects"][1]["py_components"][0]
+        first_descriptor = _python_records(candidate["objects"][0])[0]
+        second_descriptor = _python_records(candidate["objects"][1])[0]
         second_descriptor["component_id"] = first_descriptor["component_id"]
-        second_descriptor["py_fields"]["__component_id__"] = first_descriptor["component_id"]
 
         with pytest.raises(PythonComponentRestoreError, match="duplicate component_id"):
             deserialize_scene_document_transactionally(scene, candidate)
@@ -1085,7 +1312,7 @@ class TestSceneSerialization:
         root.add_py_component(component)
         original_document = root.serialize_document()
         candidate = json.loads(json.dumps(original_document))
-        candidate["py_components"][0]["py_fields"]["value"] = "not-an-int"
+        _python_records(candidate)[0]["data"]["value"] = "not-an-int"
 
         with pytest.raises(PythonComponentRestoreError, match="INT field requires an integer"):
             deserialize_game_object_document_transactionally(root, candidate)
@@ -1143,9 +1370,9 @@ class TestSceneSerialization:
         root.add_py_component(original)
         original_document = root.serialize_document()
         candidate = json.loads(json.dumps(original_document))
-        candidate["py_components"][0]["component_id"] += 1
+        _python_records(candidate)[0]["data"]["__component_id__"] = 999999
 
-        with pytest.raises(PythonComponentRestoreError, match="metadata does not match"):
+        with pytest.raises(PythonComponentRestoreError, match="exact ComponentRecord|reserved"):
             deserialize_game_object_document_transactionally(root, candidate)
 
         assert root.serialize_document() == original_document
@@ -1188,10 +1415,17 @@ class TestSceneSerialization:
 
         if corruption == "unknown_component":
             candidate["components"].append(
-                {"schema_version": 1, "type": "RemovedNativeComponent"}
+                {
+                    "component_id": 999998,
+                    "type_id": "native:infernux.RemovedNativeComponent",
+                    "type_version": 1,
+                    "enabled": True,
+                    "execution_order": 0,
+                    "data": {},
+                }
             )
         elif corruption == "invalid_component_field":
-            candidate["components"][0]["mass"] = "not-a-number"
+            candidate["components"][0]["data"]["mass"] = "not-a-number"
         elif corruption == "missing_name":
             candidate.pop("name")
         elif corruption == "unknown_field":
@@ -1224,8 +1458,7 @@ class TestSceneSerialization:
         elif collision == "component_id":
             candidate["components"][0]["component_id"] = outside_collider.component_id
         else:
-            candidate["py_components"][0]["component_id"] = outside_python.component_id
-            candidate["py_components"][0]["py_fields"]["__component_id__"] = outside_python.component_id
+            _python_records(candidate)[0]["component_id"] = outside_python.component_id
 
         if collision == "python_component_id":
             assert deserialize_game_object_document_transactionally(root, candidate) is False
@@ -1246,7 +1479,7 @@ class TestSceneSerialization:
         old_rigidbody_id = old_rigidbody.component_id
         candidate = json.loads(json.dumps(root.serialize_document()))
         candidate["name"] = "CommittedRoot"
-        candidate["components"][0]["mass"] = 7.5
+        candidate["components"][0]["data"]["mass"] = 7.5
         candidate["children"][0]["name"] = "CommittedChild"
         structure_version = scene.structure_version
 
@@ -1255,7 +1488,7 @@ class TestSceneSerialization:
         assert scene.find("CommittedRoot") is root
         assert scene.find_by_id(old_child_id) is root.get_child(0)
         assert root.get_child(0).name == "CommittedChild"
-        assert root.serialize_document()["components"][0]["mass"] == pytest.approx(7.5)
+        assert root.serialize_document()["components"][0]["data"]["mass"] == pytest.approx(7.5)
         restored_rigidbody = root.get_component("Rigidbody")
         assert restored_rigidbody is not old_rigidbody
         assert old_rigidbody.is_valid is False

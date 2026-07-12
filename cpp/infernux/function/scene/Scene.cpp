@@ -1,22 +1,246 @@
 #include "Scene.h"
+#include "Collider.h"
 #include "ComponentFactory.h"
+#include "ComponentRecord.h"
+#include "Light.h"
 #include "MeshRenderer.h"
 #include "SceneManager.h"
 #include "TransformECSStore.h"
 #include "platform/filesystem/DocumentStore.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <atomic>
 #include <core/log/InxLog.h>
 #include <fstream>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <numeric>
 #include <type_traits>
+#include <unordered_set>
 
 using json = nlohmann::json;
 
 namespace infernux
 {
+
+static std::atomic<uint64_t> s_nextSceneWorldId{1};
+
+uint64_t Scene::GenerateWorldId()
+{
+    return s_nextSceneWorldId.fetch_add(1, std::memory_order_relaxed);
+}
+
+namespace
+{
+/// Cheap header validation used before SceneCommitToken moves the live world.
+/// Full graph validation still happens inside DeserializeDocument.
+bool ValidateSceneDocumentHeader(const nlohmann::json &document)
+{
+    if (!document.is_object() || !document.contains("schema_version") || !document["schema_version"].is_number_integer() ||
+        document["schema_version"].get<int>() != 2) {
+        INXLOG_ERROR("Scene::Deserialize: expected schema_version 2");
+        return false;
+    }
+    if (!document.contains("name") || !document["name"].is_string() || !document.contains("isPlaying") ||
+        !document["isPlaying"].is_boolean() || !document.contains("objects") || !document["objects"].is_array()) {
+        INXLOG_ERROR("Scene::Deserialize: scene document is missing required fields");
+        return false;
+    }
+    static const std::unordered_set<std::string> allowedSceneFields = {
+        "schema_version", "name", "isPlaying", "objects", "mainCameraComponentId",
+    };
+    for (const auto &[key, value] : document.items()) {
+        (void)value;
+        if (allowedSceneFields.find(key) == allowedSceneFields.end()) {
+            INXLOG_ERROR("Scene::Deserialize: scene document contains unknown field: ", key);
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
+struct SceneCommitToken::Impl
+{
+    using ComponentRegistryNode = std::unordered_map<uint64_t, Component *>::node_type;
+
+    Scene *scene = nullptr;
+    bool active = true;
+    std::string name;
+    std::vector<std::unique_ptr<GameObject>> rootObjects;
+    std::unordered_map<uint64_t, GameObject *> objectsById;
+    std::vector<uint64_t> pendingDestroy;
+    std::unordered_set<uint64_t> pendingDestroySet;
+    std::vector<uint64_t> pendingStartComponentIds;
+    std::unordered_set<uint64_t> pendingStartComponentIdSet;
+    std::vector<Scene::PendingPyComponent> pendingPyComponents;
+    std::vector<ComponentRegistryNode> componentRegistryNodes;
+    std::vector<Collider *> residentColliders;
+    Camera *mainCamera = nullptr;
+    bool isLoaded = false;
+    bool isPlaying = false;
+    bool hasStarted = false;
+    uint64_t structureVersion = 0;
+};
+
+namespace
+{
+void RestoreSceneComponentRegistries(Scene &scene)
+{
+    auto &manager = SceneManager::Instance();
+    manager.ClearComponentRegistries();
+    for (GameObject *object : scene.GetAllObjects()) {
+        if (!object || !object->IsActiveInHierarchy())
+            continue;
+        for (MeshRenderer *renderer : object->GetComponents<MeshRenderer>()) {
+            if (renderer && renderer->IsEnabled())
+                manager.RegisterMeshRenderer(renderer);
+        }
+        for (Light *light : object->GetComponents<Light>()) {
+            if (light && light->IsEnabled())
+                manager.RegisterLight(light);
+        }
+    }
+}
+} // namespace
+
+SceneCommitToken::SceneCommitToken(Scene &scene) : m_impl(std::make_unique<Impl>())
+{
+    Impl &state = *m_impl;
+    state.scene = &scene;
+    state.name = scene.m_name;
+    state.mainCamera = scene.m_mainCamera;
+    state.isLoaded = scene.m_isLoaded;
+    state.isPlaying = scene.m_isPlaying;
+    state.hasStarted = scene.m_hasStarted;
+    state.structureVersion = scene.m_structureVersion;
+
+    std::vector<Component *> components;
+    for (GameObject *object : scene.GetAllObjects()) {
+        components.push_back(object->GetTransform());
+        auto objectComponents = object->GetComponents<Component>();
+        components.insert(components.end(), objectComponents.begin(), objectComponents.end());
+    }
+    state.componentRegistryNodes.reserve(components.size());
+    auto &registry = Component::GetInstanceRegistry();
+    for (Component *component : components) {
+        auto node = registry.extract(component->GetComponentID());
+        if (node.empty() || node.mapped() != component)
+            throw std::logic_error("retained Scene component is missing from the instance registry");
+        state.componentRegistryNodes.push_back(std::move(node));
+    }
+
+    for (GameObject *object : scene.GetAllObjects()) {
+        for (Collider *collider : object->GetComponents<Collider>()) {
+            collider->SuspendSceneResidency();
+            state.residentColliders.push_back(collider);
+        }
+    }
+
+    state.rootObjects = std::move(scene.m_rootObjects);
+    state.objectsById = std::move(scene.m_objectsById);
+    state.pendingDestroy = std::move(scene.m_pendingDestroy);
+    state.pendingDestroySet = std::move(scene.m_pendingDestroySet);
+    state.pendingStartComponentIds = std::move(scene.m_pendingStartComponentIds);
+    state.pendingStartComponentIdSet = std::move(scene.m_pendingStartComponentIdSet);
+    state.pendingPyComponents = std::move(scene.m_pendingPyComponents);
+
+    scene.m_mainCamera = nullptr;
+    scene.m_hasStarted = false;
+}
+
+SceneCommitToken::~SceneCommitToken()
+{
+    if (IsActive() && !Rollback())
+        Finalize();
+}
+
+bool SceneCommitToken::IsActive() const noexcept
+{
+    return m_impl && m_impl->active;
+}
+
+bool SceneCommitToken::Rollback()
+{
+    if (!IsActive())
+        return false;
+
+    Impl &state = *m_impl;
+    Scene &scene = *state.scene;
+    try {
+        SceneManager::Instance().ClearComponentRegistries();
+        scene.m_mainCamera = nullptr;
+        scene.m_rootObjects.clear();
+        scene.m_objectsById.clear();
+        scene.m_pendingDestroy.clear();
+        scene.m_pendingDestroySet.clear();
+        scene.m_pendingStartComponentIds.clear();
+        scene.m_pendingStartComponentIdSet.clear();
+        scene.m_pendingPyComponents.clear();
+
+        auto &registry = Component::GetInstanceRegistry();
+        registry.reserve(registry.size() + state.componentRegistryNodes.size());
+        for (auto &node : state.componentRegistryNodes) {
+            const auto result = registry.insert(std::move(node));
+            if (!result.inserted)
+                throw std::logic_error("retained Scene component ID collided during rollback");
+        }
+
+        scene.m_name = std::move(state.name);
+        scene.m_rootObjects = std::move(state.rootObjects);
+        scene.m_objectsById = std::move(state.objectsById);
+        scene.m_pendingDestroy = std::move(state.pendingDestroy);
+        scene.m_pendingDestroySet = std::move(state.pendingDestroySet);
+        scene.m_pendingStartComponentIds = std::move(state.pendingStartComponentIds);
+        scene.m_pendingStartComponentIdSet = std::move(state.pendingStartComponentIdSet);
+        scene.m_pendingPyComponents = std::move(state.pendingPyComponents);
+        scene.m_mainCamera = state.mainCamera;
+        scene.m_isLoaded = state.isLoaded;
+        scene.m_isPlaying = state.isPlaying;
+        scene.m_hasStarted = state.hasStarted;
+        scene.m_structureVersion = state.structureVersion;
+        for (auto &root : scene.m_rootObjects)
+            root->SetScene(&scene);
+        RestoreSceneComponentRegistries(scene);
+        for (Collider *collider : state.residentColliders)
+            collider->RestoreSceneResidency();
+        SceneManager::Instance().FlushPendingBroadphase();
+        state.active = false;
+        return true;
+    } catch (const std::exception &error) {
+        INXLOG_ERROR("Scene retained-world rollback failed: ", error.what());
+        return false;
+    }
+}
+
+void SceneCommitToken::Finalize()
+{
+    if (!IsActive())
+        return;
+    Impl &state = *m_impl;
+    for (auto &root : state.rootObjects)
+        root->SetScene(nullptr);
+    state.rootObjects.clear();
+    state.objectsById.clear();
+    state.componentRegistryNodes.clear();
+    state.active = false;
+}
+
+std::shared_ptr<SceneCommitToken> Scene::CommitDocumentRetainingCurrentWorld(const nlohmann::json &document)
+{
+    // Reject bad headers before SceneCommitToken extracts the live world.
+    // Otherwise a schema mismatch empties the scene, and a failed Rollback
+    // Finalize() destroys the retained graph — save/load then crash.
+    if (!ValidateSceneDocumentHeader(document))
+        return nullptr;
+
+    auto token = std::shared_ptr<SceneCommitToken>(new SceneCommitToken(*this));
+    if (DeserializeDocument(document))
+        return token;
+    if (!token->Rollback())
+        INXLOG_ERROR("Scene candidate commit failed and retained world could not be restored");
+    return nullptr;
+}
 
 Scene::~Scene()
 {
@@ -214,6 +438,31 @@ GameObject *Scene::FindByID(uint64_t id) const
         return it->second;
     }
     return nullptr;
+}
+
+GameObject *Scene::ResolveGameObject(const ObjectHandle &handle) const
+{
+    if (!handle.IsValid() || handle.worldId != m_worldId)
+        return nullptr;
+
+    GameObject *object = FindByID(handle.id);
+    if (!object || object->GetLifetimeGeneration() != handle.generation)
+        return nullptr;
+    return object;
+}
+
+Component *Scene::ResolveComponent(const ObjectHandle &handle) const
+{
+    if (!handle.IsValid() || handle.worldId != m_worldId)
+        return nullptr;
+
+    Component *component = Component::FindByComponentId(handle.id);
+    if (!component || component->GetLifetimeGeneration() != handle.generation)
+        return nullptr;
+    GameObject *owner = component->GetGameObject();
+    if (!owner || owner->GetScene() != this)
+        return nullptr;
+    return component;
 }
 
 GameObject *Scene::FindWithTag(const std::string &tag) const
@@ -417,14 +666,14 @@ std::unique_ptr<GameObject> Scene::BuildGameObjectFromJsonImpl(const json &objJs
     };
 
     if (!objJson.is_object() || !objJson.contains("schema_version") || !objJson["schema_version"].is_number_integer() ||
-        objJson["schema_version"].get<int>() != 1) {
-        INXLOG_ERROR("Scene object must use schema_version 1");
+        objJson["schema_version"].get<int>() != 2) {
+        INXLOG_ERROR("Scene object must use schema_version 2");
         return fail();
     }
 
     static const std::unordered_set<std::string> allowedObjectFields = {
-        "schema_version", "name",        "id",        "active",     "is_static",     "tag",      "layer",
-        "prefab_guid",    "prefab_root", "transform", "components", "py_components", "children",
+        "schema_version", "name",        "id",          "active",    "is_static",  "tag",
+        "layer",          "prefab_guid", "prefab_root", "transform", "components", "children",
     };
     for (const auto &[key, value] : objJson.items()) {
         (void)value;
@@ -436,8 +685,7 @@ std::unique_ptr<GameObject> Scene::BuildGameObjectFromJsonImpl(const json &objJs
     if (!objJson.contains("name") || !objJson["name"].is_string() || !objJson.contains("active") ||
         !objJson["active"].is_boolean() || !objJson.contains("is_static") || !objJson["is_static"].is_boolean() ||
         !objJson.contains("tag") || !objJson["tag"].is_string() || !objJson.contains("layer") ||
-        !objJson["layer"].is_number_integer() || !objJson.contains("py_components") ||
-        !objJson["py_components"].is_array()) {
+        !objJson["layer"].is_number_integer() || !objJson.contains("components") || !objJson["components"].is_array()) {
         INXLOG_ERROR("Scene object is missing required typed fields");
         return fail();
     }
@@ -495,113 +743,50 @@ std::unique_ptr<GameObject> Scene::BuildGameObjectFromJsonImpl(const json &objJs
         return fail();
     }
 
-    // C++ components (factory-based)
-    if (!objJson.contains("components") || !objJson["components"].is_array()) {
-        INXLOG_ERROR("Scene object '", name, "' is missing its components array");
-        return fail();
-    }
-    {
-        for (const auto &compJson : objJson["components"]) {
-            std::string typeName = compJson.value("type", std::string());
-            if (typeName.empty() || typeName == "Transform") {
-                INXLOG_ERROR("Scene object '", name, "' contains an invalid component type");
-                return fail();
-            }
-            std::unique_ptr<Component> comp = ComponentFactory::Create(typeName);
-            if (!comp) {
-                INXLOG_ERROR("Scene object '", name, "' references unknown component type '", typeName, "'");
-                return fail();
-            }
-            json cJson = compJson;
-            if (!preserveIds) {
-                cJson.erase("component_id");
-            }
-            comp->SetGameObject(obj.get());
-            if (!comp->DeserializeDocument(cJson)) {
-                INXLOG_ERROR("Failed to deserialize component '", typeName, "' on scene object '", name, "'");
-                return fail();
-            }
-            obj->m_components.push_back(std::move(comp));
+    const uint64_t objId = obj->m_id ? obj->m_id : obj->GetID();
+    for (size_t componentIndex = 0; componentIndex < objJson["components"].size(); ++componentIndex) {
+        const auto &componentRecordDocument = objJson["components"][componentIndex];
+        DecodedComponentRecord record;
+        try {
+            record = DecodeComponentRecord(componentRecordDocument);
+        } catch (const std::exception &error) {
+            INXLOG_ERROR("Invalid component record on scene object '", name, "': ", error.what());
+            return fail();
         }
-    }
 
-    // Python components — store as pending for Python-side reconstruction
-    {
-        static const std::unordered_set<std::string> allowedPyComponentFields = {
-            "schema_version", "type",      "enabled",     "execution_order", "component_id",
-            "py_type_name",   "type_guid", "script_guid", "py_fields",
-        };
-        uint64_t objId = obj->m_id ? obj->m_id : obj->GetID();
-        for (const auto &pyCompJson : objJson["py_components"]) {
-            if (!pyCompJson.is_object()) {
-                INXLOG_ERROR("Python component descriptor must be an object");
-                return fail();
-            }
-            for (const auto &[key, value] : pyCompJson.items()) {
-                (void)value;
-                if (allowedPyComponentFields.find(key) == allowedPyComponentFields.end()) {
-                    INXLOG_ERROR("Python component descriptor contains unknown field '", key, "'");
-                    return fail();
-                }
-            }
-            if (!pyCompJson.contains("schema_version") || !pyCompJson["schema_version"].is_number_integer() ||
-                pyCompJson["schema_version"].get<int>() != 1 || !pyCompJson.contains("type") ||
-                !pyCompJson["type"].is_string() || !pyCompJson.contains("enabled") ||
-                !pyCompJson["enabled"].is_boolean() || !pyCompJson.contains("execution_order") ||
-                !pyCompJson["execution_order"].is_number_integer() || !pyCompJson.contains("py_type_name") ||
-                !pyCompJson["py_type_name"].is_string() || !pyCompJson.contains("type_guid") ||
-                !pyCompJson["type_guid"].is_string() || !pyCompJson.contains("script_guid") ||
-                !pyCompJson["script_guid"].is_string() || !pyCompJson.contains("py_fields") ||
-                !pyCompJson["py_fields"].is_object()) {
-                INXLOG_ERROR("Python component descriptor is missing required typed fields");
-                return fail();
-            }
-            const std::string pyTypeName = pyCompJson["py_type_name"].get<std::string>();
-            if (pyTypeName.empty() || pyCompJson["type"].get<std::string>() != pyTypeName) {
-                INXLOG_ERROR("Python component type and py_type_name must be the same non-empty string");
-                return fail();
-            }
-            if (pyCompJson["script_guid"].get_ref<const std::string &>().empty() ||
-                pyCompJson["type_guid"].get_ref<const std::string &>().empty()) {
-                INXLOG_ERROR("Python component script_guid and type_guid must be non-empty");
-                return fail();
-            }
-            if (preserveIds &&
-                (!pyCompJson.contains("component_id") || !pyCompJson["component_id"].is_number_unsigned() ||
-                 pyCompJson["component_id"].get<uint64_t>() == 0)) {
-                INXLOG_ERROR("Python component must contain a non-zero unsigned component_id");
-                return fail();
-            }
-            if (pyCompJson.contains("component_id") &&
-                (!pyCompJson["component_id"].is_number_unsigned() || pyCompJson["component_id"].get<uint64_t>() == 0)) {
-                INXLOG_ERROR("Python component component_id must be a non-zero unsigned integer");
-                return fail();
-            }
-            const auto &fields = pyCompJson["py_fields"];
-            if (!fields.contains("__schema_version__") || !fields["__schema_version__"].is_number_integer() ||
-                fields["__schema_version__"].get<int>() <= 0 || !fields.contains("__type_name__") ||
-                !fields["__type_name__"].is_string() || fields["__type_name__"].get<std::string>() != pyTypeName) {
-                INXLOG_ERROR("Python component py_fields schema/type metadata is invalid");
-                return fail();
-            }
-            const bool hasComponentId = pyCompJson.contains("component_id");
-            const bool fieldsHaveComponentId = fields.contains("__component_id__");
-            if (hasComponentId != fieldsHaveComponentId ||
-                (hasComponentId &&
-                 (!fields["__component_id__"].is_number_unsigned() || fields["__component_id__"].get<uint64_t>() == 0 ||
-                  fields["__component_id__"].get<uint64_t>() != pyCompJson["component_id"].get<uint64_t>()))) {
-                INXLOG_ERROR("Python component component_id metadata is inconsistent");
-                return fail();
-            }
+        if (record.kind == ComponentRecordKind::Python) {
             PendingPyComponent pending;
             pending.gameObjectId = objId;
-            pending.typeName = pyTypeName;
-            pending.scriptGuid = pyCompJson["script_guid"].get<std::string>();
-            pending.typeGuid = pyCompJson["type_guid"].get<std::string>();
-            pending.enabled = pyCompJson["enabled"].get<bool>();
-            pending.fieldsDocument = fields;
-            m_pendingPyComponents.push_back(pending);
+            pending.typeName = record.pythonTypeName;
+            pending.scriptGuid = record.scriptGuid;
+            pending.typeGuid = record.typeGuid;
+            pending.enabled = record.enabled;
+            pending.executionOrder = record.executionOrder;
+            pending.componentIndex = componentIndex;
+            pending.fieldsDocument = BuildPythonFieldsDocument(record);
+            m_pendingPyComponents.push_back(std::move(pending));
+            continue;
         }
+
+        const std::string &typeName = record.nativeTypeName;
+        if (typeName == "Transform") {
+            INXLOG_ERROR("Scene object '", name, "' contains Transform in its components array");
+            return fail();
+        }
+        std::unique_ptr<Component> comp = ComponentFactory::Create(typeName);
+        if (!comp) {
+            INXLOG_ERROR("Scene object '", name, "' references unknown component type '", typeName, "'");
+            return fail();
+        }
+        json componentDocument = BuildNativeComponentDocument(record);
+        if (!preserveIds)
+            componentDocument.erase("component_id");
+        comp->SetGameObject(obj.get());
+        if (!comp->DeserializeDocument(componentDocument)) {
+            INXLOG_ERROR("Failed to deserialize component '", typeName, "' on scene object '", name, "'");
+            return fail();
+        }
+        obj->m_components.push_back(std::move(comp));
     }
 
     // Recurse children
@@ -841,7 +1026,7 @@ GameObject *Scene::InstantiateFromDocument(const nlohmann::json &document, GameO
 nlohmann::json Scene::SerializeDocument() const
 {
     json j;
-    j["schema_version"] = 1;
+    j["schema_version"] = 2;
     j["name"] = m_name;
     j["isPlaying"] = m_isPlaying;
 
@@ -868,23 +1053,8 @@ std::string Scene::Serialize() const
 bool Scene::DeserializeDocument(const nlohmann::json &j)
 {
     try {
-        if (!j.is_object() || !j.contains("schema_version") || !j["schema_version"].is_number_integer() ||
-            j["schema_version"].get<int>() != 1) {
-            INXLOG_ERROR("Scene::Deserialize: expected schema_version 1");
+        if (!ValidateSceneDocumentHeader(j))
             return false;
-        }
-        if (!j.contains("name") || !j["name"].is_string() || !j.contains("isPlaying") || !j["isPlaying"].is_boolean() ||
-            !j.contains("objects") || !j["objects"].is_array()) {
-            throw std::invalid_argument("scene document is missing required fields");
-        }
-        static const std::unordered_set<std::string> allowedSceneFields = {
-            "schema_version", "name", "isPlaying", "objects", "mainCameraComponentId",
-        };
-        for (const auto &[key, value] : j.items()) {
-            (void)value;
-            if (allowedSceneFields.find(key) == allowedSceneFields.end())
-                throw std::invalid_argument("scene document contains unknown field: " + key);
-        }
 
         // Build the complete graph with temporary IDs in an isolated Scene.
         // Transform/physics stores can hold both graphs, while temporary component
@@ -926,22 +1096,21 @@ bool Scene::DeserializeDocument(const nlohmann::json &j)
             };
 
             collectComponentId(&obj->m_transform, objJson.at("transform"));
-            const auto &componentDocuments = objJson.at("components");
-            if (componentDocuments.size() != obj->m_components.size())
-                throw std::invalid_argument("scene component count changed during staging");
-            for (size_t i = 0; i < obj->m_components.size(); ++i)
-                collectComponentId(obj->m_components[i].get(), componentDocuments[i]);
-
-            for (const auto &pythonComponentDocument : objJson.at("py_components")) {
-                if (!pythonComponentDocument.contains("component_id") ||
-                    !pythonComponentDocument["component_id"].is_number_unsigned()) {
-                    throw std::invalid_argument("scene Python component is missing an unsigned component_id");
+            size_t nativeComponentIndex = 0;
+            for (const auto &componentDocument : objJson.at("components")) {
+                const DecodedComponentRecord record = DecodeComponentRecord(componentDocument);
+                if (record.kind == ComponentRecordKind::Python) {
+                    if (!componentIds.insert(record.componentId).second)
+                        throw std::invalid_argument("scene contains a zero or duplicate component_id");
+                    pythonComponentIds.push_back(record.componentId);
+                    continue;
                 }
-                const uint64_t componentId = pythonComponentDocument["component_id"].get<uint64_t>();
-                if (componentId == 0 || !componentIds.insert(componentId).second)
-                    throw std::invalid_argument("scene contains a zero or duplicate component_id");
-                pythonComponentIds.push_back(componentId);
+                if (nativeComponentIndex >= obj->m_components.size())
+                    throw std::invalid_argument("scene native component count changed during staging");
+                collectComponentId(obj->m_components[nativeComponentIndex++].get(), componentDocument);
             }
+            if (nativeComponentIndex != obj->m_components.size())
+                throw std::invalid_argument("scene native component count changed during staging");
 
             const auto &childDocuments = objJson.at("children");
             if (childDocuments.size() != obj->m_children.size())

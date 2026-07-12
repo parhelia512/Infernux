@@ -108,13 +108,64 @@ bool FlushParentDirectory(const std::filesystem::path &target, std::error_code &
 #endif
 }
 
+bool PublishBackup(const std::filesystem::path &target, std::string &error)
+{
+    std::error_code existsError;
+    if (!std::filesystem::exists(target, existsError)) {
+        if (existsError) {
+            error = "failed to inspect backup source: " + existsError.message();
+            return false;
+        }
+        return true;
+    }
+
+    std::filesystem::path backup = target;
+    backup += ".bak";
+    const std::filesystem::path temporary = MakeTemporaryPath(backup);
+    std::error_code copyError;
+    std::filesystem::copy_file(target, temporary, std::filesystem::copy_options::overwrite_existing, copyError);
+    if (copyError) {
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored);
+        error = "failed to copy backup: " + copyError.message();
+        return false;
+    }
+
+    std::error_code flushError;
+    if (!FlushFileToDisk(temporary, flushError)) {
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored);
+        error = "failed to flush backup: " + flushError.message();
+        return false;
+    }
+
+    std::error_code replaceError;
+    if (!ReplaceFile(temporary, backup, replaceError)) {
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored);
+        error = "failed to publish backup: " + replaceError.message();
+        return false;
+    }
+
+    std::error_code directoryFlushError;
+    if (!FlushParentDirectory(backup, directoryFlushError)) {
+        error = "backup published but parent directory flush failed: " + directoryFlushError.message();
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
-bool WriteTextFileAtomically(const std::string &path, std::string_view content, std::string &error)
+bool WriteTextFileAtomically(const std::string &path, std::string_view content, std::string &error,
+                             AtomicWriteOptions options)
 {
     const std::filesystem::path target = ToFsPath(path);
     const std::filesystem::path temporary = MakeTemporaryPath(target);
     try {
+        if (options.createBackup && !PublishBackup(target, error))
+            return false;
+
         std::ofstream file(temporary, std::ios::out | std::ios::trunc | std::ios::binary);
         if (!file.is_open()) {
             error = "cannot open temporary file";

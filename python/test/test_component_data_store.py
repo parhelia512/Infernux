@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from Infernux import lib
-from Infernux.batch import batch_read, create_batch_handle
+from Infernux.batch import batch_read, batch_write, create_batch_handle
 from Infernux.components import InxComponent
 from Infernux.components._cds_bridge import get_class_id
 
@@ -64,6 +64,33 @@ def test_transform_batch_handle_rejects_destroyed_transform(scene):
     scene.process_pending_destroys()
     with pytest.raises(RuntimeError, match="stale transform"):
         batch_read(handle, "local_position")
+
+
+def test_transform_batch_handle_compacts_stale_transforms_with_mask(scene):
+    first = scene.create_game_object("compact_stale")
+    second = scene.create_game_object("compact_live")
+    handle = create_batch_handle([first.transform, second.transform], mode="compact")
+
+    scene.destroy_game_object(first)
+    scene.process_pending_destroys()
+
+    values, mask = batch_read(handle, "local_position")
+    assert values.shape == (1, 3)
+    np.testing.assert_array_equal(mask, np.asarray([False, True]))
+
+    write_mask = batch_write(
+        handle,
+        np.asarray([[90.0, 90.0, 90.0], [4.0, 5.0, 6.0]], dtype=np.float32),
+        "local_position",
+    )
+    np.testing.assert_array_equal(write_mask, mask)
+    np.testing.assert_allclose(
+        batch_read([second.transform], "local_position"),
+        np.asarray([[4.0, 5.0, 6.0]], dtype=np.float32),
+    )
+
+    with pytest.raises(ValueError, match="mode must be"):
+        create_batch_handle([second.transform], mode="lenient")
 
 
 def test_component_class_can_reserve_numeric_storage():

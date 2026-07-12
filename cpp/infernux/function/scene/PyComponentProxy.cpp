@@ -114,6 +114,8 @@ PyComponentProxy::PyComponentProxy(py::object pyComponent)
             // Get the Python class name for type identification
             py::object pyType = m_pyComponent.attr("__class__");
             m_typeName = pyType.attr("__name__").cast<std::string>();
+            m_moduleName = pyType.attr("__module__").cast<std::string>();
+            m_qualifiedName = pyType.attr("__qualname__").cast<std::string>();
 
             try {
                 py::object inxComponentType = py::module_::import("Infernux.components").attr("InxComponent");
@@ -175,7 +177,8 @@ PyComponentProxy::~PyComponentProxy()
 PyComponentProxy::PyComponentProxy(PyComponentProxy &&other) noexcept
     : Component(std::move(other)), m_pyComponent(std::move(other.m_pyComponent)),
       m_typeName(std::move(other.m_typeName)), m_typeGuid(std::move(other.m_typeGuid)),
-      m_scriptGuid(std::move(other.m_scriptGuid)), m_executeInEditMode(other.m_executeInEditMode),
+      m_scriptGuid(std::move(other.m_scriptGuid)), m_moduleName(std::move(other.m_moduleName)),
+      m_qualifiedName(std::move(other.m_qualifiedName)), m_executeInEditMode(other.m_executeInEditMode),
       m_overridesUpdate(other.m_overridesUpdate), m_overridesFixedUpdate(other.m_overridesFixedUpdate),
       m_overridesLateUpdate(other.m_overridesLateUpdate), m_hasCoroutineScheduler(other.m_hasCoroutineScheduler)
 {
@@ -190,6 +193,8 @@ PyComponentProxy &PyComponentProxy::operator=(PyComponentProxy &&other) noexcept
         m_typeName = std::move(other.m_typeName);
         m_typeGuid = std::move(other.m_typeGuid);
         m_scriptGuid = std::move(other.m_scriptGuid);
+        m_moduleName = std::move(other.m_moduleName);
+        m_qualifiedName = std::move(other.m_qualifiedName);
         m_executeInEditMode = other.m_executeInEditMode;
         m_overridesUpdate = other.m_overridesUpdate;
         m_overridesFixedUpdate = other.m_overridesFixedUpdate;

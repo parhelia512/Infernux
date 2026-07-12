@@ -101,24 +101,8 @@ class SceneConfirmationMixin:
                         self._close_in_progress = False
                         self._clear_pending_action()
                 else:
-                    # On close with an untitled scene, auto-save into Assets/
-                    # to avoid Save-As dialog platform differences.
-                    if self._pending_action == 'close':
-                        default_path = self._default_scene_save_path()
-                        if default_path and self._do_save(default_path):
-                            if not self._execute_pending_action():
-                                native = self._native_engine_for_close()
-                                if native:
-                                    native.confirm_close()
-                        else:
-                            native = self._native_engine_for_close()
-                            if native:
-                                native.cancel_close()
-                            self._close_in_progress = False
-                            self._clear_pending_action()
-                    else:
-                        self._post_save_callback = self._execute_pending_action
-                        self._show_save_as_dialog()
+                    self._post_save_callback = self._execute_pending_action
+                    self._show_save_as_dialog()
                 ctx.close_current_popup()
 
             def _on_dont_save():

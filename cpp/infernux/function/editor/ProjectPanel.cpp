@@ -256,6 +256,7 @@ const std::unordered_map<std::string, std::string> &ProjectPanel::GetIconMap()
         {".animclip2d", "animclip2d"},
         {".animclip3d", "animclip3d"},
         {".animfsm", "animfsm"},
+        {".vfxsystem", "file"},
     };
     return map;
 }
@@ -293,6 +294,7 @@ const std::unordered_map<std::string, ProjectPanel::DragDropInfo> &ProjectPanel:
         {".animclip2d", {"ANIMCLIP_FILE", "2D AnimClip"}},
         {".animclip3d", {"ANIMCLIP3D_FILE", "3D AnimClip"}},
         {".animfsm", {"ANIMFSM_FILE", "AnimFSM"}},
+        {".vfxsystem", {"VFXSYSTEM_FILE", "VFX System"}},
         {".animtimeline", {"ANIMTIMELINE_FILE", "Timeline"}},
         {".timelinefsm", {"TIMELINEFSM_FILE", "TimelineFSM"}},
     };
@@ -750,6 +752,13 @@ std::vector<std::string> ProjectPanel::GetSelectedPaths() const
 // ════════════════════════════════════════════════════════════════════
 
 void ProjectPanel::InvalidateDirCache()
+{
+    // Always defer. AssetManager.move/import calls this from Python while the
+    // file grid may still be iterating a DirSnapshot / items vector.
+    m_pendingCacheInvalidation = true;
+}
+
+void ProjectPanel::ClearDirCachesNow()
 {
     m_dirCache.clear();
     m_dirTreeMetaCache.clear();
@@ -1578,6 +1587,9 @@ void ProjectPanel::HandleItemClick(const FileItem &item, InxGUIContext *ctx)
         } else if (item.ext == ".animfsm") {
             if (openAnimFsm)
                 openAnimFsm(item.path);
+        } else if (item.ext == ".vfxsystem") {
+            if (openVfxSystem)
+                openVfxSystem(item.path);
         } else if (item.ext == ".animtimeline") {
             if (openAnimTimeline)
                 openAnimTimeline(item.path);
@@ -1594,6 +1606,10 @@ void ProjectPanel::HandleItemClick(const FileItem &item, InxGUIContext *ctx)
 void ProjectPanel::HandleKeyboardShortcuts(InxGUIContext *ctx)
 {
     if (!m_renamingPath.empty())
+        return;
+    // From FileGrid child: RootAndChildWindows still treats FolderTree focus as
+    // Project focus, so F2 works with a file selected even if the tree has KB focus.
+    if (!ctx->IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) || ctx->WantTextInput())
         return;
 
     bool ctrl = IsCtrl(ctx);
@@ -1731,6 +1747,7 @@ void ProjectPanel::BeginRename(const std::string &path)
     std::strncpy(m_renameBuf, name.c_str(), sizeof(m_renameBuf) - 1);
     m_renameBuf[sizeof(m_renameBuf) - 1] = '\0';
     m_renameFocusRequested = true;
+    m_renameSkipDeactivateFrames = 2;
 }
 
 void ProjectPanel::CommitRename()
@@ -1748,6 +1765,8 @@ void ProjectPanel::CommitRename()
 
     std::string newPath = doRename(m_renamingPath, newName);
     if (!newPath.empty()) {
+        // doRename → AssetManager.move_asset also calls InvalidateDirCache(); keep
+        // the pending flag so the grid finishes this frame on stable pointers.
         m_pendingCacheInvalidation = true;
         if (m_selectedFile == m_renamingPath) {
             m_selectedFile = newPath;
@@ -1758,11 +1777,13 @@ void ProjectPanel::CommitRename()
             AssignCurrentPath(newPath);
     }
     m_renamingPath.clear();
+    m_renameSkipDeactivateFrames = 0;
 }
 
 void ProjectPanel::CancelRename()
 {
     m_renamingPath.clear();
+    m_renameSkipDeactivateFrames = 0;
 }
 
 void ProjectPanel::CreateAndRename(const std::string &baseName, const std::string &extension,
@@ -2091,22 +2112,11 @@ void ProjectPanel::PreRender(InxGUIContext *ctx)
 
 void ProjectPanel::OnRenderContent(InxGUIContext *ctx)
 {
-    // ── Focus transition detection ──────────────────────────────
-    {
-        bool focused = ctx->IsWindowFocused(0);
-        if (focused != m_wasFocused) {
-            m_wasFocused = focused;
-            if (onProjectPanelFocused)
-                onProjectPanelFocused(focused);
-        }
-    }
-
     // Process any deferred cache invalidation from the previous frame
-    // (CommitRename, Delete, Paste, Move set this flag to avoid invalidating
-    // the items pointer mid-iteration in RenderFileGrid).
+    // (CommitRename, Delete, Paste, Move / AssetManager invalidate_dir_cache).
     if (m_pendingCacheInvalidation) {
         m_pendingCacheInvalidation = false;
-        InvalidateDirCache();
+        ClearDirCachesNow();
     }
     if (m_pendingAugmentedCacheInvalidation) {
         m_pendingAugmentedCacheInvalidation = false;
@@ -2133,6 +2143,16 @@ void ProjectPanel::OnRenderContent(InxGUIContext *ctx)
     ctx->EndChild();
     ctx->PopStyleColor(1); // Border
     ctx->PopStyleVar(1);   // WindowPadding
+
+    // Focus after children so FileGrid/FolderTree clicks count as Project focus.
+    {
+        bool focused = ctx->IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+        if (focused != m_wasFocused) {
+            m_wasFocused = focused;
+            if (onProjectPanelFocused)
+                onProjectPanelFocused(focused);
+        }
+    }
 
     bool hasSelection = !m_selectedFile.empty() || !m_selectedFiles.empty();
     bool clickedOutsideProject = hasSelection &&
@@ -2273,7 +2293,7 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
         ctx->Label(Tr("project.right_click_hint"));
     }
 
-    // Keyboard shortcuts
+    // Keyboard shortcuts (same frame as grid so F2 can open inline rename immediately)
     HandleKeyboardShortcuts(ctx);
 
     // Virtual scrolling
@@ -2677,17 +2697,10 @@ void ProjectPanel::RenderContextMenu(InxGUIContext *ctx)
             });
         }
         ctx->Separator();
-        if (ctx->Selectable(Tr("project.create_animtimeline"), false)) {
-            CreateAndRename("NewTimeline", ".animtimeline", [this](const std::string &name) {
-                if (createAnimTimeline)
-                    return createAnimTimeline(m_currentPath, name);
-                return std::make_pair(false, std::string("No callback"));
-            });
-        }
-        if (ctx->Selectable(Tr("project.create_timelinefsm"), false)) {
-            CreateAndRename("NewTimelineFSM", ".timelinefsm", [this](const std::string &name) {
-                if (createTimelineFsm)
-                    return createTimelineFsm(m_currentPath, name);
+        if (ctx->Selectable(Tr("project.create_vfxsystem"), false)) {
+            CreateAndRename("NewVFXSystem", ".vfxsystem", [this](const std::string &name) {
+                if (createVfxSystem)
+                    return createVfxSystem(m_currentPath, name);
                 return std::make_pair(false, std::string("No callback"));
             });
         }
@@ -2894,11 +2907,14 @@ void ProjectPanel::RenderItemLabel(InxGUIContext *ctx, const FileItem &item, flo
         ctx->SetNextItemWidth(iconSize);
         ctx->TextInput("##rename_" + item.path, m_renameBuf, sizeof(m_renameBuf));
 
+        if (m_renameSkipDeactivateFrames > 0)
+            --m_renameSkipDeactivateFrames;
+
         if (ctx->IsKeyPressed(kKeyEnter))
             CommitRename();
         else if (ctx->IsKeyPressed(kKeyEscape))
             CancelRename();
-        else if (ctx->IsItemDeactivated())
+        else if (m_renameSkipDeactivateFrames == 0 && ctx->IsItemDeactivated())
             CommitRename();
     } else {
         auto &entry = GetCachedItemLabel(ctx, item, iconSize);

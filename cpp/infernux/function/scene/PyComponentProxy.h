@@ -118,6 +118,16 @@ class PyComponentProxy : public Component
         return m_typeGuid;
     }
 
+    [[nodiscard]] const std::string &GetModuleName() const
+    {
+        return m_moduleName;
+    }
+
+    [[nodiscard]] const std::string &GetQualifiedName() const
+    {
+        return m_qualifiedName;
+    }
+
     // ========================================================================
     // Serialization
     // ========================================================================
@@ -150,6 +160,8 @@ class PyComponentProxy : public Component
     std::string m_typeName;
     std::string m_typeGuid;   // Stable type GUID (hash of module.classname)
     std::string m_scriptGuid; // Stable GUID for the script asset
+    std::string m_moduleName;
+    std::string m_qualifiedName;
     bool m_executeInEditMode = false;
     bool m_overridesUpdate = true;
     bool m_overridesFixedUpdate = true;

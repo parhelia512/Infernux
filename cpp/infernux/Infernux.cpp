@@ -1773,12 +1773,13 @@ void Infernux::PumpTimelineCubePreviewIfDirty()
         m_timelineCubeDirty = false;
         return;
     }
-    m_timelineCubeDirty = false;
-
-    ExecuteTimelineCubePreviewRender(m_pendingCubePx, m_pendingCubePy, m_pendingCubePz, m_pendingCubeRx,
-                                     m_pendingCubeRy, m_pendingCubeRz, m_pendingCubeSx, m_pendingCubeSy,
-                                     m_pendingCubeSz, m_pendingCubeCamYaw, m_pendingCubeCamPitch, m_pendingCubeCamDist,
-                                     m_pendingCubeSize, m_pendingCubePreviewHash);
+    // Keep the latest request dirty while the GPU preview submission is still
+    // in flight. The pending fields are overwritten by newer UI samples, so
+    // completion naturally renders the newest state without building a queue.
+    m_timelineCubeDirty = !ExecuteTimelineCubePreviewRender(
+        m_pendingCubePx, m_pendingCubePy, m_pendingCubePz, m_pendingCubeRx, m_pendingCubeRy, m_pendingCubeRz,
+        m_pendingCubeSx, m_pendingCubeSy, m_pendingCubeSz, m_pendingCubeCamYaw, m_pendingCubeCamPitch,
+        m_pendingCubeCamDist, m_pendingCubeSize, m_pendingCubePreviewHash);
 }
 
 bool Infernux::ExecuteTimelineCubePreviewRender(float px, float py, float pz, float rx, float ry, float rz, float sx,
@@ -2539,7 +2540,7 @@ void Infernux::LoadAndRegisterShaders(const std::string &dir, bool recursive)
         std::string filePath = FromFsPath(file);
 
         // Always register to ensure meta + GUID↔path mappings are cached
-        std::string guid = adb->ImportAsset(filePath);
+        std::string guid = adb->ImportAsset(filePath).guid;
         if (guid.empty())
             return;
 
@@ -2777,7 +2778,7 @@ void Infernux::ReloadTexture(const std::string &texturePath)
         guid = adb->GetGuidFromPath(texturePath);
         if (guid.empty()) {
             // Unregistered texture (e.g. just created) — register to mint a GUID.
-            guid = adb->ImportAsset(texturePath);
+            guid = adb->ImportAsset(texturePath).guid;
         }
     }
 

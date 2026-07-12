@@ -62,8 +62,11 @@ class PlayModeSerializationMixin:
         """
         if not state or component is None:
             return
-        if component.__class__._get_type_guid() != state["type_guid"]:
-            raise ValueError("Play Mode component type GUID changed during state restore")
+        state_script_guid = state.get("script_guid") or ""
+        live_script_guid = getattr(component, "_script_guid", "") or ""
+        if state_script_guid and live_script_guid and state_script_guid != live_script_guid:
+            raise ValueError("Play Mode component script GUID changed during state restore")
+        # type_guid may change after a class rename; script GUID is authoritative.
         component.enabled = bool(state.get("enabled", True))
 
         fields = state.get("fields", {})

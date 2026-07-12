@@ -229,6 +229,7 @@ if(INFERNUX_BUILD_TESTS)
         target_compile_options(infernux_job_system_tests PRIVATE /utf-8)
     endif()
     add_test(NAME infernux.job_system COMMAND infernux_job_system_tests)
+    set_tests_properties(infernux.job_system PROPERTIES TIMEOUT 30)
 
     add_executable(infernux_atomic_file_tests
         cpp/tests/AtomicFileTests.cpp
@@ -402,6 +403,16 @@ if(INFERNUX_BUILD_TESTS)
     )
 
     add_test(
+        NAME infernux.vfx_profile
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/vfx_profile_gate.py
+    )
+    set_tests_properties(infernux.vfx_profile PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 30
+        RUN_SERIAL TRUE
+    )
+
+    add_test(
         NAME infernux.asset_scan_profile
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/asset_scan_profile_gate.py
     )
@@ -455,7 +466,11 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND}
             -DINFERNUX_BUILD_CFG=$<CONFIG>
             -P "${CMAKE_BINARY_DIR}/copy_dependencies.cmake"
-        COMMENT "Copy dependent DLLs to python/Infernux/lib"
+        COMMAND ${CMAKE_COMMAND}
+            -DINFERNUX_BUILD_CFG=$<CONFIG>
+            -DTARGET_DIR=$<TARGET_FILE_DIR:_Infernux>
+            -P "${CMAKE_BINARY_DIR}/copy_dependencies.cmake"
+        COMMENT "Copy dependent DLLs to package and native module directories"
     )
 elseif(APPLE)
     # macOS: copy shared libraries (.dylib) and fix RPATH

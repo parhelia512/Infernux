@@ -29,6 +29,37 @@ namespace infernux
 {
 
 class InxRenderer;
+
+enum class AssetMutationErrorCode : uint8_t
+{
+    None,
+    InvalidPath,
+    NotFound,
+    UnsupportedType,
+    ImportFailed,
+    RuntimeApplyFailed,
+};
+
+struct AssetMutationResult
+{
+    bool succeeded = false;
+    bool databaseCommitted = false;
+    bool changed = false;
+    std::string operation;
+    std::string guid;
+    std::string path;
+    std::string previousPath;
+    ResourceType resourceType = ResourceType::DefaultText;
+    AssetMutationErrorCode errorCode = AssetMutationErrorCode::None;
+    std::string error;
+    uint64_t queryGeneration = 0;
+
+    [[nodiscard]] explicit operator bool() const noexcept
+    {
+        return succeeded;
+    }
+};
+
 struct AssetCatalogEntry
 {
     std::string guid;
@@ -100,20 +131,19 @@ class AssetDatabase
 
     /// @brief Import an asset and create/update its meta.
     /// Runs the appropriate AssetImporter to scan dependencies.
-    /// @return GUID of the asset, empty if failed
-    std::string ImportAsset(const std::string &path);
+    [[nodiscard]] AssetMutationResult ImportAsset(const std::string &path);
 
     /// @brief Re-run metadata/dependency import for an already registered asset.
     /// Preserves the existing GUID and returns false for missing or unregistered paths.
-    bool ReimportAsset(const std::string &path);
+    [[nodiscard]] AssetMutationResult ReimportAsset(const std::string &path);
 
     /// @brief Delete asset and meta.
     /// Notifies dependents via AssetDependencyGraph::NotifyEvent(Deleted).
-    bool DeleteAsset(const std::string &path);
+    [[nodiscard]] AssetMutationResult DeleteAsset(const std::string &path);
 
     /// @brief Move/rename asset preserving GUID.
     /// Notifies dependents via AssetDependencyGraph::NotifyEvent(Moved).
-    bool MoveAsset(const std::string &oldPath, const std::string &newPath);
+    [[nodiscard]] AssetMutationResult MoveAsset(const std::string &oldPath, const std::string &newPath);
 
     /// @brief Check if a GUID exists
     [[nodiscard]] bool ContainsGuid(const std::string &guid) const;

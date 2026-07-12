@@ -689,6 +689,9 @@ class PlayModeManager(PlayModeSerializationMixin):
 
             target_type_name = state.get("type_name") or getattr(old_comp, "type_name", type(old_comp).__name__)
             component_class = reloaded_by_name.get(target_type_name)
+            if component_class is None and len(reloaded_classes) == 1:
+                # Class rename inside a one-component script file.
+                component_class = reloaded_classes[0]
 
             if component_class is None:
                 Debug.log_error(
@@ -697,11 +700,10 @@ class PlayModeManager(PlayModeSerializationMixin):
                 )
                 continue
 
-            if component_class._get_type_guid() != state["type_guid"]:
-                Debug.log_error(
-                    f"Failed to reload component '{target_type_name}': stable type GUID changed"
-                )
-                continue
+            # Rebind to the AssetDatabase GUID so renames that preserve the GUID
+            # do not look like a type identity change.
+            from Infernux.components.component_identity import bind_asset_script_guid
+            bind_asset_script_guid(component_class, target_guid)
 
             try:
                 new_comp = create_component_instance(component_class)
@@ -715,7 +717,6 @@ class PlayModeManager(PlayModeSerializationMixin):
                 continue
 
             new_comp._script_guid = target_guid
-            component_class._asset_script_guid_ = target_guid
 
             try:
                 self._apply_py_component_state(new_comp, state)

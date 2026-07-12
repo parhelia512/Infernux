@@ -100,6 +100,7 @@ from .decorators import (
 from .spirit_animator import SpiritAnimator
 from .skeletal_animator import SkeletalAnimator
 from .timeline_action import TimelineAction
+from .particle_system import ParticleSystem
 
 __all__ = [
     "InxComponent",
@@ -178,6 +179,7 @@ __all__ = [
     "HelpURL",
     "Icon",
     # Animation
+    "ParticleSystem",
     "SpiritAnimator",
     "SkeletalAnimator",
     "TimelineAction",

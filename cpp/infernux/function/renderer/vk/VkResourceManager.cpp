@@ -5,6 +5,7 @@
 
 #include "VkResourceManager.h"
 #include "AsyncTransferContext.h"
+#include "RhiVulkanTypes.h"
 #include "VkDeviceContext.h"
 #include <SDL3/SDL.h>
 #include <core/error/InxError.h>
@@ -304,15 +305,16 @@ std::unique_ptr<VkBufferHandle> VkResourceManager::CreateIndexBuffer(const void 
     return indexBuffer;
 }
 
-std::shared_ptr<BufferUploadTicket> VkResourceManager::BeginBufferUpload(const void *data, VkDeviceSize size,
-                                                                         VkBufferUsageFlags finalUsage)
+std::shared_ptr<BufferUploadTicket> VkResourceManager::BeginBufferUpload(const rhi::BufferUploadRequest &request)
 {
+    const void *data = request.data;
+    const VkDeviceSize size = static_cast<VkDeviceSize>(request.byteSize);
+    const VkBufferUsageFlags finalUsage = rhi::ToVkBufferUsage(request.usage);
     if (m_device == VK_NULL_HANDLE || m_vmaAllocator == VK_NULL_HANDLE)
         throw std::logic_error("GPU buffer upload requires an initialized resource manager");
     if (!data || size == 0)
         throw std::invalid_argument("GPU buffer upload requires non-empty source data");
-    if ((finalUsage & (VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)) == 0)
+    if (finalUsage == 0)
         throw std::invalid_argument("GPU buffer upload has no supported destination usage");
 
     auto ticket = std::make_shared<BufferUploadTicket>();

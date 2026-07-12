@@ -96,9 +96,25 @@ def _get_component_ids(obj) -> set:
     return ids
 
 
+def _get_native_component_documents(obj) -> dict:
+    """Snapshot existing native components before an add operation."""
+    documents = {}
+    if not hasattr(obj, 'get_components'):
+        return documents
+    for component in obj.get_components():
+        if _is_python_component_entry(component):
+            continue
+        component_id = getattr(component, 'component_id', 0)
+        serializer = getattr(component, 'serialize_document', None)
+        if component_id and callable(serializer):
+            documents[component_id] = (component, serializer())
+    return documents
+
+
 def _record_add_component_compound(obj, type_name: str, comp_ref,
                                    before_ids: set,
-                                   is_py: bool = False):
+                                   is_py: bool = False,
+                                   before_documents: dict | None = None):
     """Record add-component with auto-dependency detection.
 
     Compares current component IDs against *before_ids* to find
@@ -109,7 +125,7 @@ def _record_add_component_compound(obj, type_name: str, comp_ref,
     from Infernux.debug import Debug
     from Infernux.engine.undo import (
         UndoManager, AddNativeComponentCommand, AddPyComponentCommand,
-        CompoundCommand)
+        CompoundCommand, GenericComponentCommand)
     mgr = UndoManager.instance()
     if not mgr:
         _notify_scene_modified()
@@ -117,6 +133,7 @@ def _record_add_component_compound(obj, type_name: str, comp_ref,
 
     # Detect native auto-created components
     auto_created: list = []
+    changed_existing: list = []
     main_id = getattr(comp_ref, 'component_id', None) or id(comp_ref)
     if hasattr(obj, 'get_components'):
         for c in obj.get_components():
@@ -132,7 +149,17 @@ def _record_add_component_compound(obj, type_name: str, comp_ref,
                 Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
                 pass
 
-    if not auto_created:
+    for component_id, (component, old_document) in (before_documents or {}).items():
+        if component_id not in before_ids:
+            raise RuntimeError("component document snapshot contains an unknown component ID")
+        serializer = getattr(component, 'serialize_document', None)
+        if not callable(serializer):
+            raise RuntimeError("snapshotted native component lost serialize_document")
+        new_document = serializer()
+        if new_document != old_document:
+            changed_existing.append((component, old_document, new_document))
+
+    if not auto_created and not changed_existing:
         # No auto-creation — record a single command
         _record_add_component(obj, type_name, comp_ref, is_py=is_py)
         return
@@ -142,6 +169,10 @@ def _record_add_component_compound(obj, type_name: str, comp_ref,
     # Redo replays order (adds auto-created → then main, PostAddComponent
     # sees dependencies already present and skips auto-creation).
     cmds: list = []
+    for changed_ref, old_document, new_document in changed_existing:
+        cmds.append(GenericComponentCommand(
+            changed_ref, old_document, new_document,
+            f"Update {getattr(changed_ref, 'type_name', 'component')} for {type_name}"))
     for auto_tn, auto_ref in auto_created:
         cmds.append(AddNativeComponentCommand(
             obj.id, auto_tn, auto_ref, f"Auto-add {auto_tn}"))

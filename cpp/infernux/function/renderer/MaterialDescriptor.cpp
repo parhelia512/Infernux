@@ -340,20 +340,28 @@ bool MaterialDescriptorManager::TryGetDefaultTextureBinding(std::string_view bin
     return false;
 }
 
-bool MaterialDescriptorManager::TryResolveExplicitTextureBinding(
-    const std::string &texturePath, const std::string &bindingName,
-    MaterialDescriptorSet::TextureBinding &outBinding) const
+TextureResolveStatus
+MaterialDescriptorManager::ResolveExplicitTextureBinding(const std::string &texturePath, const std::string &bindingName,
+                                                         MaterialDescriptorSet::TextureBinding &outBinding) const
 {
     if (!m_textureResolver || texturePath.empty()) {
-        return false;
+        return TextureResolveStatus::Failed;
     }
 
-    outBinding = m_textureResolver(texturePath, bindingName);
+    TextureResolveResult result = m_textureResolver(texturePath, bindingName);
+    if (result.status != TextureResolveStatus::Ready) {
+        outBinding = {};
+        return result.status;
+    }
+
+    outBinding = std::move(result.binding);
     if (outBinding.imageView == VK_NULL_HANDLE || outBinding.sampler == VK_NULL_HANDLE || !outBinding.keepAlive) {
         outBinding = {};
-        return false;
+        INXLOG_ERROR("Texture resolver returned Ready without a complete GPU binding for texture '", texturePath,
+                     "' (binding='", bindingName, "')");
+        return TextureResolveStatus::Failed;
     }
-    return true;
+    return TextureResolveStatus::Ready;
 }
 
 MaterialDescriptorSet *MaterialDescriptorManager::GetOrCreateDescriptorSet(const InxMaterial &material,
@@ -495,9 +503,11 @@ MaterialDescriptorSet *MaterialDescriptorManager::GetOrCreateDescriptorSet(const
                 // Match property name to sampler name from shader reflection
                 if (binding.name == propName) {
                     MaterialDescriptorSet::TextureBinding resolvedBinding{};
-                    const bool resolvedExplicit =
-                        !isPlaceholderTexture &&
-                        TryResolveExplicitTextureBinding(*texturePath, binding.name, resolvedBinding);
+                    const TextureResolveStatus resolveStatus =
+                        isPlaceholderTexture
+                            ? TextureResolveStatus::Pending
+                            : ResolveExplicitTextureBinding(*texturePath, binding.name, resolvedBinding);
+                    const bool resolvedExplicit = resolveStatus == TextureResolveStatus::Ready;
 
                     if (!resolvedExplicit && !TryGetDefaultTextureBinding(binding.name, resolvedBinding)) {
                         matDescSet->textureBindings.erase(binding.binding);
@@ -509,7 +519,7 @@ MaterialDescriptorSet *MaterialDescriptorManager::GetOrCreateDescriptorSet(const
                     if (resolvedExplicit) {
                         INXLOG_DEBUG("Bound texture '", *texturePath, "' to binding ", binding.binding,
                                      " for material '", materialName, "'");
-                    } else if (!isPlaceholderTexture) {
+                    } else if (resolveStatus == TextureResolveStatus::Failed) {
                         INXLOG_WARN("Failed to resolve texture '", *texturePath, "' for material '", materialName,
                                     "' property '", propName, "' — binding default texture");
                     }
@@ -689,19 +699,25 @@ void MaterialDescriptorManager::ResolveTextureProperties(const std::string &mate
                 }
 
                 const bool isPlaceholder = IsPlaceholderTexturePath(*texturePath);
-                const bool resolvedExplicit =
-                    !isPlaceholder && TryResolveExplicitTextureBinding(*texturePath, binding.name, resolvedBinding);
+                const TextureResolveStatus resolveStatus =
+                    isPlaceholder ? TextureResolveStatus::Pending
+                                  : ResolveExplicitTextureBinding(*texturePath, binding.name, resolvedBinding);
+                const bool resolvedExplicit = resolveStatus == TextureResolveStatus::Ready;
                 const bool hasBinding = resolvedExplicit || TryGetDefaultTextureBinding(binding.name, resolvedBinding);
 
                 if (hasBinding) {
                     matDescSet.textureBindings[binding.binding] = resolvedBinding;
                     AppendImageWrite(writes, imageInfos, matDescSet.descriptorSet, binding.binding,
                                      resolvedBinding.imageView, resolvedBinding.sampler);
-                    INXLOG_DEBUG("Re-bound texture '", *texturePath, "' to binding ", binding.binding,
-                                 " for material '", materialName, "'");
+                    if (resolvedExplicit) {
+                        INXLOG_DEBUG("Re-bound texture '", *texturePath, "' to binding ", binding.binding,
+                                     " for material '", materialName, "'");
+                    }
                 } else {
-                    INXLOG_WARN("Failed to resolve texture '", *texturePath, "' for material '", materialName,
-                                "' property '", propName, "' — binding default texture");
+                    if (resolveStatus == TextureResolveStatus::Failed) {
+                        INXLOG_WARN("Failed to resolve texture '", *texturePath, "' for material '", materialName,
+                                    "' property '", propName, "' — binding default texture");
+                    }
                     matDescSet.textureBindings.erase(binding.binding);
                 }
                 break;

@@ -23,34 +23,68 @@ static std::vector<Transform *> ExtractTransforms(const py::list &pyList)
     return out;
 }
 
-// ── TransformBatchHandle (caches Transform* array) ───────────────────────
+// ── TransformBatchHandle ─────────────────────────────────────────────────
 
-/// Caches the extracted Transform* pointers so that repeated batch_read /
-/// batch_write calls with the same handle skip the O(N) pybind11 cast loop.
 struct TransformBatchHandle
 {
-    std::vector<Transform *> transforms;
-    std::vector<TransformECSStore::Handle> handles;
-
-    explicit TransformBatchHandle(const py::list &pyList) : transforms(ExtractTransforms(pyList))
+    enum class Mode : uint8_t
     {
+        Strict,
+        Compact,
+    };
+
+    std::vector<TransformECSStore::Handle> handles;
+    std::vector<uint64_t> worldIds;
+    Mode mode = Mode::Strict;
+    mutable std::vector<Transform *> resolved;
+    mutable std::vector<size_t> resolvedIndices;
+    mutable std::vector<uint8_t> validMask;
+    mutable std::vector<float> valueScratch;
+
+    explicit TransformBatchHandle(const py::list &pyList, Mode validationMode = Mode::Strict) : mode(validationMode)
+    {
+        const auto transforms = ExtractTransforms(pyList);
         handles.reserve(transforms.size());
-        for (const Transform *transform : transforms)
+        worldIds.reserve(transforms.size());
+        resolved.reserve(transforms.size());
+        resolvedIndices.reserve(transforms.size());
+        validMask.resize(transforms.size());
+        valueScratch.reserve(transforms.size() * 4);
+        for (const Transform *transform : transforms) {
             handles.push_back(transform->GetECSHandle());
+            worldIds.push_back(transform->GetHandle().worldId);
+        }
     }
 
     [[nodiscard]] size_t size() const
     {
-        return transforms.size();
+        return handles.size();
     }
-    Transform *const *data() const
+
+    [[nodiscard]] bool IsCompact() const noexcept
+    {
+        return mode == Mode::Compact;
+    }
+
+    Transform *const *Resolve() const
     {
         auto &store = TransformECSStore::Instance();
+        resolved.clear();
+        resolvedIndices.clear();
+        std::fill(validMask.begin(), validMask.end(), uint8_t{0});
         for (size_t i = 0; i < handles.size(); ++i) {
-            if (!store.IsValid(handles[i]) || store.GetOwner(handles[i]) != transforms[i])
-                throw std::runtime_error("TransformBatchHandle contains a stale transform");
+            Transform *owner = store.IsValid(handles[i]) ? store.GetOwner(handles[i]) : nullptr;
+            const bool valid = owner && owner->GetHandle().worldId == worldIds[i];
+            if (!valid) {
+                if (mode == Mode::Strict)
+                    throw std::runtime_error("TransformBatchHandle contains a stale transform");
+                continue;
+            }
+            validMask[i] = 1;
+            resolved.push_back(owner);
+            resolvedIndices.push_back(i);
         }
-        return transforms.data();
+        return resolved.data();
     }
 };
 
@@ -203,10 +237,19 @@ static void TransformBatchWrite(const py::list &targets, py::array data, const s
 
 // ── Handle-based batch read/write (avoids repeated ExtractTransforms) ──
 
+static py::array_t<bool> BuildBatchMask(const TransformBatchHandle &handle)
+{
+    auto mask = py::array_t<bool>(static_cast<py::ssize_t>(handle.validMask.size()));
+    auto output = mask.mutable_unchecked<1>();
+    for (size_t i = 0; i < handle.validMask.size(); ++i)
+        output(static_cast<py::ssize_t>(i)) = handle.validMask[i] != 0;
+    return mask;
+}
+
 static py::object HandleBatchRead(const TransformBatchHandle &handle, const std::string &prop)
 {
-    const size_t n = handle.size();
-    Transform *const *tPtr = handle.data();
+    Transform *const *tPtr = handle.Resolve();
+    const size_t n = handle.resolved.size();
     {
         auto it = kTransformVec3Ops.find(prop);
         if (it != kTransformVec3Ops.end()) {
@@ -216,7 +259,9 @@ static py::object HandleBatchRead(const TransformBatchHandle &handle, const std:
                 py::gil_scoped_release release;
                 (TransformECSStore::Instance().*(it->second.gather))(tPtr, outPtr, n);
             }
-            return result;
+            if (handle.IsCompact())
+                return py::make_tuple(std::move(result), BuildBatchMask(handle));
+            return std::move(result);
         }
     }
     {
@@ -228,48 +273,71 @@ static py::object HandleBatchRead(const TransformBatchHandle &handle, const std:
                 py::gil_scoped_release release;
                 (TransformECSStore::Instance().*(it->second.gather))(tPtr, outPtr, n);
             }
-            return result;
+            if (handle.IsCompact())
+                return py::make_tuple(std::move(result), BuildBatchMask(handle));
+            return std::move(result);
         }
     }
     throw py::value_error("Unknown Transform property: '" + prop + "'");
 }
 
-static void HandleBatchWrite(const TransformBatchHandle &handle, py::array data, const std::string &prop)
+static py::object HandleBatchWrite(const TransformBatchHandle &handle, py::array data, const std::string &prop)
 {
     auto fdata = py::array_t<float, py::array::c_style>::ensure(data);
     if (!fdata) {
         throw py::type_error("data must be convertible to float32 array");
     }
-    const size_t n = handle.size();
-    Transform *const *tPtr = handle.data();
+    Transform *const *tPtr = handle.Resolve();
+    const size_t n = handle.resolved.size();
+    const size_t inputRows = handle.IsCompact() ? handle.size() : n;
     {
         auto it = kTransformVec3Ops.find(prop);
         if (it != kTransformVec3Ops.end()) {
             auto buf = fdata.unchecked<2>();
-            if (static_cast<size_t>(buf.shape(0)) < n) {
+            if (static_cast<size_t>(buf.shape(0)) < inputRows) {
                 throw py::value_error("data array has fewer rows than targets");
             }
             const float *inPtr = buf.data(0, 0);
+            if (handle.IsCompact()) {
+                handle.valueScratch.resize(n * 3);
+                for (size_t i = 0; i < n; ++i) {
+                    const float *source = inPtr + handle.resolvedIndices[i] * 3;
+                    std::copy_n(source, 3, handle.valueScratch.data() + i * 3);
+                }
+                inPtr = handle.valueScratch.data();
+            }
             {
                 py::gil_scoped_release release;
                 (TransformECSStore::Instance().*(it->second.scatter))(tPtr, inPtr, n);
             }
-            return;
+            if (handle.IsCompact())
+                return BuildBatchMask(handle);
+            return py::none();
         }
     }
     {
         auto it = kTransformQuatOps.find(prop);
         if (it != kTransformQuatOps.end()) {
             auto buf = fdata.unchecked<2>();
-            if (static_cast<size_t>(buf.shape(0)) < n) {
+            if (static_cast<size_t>(buf.shape(0)) < inputRows) {
                 throw py::value_error("data array has fewer rows than targets");
             }
             const float *inPtr = buf.data(0, 0);
+            if (handle.IsCompact()) {
+                handle.valueScratch.resize(n * 4);
+                for (size_t i = 0; i < n; ++i) {
+                    const float *source = inPtr + handle.resolvedIndices[i] * 4;
+                    std::copy_n(source, 4, handle.valueScratch.data() + i * 4);
+                }
+                inPtr = handle.valueScratch.data();
+            }
             {
                 py::gil_scoped_release release;
                 (TransformECSStore::Instance().*(it->second.scatter))(tPtr, inPtr, n);
             }
-            return;
+            if (handle.IsCompact())
+                return BuildBatchMask(handle);
+            return py::none();
         }
     }
     throw py::value_error("Unknown Transform property: '" + prop + "'");
@@ -546,16 +614,21 @@ void RegisterBatchBindings(py::module_ &m)
           "Write a numpy array back to a Transform property on all targets.\n"
           "data.shape[0] must be >= len(targets).");
 
-    // ── TransformBatchHandle (cached Transform* pointers) ──
+    py::enum_<TransformBatchHandle::Mode>(m, "TransformBatchMode")
+        .value("STRICT", TransformBatchHandle::Mode::Strict)
+        .value("COMPACT", TransformBatchHandle::Mode::Compact);
+
     py::class_<TransformBatchHandle>(m, "TransformBatchHandle")
-        .def(py::init<const py::list &>(), py::arg("targets"))
-        .def("__len__", &TransformBatchHandle::size);
+        .def(py::init<const py::list &, TransformBatchHandle::Mode>(), py::arg("targets"),
+             py::arg("mode") = TransformBatchHandle::Mode::Strict)
+        .def("__len__", &TransformBatchHandle::size)
+        .def_property_readonly("is_compact", &TransformBatchHandle::IsCompact);
 
     m.def("_transform_batch_read", &HandleBatchRead, py::arg("handle"), py::arg("property"),
-          "Like _transform_batch_read but uses a cached TransformBatchHandle.");
+          "Read through generational handles; compact mode returns (values, valid_mask).");
 
     m.def("_transform_batch_write", &HandleBatchWrite, py::arg("handle"), py::arg("data"), py::arg("property"),
-          "Like _transform_batch_write but uses a cached TransformBatchHandle.");
+          "Write through generational handles; compact mode returns valid_mask.");
 
     // ── ComponentDataStore ──
     m.def("_cds_register_class", &CDS_RegisterClass, py::arg("name"));

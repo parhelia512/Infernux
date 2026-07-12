@@ -1,8 +1,8 @@
 #include "GameObject.h"
-#include "BoxCollider.h"
 #include "Camera.h"
 #include "Collider.h"
 #include "ComponentFactory.h"
+#include "ComponentRecord.h"
 #include "MeshRenderer.h"
 #include "PyComponentProxy.h"
 #include "Rigidbody.h"
@@ -37,6 +37,7 @@ void InvalidateGameObjectLifecycleCaches(GameObject *gameObject)
 
 // Static ID generator
 static std::atomic<uint64_t> s_nextID{1};
+static std::atomic<uint64_t> s_nextGameObjectLifetimeGeneration{1};
 
 uint64_t GameObject::GenerateID()
 {
@@ -52,10 +53,17 @@ void GameObject::EnsureNextID(uint64_t id)
     }
 }
 
-GameObject::GameObject(const std::string &name) : m_name(name), m_id(GenerateID())
+GameObject::GameObject(const std::string &name)
+    : m_name(name), m_id(GenerateID()),
+      m_lifetimeGeneration(s_nextGameObjectLifetimeGeneration.fetch_add(1, std::memory_order_relaxed))
 {
     // Transform is automatically part of GameObject
     m_transform.SetGameObject(this);
+}
+
+ObjectHandle GameObject::GetHandle() const
+{
+    return ObjectHandle{m_id, m_lifetimeGeneration, m_scene ? m_scene->GetWorldId() : 0};
 }
 
 void GameObject::SetLayer(int layer)
@@ -344,14 +352,16 @@ Component *GameObject::AddExistingComponent(std::unique_ptr<Component> component
     return ptr;
 }
 
-Component *GameObject::AddPreparedPythonComponent(std::unique_ptr<Component> component)
+Component *GameObject::AddPreparedPythonComponent(std::unique_ptr<Component> component, size_t componentIndex)
 {
     if (!component || dynamic_cast<PyComponentProxy *>(component.get()) == nullptr)
         throw std::invalid_argument("prepared component must be a PyComponentProxy");
 
     Component *ptr = component.get();
     ptr->SetGameObject(this);
-    m_components.push_back(std::move(component));
+    if (componentIndex > m_components.size())
+        throw std::out_of_range("prepared Python component index exceeds component count");
+    m_components.insert(m_components.begin() + static_cast<std::ptrdiff_t>(componentIndex), std::move(component));
     if (m_scene)
         m_scene->BumpStructureVersion();
     InvalidateComponentExecutionCache();
@@ -420,12 +430,6 @@ void GameObject::PostAddComponent(Component *component)
     m_scene->BumpStructureVersion();
     InvalidateComponentExecutionCache();
     RefreshLifecycleDispatchFlags();
-
-    // Auto-add a BoxCollider when Rigidbody is added to an object without
-    // any Collider.  Physics engines require at least one shape for a body.
-    if (dynamic_cast<Rigidbody *>(component) && !HasComponent<Collider>()) {
-        AddComponent<BoxCollider>();
-    }
 
     // Unity: Reset is editor-only and fires when a component is first added.
     if (!m_scene->IsPlaying()) {
@@ -684,7 +688,7 @@ void GameObject::EditorUpdate(float deltaTime)
 nlohmann::json GameObject::SerializeDocument() const
 {
     json j;
-    j["schema_version"] = 1;
+    j["schema_version"] = 2;
     j["name"] = m_name;
     j["id"] = m_id;
     j["active"] = m_active;
@@ -702,25 +706,12 @@ nlohmann::json GameObject::SerializeDocument() const
 
     j["transform"] = m_transform.SerializeDocument();
 
-    // Serialize C++ components (excluding PyComponentProxy)
+    // Preserve the actual component order across native and Python types.
     json componentsArray = json::array();
     for (const auto &comp : m_components) {
-        if (dynamic_cast<const PyComponentProxy *>(comp.get())) {
-            continue; // PyComponentProxy serialized separately
-        }
-        componentsArray.push_back(comp->SerializeDocument());
+        componentsArray.push_back(SerializeComponentRecord(*comp));
     }
     j["components"] = componentsArray;
-
-    // Serialize PyComponentProxy (Python components) separately
-    json pyComponentsArray = json::array();
-    for (const auto &comp : m_components) {
-        const PyComponentProxy *proxy = dynamic_cast<const PyComponentProxy *>(comp.get());
-        if (proxy) {
-            pyComponentsArray.push_back(proxy->SerializeDocument());
-        }
-    }
-    j["py_components"] = pyComponentsArray;
 
     // Serialize children
     json childrenArray = json::array();
@@ -803,27 +794,22 @@ bool GameObject::DeserializeDocument(const nlohmann::json &j)
             else
                 componentAssignments.push_back({&object->m_transform, committedTransformId});
 
-            const auto &componentDocuments = document.at("components");
-            if (componentDocuments.size() != object->m_components.size())
-                throw std::logic_error("staged ObjectGraph component count changed");
-            for (size_t index = 0; index < object->m_components.size(); ++index) {
-                Component *component = object->m_components[index].get();
-                const uint64_t componentId =
-                    documentId(componentDocuments[index], "component_id", component->GetComponentID(), "component_id");
+            size_t nativeComponentIndex = 0;
+            for (const auto &componentDocument : document.at("components")) {
+                const DecodedComponentRecord record = DecodeComponentRecord(componentDocument);
+                const uint64_t componentId = record.componentId;
                 if (!componentIds.insert(componentId).second)
                     throw std::invalid_argument("ObjectGraph contains a duplicate component_id");
-                componentAssignments.push_back({component, componentId});
-            }
-
-            for (const auto &pythonComponentDocument : document.at("py_components")) {
-                if (!pythonComponentDocument.contains("component_id"))
+                if (record.kind == ComponentRecordKind::Python) {
+                    pythonComponentIds.push_back(componentId);
                     continue;
-                const uint64_t componentId =
-                    documentId(pythonComponentDocument, "component_id", 0, "Python component_id");
-                if (!componentIds.insert(componentId).second)
-                    throw std::invalid_argument("ObjectGraph contains a duplicate component_id");
-                pythonComponentIds.push_back(componentId);
+                }
+                if (nativeComponentIndex >= object->m_components.size())
+                    throw std::logic_error("staged ObjectGraph native component count changed");
+                componentAssignments.push_back({object->m_components[nativeComponentIndex++].get(), componentId});
             }
+            if (nativeComponentIndex != object->m_components.size())
+                throw std::logic_error("staged ObjectGraph native component count changed");
 
             const auto &childDocuments = document.at("children");
             if (childDocuments.size() != object->m_children.size())
@@ -977,7 +963,8 @@ std::unique_ptr<GameObject> GameObject::Clone(Scene *scene) const
     m_transform.CloneDataTo(obj->m_transform);
 
     // Clone components
-    for (const auto &comp : m_components) {
+    for (size_t componentIndex = 0; componentIndex < m_components.size(); ++componentIndex) {
+        const auto &comp = m_components[componentIndex];
         const PyComponentProxy *proxy = dynamic_cast<const PyComponentProxy *>(comp.get());
         if (proxy) {
             // Python components → push to Scene pending list (C++ can't clone py::object)
@@ -988,6 +975,8 @@ std::unique_ptr<GameObject> GameObject::Clone(Scene *scene) const
                 pending.scriptGuid = proxy->GetScriptGuid();
                 pending.typeGuid = proxy->GetTypeGuid();
                 pending.enabled = proxy->IsEnabled();
+                pending.executionOrder = proxy->GetExecutionOrder();
+                pending.componentIndex = componentIndex;
                 pending.fieldsDocument = proxy->SerializePyFieldsDocument();
                 scene->AddPendingPyComponent(std::move(pending));
             }

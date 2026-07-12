@@ -35,7 +35,8 @@ void CommandBuffer::Clear()
 // Render Target Management
 // ============================================================================
 
-RenderTargetHandle CommandBuffer::GetTemporaryRT(int width, int height, VkFormat format, VkSampleCountFlagBits samples)
+RenderTargetHandle CommandBuffer::GetTemporaryRT(int width, int height, rhi::PixelFormat format,
+                                                 rhi::SampleCount samples)
 {
     if (width <= 0 || height <= 0) {
         INXLOG_WARN("CommandBuffer '", m_name, "': GetTemporaryRT with invalid size (", width, "x", height, ")");

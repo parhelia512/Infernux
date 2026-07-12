@@ -2,6 +2,7 @@
 
 #include "Camera.h"
 #include "GameObject.h"
+#include "ObjectHandle.h"
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -11,6 +12,8 @@
 
 namespace infernux
 {
+
+class SceneCommitToken;
 
 /**
  * @brief Scene container that holds all GameObjects.
@@ -119,6 +122,17 @@ class Scene
 
     /// @brief Find a GameObject by ID
     [[nodiscard]] GameObject *FindByID(uint64_t id) const;
+
+    /// @brief Resolve a GameObject handle only when world, ID, and lifetime match.
+    [[nodiscard]] GameObject *ResolveGameObject(const ObjectHandle &handle) const;
+
+    /// @brief Resolve a Component handle only when world, ID, and lifetime match.
+    [[nodiscard]] Component *ResolveComponent(const ObjectHandle &handle) const;
+
+    [[nodiscard]] uint64_t GetWorldId() const
+    {
+        return m_worldId;
+    }
 
     /// @brief Find all GameObjects with a specific component type
     template <typename T> [[nodiscard]] std::vector<GameObject *> FindObjectsWithComponent() const;
@@ -253,6 +267,11 @@ class Scene
     /// @brief Rebuild the scene from an already parsed current-schema document.
     bool DeserializeDocument(const nlohmann::json &document);
 
+    /// Commit a validated candidate while retaining the current native world.
+    /// The returned token must be finalized after cross-language publish or
+    /// rolled back to restore the exact previous GameObject/Component instances.
+    [[nodiscard]] std::shared_ptr<SceneCommitToken> CommitDocumentRetainingCurrentWorld(const nlohmann::json &document);
+
     /// @brief Atomically save the scene to *path* through a same-directory temporary file.
     /// @return true on success; logs INXLOG_ERROR on failure.
     bool SaveToFile(const std::string &path) const;
@@ -274,6 +293,8 @@ class Scene
         std::string typeGuid;      // GUID for the concrete class within the script
         nlohmann::json fieldsDocument = nlohmann::json::object();
         bool enabled = true;
+        int executionOrder = 0;
+        size_t componentIndex = 0;
     };
 
     /// @brief Get pending Python components to be restored (and clear the list)
@@ -309,6 +330,7 @@ class Scene
 
   private:
     friend class GameObject;
+    friend class SceneCommitToken;
 
     void CollectAllObjects(GameObject *obj, std::vector<GameObject *> &result) const;
     void QueueStartObject(GameObject *obj);
@@ -335,7 +357,10 @@ class Scene
     /// @brief Recursively register all objects in a subtree with Scene's lookup map.
     void RegisterObjectSubtree(GameObject *root);
 
+    static uint64_t GenerateWorldId();
+
     std::string m_name = "Untitled Scene";
+    uint64_t m_worldId = GenerateWorldId();
 
     // Root-level game objects (objects without parents)
     std::vector<std::unique_ptr<GameObject>> m_rootObjects;
@@ -364,6 +389,26 @@ class Scene
 
     // Structure version counter (bumped on add/remove/reparent)
     uint64_t m_structureVersion = 0;
+};
+
+class SceneCommitToken final
+{
+  public:
+    ~SceneCommitToken();
+
+    SceneCommitToken(const SceneCommitToken &) = delete;
+    SceneCommitToken &operator=(const SceneCommitToken &) = delete;
+
+    [[nodiscard]] bool IsActive() const noexcept;
+    bool Rollback();
+    void Finalize();
+
+  private:
+    friend class Scene;
+    struct Impl;
+
+    explicit SceneCommitToken(Scene &scene);
+    std::unique_ptr<Impl> m_impl;
 };
 
 // ============================================================================

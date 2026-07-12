@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Type
+from Infernux.lib import AssetMutationResult
 
 _META_SUPPRESSION_TIMEOUT: float
 _DEFAULT_DEBOUNCE_SEC: float
@@ -52,20 +53,20 @@ class AssetManager:
         """Apply import settings to an asset and reimport it."""
         ...
     @classmethod
-    def import_asset(cls, path: str, *, database: Any = ..., suppress_watcher_echo: bool = ...) -> str:
+    def import_asset(cls, path: str, *, database: Any = ..., suppress_watcher_echo: bool = ...) -> AssetMutationResult:
         """Import a new asset and publish its creation."""
         ...
     @classmethod
-    def reimport_asset(cls, path: str, *, database: Any = ..., suppress_watcher_echo: bool = ...) -> bool:
+    def reimport_asset(cls, path: str, *, database: Any = ..., suppress_watcher_echo: bool = ...) -> AssetMutationResult:
         """Reimport an asset from disk."""
         ...
     @classmethod
     def move_asset(cls, old_path: str, new_path: str, *, database: Any = ...,
-                   suppress_watcher_echo: bool = ...) -> bool:
+                   suppress_watcher_echo: bool = ...) -> AssetMutationResult:
         """Move or rename an asset, updating all references."""
         ...
     @classmethod
-    def delete_asset(cls, path: str, *, database: Any = ..., suppress_watcher_echo: bool = ...) -> bool:
+    def delete_asset(cls, path: str, *, database: Any = ..., suppress_watcher_echo: bool = ...) -> AssetMutationResult:
         """Delete an asset after evicting loaded state."""
         ...
     @classmethod

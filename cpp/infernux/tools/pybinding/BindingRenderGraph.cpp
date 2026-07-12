@@ -50,7 +50,7 @@ void RegisterRenderGraphBindings(py::module_ &m)
     py::class_<GraphTextureDesc>(m, "GraphTextureDesc", "Description of a texture resource in the Python-defined graph")
         .def(py::init<>())
         .def_readwrite("name", &GraphTextureDesc::name, "Unique resource name")
-        .def_readwrite("format", &GraphTextureDesc::format, "Vulkan format")
+        .def_readwrite("format", &GraphTextureDesc::format, "Backend-neutral pixel format")
         .def_readwrite("is_backbuffer", &GraphTextureDesc::isBackbuffer,
                        "If true, refers to the scene's main color target")
         .def_readwrite("is_depth", &GraphTextureDesc::isDepth, "If true, this is a depth/stencil texture")

@@ -6,6 +6,7 @@
 #include <core/log/InxLog.h>
 #include <function/renderer/EditorTools.h>
 #include <function/renderer/GizmosDrawCallBuffer.h>
+#include <function/renderer/ParticleDrawCallBuffer.h>
 #include <function/renderer/SceneRenderGraph.h>
 #include <function/renderer/ScriptableRenderContext.h>
 #include <function/renderer/gui/InxGUIContext.h>
@@ -33,6 +34,7 @@ void RegisterResourceBindings(py::module_ &m);
 void RegisterSceneBindings(py::module_ &m);
 void RegisterAssetDatabaseBindings(py::module_ &m);
 void RegisterAssetRegistryBindings(py::module_ &m);
+void RegisterRhiBindings(py::module_ &m);
 void RegisterRenderGraphBindings(py::module_ &m);
 void RegisterRenderPipelineBindings(py::module_ &m);
 void RegisterCommandBufferBindings(py::module_ &m);
@@ -569,7 +571,8 @@ PYBIND11_MODULE(_Infernux, m)
                                    result["device_local_allocation_bytes"] = snapshot.deviceLocalAllocationBytes;
                                    result["device_local_usage_bytes"] = snapshot.deviceLocalUsageBytes;
                                    result["device_local_budget_bytes"] = snapshot.deviceLocalBudgetBytes;
-                                   result["mesh_bytes"] = snapshot.meshBytes;
+                                    result["mesh_bytes"] = snapshot.meshBytes;
+                                    result["particle_bytes"] = snapshot.particleBytes;
                                    result["texture_bytes"] = snapshot.textureBytes;
                                    result["imgui_texture_bytes"] = snapshot.imguiTextureBytes;
                                    result["pending_imgui_texture_bytes"] = snapshot.pendingImguiTextureBytes;
@@ -1371,6 +1374,54 @@ PYBIND11_MODULE(_Infernux, m)
                     buf->ClearIcons();
             },
             "Clear all component gizmo icon data")
+        .def(
+            "submit_particle_instances",
+            [](Infernux &self, uint64_t batchId, py::buffer instanceBuffer, const std::string &materialGuid,
+               float originX, float originY, float originZ) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer || !renderer->GetParticleDrawCallBuffer())
+                    throw std::logic_error("particle submission requires graphical renderer initialization");
+                py::buffer_info info = instanceBuffer.request();
+                if (info.ndim != 2 || info.shape[1] != 9 || info.itemsize != sizeof(float) ||
+                    info.format != py::format_descriptor<float>::format()) {
+                    throw std::invalid_argument("particle instances must be a contiguous float32 array shaped (N, 9)");
+                }
+                if (info.strides[1] != static_cast<py::ssize_t>(sizeof(float)) ||
+                    info.strides[0] != static_cast<py::ssize_t>(9 * sizeof(float))) {
+                    throw std::invalid_argument("particle instances must be C-contiguous");
+                }
+
+                const float *source = static_cast<const float *>(info.ptr);
+                std::vector<ParticleInstance> instances;
+                instances.reserve(static_cast<size_t>(info.shape[0]));
+                for (py::ssize_t index = 0; index < info.shape[0]; ++index) {
+                    const float *row = source + index * 9;
+                    for (size_t component = 0; component < 9; ++component) {
+                        if (!std::isfinite(row[component]))
+                            throw std::invalid_argument("particle instances must contain only finite values");
+                    }
+                    if (row[3] < 0.0f)
+                        throw std::invalid_argument("particle instance size must be non-negative");
+                    ParticleInstance instance;
+                    instance.position = glm::vec3(row[0] + originX, row[1] + originY, row[2] + originZ);
+                    instance.size = row[3];
+                    instance.color = glm::vec4(row[4], row[5], row[6], row[7]);
+                    instance.rotation = row[8];
+                    instances.push_back(instance);
+                }
+                renderer->GetParticleDrawCallBuffer()->SetBatch(batchId, std::move(instances), materialGuid);
+            },
+            py::arg("batch_id"), py::arg("instances"), py::arg("material_guid") = "", py::arg("origin_x") = 0.0f,
+            py::arg("origin_y") = 0.0f, py::arg("origin_z") = 0.0f,
+            "Submit one contiguous particle instance batch (position3, size, color4, rotation)")
+        .def(
+            "remove_particle_batch",
+            [](Infernux &self, uint64_t batchId) {
+                auto *renderer = self.GetRenderer();
+                if (renderer && renderer->GetParticleDrawCallBuffer())
+                    renderer->GetParticleDrawCallBuffer()->RemoveBatch(batchId);
+            },
+            py::arg("batch_id"), "Remove a persistent particle instance batch")
         // ========================================================================
         // Material Pipeline API - for refreshing material shaders at runtime
         // ========================================================================
@@ -1431,8 +1482,9 @@ PYBIND11_MODULE(_Infernux, m)
     RegisterAssetRegistryBindings(m);
     RegisterSceneBindings(m);
     RegisterTagLayerBindings(m);
+    RegisterRhiBindings(m);
     RegisterRenderGraphBindings(m);
-    RegisterCommandBufferBindings(m); // Must come before RenderPipeline (provides VkFormat, RenderTargetHandle, etc.)
+    RegisterCommandBufferBindings(m);
     RegisterRenderPipelineBindings(m);
     RegisterInputBindings(m);
     RegisterPhysicsBindings(m);

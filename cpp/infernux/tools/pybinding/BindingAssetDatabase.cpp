@@ -19,6 +19,29 @@ void RegisterAssetDatabaseBindings(py::module_ &m)
         .value("Modified", AssetEvent::Modified)
         .value("Moved", AssetEvent::Moved);
 
+    py::enum_<AssetMutationErrorCode>(m, "AssetMutationErrorCode")
+        .value("NONE", AssetMutationErrorCode::None)
+        .value("INVALID_PATH", AssetMutationErrorCode::InvalidPath)
+        .value("NOT_FOUND", AssetMutationErrorCode::NotFound)
+        .value("UNSUPPORTED_TYPE", AssetMutationErrorCode::UnsupportedType)
+        .value("IMPORT_FAILED", AssetMutationErrorCode::ImportFailed)
+        .value("RUNTIME_APPLY_FAILED", AssetMutationErrorCode::RuntimeApplyFailed);
+
+    py::class_<AssetMutationResult>(m, "AssetMutationResult")
+        .def(py::init<>())
+        .def_readwrite("succeeded", &AssetMutationResult::succeeded)
+        .def_readwrite("database_committed", &AssetMutationResult::databaseCommitted)
+        .def_readwrite("changed", &AssetMutationResult::changed)
+        .def_readwrite("operation", &AssetMutationResult::operation)
+        .def_readwrite("guid", &AssetMutationResult::guid)
+        .def_readwrite("path", &AssetMutationResult::path)
+        .def_readwrite("previous_path", &AssetMutationResult::previousPath)
+        .def_readwrite("resource_type", &AssetMutationResult::resourceType)
+        .def_readwrite("error_code", &AssetMutationResult::errorCode)
+        .def_readwrite("error", &AssetMutationResult::error)
+        .def_readwrite("query_generation", &AssetMutationResult::queryGeneration)
+        .def("__bool__", [](const AssetMutationResult &result) { return result.succeeded; });
+
     // AssetDependencyGraph singleton
     py::class_<AssetDependencyGraph, std::unique_ptr<AssetDependencyGraph, py::nodelete>>(m, "AssetDependencyGraph")
         .def_static("instance", &AssetDependencyGraph::Instance, py::return_value_policy::reference,

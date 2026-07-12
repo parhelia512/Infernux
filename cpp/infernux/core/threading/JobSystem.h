@@ -47,11 +47,18 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
 namespace infernux
 {
+
+class JobCancelled final : public std::runtime_error
+{
+  public:
+    using std::runtime_error::runtime_error;
+};
 
 /**
  * @brief Opaque, move-only handle identifying a single scheduled job.
@@ -80,6 +87,19 @@ class JobHandle
         return !m_state || m_state->remaining.load(std::memory_order_acquire) == 0;
     }
 
+    bool Cancel() noexcept
+    {
+        if (!m_state || IsComplete())
+            return false;
+        m_state->cancelRequested.store(true, std::memory_order_release);
+        return true;
+    }
+
+    [[nodiscard]] bool IsCancellationRequested() const noexcept
+    {
+        return m_state && m_state->cancelRequested.load(std::memory_order_acquire);
+    }
+
   private:
     friend class JobSystem;
 
@@ -90,6 +110,7 @@ class JobHandle
         }
 
         std::atomic<uint32_t> remaining;
+        std::atomic<bool> cancelRequested{false};
         std::mutex completionMutex;
         std::condition_variable completionCv;
         std::exception_ptr failure;
@@ -115,6 +136,13 @@ class JobSystem
 {
   public:
     using JobFn = std::function<void()>;
+
+    enum class State : uint8_t
+    {
+        Running,
+        Draining,
+        Stopped,
+    };
 
     /// @brief Bring up the global pool with @p workerCount worker threads.
     /// @p workerCount = 0 picks (hw_concurrency - 1) clamped to [1, 32].
@@ -168,6 +196,15 @@ class JobSystem
     {
         return static_cast<uint32_t>(m_workers.size());
     }
+    [[nodiscard]] State GetState() const noexcept
+    {
+        return m_state.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] size_t GetQueuedTaskCount() const;
+    [[nodiscard]] uint32_t GetActiveTaskCount() const noexcept
+    {
+        return m_activeTasks.load(std::memory_order_acquire);
+    }
 
   private:
     JobSystem() = default;
@@ -186,8 +223,10 @@ class JobSystem
 
     std::vector<std::thread> m_workers;
     std::queue<Task> m_queue;
-    std::mutex m_queueMutex;
+    mutable std::mutex m_queueMutex;
     std::condition_variable m_queueCv;
+    std::atomic<State> m_state{State::Stopped};
+    std::atomic<uint32_t> m_activeTasks{0};
     bool m_accepting = true;
     bool m_stopRequested = false;
 };

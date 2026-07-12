@@ -90,9 +90,8 @@ class TimelineFSMRuntime:
         self._apply_additive: bool = True                 # cached apply_mode test
         self._duration: float = _DEFAULT_PERIOD           # cached timeline duration
         self._cond_ctx: Dict[str, object] = {}            # reused condition-eval scratch dict
-        # Cached transform fast-path: the combined `set_local_trs` bound method is
-        # resolved once per transform identity (one pybind call/frame, no Vector3).
-        self._trs_transform = None
+        # Cache against the native lifetime handle, never the wrapper address.
+        self._trs_handle = None
         self._trs_setter = None
 
     # ── Setup ──────────────────────────────────────────────────────────
@@ -109,7 +108,7 @@ class TimelineFSMRuntime:
         self._sorted_keys = None
         self._apply_additive = True
         self._duration = _DEFAULT_PERIOD
-        self._trs_transform = None
+        self._trs_handle = None
         self._trs_setter = None
         if fsm is not None:
             for p in fsm.parameters:
@@ -285,9 +284,11 @@ class TimelineFSMRuntime:
             return
         pos, rot, scl = sampled
 
-        # Resolve the combined-setter bound method once per transform identity.
-        if transform is not self._trs_transform:
-            self._trs_transform = transform
+        # Resolve the combined setter once per native transform lifetime. Python
+        # stand-ins used by tests fall back to ordinary object identity.
+        transform_identity = getattr(transform, "handle", None) or transform
+        if self._trs_handle is None or transform_identity != self._trs_handle:
+            self._trs_handle = transform_identity
             self._trs_setter = getattr(transform, "set_local_trs", None)
         trs = self._trs_setter
 

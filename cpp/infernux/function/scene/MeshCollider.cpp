@@ -418,8 +418,27 @@ static std::shared_ptr<const CookedGeometry> CookGeometry(std::vector<glm::vec3>
 
 INFERNUX_REGISTER_VALIDATED_COMPONENT("MeshCollider", MeshCollider)
 
+void MeshCollider::Awake()
+{
+    if (auto *go = GetGameObject()) {
+        if (auto *rigidbody = go->GetComponent<Rigidbody>();
+            rigidbody && rigidbody->IsEnabled() && !rigidbody->IsKinematic()) {
+            m_convex = true;
+        }
+    }
+    Collider::Awake();
+}
+
 void MeshCollider::SetConvex(bool convex)
 {
+    if (!convex) {
+        if (auto *go = GetGameObject()) {
+            if (auto *rigidbody = go->GetComponent<Rigidbody>();
+                rigidbody && rigidbody->IsEnabled() && !rigidbody->IsKinematic()) {
+                throw std::invalid_argument("dynamic Rigidbody requires MeshCollider.convex = true");
+            }
+        }
+    }
     if (m_convex == convex) {
         return;
     }

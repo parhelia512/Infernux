@@ -184,6 +184,10 @@ struct DrawCall
     // When true, forces GPU buffer re-upload even if vertex/index count hasn't
     // changed (e.g. vertex colour change for gizmo highlight).
     bool forceBufferUpdate = false;
+
+    // Transparent particles preserve their sorted instance order while sharing
+    // one mesh/material draw. Ordinary transparent draw calls remain unbatched.
+    bool allowTransparentInstancing = false;
 };
 
 /**

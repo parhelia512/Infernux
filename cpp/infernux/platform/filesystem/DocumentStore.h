@@ -24,10 +24,30 @@ class DocumentWriteSuperseded final : public std::runtime_error
     using std::runtime_error::runtime_error;
 };
 
+class DocumentWriteCancelled final : public std::runtime_error
+{
+  public:
+    using std::runtime_error::runtime_error;
+};
+
 struct DocumentFileState
 {
     uint64_t size = 0;
     int64_t modifiedNs = 0;
+};
+
+struct DocumentWriteOptions
+{
+    bool createBackup = false;
+};
+
+struct DocumentPathMetrics
+{
+    uint64_t latestSubmittedGeneration = 0;
+    uint64_t latestSucceededGeneration = 0;
+    uint64_t latestFailedGeneration = 0;
+    uint64_t pendingGeneration = 0;
+    uint64_t activeGeneration = 0;
 };
 
 class DocumentWriteTicket final
@@ -42,6 +62,9 @@ class DocumentWriteTicket final
         return m_generation;
     }
 
+    [[nodiscard]] bool IsComplete() const;
+    [[nodiscard]] std::string GetStatusName() const;
+
     void Wait() const;
     bool WaitFor(std::chrono::milliseconds timeout) const;
     [[nodiscard]] std::optional<DocumentFileState> GetCommittedFileState() const;
@@ -54,6 +77,7 @@ class DocumentWriteTicket final
         Pending,
         Succeeded,
         Superseded,
+        Cancelled,
         Failed,
     };
 
@@ -76,7 +100,7 @@ class DocumentWriteTicket final
 class DocumentStore final
 {
   public:
-    using Writer = std::function<void(const std::string &, const std::string &)>;
+    using Writer = std::function<void(const std::string &, const std::string &, const DocumentWriteOptions &)>;
 
     explicit DocumentStore(Writer writer = {}, size_t workerCount = 2);
     ~DocumentStore();
@@ -86,8 +110,11 @@ class DocumentStore final
 
     static DocumentStore &Instance();
 
-    std::shared_ptr<DocumentWriteTicket> Submit(const std::string &path, std::string content);
-    uint64_t WriteAndWait(const std::string &path, std::string content);
+    std::shared_ptr<DocumentWriteTicket> Submit(const std::string &path, std::string content,
+                                                DocumentWriteOptions options = {});
+    uint64_t WriteAndWait(const std::string &path, std::string content, DocumentWriteOptions options = {});
+    bool Cancel(const std::shared_ptr<DocumentWriteTicket> &ticket);
+    [[nodiscard]] DocumentPathMetrics GetMetrics(const std::string &path) const;
     void Flush();
     void Flush(const std::string &path);
     void Shutdown();
@@ -105,6 +132,7 @@ class DocumentStore final
         std::string key;
         std::string path;
         std::string content;
+        DocumentWriteOptions options;
         std::shared_ptr<DocumentWriteTicket> ticket;
     };
 
@@ -124,6 +152,9 @@ class DocumentStore final
     std::deque<std::string> m_readyPaths;
     std::unordered_set<std::string> m_queuedPaths;
     std::unordered_map<std::string, uint64_t> m_generations;
+    std::unordered_map<std::string, uint64_t> m_succeededGenerations;
+    std::unordered_map<std::string, uint64_t> m_failedGenerations;
+    std::unordered_map<std::string, uint64_t> m_activeGenerations;
 };
 
 } // namespace infernux

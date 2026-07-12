@@ -78,8 +78,8 @@ void InxVkCoreModular::PumpPendingTextureLoads()
     }
 }
 
-MaterialDescriptorSet::TextureBinding InxVkCoreModular::ResolveTextureForMaterial(const std::string &textureRef,
-                                                                                  const std::string &bindingName)
+TextureResolveResult InxVkCoreModular::ResolveTextureForMaterial(const std::string &textureRef,
+                                                                 const std::string &bindingName)
 {
     // Material texture properties store asset GUIDs. Path normalization belongs
     // at the public material/asset boundary, never in the renderer.
@@ -93,7 +93,7 @@ MaterialDescriptorSet::TextureBinding InxVkCoreModular::ResolveTextureForMateria
     if (texturePath.empty()) {
         INXLOG_WARN("TextureResolver: texture reference '", textureRef, "' is not a resolvable asset GUID (binding='",
                     bindingName, "'). Texture properties must hold GUIDs.");
-        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+        return {TextureResolveStatus::Failed, {}};
     }
 
     auto infTex = registry.GetAsset<InxTexture>(textureGuid);
@@ -107,23 +107,23 @@ MaterialDescriptorSet::TextureBinding InxVkCoreModular::ResolveTextureForMateria
             } catch (const std::exception &exception) {
                 INXLOG_ERROR("TextureResolver: failed to schedule CPU load for '", textureGuid,
                              "': ", exception.what());
-                return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+                return {TextureResolveStatus::Failed, {}};
             }
         }
         try {
             if (!registry.TryCommitAssetLoad(pending->second))
-                return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+                return {TextureResolveStatus::Pending, {}};
             m_pendingTextureCpuLoads.erase(pending);
             infTex = registry.GetAsset<InxTexture>(textureGuid);
         } catch (const std::exception &exception) {
             INXLOG_ERROR("TextureResolver: CPU load failed for '", textureGuid, "': ", exception.what());
             m_pendingTextureCpuLoads.erase(pending);
-            return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+            return {TextureResolveStatus::Failed, {}};
         }
     }
     if (!infTex || !infTex->GetCpuData() || !infTex->GetCpuData()->IsValid()) {
         INXLOG_ERROR("TextureResolver: texture asset has no decoded CPU payload: ", textureGuid);
-        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+        return {TextureResolveStatus::Failed, {}};
     }
 
     const bool isLinearTexture = infTex->IsLinear();
@@ -158,7 +158,7 @@ MaterialDescriptorSet::TextureBinding InxVkCoreModular::ResolveTextureForMateria
     {
         auto cached = m_textureCache.FindAsset(cacheKey, textureGuid, runtimeVersion, m_ensureFrameCounter);
         if (cached) {
-            return {cached->GetView(), cached->GetSampler(), std::move(cached)};
+            return {TextureResolveStatus::Ready, {cached->GetView(), cached->GetSampler(), std::move(cached)}};
         }
     }
 
@@ -175,29 +175,29 @@ MaterialDescriptorSet::TextureBinding InxVkCoreModular::ResolveTextureForMateria
                              .first;
         } catch (const std::exception &exception) {
             INXLOG_ERROR("TextureResolver: failed to schedule GPU upload for '", textureGuid, "': ", exception.what());
-            return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+            return {TextureResolveStatus::Failed, {}};
         }
     }
     try {
         if (!m_resourceManager.TryPublishTextureUpload(pendingGpu->second.ticket))
-            return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+            return {TextureResolveStatus::Pending, {}};
         auto texture = pendingGpu->second.ticket->GetTexture();
         const VkImageView view = texture->GetView();
         const VkSampler sampler = texture->GetSampler();
         if (!registry.IsLoaded(textureGuid) ||
             registry.GetAssetVersion(textureGuid) != pendingGpu->second.runtimeVersion) {
             m_pendingTextureGpuUploads.erase(pendingGpu);
-            return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+            return {TextureResolveStatus::Pending, {}};
         }
         auto resident = m_textureCache.Insert(cacheKey, std::move(texture), m_ensureFrameCounter, false, textureGuid,
                                               pendingGpu->second.runtimeVersion);
         m_pendingTextureGpuUploads.erase(pendingGpu);
         ++m_completedTextureUploadCount;
-        return {view, sampler, std::move(resident)};
+        return {TextureResolveStatus::Ready, {view, sampler, std::move(resident)}};
     } catch (const std::exception &exception) {
         INXLOG_ERROR("TextureResolver: GPU upload failed for '", textureGuid, "': ", exception.what());
         m_pendingTextureGpuUploads.erase(pendingGpu);
-        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+        return {TextureResolveStatus::Failed, {}};
     }
 }
 
@@ -431,8 +431,7 @@ void InxVkCoreModular::InitializeMaterialSystem()
         // Set up texture resolver for material Texture2D properties
         // Delegates to ResolveTextureForMaterial which uses GUID-based cache keys.
         m_materialPipelineManager.SetTextureResolver(
-            [this](const std::string &textureRef,
-                   const std::string &bindingName) -> MaterialDescriptorSet::TextureBinding {
+            [this](const std::string &textureRef, const std::string &bindingName) -> TextureResolveResult {
                 return ResolveTextureForMaterial(textureRef, bindingName);
             });
     }
@@ -519,7 +518,7 @@ void InxVkCoreModular::ReinitializeMaterialPipelines(VkSampleCountFlagBits newSa
 
     // Restore texture resolver
     m_materialPipelineManager.SetTextureResolver(
-        [this](const std::string &textureRef, const std::string &bindingName) -> MaterialDescriptorSet::TextureBinding {
+        [this](const std::string &textureRef, const std::string &bindingName) -> TextureResolveResult {
             return ResolveTextureForMaterial(textureRef, bindingName);
         });
 
@@ -575,14 +574,12 @@ bool InxVkCoreModular::RefreshPreviewMaterialPipeline(std::shared_ptr<InxMateria
         bool forwardOk = renderData && renderData->isValid;
 
         if (forwardOk && m_shadowPipelineReady) {
-            std::string shadowFragName = fragShaderName + "/shadow";
-            bool hasShadowFrag = (GetShaderModule(shadowFragName, "fragment") != VK_NULL_HANDLE);
-            if (hasShadowFrag) {
-                // Shadow pipelines are owned by m_shadowPipelineCache — do NOT
-                // push the old handle to the deletion queue (it is shared).
-                material->SetPassPipeline(ShaderCompileTarget::Shadow, VK_NULL_HANDLE);
-                CreateMaterialShadowPipeline(material, vertShaderName, fragShaderName);
-            }
+            // Shadow resources are created lazily by DrawShadowCasters. Eagerly
+            // allocating here makes every transient/runtime material consume a
+            // descriptor even when it never reaches a shadow pass, and repeated
+            // 2D animation material refreshes eventually exhaust the fixed pool.
+            // The next real shadow draw will rebuild the pass if needed.
+            material->SetPassPipeline(ShaderCompileTarget::Shadow, VK_NULL_HANDLE);
         }
 
         return forwardOk;
@@ -925,12 +922,16 @@ void InxVkCoreModular::CreateMaterialShadowPipeline(std::shared_ptr<InxMaterial>
             return;
         }
 
-        // Runtime texture/material invalidation can recreate shadow descriptor sets
-        // while previously recorded command buffers still reference older handles.
-        // Freeing an individual set here can invalidate an in-flight command buffer.
-        // Keep old sets alive and reclaim in bulk when shadow descriptor pool is
-        // destroyed/reset during shadow pipeline cleanup.
-        (void)descriptorSet;
+        // Runtime texture/material invalidation can recreate shadow descriptor
+        // sets while recorded command buffers still reference older handles.
+        // Reclaim after all frames that could reference the set have retired.
+        VkDevice retireDevice = device;
+        VkDescriptorPool retirePool = m_shadowMaterialDescPool;
+        m_deletionQueue.Push([retireDevice, retirePool, descriptorSet] {
+            VkResult result = vkFreeDescriptorSets(retireDevice, retirePool, 1, &descriptorSet);
+            if (result != VK_SUCCESS)
+                INXLOG_WARN("Failed to retire shadow material descriptor set: ", static_cast<int>(result));
+        });
     };
 
     if (needsShadowMaterialDesc) {

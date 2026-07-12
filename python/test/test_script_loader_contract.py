@@ -6,7 +6,7 @@ from Infernux.components.registry import get_type_by_identity
 from Infernux.engine.component_restore import create_component_instance
 
 
-def test_script_loader_does_not_substitute_a_renamed_component(tmp_path):
+def test_script_loader_falls_back_to_sole_class_after_rename(tmp_path):
     script = tmp_path / "strict_component.py"
     script.write_text(
         "from Infernux.components import InxComponent\n"
@@ -15,10 +15,21 @@ def test_script_loader_does_not_substitute_a_renamed_component(tmp_path):
         encoding="utf-8",
     )
 
+    # One-component scripts tolerate an authored class rename.
+    remapped = load_component_class_from_file(str(script), "RemovedComponent")
+    assert remapped is not None
+    assert remapped.__name__ == "CurrentComponent"
+
+    script.write_text(
+        "from Infernux.components import InxComponent\n"
+        "class CurrentComponent(InxComponent):\n"
+        "    speed: float = 1.0\n"
+        "class OtherComponent(InxComponent):\n"
+        "    value: int = 1\n",
+        encoding="utf-8",
+    )
+    # Multi-component scripts stay strict to avoid picking the wrong class.
     assert load_component_class_from_file(str(script), "RemovedComponent") is None
-    current = load_component_class_from_file(str(script), "CurrentComponent")
-    assert current is not None
-    assert current.__name__ == "CurrentComponent"
 
 
 def test_component_identity_distinguishes_same_named_classes():

@@ -194,6 +194,24 @@ class AnimStateMachineRef(AssetRefBase):
         return None
 
 
+class VfxSystemRef(AssetRefBase):
+    """Reference to a strict VFX system authoring asset."""
+
+    def _do_resolve(self):
+        path = self._path_hint if not self._guid else ""
+        db = _get_asset_database()
+        if db and self._guid:
+            path = db.get_path_from_guid(self._guid) or ""
+        if not path:
+            return None
+        try:
+            from Infernux.core.vfx_system import VfxSystem
+
+            return VfxSystem.load(path)
+        except (OSError, ValueError):
+            return None
+
+
 class TimelineFSMRef(AssetRefBase):
     """Reference to a Timeline state machine (.timelinefsm) asset.
 
@@ -314,6 +332,13 @@ def _ensure_registry():
             "extensions": ("*.animfsm",),
             "display":    "AnimFSM",
             "prefix":     "fsm",
+        },
+        "VfxSystem": {
+            "ref_class":  VfxSystemRef,
+            "drag_type":  "VFXSYSTEM_FILE",
+            "extensions": ("*.vfxsystem",),
+            "display":    "VFX System",
+            "prefix":     "vfx",
         },
         "AnimationClip": {
             "ref_class":  AnimationClipRef,

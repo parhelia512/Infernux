@@ -418,7 +418,10 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
     // std::sort when the eligible scratch is already in correct order from
     // a previous frame (common in stable scenes with static camera).
     const bool preserveOrder = sortMode.empty() || sortMode == "none" || sortMode == "preserve";
-    if (m_eligibleScratch.size() > 1 && !uniformBatch && !preserveOrder) {
+    // Transparent entries still need depth sorting even when they form one
+    // instance batch. The sorted matrix stream determines blend order.
+    const bool skipUniformBatchSort = uniformBatch && sortMode != "back_to_front";
+    if (m_eligibleScratch.size() > 1 && !skipUniformBatchSort && !preserveOrder) {
         // In left-handed view space: near objects have small positive Z, far
         // objects have larger positive Z.
         if (sortMode == "front_to_back") {
@@ -722,11 +725,18 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
 
         VkBuffer vb = bufIt->second.vertexBuffer->GetBuffer();
 
-        // Check if this entry can extend the current batch
-        bool canExtendBatch = allowBatching && batchInstanceCount > 0 && pipeline == currentPipeline &&
-                              descriptorSet == currentDescriptorSet && matRaw == currentMaterialRaw &&
-                              vb == currentVertexBuffer && dc.indexStart == batchIndexStart &&
-                              dc.indexCount == batchIndexCount && dc.vertexStart == batchVertexStart;
+        // Check if this entry can extend the current batch. Transparent
+        // instancing is opt-in so normal alpha surfaces retain per-object draws.
+        bool canExtendBatch = false;
+        if (batchInstanceCount > 0) {
+            const DrawCall &batchFirst = *m_eligibleScratch[batchFirstInstance].dc;
+            const bool batchingAllowed =
+                allowBatching || (batchFirst.allowTransparentInstancing && dc.allowTransparentInstancing);
+            canExtendBatch = batchingAllowed && pipeline == currentPipeline && descriptorSet == currentDescriptorSet &&
+                             matRaw == currentMaterialRaw && vb == currentVertexBuffer &&
+                             dc.indexStart == batchIndexStart && dc.indexCount == batchIndexCount &&
+                             dc.vertexStart == batchVertexStart;
+        }
 
         if (canExtendBatch) {
             ++batchInstanceCount;
@@ -1666,9 +1676,9 @@ void InxVkCoreModular::EnsureObjectBuffers(uint64_t objectId, const std::vector<
         if (pending == m_pendingSharedMeshBuffers.end()) {
             PendingSharedMeshBuffers uploads;
             uploads.vertexUpload = m_resourceManager.BeginBufferUpload(
-                vertices.data(), vertices.size() * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-            uploads.indexUpload = m_resourceManager.BeginBufferUpload(indices.data(), indices.size() * sizeof(uint32_t),
-                                                                      VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+                {vertices.data(), vertices.size() * sizeof(Vertex), rhi::BufferUsage::Vertex});
+            uploads.indexUpload = m_resourceManager.BeginBufferUpload(
+                {indices.data(), indices.size() * sizeof(uint32_t), rhi::BufferUsage::Index});
             uploads.vertexCount = vertices.size();
             uploads.indexCount = indices.size();
             ++m_submittedMeshUploadCount;

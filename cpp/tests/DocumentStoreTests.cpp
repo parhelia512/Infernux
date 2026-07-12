@@ -9,6 +9,7 @@
 #include <vector>
 
 using infernux::DocumentStore;
+using infernux::DocumentWriteCancelled;
 using infernux::DocumentWriteSuperseded;
 
 namespace
@@ -28,7 +29,7 @@ void TestCoalescesQueuedGenerations()
     bool releaseFirst = false;
     std::vector<std::string> writes;
 
-    DocumentStore store([&](const std::string &, const std::string &content) {
+    DocumentStore store([&](const std::string &, const std::string &content, const infernux::DocumentWriteOptions &) {
         std::unique_lock lock(mutex);
         writes.push_back(content);
         if (content == "first") {
@@ -73,7 +74,9 @@ void TestCoalescesQueuedGenerations()
 void TestShutdownDrainsAndRestarts()
 {
     std::vector<std::string> writes;
-    DocumentStore store([&](const std::string &, const std::string &content) { writes.push_back(content); });
+    DocumentStore store([&](const std::string &, const std::string &content, const infernux::DocumentWriteOptions &) {
+        writes.push_back(content);
+    });
     auto accepted = store.Submit("drain.scene", "accepted");
     store.Shutdown();
     accepted->Wait();
@@ -92,7 +95,7 @@ void TestDifferentPathsRunConcurrently()
     int started = 0;
     bool release = false;
     DocumentStore store(
-        [&](const std::string &, const std::string &) {
+        [&](const std::string &, const std::string &, const infernux::DocumentWriteOptions &) {
             std::unique_lock lock(mutex);
             ++started;
             condition.notify_all();
@@ -116,7 +119,9 @@ void TestDifferentPathsRunConcurrently()
 
 void TestWriterFailurePropagates()
 {
-    DocumentStore store([](const std::string &, const std::string &) { throw std::runtime_error("disk full"); });
+    DocumentStore store([](const std::string &, const std::string &, const infernux::DocumentWriteOptions &) {
+        throw std::runtime_error("disk full");
+    });
     auto failed = store.Submit("failed.scene", "content");
     bool propagated = false;
     try {
@@ -126,6 +131,67 @@ void TestWriterFailurePropagates()
     }
     store.Shutdown();
     Require(propagated, "writer failure was not propagated through the ticket");
+    Require(failed->GetStatusName() == "failed", "failed ticket did not expose its terminal status");
+    Require(store.GetMetrics("failed.scene").latestFailedGeneration == failed->GetGeneration(),
+            "failed generation metric was not recorded");
+}
+
+void TestQueuedCancellationAndGenerationMetrics()
+{
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool blockerStarted = false;
+    bool releaseBlocker = false;
+    std::vector<std::string> writes;
+    DocumentStore store(
+        [&](const std::string &, const std::string &content, const infernux::DocumentWriteOptions &) {
+            std::unique_lock lock(mutex);
+            writes.push_back(content);
+            if (content == "blocker") {
+                blockerStarted = true;
+                condition.notify_all();
+                condition.wait(lock, [&] { return releaseBlocker; });
+            }
+        },
+        1);
+
+    auto blocker = store.Submit("cancel-blocker.scene", "blocker");
+    {
+        std::unique_lock lock(mutex);
+        Require(condition.wait_for(lock, std::chrono::seconds(2), [&] { return blockerStarted; }),
+                "cancellation blocker did not start");
+    }
+    Require(!store.Cancel(blocker), "active generation was incorrectly cancelled");
+
+    auto queued = store.Submit("cancel-target.scene", "must-not-write");
+    const auto queuedMetrics = store.GetMetrics("cancel-target.scene");
+    Require(queuedMetrics.latestSubmittedGeneration == queued->GetGeneration(),
+            "submitted generation metric was not recorded");
+    Require(queuedMetrics.pendingGeneration == queued->GetGeneration(), "pending generation metric was not recorded");
+    Require(store.Cancel(queued), "queued generation could not be cancelled");
+    Require(queued->IsComplete() && queued->GetStatusName() == "cancelled",
+            "cancelled ticket did not expose its terminal status");
+    Require(store.GetMetrics("cancel-target.scene").pendingGeneration == 0,
+            "cancelled generation remained visible as pending");
+
+    bool cancelled = false;
+    try {
+        queued->Wait();
+    } catch (const DocumentWriteCancelled &) {
+        cancelled = true;
+    }
+    Require(cancelled, "cancelled ticket did not propagate DocumentWriteCancelled");
+
+    {
+        std::lock_guard lock(mutex);
+        releaseBlocker = true;
+    }
+    condition.notify_all();
+    blocker->Wait();
+    store.Shutdown();
+    Require(writes == std::vector<std::string>{"blocker"}, "cancelled generation reached the writer");
+    Require(store.GetMetrics("cancel-blocker.scene").latestSucceededGeneration == blocker->GetGeneration(),
+            "successful generation metric was not recorded");
 }
 
 } // namespace
@@ -137,6 +203,7 @@ int main()
         TestShutdownDrainsAndRestarts();
         TestDifferentPathsRunConcurrently();
         TestWriterFailurePropagates();
+        TestQueuedCancellationAndGenerationMetrics();
         std::cout << "DocumentStore tests passed\n";
         return 0;
     } catch (const std::exception &error) {
