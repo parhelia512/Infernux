@@ -9,6 +9,7 @@
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 
 #include "CapsuleCollider.h"
+#include "ComponentDocumentValidation.h"
 #include "ComponentFactory.h"
 #include "GameObject.h"
 #include "MeshRenderer.h"
@@ -22,23 +23,29 @@
 namespace infernux
 {
 
-INFERNUX_REGISTER_COMPONENT("CapsuleCollider", CapsuleCollider)
+INFERNUX_REGISTER_VALIDATED_COMPONENT("CapsuleCollider", CapsuleCollider)
 
 void CapsuleCollider::SetRadius(float radius)
 {
-    m_radius = std::max(radius, 0.001f);
+    if (!std::isfinite(radius) || radius < 0.001f || m_height < radius * 2.0f + 0.001f)
+        throw std::invalid_argument("capsule radius is invalid for the current height");
+    m_radius = radius;
     RebuildShape();
 }
 
 void CapsuleCollider::SetHeight(float height)
 {
-    m_height = std::max(height, m_radius * 2.0f + 0.001f);
+    if (!std::isfinite(height) || height < m_radius * 2.0f + 0.001f)
+        throw std::invalid_argument("capsule height must exceed its diameter");
+    m_height = height;
     RebuildShape();
 }
 
 void CapsuleCollider::SetDirection(int dir)
 {
-    m_direction = std::clamp(dir, 0, 2);
+    if (dir < 0 || dir > 2)
+        throw std::invalid_argument("capsule direction must be X, Y, or Z");
+    m_direction = dir;
     RebuildShape();
 }
 
@@ -131,28 +138,44 @@ void *CapsuleCollider::CreateJoltShapeRaw() const
 // Serialization
 // ============================================================================
 
-std::string CapsuleCollider::Serialize() const
+nlohmann::json CapsuleCollider::SerializeDocument() const
 {
-    auto baseJson = nlohmann::json::parse(Collider::Serialize());
+    auto baseJson = Collider::SerializeDocument();
     baseJson["radius"] = m_radius;
     baseJson["height"] = m_height;
     baseJson["direction"] = m_direction;
-    return baseJson.dump();
+    return baseJson;
 }
 
-bool CapsuleCollider::Deserialize(const std::string &jsonStr)
+void CapsuleCollider::ValidateSerializedDocument(const nlohmann::json &j)
 {
-    if (!Collider::Deserialize(jsonStr))
-        return false;
+    using namespace component_document_validation;
+    ValidateComponentDocument(j, "CapsuleCollider", 1,
+                              {"is_trigger", "center", "physic_material_guid", "radius", "height", "direction"});
+    RequireBoolean(j, "is_trigger", "CapsuleCollider");
+    RequireFiniteVector(j, "center", 3, "CapsuleCollider");
+    RequireString(j, "physic_material_guid", "CapsuleCollider");
+    const float radius = RequireFiniteFloat(j, "radius", "CapsuleCollider");
+    const float height = RequireFiniteFloat(j, "height", "CapsuleCollider");
+    const int direction = RequireInteger(j, "direction", "CapsuleCollider");
+    if (radius < 0.001f || height < radius * 2.0f + 0.001f)
+        throw std::invalid_argument("CapsuleCollider geometry is invalid");
+    if (direction < 0 || direction > 2)
+        throw std::invalid_argument("CapsuleCollider.direction must be 0, 1, or 2");
+}
 
+bool CapsuleCollider::DeserializeDocument(const nlohmann::json &j)
+{
     try {
-        auto j = nlohmann::json::parse(jsonStr);
-        if (j.contains("radius"))
-            m_radius = j["radius"].get<float>();
-        if (j.contains("height"))
-            m_height = j["height"].get<float>();
-        if (j.contains("direction"))
-            m_direction = j["direction"].get<int>();
+        ValidateSerializedDocument(j);
+        const float stagedRadius = j["radius"].get<float>();
+        const float stagedHeight = j["height"].get<float>();
+        const int stagedDirection = j["direction"].get<int>();
+        if (!Collider::DeserializeDocument(j))
+            return false;
+        m_radius = stagedRadius;
+        m_height = stagedHeight;
+        m_direction = stagedDirection;
         RebuildShape();
         return true;
     } catch (const std::exception &e) {

@@ -5,11 +5,14 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace infernux
 {
+
+class InxSkinnedMesh;
 
 /**
  * @brief A contiguous range within a shared vertex/index buffer.
@@ -212,6 +215,18 @@ class InxMesh
         m_materialSlotNames = std::move(names);
     }
 
+    void SetSkinnedData(std::shared_ptr<const InxSkinnedMesh> skinnedData);
+    [[nodiscard]] const std::shared_ptr<const InxSkinnedMesh> &GetSkinnedData() const noexcept
+    {
+        return m_skinnedData;
+    }
+    [[nodiscard]] bool HasSkinnedData() const noexcept
+    {
+        return static_cast<bool>(m_skinnedData);
+    }
+
+    [[nodiscard]] size_t GetRuntimeMemoryBytes() const noexcept;
+
   private:
     std::string m_name;
     std::string m_guid;
@@ -227,6 +242,7 @@ class InxMesh
     std::vector<std::string> m_materialSlotNames;
     std::vector<MaterialSlotData> m_materialSlotData;
     std::vector<std::string> m_nodeNames; ///< Node names indexed by nodeGroup
+    std::shared_ptr<const InxSkinnedMesh> m_skinnedData;
 
     /// Recompute m_boundsMin/Max from vertex positions.
     void RecalculateBounds();

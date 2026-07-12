@@ -107,7 +107,6 @@ class PlayerGUI(InxGUIRenderable):
             if native and native.is_close_requested():
                 native.confirm_close()
                 return
-            self._engine.tick_play_mode()
 
     def _render_game(self, ctx: InxGUIContext, vp_w: float, vp_h: float):
         target_w = max(1, int(vp_w))

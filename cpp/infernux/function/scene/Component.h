@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -226,6 +227,11 @@ class Component
     /// @brief Pre-allocate the component registry hash map for bulk creation.
     static void ReserveRegistry(size_t n);
 
+    [[nodiscard]] static size_t GetInstanceCount()
+    {
+        return GetInstanceRegistry().size();
+    }
+
     /// @brief Check if the component is enabled
     [[nodiscard]] bool IsEnabled() const
     {
@@ -334,14 +340,16 @@ class Component
     // Serialization
     // ========================================================================
 
-    /// @brief Serialize component data to JSON string
-    /// @return JSON string representation
-    [[nodiscard]] virtual std::string Serialize() const;
+    /// Text boundary wrappers. Internal composition uses the structured API below.
+    [[nodiscard]] std::string Serialize() const;
+    bool Deserialize(const std::string &jsonStr);
 
-    /// @brief Deserialize component data from JSON string
-    /// @param jsonStr JSON string to deserialize from
-    /// @return true if successful
-    virtual bool Deserialize(const std::string &jsonStr);
+    [[nodiscard]] virtual nlohmann::json SerializeDocument() const;
+    virtual bool DeserializeDocument(const nlohmann::json &document);
+    [[nodiscard]] virtual int GetSerializationSchemaVersion() const
+    {
+        return 1;
+    }
 
     /// @brief Create a deep copy of this component (native clone, no JSON round-trip).
     /// The clone gets a fresh component ID and instance GUID.
@@ -380,6 +388,7 @@ class Component
     static std::unordered_map<uint64_t, Component *> &GetInstanceRegistry();
 
     friend class Scene; // Scene needs to call Start
+    friend class GameObject;
 };
 
 } // namespace infernux

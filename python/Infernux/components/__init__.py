@@ -40,6 +40,7 @@ from .builtin import (
 )
 from Infernux.lib import Transform, Component
 from .serializable_object import SerializableObject
+from .value_codec import ValueCodecDescriptor, ValueCodecRegistry, VALUE_CODECS
 from .serialized_field import (
     serialized_field,
     int_field,
@@ -144,6 +145,9 @@ __all__ = [
     "ComponentRef",
     "PrefabRef",
     "SerializableObject",
+    "ValueCodecDescriptor",
+    "ValueCodecRegistry",
+    "VALUE_CODECS",
     "list_field",
     "component_field",
     "component_list_field",

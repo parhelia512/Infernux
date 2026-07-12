@@ -18,7 +18,7 @@ PROPERTY_TYPES = {
     "Color": "material.set_color(name, r, g, b, a)",
     "Int": "material.set_int(name, value)",
     "Mat4": "material.set_param(name, matrix_value)",
-    "Texture2D": "material.set_texture(name, texture_or_guid_or_path)",
+    "Texture2D": "material.set_texture(name, texture_or_guid)",
 }
 
 
@@ -64,7 +64,7 @@ SUBSYSTEM_GUIDES: dict[str, dict[str, Any]] = {
             "Do not put @shader_id only in comments; the parser expects lines that start with @shader_id: near the top.",
             "Do not assign a .shadingmodel or .glsl library as Material.frag_shader_name.",
             "Do not invent property names in Material unless the shader declares them or intentionally uses dynamic properties.",
-            "Texture2D defaults are symbolic names such as white; material values should be texture GUID/path/wrapper, not a vec4.",
+            "Texture2D defaults are symbolic names such as white; material values must be texture GUIDs or wrappers, not paths or vec4 values.",
             "Do not assume Shader.reload is fully bound for every runtime path; prefer asset_refresh and material/pipeline refresh tools when available.",
         ],
         "rules": {

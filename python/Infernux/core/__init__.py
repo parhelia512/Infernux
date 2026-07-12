@@ -31,6 +31,7 @@ from .material import Material
 from .texture import Texture
 from .shader import Shader
 from .audio_clip import AudioClip
+from .physic_material import PhysicMaterial
 from .animation_clip import AnimationClip
 from .animation_clip3d import AnimationClip3D
 from .anim_state_machine import (
@@ -57,6 +58,7 @@ from .asset_ref import (
     AnimationClipRef,
     AnimationClip3DRef,
     AnimStateMachineRef,
+    PhysicMaterialRef,
 )
 
 __all__ = [
@@ -64,6 +66,7 @@ __all__ = [
     "Texture",
     "Shader",
     "AudioClip",
+    "PhysicMaterial",
     "AnimationClip",
     "AnimationClip3D",
     "AnimStateMachine",
@@ -86,4 +89,5 @@ __all__ = [
     "AnimationClipRef",
     "AnimationClip3DRef",
     "AnimStateMachineRef",
+    "PhysicMaterialRef",
 ]

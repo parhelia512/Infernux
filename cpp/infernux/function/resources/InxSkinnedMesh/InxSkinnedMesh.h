@@ -127,6 +127,7 @@ class InxSkinnedMesh
     BuildGpuBonePaletteFromPoseStack(const std::vector<PoseStackLayer> &layers) const;
 
     void NormalizeInfluences();
+    [[nodiscard]] size_t GetRuntimeMemoryBytes() const noexcept;
 
   private:
     struct PaletteCacheKey

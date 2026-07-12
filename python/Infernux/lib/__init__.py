@@ -46,6 +46,19 @@ def _register_native_search_dir(path: str) -> None:
             os.environ["LD_LIBRARY_PATH"] = norm + ((":" + ld_path) if ld_path else "")
 
 
+def _register_native_module_override() -> None:
+    override = os.environ.get("INFERNUX_NATIVE_MODULE_DIR")
+    if override is None:
+        return
+
+    native_dir = os.path.abspath(override)
+    if not os.path.isdir(native_dir):
+        raise ImportError(f"INFERNUX_NATIVE_MODULE_DIR is not a directory: {native_dir}")
+    if native_dir not in __path__:
+        __path__.insert(0, native_dir)
+    _register_native_search_dir(native_dir)
+
+
 def _iter_dev_native_search_dirs():
     repo_root = os.path.abspath(os.path.join(lib_dir, "..", "..", ".."))
     build_root = os.path.join(repo_root, "out", "build")
@@ -202,6 +215,7 @@ def _preload_bundled_crt_dlls() -> None:
                 pass  # Best-effort; the import below will give a clear error.
 
 
+_register_native_module_override()
 _register_native_search_dir(lib_dir)
 _preload_bundled_crt_dlls()
 
@@ -215,6 +229,12 @@ except (ModuleNotFoundError, ImportError):
     except (ModuleNotFoundError, ImportError) as exc:
         _raise_native_import_error(exc)
 
+from ._Infernux import (
+    _SceneDocumentReadTicket,
+    _preflight_scene_resource_dependencies,
+    _schedule_scene_document_read,
+)
+
 # `import *` skips underscore-prefixed names.  Re-export internal C++
 # helpers so that `from Infernux import lib; lib._cds_register_class`
 # works for the Python-side CDS bridge and batch API.
@@ -224,11 +244,13 @@ try:
         _cds_register_field,
         _cds_alloc,
         _cds_free,
+        _cds_reserve,
+        _cds_capacity,
+        _cds_alive_count,
         _cds_get,
         _cds_set,
         _cds_batch_gather,
         _cds_batch_scatter,
-        _cds_clear,
         _transform_batch_read,
         _transform_batch_write,
     )
@@ -302,7 +324,7 @@ def _native_safe_default(obj, name: str):
         return _identity_quat()
     if name in {"local_to_world_matrix", "world_to_local_matrix"}:
         return _identity_matrix4x4()
-    if name in {"distance", "impulse"}:
+    if name == "distance":
         return 0.0
 
     if name.startswith("get_") and name.endswith("s"):
@@ -392,7 +414,13 @@ _native_game_object_get_component = GameObject.get_component
 _native_game_object_get_components = GameObject.get_components
 _native_game_object_get_component_in_children = GameObject.get_component_in_children
 _native_game_object_get_component_in_parent = GameObject.get_component_in_parent
-_native_game_object_instantiate = GameObject.instantiate
+def _native_game_object_instantiate(original, parent=None):
+    scene = original.scene
+    if scene is None:
+        raise RuntimeError("instantiate(): source GameObject is detached from a Scene")
+    from Infernux.engine.component_restore import clone_game_object_transactionally
+
+    return clone_game_object_transactionally(scene, original, parent)
 
 
 def _call_native_game_object(method_name: str, native_method, game_object, *args):

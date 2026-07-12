@@ -6,7 +6,7 @@
  *
  * Exposes the deferred-recording CommandBuffer API to Python, allowing
  * users to write custom render pipelines with full control over render
- * targets, global shader parameters, and async readback.
+ * targets and global shader parameters.
  */
 
 #include <function/renderer/CommandBuffer.h>
@@ -124,11 +124,6 @@ void RegisterCommandBufferBindings(py::module_ &m)
             },
             py::arg("name"), py::arg("data"),
             "Set a global 4x4 matrix shader parameter (list of 16 floats, column-major)")
-
-        // ---- Async Readback ----
-        .def("request_async_readback", &CommandBuffer::RequestAsyncReadback, py::arg("handle"), py::arg("callback_id"),
-             "Request an asynchronous GPU→CPU readback of a render target.\n"
-             "The result can be retrieved later via the callback ID.")
 
         // ---- Misc ----
         .def("clear", &CommandBuffer::Clear, "Discard all recorded commands (reuse the buffer)")

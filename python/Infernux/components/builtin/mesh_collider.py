@@ -1,16 +1,15 @@
 """
 MeshCollider — Python BuiltinComponent wrapper for C++ MeshCollider.
 
-Uses sibling ``MeshRenderer`` geometry when available. Static and kinematic
-bodies use triangle-mesh collision; dynamic rigidbodies automatically use a
-convex hull, matching common engine constraints.
+Requires sibling ``MeshRenderer`` geometry. Static and kinematic bodies may
+use triangle-mesh collision; switching to a dynamic Rigidbody sets the public
+``convex`` property before rebuilding the shape.
 """
 
 from __future__ import annotations
 
 from Infernux.components.builtin.collider import Collider
 from Infernux.components.builtin_component import CppProperty
-from Infernux.debug import Debug
 from Infernux.components.serialized_field import FieldType
 
 
@@ -23,7 +22,19 @@ class MeshCollider(Collider):
         "convex",
         FieldType.BOOL,
         default=False,
-        tooltip="Use convex hull collision. Dynamic rigidbodies force convex mode.",
+        tooltip="Use convex hull collision. Required for dynamic rigidbodies.",
+    )
+    shape_error = CppProperty(
+        "shape_error",
+        FieldType.STRING,
+        default="",
+        readonly=True,
+    )
+    is_cooking = CppProperty(
+        "is_cooking",
+        FieldType.BOOL,
+        default=False,
+        readonly=True,
     )
 
     # ------------------------------------------------------------------
@@ -34,21 +45,21 @@ class MeshCollider(Collider):
         from Infernux.engine.ui.inspector_components import render_builtin_via_setters
         from Infernux.engine.ui.inspector_utils import render_inspector_checkbox
 
-        go = getattr(self, 'game_object', None)
-        forced_convex = False
-        if go is not None:
-            rb = go.get_component('Rigidbody')
-            if rb is not None:
-                try:
-                    forced_convex = not rb.is_kinematic
-                except (RuntimeError, AttributeError) as _exc:
-                    Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                    pass
+        go = self.game_object
+        rb = go.get_component('Rigidbody')
+        forced_convex = rb is not None and not rb.is_kinematic
 
         if forced_convex:
-            render_builtin_via_setters(ctx, self, type(self), skip_fields={'convex'})
+            render_builtin_via_setters(ctx, self, type(self), skip_fields={'convex', 'shape_error', 'is_cooking'})
             ctx.begin_disabled(True)
-            render_inspector_checkbox(ctx, "Convex", True)
+            render_inspector_checkbox(ctx, "Convex", self.convex)
             ctx.end_disabled()
         else:
-            render_builtin_via_setters(ctx, self, type(self))
+            render_builtin_via_setters(ctx, self, type(self), skip_fields={'shape_error', 'is_cooking'})
+
+        shape_error = self.shape_error
+        if shape_error:
+            from Infernux.engine.ui.theme import ImGuiCol, Theme
+            ctx.push_style_color(ImGuiCol.Text, *Theme.ERROR_TEXT)
+            ctx.text_wrapped(shape_error)
+            ctx.pop_style_color(1)

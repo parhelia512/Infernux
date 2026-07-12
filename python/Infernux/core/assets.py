@@ -92,6 +92,10 @@ class AssetManager:
     # handles the reload synchronously, so all watcher events that arrive
     # within the window are redundant (Windows may fire >1 event per write).
     _meta_write_suppression: Dict[str, float] = {}
+    _watcher_echo_suppression: Dict[
+        tuple[str, str, str],
+        tuple[float, tuple[int, int] | None],
+    ] = {}
 
     @classmethod
     def initialize(cls, engine) -> None:
@@ -278,33 +282,83 @@ class AssetManager:
         if not ok:
             cls._meta_write_suppression.pop(normalized, None)
             return False
-        cls.reimport_asset(path)
-
-        # Invalidate GPU texture cache so materials pick up the new format
-        if asset_category == "texture":
-            cls._invalidate_texture_ui_cache(path)
-            cls._schedule_gpu_texture_reload(path)
-
-        # Reload mesh in AssetRegistry so the new import settings take effect
-        if asset_category == "mesh":
-            cls._reload_mesh_asset(path)
-
-        cls._emit_editor_asset_changed(path, "modified")
-
-        return True
+        if cls.reimport_asset(path):
+            return True
+        cls._meta_write_suppression.pop(normalized, None)
+        return False
 
     @classmethod
-    def reimport_asset(cls, path: str) -> bool:
-        """Reimport one asset through AssetDatabase."""
-        adb = cls._asset_database
-        if not adb or not hasattr(adb, "import_asset"):
+    def _mutation_database(cls, database=None):
+        result = database if database is not None else cls._asset_database
+        if result is None:
+            raise RuntimeError("AssetManager requires an initialized AssetDatabase")
+        return result
+
+    @classmethod
+    def import_asset(cls, path: str, *, database=None, suppress_watcher_echo: bool = True) -> str:
+        """Import one new asset and publish its editor-visible creation."""
+        asset_database = cls._mutation_database(database)
+        guid = asset_database.import_asset(path)
+        if not guid:
+            raise RuntimeError(f"AssetDatabase failed to import '{path}'")
+        if suppress_watcher_echo:
+            cls._suppress_watcher_echo("created", path)
+        cls._invalidate_project_panel_cache()
+        cls._emit_editor_asset_changed(path, "created")
+        return guid
+
+    @classmethod
+    def reimport_asset(cls, path: str, *, database=None, suppress_watcher_echo: bool = True) -> bool:
+        """Reload cached state, then reimport and publish dependency events."""
+        asset_database = cls._mutation_database(database)
+        guid = asset_database.get_guid_from_path(path)
+        if not guid:
             return False
-        try:
-            guid = adb.import_asset(path)
-            return bool(guid)
-        except (RuntimeError, OSError) as exc:
-            Debug.log_suppressed("AssetManager.reimport_asset", exc)
+
+        ext = os.path.splitext(path)[1].lower()
+        previous_shader_id = ""
+        if ext in SHADER_EXTENSIONS:
+            metadata = asset_database.get_meta_by_guid(guid)
+            if metadata is not None and metadata.has_key("shader_id"):
+                previous_shader_id = metadata.get_string("shader_id")
+        native = cls._native_engine()
+        has_shader_runtime = bool(
+            ext in SHADER_EXTENSIONS and native is not None and native.has_renderer
+        )
+
+        registry = cls._get_registry()
+        if (
+            not has_shader_runtime
+            and registry
+            and registry.is_loaded(guid)
+            and not registry.reload_asset(guid)
+        ):
             return False
+        if not asset_database.reimport_asset(path):
+            return False
+
+        if has_shader_runtime:
+            error = native.reload_shader_runtime(path, previous_shader_id)
+            if error:
+                Debug.log_error(error)
+                return False
+            try:
+                from Infernux.engine.ui import inspector_shader_utils
+                inspector_shader_utils.bump_shader_property_generation()
+            except ImportError:
+                pass
+
+        cls.invalidate(guid)
+        if ext in IMAGE_EXTENSIONS:
+            cls._invalidate_texture_ui_cache(path)
+            cls._schedule_gpu_texture_reload(path)
+        from Infernux.core.asset_types import MESH_EXTENSIONS
+        if ext in MESH_EXTENSIONS:
+            cls._reload_mesh_asset(path)
+        if suppress_watcher_echo:
+            cls._suppress_watcher_echo("modified", path)
+        cls._emit_editor_asset_changed(path, "modified")
+        return True
 
     @classmethod
     def _emit_editor_asset_changed(cls, path: str, event_type: str = "modified") -> None:
@@ -315,20 +369,68 @@ class AssetManager:
 
             bus = EditorEventBus.instance()
             bus.emit(EditorEvent.ASSET_CHANGED, path, event_type)
-        except Exception:
-            pass
+        except Exception as exc:
+            Debug.log_suppressed("AssetManager._emit_editor_asset_changed", exc)
 
     @classmethod
-    def move_asset(cls, old_path: str, new_path: str) -> bool:
-        """Move asset path in AssetDatabase while preserving mapping/GUID."""
-        adb = cls._asset_database
-        if not adb or not hasattr(adb, "move_asset"):
+    def move_asset(
+        cls,
+        old_path: str,
+        new_path: str,
+        *,
+        database=None,
+        suppress_watcher_echo: bool = True,
+    ) -> bool:
+        """Commit a GUID-stable move, then patch all loaded path-bearing state."""
+        asset_database = cls._mutation_database(database)
+        guid = asset_database.get_guid_from_path(old_path)
+        if not asset_database.move_asset(old_path, new_path):
             return False
-        try:
-            return bool(adb.move_asset(old_path, new_path))
-        except (RuntimeError, OSError) as exc:
-            Debug.log_suppressed("AssetManager.move_asset", exc)
+
+        registry = cls._get_registry()
+        if registry:
+            registry.update_loaded_asset_path(old_path, new_path)
+        if guid:
+            cls.invalidate(guid)
+        if os.path.splitext(old_path)[1].lower() in IMAGE_EXTENSIONS:
+            cls._invalidate_texture_ui_cache(old_path)
+        if suppress_watcher_echo:
+            cls._suppress_watcher_echo("moved", old_path, new_path)
+        cls._invalidate_project_panel_cache()
+        cls._emit_editor_asset_changed(new_path, "moved")
+        return True
+
+    @classmethod
+    def delete_asset(cls, path: str, *, database=None, suppress_watcher_echo: bool = True) -> bool:
+        """Evict loaded state before deleting the database record and metadata."""
+        from Infernux.core.asset_types import MATERIAL_EXTENSIONS
+
+        asset_database = cls._mutation_database(database)
+        guid = asset_database.get_guid_from_path(path)
+        registry = cls._get_registry()
+        if registry and guid:
+            registry.remove_asset(guid)
+        if guid:
+            cls.invalidate(guid)
+
+        ext = os.path.splitext(path)[1].lower()
+        if ext in MATERIAL_EXTENSIONS:
+            if guid:
+                cls._remove_material_pipeline(guid)
+            else:
+                cls._remove_material_pipeline_by_path(path)
+        if ext in IMAGE_EXTENSIONS:
+            cls._invalidate_texture_ui_cache(path)
+            cls._clear_deleted_texture_from_active_ui(path)
+            cls._schedule_gpu_texture_reload(path)
+
+        if not asset_database.delete_asset(path):
             return False
+        if suppress_watcher_echo:
+            cls._suppress_watcher_echo("deleted", path)
+        cls._invalidate_project_panel_cache()
+        cls._emit_editor_asset_changed(path, "deleted")
+        return True
 
     @classmethod
     def schedule_save(cls, key: str, save_fn: Callable[[], object], debounce_sec: float = _DEFAULT_DEBOUNCE_SEC):
@@ -683,7 +785,56 @@ class AssetManager:
         if not normalized:
             return False
         expiry = cls._meta_write_suppression.get(normalized)
-        return expiry is not None and time.monotonic() < expiry
+        if expiry is None:
+            return False
+        if time.monotonic() < expiry:
+            return True
+        cls._meta_write_suppression.pop(normalized, None)
+        return False
+
+    @classmethod
+    def _watcher_echo_key(cls, event_type: str, path: str, destination: str = ""):
+        return (
+            event_type,
+            cls._normalize_asset_path(path),
+            cls._normalize_asset_path(destination),
+        )
+
+    @classmethod
+    def _suppress_watcher_echo(cls, event_type: str, path: str, destination: str = "") -> None:
+        key = cls._watcher_echo_key(event_type, path, destination)
+        target = destination if event_type == "moved" else path
+        try:
+            stat = os.stat(target)
+            fingerprint = (stat.st_size, stat.st_mtime_ns)
+        except FileNotFoundError:
+            fingerprint = None
+        cls._watcher_echo_suppression[key] = (
+            time.monotonic() + _META_SUPPRESSION_TIMEOUT,
+            fingerprint,
+        )
+
+    @classmethod
+    def is_watcher_echo_suppressed(cls, event_type: str, path: str, destination: str = "") -> bool:
+        now = time.monotonic()
+        for key, (expiry, _fingerprint) in tuple(cls._watcher_echo_suppression.items()):
+            if expiry <= now:
+                cls._watcher_echo_suppression.pop(key, None)
+        key = cls._watcher_echo_key(event_type, path, destination)
+        suppression = cls._watcher_echo_suppression.get(key)
+        if suppression is None:
+            return False
+        _expiry, expected_fingerprint = suppression
+        target = destination if event_type == "moved" else path
+        try:
+            stat = os.stat(target)
+            current_fingerprint = (stat.st_size, stat.st_mtime_ns)
+        except FileNotFoundError:
+            current_fingerprint = None
+        if current_fingerprint == expected_fingerprint:
+            return True
+        cls._watcher_echo_suppression.pop(key, None)
+        return False
 
     @classmethod
     def _reload_mesh_asset(cls, path: str) -> None:
@@ -863,94 +1014,6 @@ class AssetManager:
                 )
 
         return changed
-
-    @classmethod
-    def on_asset_deleted(cls, path: str) -> None:
-        """Handle deletion — delegate to AssetRegistry, then Python-side cleanup."""
-        import os
-        from Infernux.core.asset_types import IMAGE_EXTENSIONS, MATERIAL_EXTENSIONS
-
-        # Resolve GUID before AssetRegistry clears the mapping
-        guid = cls._get_guid_from_path(path)
-
-        # Unified delegation — AssetRegistry evicts from C++ cache
-        registry = cls._get_registry()
-        if registry:
-            registry.on_asset_deleted(path)
-
-        # Invalidate Python-side weak-ref cache
-        cls.invalidate_path(path)
-
-        ext = os.path.splitext(path)[1].lower()
-
-        # GPU pipeline cleanup for deleted materials
-        if ext in MATERIAL_EXTENSIONS:
-            if guid:
-                cls._remove_material_pipeline(guid)
-            else:
-                cls._remove_material_pipeline_by_path(path)
-
-        # GPU texture cache cleanup
-        if ext in IMAGE_EXTENSIONS:
-            cls._invalidate_texture_ui_cache(path)
-            cls._clear_deleted_texture_from_active_ui(path)
-            cls._schedule_gpu_texture_reload(path)
-
-    @classmethod
-    def on_asset_moved(cls, old_path: str, new_path: str) -> None:
-        """Handle rename/move — delegate to AssetRegistry, then Python-side cleanup."""
-        import os
-        from Infernux.core.asset_types import IMAGE_EXTENSIONS
-
-        # Unified delegation — AssetRegistry updates GUID↔path mapping
-        registry = cls._get_registry()
-        if registry:
-            registry.on_asset_moved(old_path, new_path)
-
-        # Invalidate Python-side caches for old path
-        cls.invalidate_path(old_path)
-
-        # GPU texture cache needs explicit invalidation for old path
-        ext = os.path.splitext(old_path)[1].lower()
-        if ext in IMAGE_EXTENSIONS:
-            cls._invalidate_texture_ui_cache(old_path)
-
-    @classmethod
-    def on_asset_modified(cls, path: str) -> None:
-        """Handle file modification — delegate to AssetRegistry, then Python-side cleanup."""
-        import os
-        from Infernux.core.asset_types import IMAGE_EXTENSIONS
-        from Infernux.debug import Debug
-
-        # Check suppression (set by apply_import_settings to avoid echo reloads).
-        normalized = cls._normalize_asset_path(path)
-        expiry = cls._meta_write_suppression.get(normalized)
-        if expiry is not None:
-            if time.monotonic() < expiry:
-                Debug.log_internal(f"[AssetManager] suppressed watcher event for '{path}'")
-                return
-            cls._meta_write_suppression.pop(normalized, None)
-            Debug.log_internal(f"[AssetManager] suppression expired for '{path}', processing normally")
-
-        # Unified delegation: AssetRegistry handles reload for ALL cached asset types
-        registry = cls._get_registry()
-        if registry:
-            registry.on_asset_modified(path)
-
-        # Invalidate Python-side weak-ref cache
-        cls.invalidate_path(path)
-
-        # GPU texture cache requires explicit invalidation (not managed by AssetRegistry)
-        ext = os.path.splitext(path)[1].lower()
-        if ext in IMAGE_EXTENSIONS:
-            cls._invalidate_texture_ui_cache(path)
-            cls._schedule_gpu_texture_reload(path)
-
-        from Infernux.core.asset_types import MESH_EXTENSIONS
-        if ext in MESH_EXTENSIONS:
-            cls._reload_mesh_asset(path)
-
-        cls._emit_editor_asset_changed(path, "modified")
 
     @classmethod
     def invalidate_project_panel_cache(cls) -> None:

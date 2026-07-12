@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
 
@@ -407,9 +408,18 @@ void SceneRenderer::EmitDrawCallsForRenderable(DrawCallResult &result, const Ren
         return;
 
     if (renderer->HasMeshAsset()) {
-        auto meshPtr = renderer->GetMeshAssetRef().Get();
+        const auto &assetRef = renderer->GetMeshAssetRef();
+        auto &registry = AssetRegistry::Instance();
+        if (!registry.IsLoaded(assetRef.GetGuid()) ||
+            assetRef.GetCachedVersion() != registry.GetAssetVersion(assetRef.GetGuid()))
+            return;
+        auto meshPtr = assetRef.Get();
         if (!meshPtr)
             return;
+        const auto stampAssetIdentity = [&assetRef](DrawCall &drawCall) {
+            drawCall.meshAssetGuid = assetRef.GetGuid();
+            drawCall.meshRuntimeVersion = assetRef.GetCachedVersion();
+        };
         const std::vector<Vertex> *objVerticesPtr = &meshPtr->GetVertices();
         const std::vector<uint32_t> *objIndicesPtr = &meshPtr->GetIndices();
         const std::vector<SubMesh> *subMeshesPtr = &meshPtr->GetSubMeshes();
@@ -446,6 +456,7 @@ void SceneRenderer::EmitDrawCallsForRenderable(DrawCallResult &result, const Ren
             dc.worldBounds = renderable.worldBounds;
             dc.meshVertices = &objVertices;
             dc.meshIndices = &objIndices;
+            stampAssetIdentity(dc);
             dc.skinBoneMatricesOwner = skinBoneMatricesOwner;
             dc.skinBoneMatrices = skinBoneMatricesPtr;
             dc.forceBufferUpdate = bufferDirty;
@@ -469,6 +480,7 @@ void SceneRenderer::EmitDrawCallsForRenderable(DrawCallResult &result, const Ren
             dc.worldBounds = renderable.worldBounds;
             dc.meshVertices = &objVertices;
             dc.meshIndices = &objIndices;
+            stampAssetIdentity(dc);
             dc.skinBoneMatricesOwner = skinBoneMatricesOwner;
             dc.skinBoneMatrices = skinBoneMatricesPtr;
             dc.forceBufferUpdate = bufferDirty;
@@ -508,6 +520,7 @@ void SceneRenderer::EmitDrawCallsForRenderable(DrawCallResult &result, const Ren
                 dc.worldBounds = renderable.worldBounds;
                 dc.meshVertices = &objVertices;
                 dc.meshIndices = &objIndices;
+                stampAssetIdentity(dc);
                 dc.skinBoneMatricesOwner = skinBoneMatricesOwner;
                 dc.skinBoneMatrices = skinBoneMatricesPtr;
                 dc.forceBufferUpdate = firstDirty ? bufferDirty : false;

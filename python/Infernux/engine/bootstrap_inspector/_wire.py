@@ -461,25 +461,26 @@ def _wire_clipboard_and_context(ctx):
     SceneManager = ctx.SceneManager
 
     _comp_clipboard = {
-        "type_name": "", "is_native": True, "script_guid": "", "json": "",
+        "type_name": "", "is_native": True, "script_guid": "", "type_guid": "", "payload": None,
     }
 
     def _copy_to_clipboard(comp, type_name, is_native):
         _comp_clipboard["type_name"] = type_name
         _comp_clipboard["is_native"] = is_native
         _comp_clipboard["script_guid"] = getattr(comp, '_script_guid', '') or ''
+        _comp_clipboard["type_guid"] = comp.__class__._get_type_guid() if not is_native else ""
         try:
-            if is_native and hasattr(comp, "serialize"):
-                _comp_clipboard["json"] = comp.serialize()
+            if is_native and hasattr(comp, "serialize_document"):
+                _comp_clipboard["payload"] = comp.serialize_document()
             elif hasattr(comp, "_serialize_fields"):
-                _comp_clipboard["json"] = comp._serialize_fields()
+                _comp_clipboard["payload"] = comp._serialize_fields()
             else:
-                _comp_clipboard["json"] = ""
+                _comp_clipboard["payload"] = None
         except Exception:
-            _comp_clipboard["json"] = ""
+            _comp_clipboard["payload"] = None
 
     def _has_clip():
-        return bool(_comp_clipboard["type_name"] and _comp_clipboard["json"])
+        return bool(_comp_clipboard["type_name"] and _comp_clipboard["payload"] is not None)
 
     def _can_paste_values(comp, type_name, is_native):
         if not _has_clip():
@@ -490,13 +491,15 @@ def _wire_clipboard_and_context(ctx):
     def _paste_as_new(obj):
         tn = _comp_clipboard["type_name"]
         native = _comp_clipboard["is_native"]
-        json_data = _comp_clipboard["json"]
+        payload = _comp_clipboard["payload"]
         guid = _comp_clipboard["script_guid"]
+        type_guid = _comp_clipboard["type_guid"]
         if native:
             result = obj.add_component(tn)
-            if result and json_data and hasattr(result, "deserialize"):
+            if result and payload is not None and hasattr(result, "deserialize_document"):
                 try:
-                    result.deserialize(json_data)
+                    if not result.deserialize_document(payload):
+                        raise RuntimeError(f"Failed to paste native component '{tn}'")
                 except Exception as _exc:
                     Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
         else:
@@ -505,15 +508,15 @@ def _wire_clipboard_and_context(ctx):
             sfm = SceneFileManager.instance()
             asset_db = sfm._asset_database if sfm else None
             instance, _sp = create_component_instance(
-                guid, tn, asset_database=asset_db)
+                guid, type_guid, tn, asset_database=asset_db)
             if instance is None:
                 Debug.log_warning(f"Cannot paste: failed to create '{tn}'")
                 return
-            if json_data:
+            if payload:
                 try:
-                    instance._deserialize_fields(json_data, _skip_on_after_deserialize=True)
+                    instance._deserialize_fields(payload, _skip_on_after_deserialize=True)
                 except TypeError:
-                    instance._deserialize_fields(json_data)
+                    instance._deserialize_fields(payload)
                 except Exception as _exc:
                     Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
             if guid:
@@ -525,19 +528,20 @@ def _wire_clipboard_and_context(ctx):
         _invalidate()
 
     def _paste_values(comp, is_native):
-        json_data = _comp_clipboard["json"]
-        if not json_data:
+        payload = _comp_clipboard["payload"]
+        if payload is None:
             return
-        if is_native and hasattr(comp, "deserialize"):
+        if is_native and hasattr(comp, "deserialize_document"):
             try:
-                comp.deserialize(json_data)
+                if not comp.deserialize_document(payload):
+                    raise RuntimeError("Failed to paste native component values")
             except Exception as _exc:
                 Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
         elif hasattr(comp, "_deserialize_fields"):
             try:
-                comp._deserialize_fields(json_data, _skip_on_after_deserialize=True)
+                comp._deserialize_fields(payload, _skip_on_after_deserialize=True)
             except TypeError:
-                comp._deserialize_fields(json_data)
+                comp._deserialize_fields(payload)
             except Exception as _exc:
                 Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
         _bump()

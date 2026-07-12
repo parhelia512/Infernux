@@ -12,7 +12,6 @@ Identification strategy:
   this iteration of the override system.
 """
 
-import json
 import os
 from typing import Dict, List, Optional
 
@@ -38,7 +37,7 @@ class Override:
 # ─── Core diff ────────────────────────────────────────────────────────────
 
 _SKIP_KEYS = frozenset({
-    "id", "schema_version", "children", "components", "py_components",
+    "id", "local_id", "schema_version", "children", "components", "py_components",
     "transform", "prefab_guid", "prefab_root",
 })
 
@@ -71,29 +70,19 @@ def apply_overrides_to_prefab(instance_obj, prefab_path: str,
     Resets the instance to non-overridden state (the prefab file now
     matches the instance).
     """
-    instance_data = _serialize_obj(instance_obj)
-    if instance_data is None:
-        Debug.log_error("Failed to serialize instance for apply.")
-        return False
-
-    # Strip prefab linkage fields from what we write to disk
-    from Infernux.engine.prefab_manager import _strip_prefab_fields
-    _strip_prefab_fields(instance_data)
-
     try:
-        with open(prefab_path, "r", encoding="utf-8") as f:
-            prefab_file = json.load(f)
-    except (OSError, json.JSONDecodeError) as exc:
+        from Infernux.engine.prefab_manager import _read_prefab_document, save_prefab
+        prefab_file = _read_prefab_document(prefab_path)
+    except (OSError, ValueError) as exc:
         Debug.log_error(f"Failed to read prefab for apply: {exc}")
         return False
 
-    prefab_file["root_object"] = instance_data
-
-    try:
-        with open(prefab_path, "w", encoding="utf-8") as f:
-            json.dump(prefab_file, f, indent=2, ensure_ascii=False)
-    except OSError as exc:
-        Debug.log_error(f"Failed to write prefab: {exc}")
+    if not save_prefab(
+        instance_obj,
+        prefab_path,
+        asset_database=asset_database,
+        source_canvas_name=prefab_file.get("source_canvas_name", ""),
+    ):
         return False
 
     Debug.log_internal(f"Applied overrides to prefab: {os.path.basename(prefab_path)}")
@@ -114,8 +103,7 @@ def revert_overrides(instance_obj, prefab_path: str,
 
     # Keep current instance transform (user may have moved the object)
     try:
-        current_json = json.loads(instance_obj.serialize())
-        current_transform = current_json.get("transform")
+        current_transform = instance_obj.serialize_document().get("transform")
     except Exception:
         current_transform = None
 
@@ -132,7 +120,15 @@ def revert_overrides(instance_obj, prefab_path: str,
         prefab_data["transform"] = current_transform
 
     try:
-        instance_obj.deserialize(json.dumps(prefab_data))
+        from Infernux.engine.component_restore import deserialize_game_object_document_transactionally
+        if not deserialize_game_object_document_transactionally(
+            instance_obj,
+            prefab_data,
+            asset_database,
+            preserve_document_ids=False,
+        ):
+            Debug.log_error("Failed to apply prefab document during revert.")
+            return False
     except Exception as exc:
         Debug.log_error(f"Failed to deserialize during revert: {exc}")
         return False
@@ -148,10 +144,9 @@ def _load_prefab_root(prefab_path: str) -> Optional[dict]:
     if not prefab_path or not os.path.isfile(prefab_path):
         return None
     try:
-        with open(prefab_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data.get("root_object")
-    except (OSError, json.JSONDecodeError) as _exc:
+        from Infernux.engine.prefab_manager import _read_prefab_document
+        return _read_prefab_document(prefab_path)["root_object"]
+    except (OSError, ValueError) as _exc:
         Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
         return None
 
@@ -159,7 +154,7 @@ def _load_prefab_root(prefab_path: str) -> Optional[dict]:
 def _serialize_obj(obj) -> Optional[dict]:
     """Serialize a live GameObject to a dict."""
     try:
-        return json.loads(obj.serialize())
+        return obj.serialize_document()
     except Exception as _exc:
         Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
         return None

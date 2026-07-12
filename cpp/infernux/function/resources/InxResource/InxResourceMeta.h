@@ -3,6 +3,7 @@
 #include <core/types/InxFwdType.h>
 
 #include <any>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <unordered_map>
 
@@ -15,6 +16,8 @@ namespace infernux
 class InxResourceMeta
 {
   public:
+    static constexpr int ImporterVersion = 2;
+
     // Type definitions
     using MetadataType = std::pair<std::string, std::any>;
     using MetadataMap = std::unordered_map<std::string, MetadataType>;
@@ -55,6 +58,8 @@ class InxResourceMeta
     void UpdateFilePath(const std::string &newFilePath);
 
     // Serialization methods (JSON only)
+    [[nodiscard]] nlohmann::json SerializeDocument() const;
+    void DeserializeDocument(const nlohmann::json &document);
     bool SaveToFile(const std::string &metaFilePath) const;
     bool LoadFromFile(const std::string &metaFilePath);
 

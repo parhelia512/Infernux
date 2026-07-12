@@ -13,7 +13,6 @@ import os
 import pathlib
 from typing import Optional
 
-from Infernux.lib import TagLayerManager
 import Infernux.resources as _resources
 from Infernux.debug import Debug
 from Infernux.engine.engine import Engine, LogLevel
@@ -21,7 +20,6 @@ from Infernux.engine.resources_manager import ResourcesManager
 from Infernux.engine.play_mode import PlayModeManager, PlayModeState
 from Infernux.engine.scene_manager import SceneFileManager
 from Infernux.engine.ui import (
-    FrameSchedulerPanel,
     SceneViewPanel,
     GameViewPanel,
     WindowManager,
@@ -40,7 +38,7 @@ from Infernux.engine.ui import panel_state as _panel_state
 _log = logging.getLogger("Infernux.bootstrap")
 
 _LAYOUT_VERSION = 5
-_TOTAL_STEPS = 13
+_TOTAL_STEPS = 12
 
 
 def _signal_progress(current_step: int, total: int, message: str) -> None:
@@ -80,7 +78,6 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
         self.event_bus: Optional[EditorEventBus] = None
 
         # Panels
-        self.frame_scheduler = None
         self.menu_bar = None
         self.toolbar = None
         self.hierarchy = None
@@ -113,9 +110,6 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
 
         self._report_progress("Initializing renderer\u2026")
         self._init_engine()
-
-        self._report_progress("Loading tag/layer settings\u2026")
-        self._load_tag_layer_settings()
 
         self._report_progress("Creating managers\u2026")
         self._create_managers()
@@ -182,11 +176,6 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             width=1600, height=900, project_path=self.project_path
         )
         self.engine.set_gui_font(_resources.engine_font_path, 15)
-
-    def _load_tag_layer_settings(self):
-        path = os.path.join(self.project_path, "ProjectSettings", "TagLayerSettings.json")
-        if os.path.isfile(path):
-            TagLayerManager.instance().load_from_file(path)
 
     def _prewarm_material_previews(self):
         """Prewarm material preview textures once at startup.
@@ -255,16 +244,6 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
                 continue
 
         Debug.log_internal(f"Material preview prewarm: {warmed}/{len(material_paths)}")
-
-        # Synchronously flush the entire request queue now, before the main
-        # loop starts.  PumpPreviewTasks() is frame-budgeted (2/frame), so
-        # without this flush N materials would take ~⌈N/2⌉ frames to appear.
-        if hasattr(native, "flush_all_material_previews"):
-            try:
-                native.flush_all_material_previews()
-                Debug.log_internal("Material preview prewarm: flush complete")
-            except Exception as exc:
-                Debug.log_suppressed("EditorBootstrap.material_preview_prewarm.flush_all", exc)
 
     def _create_managers(self):
         from Infernux.engine.undo import UndoManager

@@ -2,10 +2,12 @@
 #include "AudioEngine.h"
 #include <core/log/InxLog.h>
 #include <function/resources/AssetRegistry/AssetRegistry.h>
+#include <function/scene/ComponentDocumentValidation.h>
 #include <function/scene/ComponentFactory.h>
 #include <function/scene/GameObject.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <nlohmann/json.hpp>
 
@@ -15,7 +17,7 @@ namespace infernux
 {
 
 // Register AudioSource with ComponentFactory so it can be created by type name
-INFERNUX_REGISTER_COMPONENT("AudioSource", AudioSource)
+INFERNUX_REGISTER_VALIDATED_COMPONENT("AudioSource", AudioSource)
 
 AudioSource::AudioSource()
 {
@@ -125,9 +127,9 @@ void AudioSource::Update(float /*deltaTime*/)
 // Serialization
 // ============================================================================
 
-std::string AudioSource::Serialize() const
+nlohmann::json AudioSource::SerializeDocument() const
 {
-    json j = json::parse(Component::Serialize());
+    json j = Component::SerializeDocument();
     j["volume"] = m_volume;
     j["pitch"] = m_pitch;
     j["loop"] = m_loop;
@@ -151,62 +153,93 @@ std::string AudioSource::Serialize() const
     }
     j["tracks"] = tracksJson;
 
-    return j.dump(2);
+    return j;
 }
 
-bool AudioSource::Deserialize(const std::string &jsonStr)
+void AudioSource::ValidateSerializedDocument(const nlohmann::json &j)
 {
-    if (!Component::Deserialize(jsonStr)) {
-        return false;
-    }
+    using namespace component_document_validation;
+    ValidateComponentDocument(j, "AudioSource", 1,
+                              {"volume", "pitch", "loop", "play_on_awake", "mute", "min_distance", "max_distance",
+                               "one_shot_pool_size", "output_bus", "track_count", "tracks"});
+    const float volume = RequireFiniteFloat(j, "volume", "AudioSource");
+    const float pitch = RequireFiniteFloat(j, "pitch", "AudioSource");
+    RequireBoolean(j, "loop", "AudioSource");
+    RequireBoolean(j, "play_on_awake", "AudioSource");
+    RequireBoolean(j, "mute", "AudioSource");
+    const float minDistance = RequireFiniteFloat(j, "min_distance", "AudioSource");
+    const float maxDistance = RequireFiniteFloat(j, "max_distance", "AudioSource");
+    const int poolSize = RequireInteger(j, "one_shot_pool_size", "AudioSource");
+    RequireString(j, "output_bus", "AudioSource");
+    const int trackCount = RequireInteger(j, "track_count", "AudioSource");
+    const auto &tracks = j["tracks"];
+    if (!tracks.is_array() || trackCount < 1 || tracks.size() != static_cast<size_t>(trackCount))
+        throw std::invalid_argument("AudioSource.tracks must match positive track_count");
+    if (volume < 0.0f || volume > 1.0f || pitch < 0.1f || pitch > 3.0f)
+        throw std::invalid_argument("AudioSource volume or pitch is out of range");
+    if (minDistance <= 0.0f || maxDistance < minDistance || poolSize < 1)
+        throw std::invalid_argument("AudioSource distance or pool settings are invalid");
 
+    for (size_t index = 0; index < tracks.size(); ++index) {
+        const auto &track = tracks[index];
+        if (!track.is_object())
+            throw std::invalid_argument("AudioSource.tracks[" + std::to_string(index) + "] must be an object");
+        for (const auto &[key, value] : track.items()) {
+            (void)value;
+            if (key != "volume" && key != "clip_guid")
+                throw std::invalid_argument("AudioSource.tracks[" + std::to_string(index) +
+                                            "] contains unknown field '" + key + "'");
+        }
+        if (!track.contains("volume") || !track["volume"].is_number())
+            throw std::invalid_argument("AudioSource track volume is required and must be numeric");
+        const double trackVolume = track["volume"].get<double>();
+        if (!std::isfinite(trackVolume) || trackVolume < 0.0 || trackVolume > 1.0)
+            throw std::invalid_argument("AudioSource track volume is out of range");
+        if (track.contains("clip_guid")) {
+            if (!track["clip_guid"].is_string() || track["clip_guid"].get_ref<const std::string &>().empty())
+                throw std::invalid_argument("AudioSource track clip_guid must be a non-empty string");
+        }
+    }
+}
+
+bool AudioSource::DeserializeDocument(const nlohmann::json &j)
+{
     try {
-        json j = json::parse(jsonStr);
-        if (j.contains("volume"))
-            m_volume = j["volume"].get<float>();
-        if (j.contains("pitch"))
-            m_pitch = j["pitch"].get<float>();
-        if (j.contains("loop"))
-            m_loop = j["loop"].get<bool>();
-        if (j.contains("play_on_awake"))
-            m_playOnAwake = j["play_on_awake"].get<bool>();
-        if (j.contains("mute"))
-            m_mute = j["mute"].get<bool>();
-        if (j.contains("min_distance"))
-            m_minDistance = j["min_distance"].get<float>();
-        if (j.contains("max_distance"))
-            m_maxDistance = j["max_distance"].get<float>();
-        if (j.contains("one_shot_pool_size"))
-            m_oneShotPoolSize = j["one_shot_pool_size"].get<int>();
-        if (j.contains("output_bus"))
-            m_outputBus = j["output_bus"].get<std::string>();
+        ValidateSerializedDocument(j);
+
+        auto &registry = AssetRegistry::Instance();
+        const auto &tracksJson = j["tracks"];
+        std::vector<std::shared_ptr<AudioClip>> stagedClips(tracksJson.size());
+        for (size_t index = 0; index < tracksJson.size(); ++index) {
+            if (!tracksJson[index].contains("clip_guid"))
+                continue;
+            const std::string guid = tracksJson[index]["clip_guid"].get<std::string>();
+            stagedClips[index] = registry.LoadAsset<AudioClip>(guid, ResourceType::Audio);
+            if (!stagedClips[index])
+                throw std::invalid_argument("audio clip GUID cannot be resolved: " + guid);
+        }
+
+        if (!Component::DeserializeDocument(j))
+            return false;
+
+        m_volume = j["volume"].get<float>();
+        m_pitch = j["pitch"].get<float>();
+        m_loop = j["loop"].get<bool>();
+        m_playOnAwake = j["play_on_awake"].get<bool>();
+        m_mute = j["mute"].get<bool>();
+        m_minDistance = j["min_distance"].get<float>();
+        m_maxDistance = j["max_distance"].get<float>();
+        m_oneShotPoolSize = j["one_shot_pool_size"].get<int>();
+        m_outputBus = j["output_bus"].get<std::string>();
 
         // Deserialize tracks
-        if (j.contains("tracks") && j["tracks"].is_array()) {
-            int trackCount = j.contains("track_count") ? j["track_count"].get<int>() : 1;
-            SetTrackCount(trackCount);
+        const int trackCount = j["track_count"].get<int>();
+        SetTrackCount(trackCount);
 
-            auto &registry = AssetRegistry::Instance();
-            const auto &tracksJson = j["tracks"];
-            for (int i = 0; i < std::min(static_cast<int>(tracksJson.size()), trackCount); ++i) {
-                const auto &tj = tracksJson[i];
-                if (tj.contains("volume"))
-                    m_tracks[i].volume = tj["volume"].get<float>();
-                m_tracks[i].clip.reset();
-
-                if (tj.contains("clip_guid")) {
-                    const std::string clipGuid = tj["clip_guid"].get<std::string>();
-                    if (!clipGuid.empty() && registry.IsInitialized()) {
-                        auto clip = registry.LoadAsset<AudioClip>(clipGuid, ResourceType::Audio);
-                        if (clip) {
-                            m_tracks[i].clip = std::move(clip);
-                        } else {
-                            INXLOG_WARN("AudioSource::Deserialize: failed to load clip GUID for track ", i, ": ",
-                                        clipGuid);
-                        }
-                    }
-                }
-            }
+        for (int i = 0; i < trackCount; ++i) {
+            const auto &tj = tracksJson[i];
+            m_tracks[i].volume = tj["volume"].get<float>();
+            m_tracks[i].clip = std::move(stagedClips[i]);
         }
 
         SetVolume(m_volume);

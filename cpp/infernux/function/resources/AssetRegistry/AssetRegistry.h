@@ -1,15 +1,19 @@
 #pragma once
 
+#include <core/threading/JobSystem.h>
 #include <core/types/InxFwdType.h>
 #include <function/resources/AssetDatabase/AssetDatabase.h>
 #include <function/resources/AssetRef.h>
 #include <function/resources/AssetRegistry/IAssetLoader.h>
 
+#include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <set>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -19,6 +23,67 @@ namespace infernux
 // Forward declarations — avoid pulling in heavy headers
 class InxMaterial;
 class InxTexture;
+class AssetRegistry;
+
+struct AssetResidencyRecord
+{
+    std::string guid;
+    ResourceType type = ResourceType::DefaultBinary;
+    std::string runtimeTypeName;
+    uint64_t runtimeVersion = 0;
+    size_t cpuBytes = 0;
+    uint64_t lastAccessSerial = 0;
+    uint32_t explicitPinCount = 0;
+    size_t externalReferenceCount = 0;
+    bool evictable = false;
+};
+
+struct PublishedAssetVersion
+{
+    std::string guid;
+    ResourceType type = ResourceType::DefaultBinary;
+    uint64_t runtimeVersion = 0;
+};
+
+class AssetLoadTicket final
+{
+  public:
+    [[nodiscard]] const std::string &GetGuid() const noexcept
+    {
+        return m_guid;
+    }
+    [[nodiscard]] ResourceType GetResourceType() const noexcept
+    {
+        return m_resourceType;
+    }
+    [[nodiscard]] bool IsComplete() const noexcept
+    {
+        return !m_job.IsValid() || m_job.IsComplete();
+    }
+    [[nodiscard]] bool IsCommitted() const noexcept
+    {
+        return m_committed;
+    }
+    [[nodiscard]] bool WasProducedOnWorker() const noexcept
+    {
+        return IsComplete() && m_producerThread != std::thread::id{} && m_producerThread != m_ownerThread;
+    }
+
+  private:
+    friend class AssetRegistry;
+    AssetRegistry *m_registry = nullptr;
+    std::string m_guid;
+    std::string m_sourcePath;
+    ResourceType m_resourceType = ResourceType::DefaultBinary;
+    RuntimeAssetPayload m_payload;
+    JobHandle m_job;
+    std::exception_ptr m_failure;
+    std::thread::id m_ownerThread;
+    std::thread::id m_producerThread;
+    uint64_t m_expectedMutationGeneration = 0;
+    bool m_committed = false;
+    bool m_rejected = false;
+};
 
 // =============================================================================
 // AssetRegistry — the single source of truth for loaded asset instances
@@ -102,11 +167,12 @@ class AssetRegistry
     /// Fully remove the record (e.g. when the file is deleted).
     void RemoveAsset(const std::string &guid);
 
-    // ── File-event hooks (called from Python file watcher / AssetDatabase) ───
+    [[nodiscard]] std::shared_ptr<AssetLoadTicket> BeginLoadAsset(const std::string &guid, ResourceType type);
+    bool TryCommitAssetLoad(const std::shared_ptr<AssetLoadTicket> &ticket);
+    void DrainPendingLoads() noexcept;
 
-    void OnAssetModified(const std::string &path);
-    void OnAssetMoved(const std::string &oldPath, const std::string &newPath);
-    void OnAssetDeleted(const std::string &path);
+    /// Patch path-bearing state after AssetDatabase has committed a GUID-stable move.
+    void UpdateLoadedAssetPath(const std::string &oldPath, const std::string &newPath);
 
     // ── Built-in material helpers (named, no GUID) ───────────────────────────
 
@@ -125,10 +191,28 @@ class AssetRegistry
 
     [[nodiscard]] bool IsLoaded(const std::string &guid) const;
     [[nodiscard]] ResourceType GetAssetType(const std::string &guid) const;
+    [[nodiscard]] uint64_t GetAssetVersion(const std::string &guid) const;
+    [[nodiscard]] std::string GetAssetRuntimeTypeName(const std::string &guid) const;
     [[nodiscard]] std::vector<std::string> GetAllLoadedGuids() const;
-
-    /// Collect all loaded assets of a given ResourceType.
-    [[nodiscard]] std::vector<std::shared_ptr<void>> GetAllAssetsOfType(ResourceType type) const;
+    [[nodiscard]] AssetResidencyRecord GetAssetResidency(const std::string &guid) const;
+    [[nodiscard]] std::vector<AssetResidencyRecord> GetAllAssetResidency() const;
+    [[nodiscard]] std::vector<PublishedAssetVersion> GetAllPublishedAssetVersions() const;
+    [[nodiscard]] size_t GetTotalCpuBytes() const noexcept
+    {
+        return m_totalCpuBytes;
+    }
+    [[nodiscard]] size_t GetCpuBudgetBytes() const noexcept
+    {
+        return m_cpuBudgetBytes;
+    }
+    [[nodiscard]] uint64_t GetCpuEvictionCount() const noexcept
+    {
+        return m_cpuEvictionCount;
+    }
+    void SetCpuBudgetBytes(size_t bytes);
+    [[nodiscard]] size_t TrimCpuBudget();
+    void PinAsset(const std::string &guid);
+    void UnpinAsset(const std::string &guid);
 
     /// Return all known materials — builtin + loaded from disk.
     [[nodiscard]] std::vector<std::shared_ptr<InxMaterial>> GetAllMaterials() const;
@@ -145,19 +229,36 @@ class AssetRegistry
     ~AssetRegistry() = default;
 
     /// Internal load helper — assumes GUID / path are valid.
-    std::shared_ptr<void> LoadAssetInternal(const std::string &filePath, const std::string &guid, ResourceType type);
+    RuntimeAssetPayload LoadAssetInternal(const std::string &filePath, const std::string &guid, ResourceType type);
+    [[nodiscard]] size_t EstimatePayloadBytes(ResourceType type, const RuntimeAssetPayload &payload) const;
 
     struct AssetEntry
     {
-        std::shared_ptr<void> instance;
+        RuntimeAssetPayload payload;
         ResourceType type = ResourceType::DefaultBinary;
+        uint64_t version = 1;
+        size_t cpuBytes = 0;
+        mutable uint64_t lastAccessSerial = 0;
+        uint32_t explicitPinCount = 0;
     };
+    using AssetEntryMap = std::unordered_map<std::string, AssetEntry>;
+    void RemoveEntry(AssetEntryMap::iterator entry);
+    [[nodiscard]] uint64_t NextRuntimeVersion(const std::string &guid);
 
     bool m_initialized = false;
+    std::thread::id m_ownerThread;
     std::unique_ptr<AssetDatabase> m_assetDb;
-    std::unordered_map<std::string, AssetEntry> m_loadedAssets;                       // GUID → live instance
+    AssetEntryMap m_loadedAssets; // GUID → live instance
+    std::unordered_map<std::string, uint64_t> m_assetMutationGenerations;
+    std::unordered_map<std::string, uint64_t> m_assetRuntimeVersions;
+    std::unordered_map<std::string, ResourceType> m_assetRuntimeTypes;
+    std::vector<std::weak_ptr<AssetLoadTicket>> m_pendingLoads;
     std::unordered_map<ResourceType, std::unique_ptr<IAssetLoader>> m_loaders;        // type → loader
     std::unordered_map<std::string, std::shared_ptr<InxMaterial>> m_builtinMaterials; // name → builtin mat
+    mutable uint64_t m_accessSerial = 0;
+    size_t m_totalCpuBytes = 0;
+    size_t m_cpuBudgetBytes = 512ULL * 1024ULL * 1024ULL;
+    uint64_t m_cpuEvictionCount = 0;
 };
 
 // =============================================================================
@@ -167,16 +268,23 @@ class AssetRegistry
 template <typename T> std::shared_ptr<T> AssetRegistry::GetAsset(const std::string &guid) const
 {
     auto it = m_loadedAssets.find(guid);
-    if (it != m_loadedAssets.end())
-        return std::static_pointer_cast<T>(it->second.instance);
+    if (it != m_loadedAssets.end()) {
+        it->second.lastAccessSerial = ++m_accessSerial;
+        return it->second.payload.Get<T>();
+    }
     return nullptr;
 }
 
 template <typename T> std::shared_ptr<T> AssetRegistry::LoadAsset(const std::string &guid, ResourceType type)
 {
-    // 1. Cache hit
-    if (auto cached = GetAsset<T>(guid))
-        return cached;
+    // 1. Cache hit with strict resource and C++ type validation.
+    const auto cached = m_loadedAssets.find(guid);
+    if (cached != m_loadedAssets.end()) {
+        if (cached->second.type != type)
+            throw std::invalid_argument("AssetRegistry resource type mismatch for GUID: " + guid);
+        cached->second.lastAccessSerial = ++m_accessSerial;
+        return cached->second.payload.Get<T>();
+    }
 
     // 2. GUID → path via AssetDatabase
     if (!m_assetDb)
@@ -186,8 +294,8 @@ template <typename T> std::shared_ptr<T> AssetRegistry::LoadAsset(const std::str
         return nullptr;
 
     // 3. Delegate to loader
-    auto inst = LoadAssetInternal(path, guid, type);
-    return inst ? std::static_pointer_cast<T>(inst) : nullptr;
+    auto payload = LoadAssetInternal(path, guid, type);
+    return payload ? payload.Get<T>() : nullptr;
 }
 
 template <typename T> std::shared_ptr<T> AssetRegistry::LoadAssetByPath(const std::string &path, ResourceType type)
@@ -198,25 +306,31 @@ template <typename T> std::shared_ptr<T> AssetRegistry::LoadAssetByPath(const st
     if (guid.empty())
         return nullptr;
 
-    // Cache hit
-    if (auto cached = GetAsset<T>(guid))
-        return cached;
+    const auto cached = m_loadedAssets.find(guid);
+    if (cached != m_loadedAssets.end()) {
+        if (cached->second.type != type)
+            throw std::invalid_argument("AssetRegistry resource type mismatch for GUID: " + guid);
+        cached->second.lastAccessSerial = ++m_accessSerial;
+        return cached->second.payload.Get<T>();
+    }
 
-    auto inst = LoadAssetInternal(path, guid, type);
-    return inst ? std::static_pointer_cast<T>(inst) : nullptr;
+    auto payload = LoadAssetInternal(path, guid, type);
+    return payload ? payload.Get<T>() : nullptr;
 }
 
 template <typename T> bool AssetRegistry::Resolve(AssetRef<T> &ref, ResourceType type)
 {
     if (!ref.HasGuid())
         return false;
-    if (ref.Get())
-        return true; // already resolved
+    const uint64_t loadedVersion = GetAssetVersion(ref.GetGuid());
+    if (ref.Get() && IsLoaded(ref.GetGuid()) && ref.GetCachedVersion() == loadedVersion)
+        return true;
     auto asset = LoadAsset<T>(ref.GetGuid(), type);
     if (asset) {
-        ref.SetCached(std::move(asset));
+        ref.SetCached(std::move(asset), GetAssetVersion(ref.GetGuid()));
         return true;
     }
+    ref.Invalidate();
     return false;
 }
 

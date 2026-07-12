@@ -22,7 +22,6 @@ from Infernux.engine.resources_manager import ResourcesManager
 from Infernux.engine.play_mode import PlayModeManager, PlayModeState
 from Infernux.engine.scene_manager import SceneFileManager
 from Infernux.engine.ui import (
-    FrameSchedulerPanel,
     SceneViewPanel,
     GameViewPanel,
     WindowManager,

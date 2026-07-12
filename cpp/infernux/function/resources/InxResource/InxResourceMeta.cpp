@@ -2,6 +2,7 @@
 
 #include <core/log/InxLog.h>
 #include <nlohmann/json.hpp>
+#include <platform/filesystem/DocumentStore.h>
 #include <platform/filesystem/InxPath.h>
 
 #include <chrono>
@@ -10,6 +11,7 @@
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <limits>
 #include <random>
 #include <sstream>
 
@@ -65,8 +67,7 @@ void InxResourceMeta::Init(const char *content, size_t contentSize, const std::s
 
     AddMetadata("guid", guid);
 
-    // Add importer version for future migration support
-    AddMetadata("importer_version", 1);
+    AddMetadata("importer_version", ImporterVersion);
 
     // Get file modification time
     std::string modTimeStr;
@@ -171,69 +172,111 @@ std::string InxResourceMeta::GetMetaFilePath(const std::string &resourceFilePath
     return resourceFilePath + ".meta";
 }
 
+nlohmann::json InxResourceMeta::SerializeDocument() const
+{
+    nlohmann::json root;
+    root["meta_version"] = 2;
+
+    nlohmann::json entries = nlohmann::json::object();
+    for (const auto &[key, metaPair] : m_metadata) {
+        const std::string &typeName = metaPair.first;
+        const std::any &value = metaPair.second;
+
+        nlohmann::json entry;
+        entry["type"] = typeName;
+
+        if (typeName == "string") {
+            entry["value"] = std::any_cast<std::string>(value);
+        } else if (typeName == "int") {
+            entry["value"] = std::any_cast<int>(value);
+        } else if (typeName == "bool") {
+            entry["value"] = std::any_cast<bool>(value);
+        } else if (typeName == "size_t") {
+            entry["value"] = std::any_cast<size_t>(value);
+        } else if (typeName == "float") {
+            const float number = std::any_cast<float>(value);
+            if (!std::isfinite(number))
+                throw std::invalid_argument("metadata float must be finite: " + key);
+            entry["value"] = number;
+        } else if (typeName == "enum infernux::ResourceType") {
+            entry["value"] = InxTypeRegistry::GetInstance().ToString(typeName, value);
+        } else if (typeName == "json_array" || typeName == "json_object") {
+            entry["value"] = nlohmann::json::parse(std::any_cast<std::string>(value));
+        } else {
+            throw std::invalid_argument("unsupported metadata type for '" + key + "': " + typeName);
+        }
+        entries[key] = std::move(entry);
+    }
+    root["metadata"] = std::move(entries);
+    return root;
+}
+
+void InxResourceMeta::DeserializeDocument(const nlohmann::json &document)
+{
+    if (!document.is_object() || document.size() != 2 || !document.contains("meta_version") ||
+        !document.contains("metadata"))
+        throw std::invalid_argument("metadata document must contain exactly meta_version and metadata");
+    if (!document["meta_version"].is_number_integer() || document["meta_version"].get<int>() != 2)
+        throw std::invalid_argument("metadata document requires meta_version 2");
+    if (!document["metadata"].is_object())
+        throw std::invalid_argument("metadata must be an object");
+
+    InxResourceMeta staged;
+    for (const auto &[key, entry] : document["metadata"].items()) {
+        if (key.empty() || !entry.is_object() || entry.size() != 2 || !entry.contains("type") ||
+            !entry.contains("value") || !entry["type"].is_string())
+            throw std::invalid_argument("invalid metadata entry: " + key);
+
+        const std::string typeName = entry["type"].get<std::string>();
+        const auto &value = entry["value"];
+        if (typeName == "string") {
+            if (!value.is_string())
+                throw std::invalid_argument("metadata string value expected: " + key);
+            staged.AddMetadata(key, value.get<std::string>());
+        } else if (typeName == "int") {
+            if (!value.is_number_integer())
+                throw std::invalid_argument("metadata int value expected: " + key);
+            staged.AddMetadata(key, value.get<int>());
+        } else if (typeName == "bool") {
+            if (!value.is_boolean())
+                throw std::invalid_argument("metadata bool value expected: " + key);
+            staged.AddMetadata(key, value.get<bool>());
+        } else if (typeName == "size_t") {
+            if (!value.is_number_unsigned())
+                throw std::invalid_argument("metadata unsigned value expected: " + key);
+            staged.AddMetadata(key, value.get<size_t>());
+        } else if (typeName == "float") {
+            if (!value.is_number())
+                throw std::invalid_argument("metadata float value expected: " + key);
+            const double number = value.get<double>();
+            if (!std::isfinite(number) || number < -std::numeric_limits<float>::max() ||
+                number > std::numeric_limits<float>::max())
+                throw std::invalid_argument("metadata float must be finite: " + key);
+            staged.AddMetadata(key, static_cast<float>(number));
+        } else if (typeName == "enum infernux::ResourceType") {
+            if (!value.is_string())
+                throw std::invalid_argument("metadata ResourceType string expected: " + key);
+            const std::any converted = InxTypeRegistry::GetInstance().FromString(typeName, value.get<std::string>());
+            staged.AddMetadata(key, std::any_cast<ResourceType>(converted));
+        } else if (typeName == "json_array") {
+            if (!value.is_array())
+                throw std::invalid_argument("metadata JSON array expected: " + key);
+            staged.m_metadata[key] = std::make_pair(typeName, std::any(value.dump()));
+        } else if (typeName == "json_object") {
+            if (!value.is_object())
+                throw std::invalid_argument("metadata JSON object expected: " + key);
+            staged.m_metadata[key] = std::make_pair(typeName, std::any(value.dump()));
+        } else {
+            throw std::invalid_argument("unsupported metadata type for '" + key + "': " + typeName);
+        }
+    }
+    m_metadata = std::move(staged.m_metadata);
+}
+
 bool InxResourceMeta::SaveToFile(const std::string &metaFilePath) const
 {
-    const std::string tempPath = metaFilePath + ".tmp";
-    std::ofstream file(ToFsPath(tempPath), std::ios::trunc);
-    if (!file.is_open()) {
-        INXLOG_ERROR("Failed to open meta temp file for writing: ", tempPath);
-        return false;
-    }
-
     try {
-        nlohmann::json root;
-        root["meta_version"] = 2;
-
-        nlohmann::json entries = nlohmann::json::object();
-        for (const auto &[key, metaPair] : m_metadata) {
-            const std::string &typeName = metaPair.first;
-            const std::any &value = metaPair.second;
-
-            nlohmann::json entry;
-            entry["type"] = typeName;
-
-            if (typeName == "string") {
-                entry["value"] = std::any_cast<std::string>(value);
-            } else if (typeName == "int") {
-                entry["value"] = std::any_cast<int>(value);
-            } else if (typeName == "bool") {
-                entry["value"] = std::any_cast<bool>(value);
-            } else if (typeName == "size_t") {
-                entry["value"] = std::any_cast<size_t>(value);
-            } else if (typeName == "float") {
-                entry["value"] = std::any_cast<float>(value);
-            } else if (typeName == "enum infernux::ResourceType") {
-                entry["value"] = InxTypeRegistry::GetInstance().ToString(typeName, value);
-            } else if (typeName == "json_array" || typeName == "json_object") {
-                // Stored as a raw JSON string — parse it back so the .meta
-                // file contains the original structured JSON, not an escaped string.
-                entry["value"] = nlohmann::json::parse(std::any_cast<std::string>(value));
-            } else {
-                INXLOG_WARN("Unknown type for JSON serialization: ", typeName);
-                continue;
-            }
-            entries[key] = entry;
-        }
-        root["metadata"] = entries;
-
-        file << root.dump(4) << "\n";
-        file.flush();
-        file.close();
-
-        std::error_code ec;
-        std::filesystem::rename(ToFsPath(tempPath), ToFsPath(metaFilePath), ec);
-        if (ec) {
-            std::filesystem::remove(ToFsPath(metaFilePath), ec);
-            ec.clear();
-            std::filesystem::rename(ToFsPath(tempPath), ToFsPath(metaFilePath), ec);
-        }
-        if (ec) {
-            INXLOG_ERROR("Failed to finalize meta file: ", metaFilePath, " error: ", ec.message());
-            // Remove orphaned temp file so it doesn't litter the project
-            std::error_code removeEc;
-            std::filesystem::remove(ToFsPath(tempPath), removeEc);
-            return false;
-        }
+        DocumentStore::Instance().WriteAndWait(metaFilePath, SerializeDocument().dump(4) + "\n");
 
         INXLOG_DEBUG("Meta file saved: ", metaFilePath);
         return true;
@@ -252,59 +295,13 @@ bool InxResourceMeta::LoadFromFile(const std::string &metaFilePath)
     }
 
     try {
-        nlohmann::json root = nlohmann::json::parse(file);
-        file.close();
-
-        m_metadata.clear();
-
-        if (!root.contains("metadata") || !root["metadata"].is_object())
-            return false;
-
-        for (auto &[key, entry] : root["metadata"].items()) {
-            if (!entry.contains("type") || !entry.contains("value"))
-                continue;
-
-            std::string typeName = entry["type"].get<std::string>();
-
-            try {
-                if (typeName == "string") {
-                    if (entry["value"].is_string()) {
-                        AddMetadata(key, entry["value"].get<std::string>());
-                    } else {
-                        // Legacy: Python wrote a list/dict with type "string".
-                        // Treat it as json_array/json_object to preserve data.
-                        typeName = entry["value"].is_array() ? "json_array" : "json_object";
-                        m_metadata[key] = std::make_pair(typeName, std::any(entry["value"].dump()));
-                    }
-                } else if (typeName == "int") {
-                    AddMetadata(key, entry["value"].get<int>());
-                } else if (typeName == "bool") {
-                    AddMetadata(key, entry["value"].get<bool>());
-                } else if (typeName == "size_t") {
-                    AddMetadata(key, entry["value"].get<size_t>());
-                } else if (typeName == "float") {
-                    AddMetadata(key, entry["value"].get<float>());
-                } else if (typeName == "enum infernux::ResourceType") {
-                    std::string valStr = entry["value"].get<std::string>();
-                    std::any resourceType = InxTypeRegistry::GetInstance().FromString(typeName, valStr);
-                    AddMetadata(key, std::any_cast<ResourceType>(resourceType));
-                } else if (typeName == "json_array" || typeName == "json_object") {
-                    // Python-only structured data (e.g. sprite_frames) — store
-                    // the raw JSON string so the round-trip through C++ SaveToFile
-                    // preserves it, but C++ code never needs to interpret it.
-                    AddMetadata(key, entry["value"].dump());
-                } else {
-                    INXLOG_WARN("Unknown type in JSON meta: ", typeName);
-                }
-            } catch (const std::exception &entryEx) {
-                INXLOG_WARN("Skipping meta entry '", key, "' (type ", typeName, "): ", entryEx.what());
-            }
-        }
+        const nlohmann::json root = nlohmann::json::parse(file);
+        DeserializeDocument(root);
         INXLOG_DEBUG("Meta file loaded: ", metaFilePath);
         return true;
     } catch (const std::exception &e) {
         INXLOG_ERROR("Exception while loading meta file: ", metaFilePath, " - ", e.what());
-        return false;
+        throw std::runtime_error("Invalid metadata file '" + metaFilePath + "': " + e.what());
     }
 }
 

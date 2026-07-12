@@ -160,7 +160,7 @@ void ShaderCache::PrecompileShaders(
 
     INXLOG_INFO("ShaderCache: Precompiling shaders in ", shaderDirectory);
 
-    std::vector<std::string> shaderExtensions = {".vert", ".frag", ".geom", ".tesc", ".tese"};
+    std::vector<std::string> shaderExtensions = {".vert", ".frag"};
 
     for (const auto &entry : fs::recursive_directory_iterator(shaderDir)) {
         if (!entry.is_regular_file()) {

@@ -77,8 +77,8 @@ def save_build_settings(settings: dict):
     if not path:
         return
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
+    from Infernux.core.document_store import write_document_text
+    write_document_text(path, json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------------------

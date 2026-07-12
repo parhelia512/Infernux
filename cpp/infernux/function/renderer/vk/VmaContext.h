@@ -15,12 +15,24 @@
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <vk_mem_alloc.h>
 
 namespace infernux
 {
 namespace vk
 {
+
+struct VmaRuntimeStatistics
+{
+    uint64_t allocationBytes = 0;
+    uint64_t blockBytes = 0;
+    uint64_t deviceLocalAllocationBytes = 0;
+    uint64_t deviceLocalUsageBytes = 0;
+    uint64_t deviceLocalBudgetBytes = 0;
+    size_t allocationCount = 0;
+};
 
 /**
  * @brief Create a VmaAllocator for the given Vulkan instance/device.
@@ -43,6 +55,8 @@ namespace vk
  * @param allocator The allocator to destroy (may be VK_NULL_HANDLE)
  */
 void DestroyVmaAllocator(VmaAllocator allocator);
+
+[[nodiscard]] VmaRuntimeStatistics QueryVmaRuntimeStatistics(VmaAllocator allocator, VkPhysicalDevice physicalDevice);
 
 } // namespace vk
 } // namespace infernux

@@ -172,6 +172,7 @@ class PhysicsLayerMatrixPanel:
         self._gravity = list(_phys_settings.DEFAULT_PHYSICS_SETTINGS["gravity"])
         self._fixed_delta_time = float(_phys_settings.DEFAULT_PHYSICS_SETTINGS["fixed_delta_time"])
         self._max_fixed_delta_time = float(_phys_settings.DEFAULT_PHYSICS_SETTINGS["max_fixed_delta_time"])
+        self._physics_settings = dict(_phys_settings.DEFAULT_PHYSICS_SETTINGS)
 
     def set_project_path(self, path: str):
         self._project_path = path
@@ -197,17 +198,20 @@ class PhysicsLayerMatrixPanel:
 
     def _reload_project_settings(self):
         settings = _phys_settings.load(self._project_path)
+        self._physics_settings = settings
         self._gravity = list(settings["gravity"])
         self._fixed_delta_time = float(settings["fixed_delta_time"])
         self._max_fixed_delta_time = float(settings["max_fixed_delta_time"])
         _phys_settings.apply(settings)
 
     def _save_project_settings(self):
-        settings = {
-            "gravity": [float(self._gravity[0]), float(self._gravity[1]), float(self._gravity[2])],
-            "fixed_delta_time": float(self._fixed_delta_time),
-            "max_fixed_delta_time": float(self._max_fixed_delta_time),
-        }
+        settings = dict(self._physics_settings)
+        settings.update(
+            gravity=[float(self._gravity[0]), float(self._gravity[1]), float(self._gravity[2])],
+            fixed_delta_time=float(self._fixed_delta_time),
+            max_fixed_delta_time=float(self._max_fixed_delta_time),
+        )
+        self._physics_settings = settings
         _phys_settings.apply(settings)
         _phys_settings.save(self._project_path, settings)
 
@@ -345,5 +349,93 @@ class PhysicsLayerMatrixPanel:
         gz = ctx.input_float("Gravity Z", float(self._gravity[2]), 0.1, 1.0, 0)
         if abs(gx - self._gravity[0]) > 1e-6 or abs(gy - self._gravity[1]) > 1e-6 or abs(gz - self._gravity[2]) > 1e-6:
             self._gravity = [float(gx), float(gy), float(gz)]
+            self._save_project_settings()
+
+        ctx.spacing()
+        ctx.set_next_item_open(False, Theme.COND_FIRST_USE_EVER)
+        if ctx.collapsing_header(t("physics.advanced")):
+            ctx.push_style_color(ImGuiCol.Text, *Theme.WARNING_TEXT)
+            ctx.label(t("physics.restart_required"))
+            ctx.pop_style_color(1)
+
+            self._render_int_setting(ctx, "collision_steps", "physics.collision_steps", 1, 16)
+            self._render_int_setting(ctx, "velocity_steps", "physics.velocity_steps", 2, 64)
+            self._render_int_setting(ctx, "position_steps", "physics.position_steps", 1, 64)
+
+            self._render_float_setting(
+                ctx, "penetration_slop", "physics.penetration_slop", 0.0, 1.0, 0.001
+            )
+            self._render_float_setting(
+                ctx,
+                "speculative_contact_distance",
+                "physics.speculative_contact_distance",
+                0.0,
+                1.0,
+                0.001,
+            )
+            self._render_float_setting(
+                ctx,
+                "linear_cast_max_penetration",
+                "physics.linear_cast_max_penetration",
+                0.0,
+                1.0,
+                0.01,
+            )
+            self._render_float_setting(ctx, "baumgarte", "physics.baumgarte", 0.0, 1.0, 0.01)
+            self._render_float_setting(
+                ctx,
+                "max_penetration_distance",
+                "physics.max_penetration_distance",
+                0.0,
+                1.0,
+                0.01,
+            )
+            self._render_float_setting(
+                ctx, "linear_cast_threshold", "physics.linear_cast_threshold", 0.0, 1.0, 0.01
+            )
+            self._render_float_setting(
+                ctx,
+                "min_velocity_for_restitution",
+                "physics.min_velocity_for_restitution",
+                0.001,
+                1000.0,
+                0.1,
+            )
+            self._render_float_setting(
+                ctx, "time_before_sleep", "physics.time_before_sleep", 0.0, 60.0, 0.1
+            )
+            self._render_float_setting(
+                ctx,
+                "point_velocity_sleep_threshold",
+                "physics.point_velocity_sleep_threshold",
+                0.001,
+                100.0,
+                0.005,
+            )
+
+    def _render_int_setting(
+        self, ctx: InxGUIContext, field: str, label_key: str, minimum: int, maximum: int
+    ):
+        current = int(self._physics_settings[field])
+        value = ctx.input_int(f"{t(label_key)}##{field}", current, 1, 4)
+        value = max(minimum, min(maximum, int(value)))
+        if value != current:
+            self._physics_settings[field] = value
+            self._save_project_settings()
+
+    def _render_float_setting(
+        self,
+        ctx: InxGUIContext,
+        field: str,
+        label_key: str,
+        minimum: float,
+        maximum: float,
+        step: float,
+    ):
+        current = float(self._physics_settings[field])
+        value = ctx.input_float(f"{t(label_key)}##{field}", current, step, step * 10.0, 0)
+        value = max(minimum, min(maximum, float(value)))
+        if abs(value - current) > 1e-9:
+            self._physics_settings[field] = value
             self._save_project_settings()
 

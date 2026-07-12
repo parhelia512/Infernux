@@ -1,6 +1,7 @@
 #include "AudioListener.h"
 #include "AudioEngine.h"
 #include <core/log/InxLog.h>
+#include <function/scene/ComponentDocumentValidation.h>
 #include <function/scene/ComponentFactory.h>
 #include <function/scene/GameObject.h>
 
@@ -12,7 +13,7 @@ namespace infernux
 {
 
 // Register AudioListener with ComponentFactory
-INFERNUX_REGISTER_COMPONENT("AudioListener", AudioListener)
+INFERNUX_REGISTER_VALIDATED_COMPONENT("AudioListener", AudioListener)
 
 void AudioListener::Awake()
 {
@@ -36,15 +37,25 @@ void AudioListener::OnDestroy()
     AudioEngine::Instance().UnregisterListener(this);
 }
 
-std::string AudioListener::Serialize() const
+nlohmann::json AudioListener::SerializeDocument() const
 {
-    // AudioListener has no extra properties beyond Component base
-    return Component::Serialize();
+    return Component::SerializeDocument();
 }
 
-bool AudioListener::Deserialize(const std::string &jsonStr)
+void AudioListener::ValidateSerializedDocument(const nlohmann::json &document)
 {
-    return Component::Deserialize(jsonStr);
+    component_document_validation::ValidateComponentDocument(document, "AudioListener", 1, {});
+}
+
+bool AudioListener::DeserializeDocument(const nlohmann::json &document)
+{
+    try {
+        ValidateSerializedDocument(document);
+    } catch (const std::exception &error) {
+        INXLOG_ERROR("AudioListener::Deserialize failed: ", error.what());
+        return false;
+    }
+    return Component::DeserializeDocument(document);
 }
 
 uint64_t AudioListener::GetGameObjectId() const

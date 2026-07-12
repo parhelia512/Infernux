@@ -3,6 +3,7 @@
 #include <core/types/InxFwdType.h>
 
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -12,124 +13,109 @@
 namespace infernux
 {
 
-/**
- * @brief Notification types for asset lifecycle events.
- */
 enum class AssetEvent
 {
-    Deleted,  ///< Asset file was deleted — dependents should null out / fallback
-    Modified, ///< Asset file was modified — dependents should re-resolve
-    Moved     ///< Asset was moved/renamed — GUID is stable, path changed
+    Deleted,
+    Modified,
+    Moved,
 };
 
-/**
- * @brief Callback invoked when a dependency is affected.
- *
- * @param dependentGuid  GUID of the asset that holds the reference
- * @param dependencyGuid GUID of the asset that was affected
- * @param event          What happened to the dependency
- */
 using AssetEventCallback =
     std::function<void(const std::string &dependentGuid, const std::string &dependencyGuid, AssetEvent event)>;
 
+class AssetDependencyGraph;
+
+class AssetDependencySnapshot final
+{
+  public:
+    [[nodiscard]] uint64_t GetGeneration() const noexcept
+    {
+        return m_generation;
+    }
+    [[nodiscard]] size_t GetEdgeCount() const noexcept
+    {
+        return m_edgeCount;
+    }
+    [[nodiscard]] size_t GetNodeCount() const noexcept
+    {
+        return m_nodes.size();
+    }
+
+  private:
+    friend class AssetDependencyGraph;
+    uint64_t m_generation = 0;
+    size_t m_edgeCount = 0;
+    std::unordered_map<std::string, std::unordered_set<std::string>> m_dependencies;
+    std::unordered_map<std::string, std::unordered_set<std::string>> m_dependents;
+    std::unordered_set<std::string> m_nodes;
+};
+
 /**
- * @brief Central, type-agnostic asset dependency graph.
- *
- * Replaces the scattered dependency maps that were previously maintained
- * independently by AssetRegistry (material ↔ MeshRenderer),
- * MaterialPipelineManager (texture ↔ material), and ad-hoc Python code.
- *
- * Two kinds of relationships are tracked:
- *
- * 1. **Asset → Asset dependencies** (GUID-based):
- *    A material depends on textures, shaders.
- *    Registered during import/deserialization by scanning the asset's content.
- *
- * 2. **Runtime object → Asset usage** (pointer-based):
- *    A MeshRenderer uses a Material, an AudioSource uses an AudioClip.
- *    Registered when a component binds to an asset.
- *
- * When an asset is deleted/modified, the graph notifies all dependents
- * through registered callbacks per resource type.
+ * Asset-to-asset edges and runtime-object usage have different lifetimes.
+ * Asset edges are published as immutable generations; runtime usage remains a
+ * small mutable overlay. Queries and lifecycle notifications observe their
+ * union without making refresh publication copy runtime state.
  */
 class AssetDependencyGraph
 {
   public:
     static AssetDependencyGraph &Instance();
 
-    // Non-copyable
     AssetDependencyGraph(const AssetDependencyGraph &) = delete;
     AssetDependencyGraph &operator=(const AssetDependencyGraph &) = delete;
 
-    // ========================================================================
-    // Asset → Asset dependencies (GUID-based)
-    // ========================================================================
+    void AddAssetDependency(const std::string &assetGuid, const std::string &dependencyGuid);
+    void RemoveAssetDependency(const std::string &assetGuid, const std::string &dependencyGuid);
+    void ClearAssetDependenciesOf(const std::string &assetGuid);
+    void SetAssetDependencies(const std::string &assetGuid, const std::unordered_set<std::string> &dependencyGuids);
 
-    /// @brief Register that `userGuid` depends on `dependencyGuid`.
-    void AddDependency(const std::string &userGuid, const std::string &dependencyGuid);
+    [[nodiscard]] static std::shared_ptr<const AssetDependencySnapshot>
+    BuildAssetSnapshot(const std::unordered_map<std::string, std::vector<std::string>> &dependenciesByAsset,
+                       uint64_t generation);
+    void InstallAssetSnapshot(std::shared_ptr<const AssetDependencySnapshot> snapshot);
+    [[nodiscard]] std::shared_ptr<const AssetDependencySnapshot> GetAssetSnapshot() const;
+    [[nodiscard]] uint64_t GetAssetGeneration() const;
 
-    /// @brief Remove a single dependency edge.
-    void RemoveDependency(const std::string &userGuid, const std::string &dependencyGuid);
+    void AddRuntimeDependency(const std::string &objectGuid, const std::string &assetGuid);
+    void RemoveRuntimeDependency(const std::string &objectGuid, const std::string &assetGuid);
+    void ClearRuntimeDependenciesOf(const std::string &objectGuid);
 
-    /// @brief Remove ALL dependencies declared by `userGuid`.
-    /// Call before re-scanning (import/deserialize) to rebuild fresh.
-    void ClearDependenciesOf(const std::string &userGuid);
-
-    /// @brief Remove ALL records for an asset (both as user and dependency).
-    /// Call when the asset is permanently deleted.
+    /// Remove an asset from both immutable asset edges and runtime usage.
     void RemoveAsset(const std::string &guid);
 
-    /// @brief Bulk-set dependencies for `userGuid` (replaces any previous).
-    void SetDependencies(const std::string &userGuid, const std::unordered_set<std::string> &dependencyGuids);
-
-    /// @brief Get all GUIDs that `guid` depends on (forward lookup).
     [[nodiscard]] std::unordered_set<std::string> GetDependencies(const std::string &guid) const;
-
-    /// @brief Get all GUIDs that depend on `guid` (reverse lookup).
+    [[nodiscard]] std::unordered_map<std::string, std::unordered_set<std::string>>
+    GetDependenciesBatch(const std::vector<std::string> &guids) const;
     [[nodiscard]] std::unordered_set<std::string> GetDependents(const std::string &guid) const;
-
-    /// @brief Check if `userGuid` depends on `dependencyGuid`.
     [[nodiscard]] bool HasDependency(const std::string &userGuid, const std::string &dependencyGuid) const;
 
-    // ========================================================================
-    // Event dispatch
-    // ========================================================================
-
-    /// @brief Register a callback for a specific resource type.
-    /// When an asset of that type is deleted/modified, all dependents are
-    /// notified through this callback.
     void RegisterCallback(ResourceType type, AssetEventCallback callback);
-
-    /// @brief Notify all dependents that `guid` (of `type`) had an event.
-    /// Iterates GetDependents(guid) and invokes matching callbacks.
     void NotifyEvent(const std::string &guid, ResourceType type, AssetEvent event);
 
-    // ========================================================================
-    // Diagnostics
-    // ========================================================================
-
-    /// @brief Total number of dependency edges.
     [[nodiscard]] size_t GetEdgeCount() const;
-
-    /// @brief Total number of tracked assets (as user or dependency).
     [[nodiscard]] size_t GetNodeCount() const;
-
-    /// @brief Clear the entire graph.
     void Clear();
 
   private:
-    AssetDependencyGraph() = default;
+    AssetDependencyGraph();
     ~AssetDependencyGraph() = default;
 
-    // Forward: userGuid → set of dependencyGuids
-    std::unordered_map<std::string, std::unordered_set<std::string>> m_dependencies;
-    // Reverse: dependencyGuid → set of userGuids
-    std::unordered_map<std::string, std::unordered_set<std::string>> m_dependents;
+    void PublishAssetMutation(const std::function<void(AssetDependencySnapshot &)> &mutation);
+    static void AddEdge(AssetDependencySnapshot &snapshot, const std::string &userGuid,
+                        const std::string &dependencyGuid);
+    static void RemoveEdge(AssetDependencySnapshot &snapshot, const std::string &userGuid,
+                           const std::string &dependencyGuid);
+    static void ClearEdgesOf(AssetDependencySnapshot &snapshot, const std::string &userGuid);
+    static void RemoveNode(AssetDependencySnapshot &snapshot, const std::string &guid);
+    static void RebuildStatistics(AssetDependencySnapshot &snapshot);
 
-    // Event callbacks per resource type
+    std::shared_ptr<const AssetDependencySnapshot> m_assetSnapshot;
+    mutable std::mutex m_assetWriteMutex;
+
+    std::unordered_map<std::string, std::unordered_set<std::string>> m_runtimeDependencies;
+    std::unordered_map<std::string, std::unordered_set<std::string>> m_runtimeDependents;
     std::unordered_map<ResourceType, std::vector<AssetEventCallback>> m_callbacks;
-
-    mutable std::mutex m_mutex;
+    mutable std::mutex m_runtimeMutex;
 };
 
 } // namespace infernux

@@ -22,7 +22,6 @@ from typing import Optional, Callable
 
 from Infernux.debug import Debug
 from Infernux.engine.project_context import get_project_root
-from Infernux.engine.path_utils import safe_path as _safe_path
 
 
 # ---------------------------------------------------------------------------
@@ -42,13 +41,13 @@ KEY_LEFT_CTRL = 527  # Left Ctrl
 KEY_RIGHT_CTRL = 531 # Right Ctrl
 
 
-def _empty_scene_json(name: str) -> str:
-    return json.dumps({
+def _empty_scene_document(name: str) -> dict:
+    return {
         "schema_version": 1,
         "name": name,
         "isPlaying": False,
         "objects": [],
-    })
+    }
 
 
 def _get_scene_root_objects(scene):
@@ -110,8 +109,8 @@ def _save_editor_settings(settings: dict):
     if not path:
         return
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
+    from Infernux.core.document_store import write_document_text
+    write_document_text(path, json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +186,8 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
         self._deferred_load_path: Optional[str] = None   # non-None → load pending
         self._deferred_new_scene: bool = False            # True → new scene pending
         self._deferred_exit_prefab: bool = False           # True → exit prefab mode task pending
+        self._scene_transaction = None
+        self._scene_transaction_path: Optional[str] = None
 
         # True while _do_open_scene / _do_new_scene is running.
         # Prevents stacking deferred loads from rapid user clicks.
@@ -205,7 +206,7 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
         self.prefab_envelope = {}
         self._previous_scene_path = None
         self._previous_scene_dirty = False
-        self._previous_scene_json = ""
+        self._previous_scene_document = None
 
     @classmethod
     def instance(cls) -> Optional["SceneFileManager"]:
@@ -249,7 +250,12 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
     @property
     def is_loading(self) -> bool:
         """True while a deferred scene load is pending."""
-        return self._deferred_load_path is not None or self._deferred_new_scene or self._deferred_exit_prefab
+        return (
+            self._scene_transaction is not None
+            or self._deferred_load_path is not None
+            or self._deferred_new_scene
+            or self._deferred_exit_prefab
+        )
 
     def mark_dirty(self):
         if self._is_play_mode():
@@ -488,6 +494,20 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
         until the new scene's first Execute() overwrites it, so no
         placeholder or extra-frame delay is needed.
         """
+        if self._scene_transaction is not None:
+            transaction = self._scene_transaction
+            if not transaction.poll():
+                return
+            path = self._scene_transaction_path
+            self._scene_transaction = None
+            self._scene_transaction_path = None
+            self._load_in_progress = False
+            if transaction.succeeded:
+                self._finish_open_scene(path)
+            else:
+                Debug.log_error(f"Scene load failed for '{path}': {transaction.error}")
+            return
+
         if self._load_in_progress:
             return
         if self._deferred_load_path is not None:
@@ -495,10 +515,15 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
             self._deferred_load_path = None
             self._load_in_progress = True
             try:
-                self._do_open_scene(path)
+                transaction = self._create_open_scene_transaction(path)
+                if transaction is None:
+                    self._load_in_progress = False
+                    return
+                transaction.start()
+                self._scene_transaction = transaction
+                self._scene_transaction_path = os.path.abspath(path)
             except Exception as exc:
                 Debug.log_error(f"Scene load failed: {exc}")
-            finally:
                 self._load_in_progress = False
         elif self._deferred_new_scene:
             self._deferred_new_scene = False
@@ -532,14 +557,6 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
     # Internal — actual scene operations (no dirty check)
     # ------------------------------------------------------------------
 
-    def _pump_events_safe(self):
-        """Pump the OS message queue to prevent Windows 'Not Responding'."""
-        if self._engine:
-            try:
-                self._engine.pump_events()
-            except Exception as exc:
-                Debug.log_suppressed("SceneFileManager.pump_events", exc)
-
     def _prepare_native_scene_swap(self):
         """Clear native editor state and drain GPU work before scene replacement."""
         if not self._engine:
@@ -567,23 +584,15 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
         except Exception as exc:
             Debug.log_warning(f"Failed to drain GPU before scene switch: {exc}")
 
-    def _do_open_scene(self, path: str) -> bool:
-        """Load a .scene file, replacing the current scene (no dirty guard)."""
+    def _create_open_scene_transaction(self, path: str):
+        """Build a path-backed transaction without mutating the live scene."""
         if not path or not os.path.isfile(path):
             Debug.log_warning(f"Scene file not found: {path}")
-            return False
+            return None
 
         if not self._is_under_assets(path):
             Debug.log_warning("Scene file must be under the project's Assets/ directory.")
-            return False
-
-        # Clear the RenderStack singleton before load — it's just a Python
-        # class attribute and safe to nil out.  Registry / cache clearing must
-        # wait until AFTER load_from_file() finishes, because C++ destroys old
-        # GameObjects during Deserialize() and their PyComponentProxy::OnDestroy
-        # callbacks still need to reach live Python objects.
-        from Infernux.renderstack.render_stack import RenderStack
-        RenderStack._active_instance = None
+            return None
 
         from Infernux.lib import SceneManager
         sm = SceneManager.instance()
@@ -592,26 +601,30 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
         if not scene:
             scene = sm.create_scene(DEFAULT_SCENE_NAME)
 
-        self._prepare_native_scene_swap()
+        def before_commit():
+            if sm.get_active_scene() is not scene:
+                raise RuntimeError("active scene changed while scene document was loading")
+            self._prepare_native_scene_swap()
+            from Infernux.renderstack.render_stack import RenderStack
+            RenderStack._active_instance = None
 
-        if not scene.load_from_file(_safe_path(path)):
-            Debug.log_error(f"Failed to load scene from: {path}")
-            return False
+        from Infernux.engine.scene_document_transaction import SceneDocumentTransaction
+        return SceneDocumentTransaction(
+            scene,
+            path=path,
+            asset_database=self._asset_database,
+            clear_registries=True,
+            before_commit=before_commit,
+        )
 
-        # Pump OS message queue after the heavy C++ deserialization + GPU
-        # uploads so Windows doesn't flag the app as Not Responding.
-        self._pump_events_safe()
-
+    def _finish_open_scene(self, path: str) -> None:
+        """Publish editor bookkeeping after a successful Scene transaction."""
         self._current_scene_path = os.path.abspath(path)
         self._dirty = False
         self._reset_undo_history(scene_is_dirty=False)
 
-        # Now that C++ has finished destroying old objects, clear stale Python
-        # registries and restore the new scene's Python components.
-        try:
-            self._restore_py_components(scene)
-        except Exception as exc:
-            Debug.log_error(f"Error restoring Python components: {exc}")
+        from Infernux.lib import SceneManager
+        scene = SceneManager.instance().get_active_scene()
 
         # Force-init SpriteRenderer wrappers so their materials (texture,
         # color, uvRect) are created before the first render frame.
@@ -620,8 +633,6 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
             SpriteRenderer.init_all_in_scene(scene)
         except Exception as exc:
             Debug.log_internal(f"SpriteRenderer init: {exc}")
-
-        self._pump_events_safe()
 
         self._restore_camera_state(self._current_scene_path)
         self._remember_last_scene(self._current_scene_path)
@@ -632,36 +643,45 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
         Debug.log_internal(f"Scene loaded: {os.path.basename(path)}")
         if self._on_scene_changed:
             self._on_scene_changed()
+
+    def _do_open_scene(self, path: str) -> bool:
+        """Synchronously run the same transaction used by deferred loading."""
+        transaction = self._create_open_scene_transaction(path)
+        if transaction is None:
+            return False
+        transaction.run_to_completion(raise_on_failure=False)
+        if not transaction.succeeded:
+            Debug.log_error(f"Scene load failed for '{path}': {transaction.error}")
+            return False
+        self._finish_open_scene(path)
         return True
 
 
     def _do_new_scene(self):
         """Create a blank scene with default Camera and Light (no dirty guard)."""
-        from Infernux.renderstack.render_stack import RenderStack
-        RenderStack._active_instance = None
-
         from Infernux.lib import SceneManager
         sm = SceneManager.instance()
 
         scene = sm.get_active_scene()
         if not scene:
             scene = sm.create_scene(DEFAULT_SCENE_NAME)
-        else:
-            self._prepare_native_scene_swap()
-            empty_json = json.dumps({
-                "schema_version": 1,
-                "name": DEFAULT_SCENE_NAME,
-                "isPlaying": False,
-                "objects": []
-            })
-            scene.deserialize(empty_json)
 
-        # C++ has finished destroying old objects — now safe to clear Python
-        # registries so stale entries don't accumulate.
-        from Infernux.components.component import InxComponent
-        InxComponent._clear_all_instances()
-        from Infernux.components.builtin_component import BuiltinComponent
-        BuiltinComponent._clear_cache()
+        def before_commit():
+            self._prepare_native_scene_swap()
+            from Infernux.renderstack.render_stack import RenderStack
+            RenderStack._active_instance = None
+
+        from Infernux.engine.scene_document_transaction import SceneDocumentTransaction
+        transaction = SceneDocumentTransaction(
+            scene,
+            document=_empty_scene_document(DEFAULT_SCENE_NAME),
+            asset_database=self._asset_database,
+            clear_registries=True,
+            before_commit=before_commit,
+        )
+        if not transaction.run_to_completion(raise_on_failure=False):
+            Debug.log_error(f"New scene transaction failed: {transaction.error}")
+            return False
 
         try:
             self._populate_default_objects(scene)
@@ -685,6 +705,7 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
             SpriteRenderer.init_all_in_scene(scene)
         except Exception as exc:
             Debug.log_internal(f"SpriteRenderer init after new scene: {exc}")
+        return True
 
     @staticmethod
     def _populate_default_objects(scene) -> None:
@@ -775,18 +796,5 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
             state["focusDistance"],
             state["yaw"],
             state["pitch"],
-        )
-
-    # ------------------------------------------------------------------
-    # Python component serialization helpers
-    # ------------------------------------------------------------------
-
-    def _restore_py_components(self, scene):
-        """After loading, recreate Python component instances from pending data."""
-        from Infernux.engine.component_restore import restore_pending_py_components
-        restore_pending_py_components(
-            scene,
-            asset_database=self._asset_database,
-            clear_registries=True,
         )
 

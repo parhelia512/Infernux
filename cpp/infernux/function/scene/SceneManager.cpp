@@ -4,6 +4,7 @@
 #include "EditorCameraController.h"
 #include "GameObject.h"
 #include "Light.h"
+#include "MeshCollider.h"
 #include "MeshRenderer.h"
 #include "Rigidbody.h"
 #include "SkinnedMeshRenderer.h"
@@ -40,6 +41,17 @@ SceneManager &SceneManager::Instance()
 
 SceneManager::SceneManager()
 {
+    TransformECSStore::Instance().SetInvalidationObserver([](Transform *transform) {
+        auto *gameObject = transform ? transform->GetGameObject() : nullptr;
+        if (!gameObject)
+            return;
+        auto &physicsStore = PhysicsECSStore::Instance();
+        for (auto *collider : gameObject->GetComponents<Collider>()) {
+            if (collider)
+                physicsStore.MarkColliderDirty(collider->GetECSHandle());
+        }
+    });
+
     // Create editor camera
     m_editorCameraObject = std::make_unique<GameObject>("Editor Camera");
     m_editorCameraComponent = m_editorCameraObject->AddComponent<Camera>();
@@ -130,6 +142,10 @@ void SceneManager::UnloadScene(Scene *scene)
 
 void SceneManager::Shutdown()
 {
+    // Mesh cooking uses immutable snapshots, but Jolt's geometry helpers must
+    // finish before PhysicsWorld and its global factory are torn down.
+    MeshCollider::FlushCompletedCooking(true);
+
     // No play-mode restore logic here — this is irreversible engine teardown.
     m_isPlaying = false;
     m_isPaused = false;
@@ -211,17 +227,20 @@ void SceneManager::Update(float deltaTime)
         m_activeScene->ProcessPendingStarts();
         m_lastFrameProfile.pendingStartsMs += ProfileMsSince(t0);
 
+        // Keep gameplay and physics on the same scaled clock. The raw frame
+        // delta is clamped once before scaling so long frames cannot create an
+        // unbounded fixed-step catch-up burst.
+        const float unscaledDeltaTime = std::clamp(deltaTime, 0.0f, m_maxFixedDeltaTime);
+        m_lastScaledDeltaTime = unscaledDeltaTime * m_timeScale;
+
         // ---- Fixed-update accumulator (Unity-style) ----
-        float dt = std::min(deltaTime, m_maxFixedDeltaTime);
-        m_fixedTimeAccumulator += dt;
+        m_fixedTimeAccumulator += m_lastScaledDeltaTime;
         while (m_fixedTimeAccumulator >= m_fixedTimeStep) {
             m_lastFrameProfile.fixedSteps += 1.0;
 
-            // Detect user-driven Transform changes on dynamic Rigidbodies
-            // and teleport their Jolt bodies before the physics step.
-            t0 = ProfileClock::now();
-            SyncExternalRigidbodyMoves();
-            m_lastFrameProfile.syncExternalMovesMs += ProfileMsSince(t0);
+            m_fixedTime += static_cast<double>(m_fixedTimeStep);
+            if (m_timeScale > 0.0f)
+                m_fixedUnscaledTime += static_cast<double>(m_fixedTimeStep / m_timeScale);
 
             // Flush deferred broadphase additions (Unity-style batch add)
             FlushPendingBroadphase();
@@ -237,9 +256,6 @@ void SceneManager::Update(float deltaTime)
 
             // FixedUpdate may rotate/move kinematic colliders or instantiate
             // new physics objects. Flush those changes before the Jolt step.
-            t0 = ProfileClock::now();
-            SyncExternalRigidbodyMoves();
-            m_lastFrameProfile.syncExternalMovesMs += ProfileMsSince(t0);
             FlushPendingBroadphase();
             t0 = ProfileClock::now();
             SyncCollidersToPhysics(m_fixedTimeStep);
@@ -249,10 +265,12 @@ void SceneManager::Update(float deltaTime)
             t0 = ProfileClock::now();
             PhysicsWorld::Instance().Step(m_fixedTimeStep);
             m_lastFrameProfile.physicsStepMs += ProfileMsSince(t0);
+            m_lastFrameProfile.dynamicCCDSplits +=
+                static_cast<double>(PhysicsWorld::Instance().GetLastDynamicCCDSplitCount());
 
             // Dispatch collision/trigger callbacks to components (Unity-style)
             t0 = ProfileClock::now();
-            PhysicsWorld::Instance().DispatchContactEvents();
+            m_lastFrameProfile.contactEvents += static_cast<double>(PhysicsWorld::Instance().DispatchContactEvents());
             m_lastFrameProfile.physicsEventsMs += ProfileMsSince(t0);
 
             // Write physics results back to Transforms (dynamic Rigidbodies)
@@ -268,7 +286,7 @@ void SceneManager::Update(float deltaTime)
         m_lastFrameProfile.interpolationMs += ProfileMsSince(t0);
 
         t0 = ProfileClock::now();
-        m_activeScene->Update(deltaTime);
+        m_activeScene->Update(m_lastScaledDeltaTime);
         m_lastFrameProfile.gameplayUpdateMs += ProfileMsSince(t0);
     }
 }
@@ -289,7 +307,7 @@ void SceneManager::LateUpdate(float deltaTime)
         m_lastFrameProfile.pendingStartsMs += ProfileMsSince(t0);
 
         t0 = ProfileClock::now();
-        m_activeScene->LateUpdate(deltaTime);
+        m_activeScene->LateUpdate(m_lastScaledDeltaTime);
         m_lastFrameProfile.lateUpdateMs += ProfileMsSince(t0);
     }
 
@@ -313,6 +331,9 @@ void SceneManager::Play()
     // Only reset accumulator on initial play, not on resume-from-pause
     if (!m_isPlaying) {
         m_fixedTimeAccumulator = 0.0f;
+        m_fixedTime = 0.0;
+        m_fixedUnscaledTime = 0.0;
+        m_lastScaledDeltaTime = 0.0f;
     }
 
     m_isPlaying = true;
@@ -348,9 +369,6 @@ void SceneManager::Play()
             INXLOG_INFO("[Perf] Play(): Start=", static_cast<int>(startMs), "ms, Flush=", static_cast<int>(flushMs),
                         "ms");
         }
-
-        // Reset physics sync serial so the first fixed step does a full sync.
-        m_lastPhysicsSyncTransformSerial = 0;
     }
 }
 
@@ -359,6 +377,9 @@ void SceneManager::Stop()
     m_isPlaying = false;
     m_isPaused = false;
     m_fixedTimeAccumulator = 0.0f;
+    m_fixedTime = 0.0;
+    m_fixedUnscaledTime = 0.0;
+    m_lastScaledDeltaTime = 0.0f;
 
     // Notify renderer that play stopped.
     if (m_onPlayStateChanged)
@@ -385,18 +406,20 @@ void SceneManager::Step(float deltaTime)
     if (!m_isPaused || !m_isPlaying || !m_activeScene)
         return;
 
+    m_lastFrameProfile = {};
     m_activeScene->ProcessPendingStarts();
 
-    // Detect external moves before stepping physics
-    SyncExternalRigidbodyMoves();
     FlushPendingBroadphase();
     SyncCollidersToPhysics(m_fixedTimeStep);
+    m_fixedTime += static_cast<double>(m_fixedTimeStep);
+    if (m_timeScale > 0.0f)
+        m_fixedUnscaledTime += static_cast<double>(m_fixedTimeStep / m_timeScale);
     m_activeScene->FixedUpdate(m_fixedTimeStep);
-    SyncExternalRigidbodyMoves();
     FlushPendingBroadphase();
     SyncCollidersToPhysics(m_fixedTimeStep);
     PhysicsWorld::Instance().Step(m_fixedTimeStep);
-    PhysicsWorld::Instance().DispatchContactEvents();
+    m_lastFrameProfile.dynamicCCDSplits += static_cast<double>(PhysicsWorld::Instance().GetLastDynamicCCDSplitCount());
+    m_lastFrameProfile.contactEvents += static_cast<double>(PhysicsWorld::Instance().DispatchContactEvents());
     SyncRigidbodiesToTransform();
     ApplyInterpolatedRigidbodies(1.0f);
     m_activeScene->Update(deltaTime);
@@ -448,33 +471,36 @@ void SceneManager::ExtractPersistentObjects(Scene *scene)
 
 void SceneManager::SyncCollidersToPhysics(float fixedDeltaTime)
 {
-    // ── Unity-style deferred transform sync ──
-    // Skip the entire collider walk when no transform has been invalidated
-    // since the last sync.  This is the single biggest win for static scenes
-    // (thousands of colliders, none of which moved).
-    auto &tStore = TransformECSStore::Instance();
-    uint64_t currentSerial = tStore.GetGlobalTransformSerial();
-    if (currentSerial == m_lastPhysicsSyncTransformSerial) {
-        return; // nothing moved — zero work
-    }
-    m_lastPhysicsSyncTransformSerial = currentSerial;
+    auto &store = PhysicsECSStore::Instance();
+    auto dirtyColliders = store.ConsumeDirtyColliders();
+    m_lastFrameProfile.colliderSyncCandidates += static_cast<double>(dirtyColliders.size());
 
-    // Something moved — walk all colliders via zero-allocation ForEach.
-    // Each collider's SyncTransformToPhysics() has its own lastSyncedPos/Rot
-    // early-out so only colliders that actually moved pay for a Jolt call.
-    PhysicsECSStore::Instance().ForEachAliveCollider([this, fixedDeltaTime](ColliderECSData &data) {
+    for (const auto handle : dirtyColliders) {
+        if (!store.IsValid(handle))
+            continue;
+        auto &data = store.GetCollider(handle);
         auto *col = data.owner;
         if (!col || !col->IsEnabled())
-            return;
+            continue;
         auto *go = col->GetGameObject();
         if (!go || go->GetScene() != m_activeScene)
-            return;
+            continue;
         col->SyncTransformToPhysics(fixedDeltaTime);
-    });
+        const auto actorHandle = data.actorHandle;
+        if (!store.IsValid(actorHandle))
+            throw std::logic_error("dirty Collider references a stale PhysicsActor");
+        auto &actor = store.GetActor(actorHandle);
+        if (actor.rigidbody && actor.rigidbody->IsEnabled() && !actor.rigidbody->IsKinematic()) {
+            auto t0 = ProfileClock::now();
+            actor.rigidbody->SyncExternalMovesToPhysics();
+            m_lastFrameProfile.syncExternalMovesMs += ProfileMsSince(t0);
+        }
+    }
 }
 
 void SceneManager::FlushPendingBroadphase()
 {
+    MeshCollider::FlushCompletedCooking();
     auto &store = PhysicsECSStore::Instance();
     auto &pw = PhysicsWorld::Instance();
     if (!pw.IsInitialized())
@@ -493,14 +519,14 @@ void SceneManager::FlushPendingBroadphase()
             continue;
         auto &data = store.GetCollider(handle);
         auto *col = data.owner;
-        if (!col || !col->IsEnabled() || data.bodyId != 0xFFFFFFFF)
+        if (!col || !col->IsEnabled() || col->GetBodyId() != 0xFFFFFFFF)
             continue;
 
         // Actually create the Jolt body (deferred from Awake)
         col->RegisterBody();
 
         // Queue broadphase add for the batch step below
-        if (data.bodyId != 0xFFFFFFFF) {
+        if (col->GetBodyId() != 0xFFFFFFFF) {
             col->AddToBroadphase();
         }
     }
@@ -516,6 +542,18 @@ void SceneManager::FlushPendingBroadphase()
     // Use Jolt batch API (AddBodiesPrepare/Finalize) for large batches,
     // which is significantly faster than individual AddBody calls.
     pw.AddBodiesBatch(pending);
+
+    // Start() runs before this first physics flush, so force commands may
+    // already be queued on Rigidbodies whose deferred body did not exist yet.
+    // Jolt requires force submission after the body enters the system.
+    for (const auto handle : pendingBodies) {
+        if (!store.IsValid(handle))
+            continue;
+        auto *collider = store.GetCollider(handle).owner;
+        auto *rigidbody = collider ? collider->GetCachedRigidbody() : nullptr;
+        if (rigidbody && rigidbody->IsEnabled() && collider->GetBodyId() != 0xFFFFFFFF)
+            rigidbody->FlushPendingForceCommands();
+    }
 
     double addBodiesMs = ProfileMsSince(t1);
 
@@ -534,10 +572,13 @@ void SceneManager::FlushPendingBroadphase()
 
 void SceneManager::SyncTransforms()
 {
-    // Flush any pending broadphase additions first
+    // First pass starts any deferred mesh cooking. Explicit SyncTransforms is
+    // a barrier: wait for those immutable CPU jobs, commit them on this main
+    // thread, then create/rebuild bodies before returning.
     FlushPendingBroadphase();
-    // Force a full collider sync regardless of serial
-    m_lastPhysicsSyncTransformSerial = 0; // invalidate cache
+    MeshCollider::FlushCompletedCooking(true);
+    FlushPendingBroadphase();
+    PhysicsECSStore::Instance().MarkAllCollidersDirty();
     SyncCollidersToPhysics();
 }
 
@@ -585,15 +626,36 @@ void SceneManager::ActivateAllDynamicBodies()
 
 void SceneManager::SyncRigidbodiesToTransform()
 {
-    PhysicsECSStore::Instance().ForEachAliveRigidbody([this](RigidbodyECSData &data) {
-        auto *rb = data.owner;
+    auto &physics = PhysicsWorld::Instance();
+    const auto &bodyIds = physics.GetPoseReadbackBodyIds();
+    m_lastFrameProfile.rigidbodySyncCandidates += static_cast<double>(bodyIds.size());
+
+    // A body absent from the new active union has gone to sleep or been
+    // deactivated. Finish its previous interpolation at the exact solver pose
+    // before removing it from the dense presentation set.
+    for (const uint32_t previousBodyId : m_posePresentationBodyIds) {
+        if (std::binary_search(bodyIds.begin(), bodyIds.end(), previousBodyId))
+            continue;
+        auto *collider = physics.FindColliderByBodyId(previousBodyId);
+        auto *rb = collider ? collider->GetCachedRigidbody() : nullptr;
         if (!rb || !rb->IsEnabled())
-            return;
+            continue;
+        auto *go = rb->GetGameObject();
+        if (go && go->GetScene() == m_activeScene)
+            rb->ApplyInterpolatedTransform(1.0f);
+    }
+    m_posePresentationBodyIds.assign(bodyIds.begin(), bodyIds.end());
+
+    for (const uint32_t bodyId : bodyIds) {
+        auto *collider = physics.FindColliderByBodyId(bodyId);
+        auto *rb = collider ? collider->GetCachedRigidbody() : nullptr;
+        if (!rb || !rb->IsEnabled())
+            continue;
         auto *go = rb->GetGameObject();
         if (!go || go->GetScene() != m_activeScene)
-            return;
+            continue;
         rb->SyncPhysicsToTransform();
-    });
+    }
 }
 
 void SceneManager::ApplyInterpolatedRigidbodies(float alpha)
@@ -601,28 +663,18 @@ void SceneManager::ApplyInterpolatedRigidbodies(float alpha)
     if (!m_activeScene)
         return;
 
-    PhysicsECSStore::Instance().ForEachAliveRigidbody([this, alpha](RigidbodyECSData &data) {
-        auto *rb = data.owner;
+    auto &physics = PhysicsWorld::Instance();
+    m_lastFrameProfile.interpolationCandidates += static_cast<double>(m_posePresentationBodyIds.size());
+    for (const uint32_t bodyId : m_posePresentationBodyIds) {
+        auto *collider = physics.FindColliderByBodyId(bodyId);
+        auto *rb = collider ? collider->GetCachedRigidbody() : nullptr;
         if (!rb || !rb->IsEnabled())
-            return;
+            continue;
         auto *go = rb->GetGameObject();
         if (!go || go->GetScene() != m_activeScene)
-            return;
+            continue;
         rb->ApplyInterpolatedTransform(alpha);
-    });
-}
-
-void SceneManager::SyncExternalRigidbodyMoves()
-{
-    PhysicsECSStore::Instance().ForEachAliveRigidbody([this](RigidbodyECSData &data) {
-        auto *rb = data.owner;
-        if (!rb || !rb->IsEnabled())
-            return;
-        auto *go = rb->GetGameObject();
-        if (!go || go->GetScene() != m_activeScene)
-            return;
-        rb->SyncExternalMovesToPhysics();
-    });
+    }
 }
 
 // ============================================================================
@@ -633,7 +685,7 @@ void SceneManager::ClearComponentRegistries()
 {
     // Renderer-facing registries: MeshRenderer/Light keep raw component
     // pointers, so we must drop them before the owning GameObjects die during
-    // a Scene::Deserialize() rebuild (see the Scene Rebuild Contract).
+    // a Scene::DeserializeDocument() commit (see the Scene Rebuild Contract).
     m_activeMeshRenderers.clear();
     m_activeMeshRendererSet.clear();
     m_activeLights.clear();
@@ -645,6 +697,7 @@ void SceneManager::ClearComponentRegistries()
     // new QueueBodyCreation() silently fails its insert and the body is never
     // created, leading to invisible collisions/missing rigidbodies post-load.
     PhysicsECSStore::Instance().ClearPendingQueues();
+    m_posePresentationBodyIds.clear();
 }
 
 // ========================================================================
@@ -692,7 +745,8 @@ void SceneManager::NotifyMeshRendererChanged(MeshRenderer *renderer)
 
 void SceneManager::MarkMeshRenderersDirtyForAsset(const std::string &meshGuid, const std::string &meshPath)
 {
-    if (meshGuid.empty() && meshPath.empty())
+    (void)meshPath;
+    if (meshGuid.empty())
         return;
     for (auto *renderer : m_activeMeshRenderers) {
         if (renderer && renderer->HasMeshAsset() && renderer->GetMeshAssetGuid() == meshGuid) {
@@ -703,9 +757,7 @@ void SceneManager::MarkMeshRenderersDirtyForAsset(const std::string &meshGuid, c
                 renderer->SetLocalBounds(mesh->GetBoundsMin(), mesh->GetBoundsMax());
         }
         if (auto *skinned = dynamic_cast<SkinnedMeshRenderer *>(renderer)) {
-            const bool guidMatches = !meshGuid.empty() && skinned->GetSourceModelGuid() == meshGuid;
-            const bool pathMatches = !meshPath.empty() && skinned->GetSourceModelPath() == meshPath;
-            if (guidMatches || pathMatches)
+            if (skinned->GetSourceModelGuid() == meshGuid)
                 skinned->ReloadSourceModel();
         }
     }

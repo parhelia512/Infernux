@@ -764,7 +764,8 @@ void InspectorPanel::RenderTagLayerRow(InxGUIContext *ctx, uint64_t objId, const
         }
     }
 
-    int newTagIdx = SearchableCombo(ctx, "Tag", tagIdx, m_cachedTagItems, halfW - 30);
+    int newTagIdx = ctx->SearchableCombo("Inspector.Tag", tagIdx, m_cachedTagItems, halfW - 30, 8,
+                                         Tr("igui.search_hint").c_str(), Tr("igui.no_results").c_str());
     if (newTagIdx != tagIdx) {
         if (newTagIdx == static_cast<int>(m_cachedTags.size())) {
             // "Add Tag..." selected
@@ -783,7 +784,8 @@ void InspectorPanel::RenderTagLayerRow(InxGUIContext *ctx, uint64_t objId, const
     ImGui::SameLine(0, 4.0f);
     float layerComboW = ImGui::GetContentRegionAvail().x;
 
-    int newLayer = SearchableCombo(ctx, "Layer", info.layer, m_cachedLayerItems, layerComboW);
+    int newLayer = ctx->SearchableCombo("Inspector.Layer", info.layer, m_cachedLayerItems, layerComboW, 8,
+                                        Tr("igui.search_hint").c_str(), Tr("igui.no_results").c_str());
     if (newLayer != info.layer) {
         if (newLayer == static_cast<int>(m_cachedLayerItems.size()) - 1) {
             // "Add Layer..." selected
@@ -1130,6 +1132,7 @@ void InspectorPanel::RenderAddComponentButton(InxGUIContext * /*ctx*/)
         m_addCompSearch[0] = '\0';
         if (getAddComponentEntries)
             m_addCompEntries = getAddComponentEntries();
+        m_addCompNeedsFocus = true;
         ImGui::OpenPopup("##add_component_popup");
     }
     ImGui::PopStyleVar();
@@ -1142,9 +1145,17 @@ void InspectorPanel::RenderAddComponentPopup(InxGUIContext * /*ctx*/)
 
     if (ImGui::BeginPopup("##add_component_popup")) {
         // Search field
+        if (m_addCompNeedsFocus) {
+            ImGui::SetKeyboardFocusHere();
+            m_addCompNeedsFocus = false;
+        }
         ImGui::SetNextItemWidth(EditorTheme::ADD_COMP_SEARCH_W);
-        ImGui::InputTextWithHint("##comp_search", Tr("inspector.search_components").c_str(), m_addCompSearch,
-                                 sizeof(m_addCompSearch));
+        const bool submitFirst =
+            ImGui::InputTextWithHint("##comp_search", Tr("inspector.search_components").c_str(), m_addCompSearch,
+                                     sizeof(m_addCompSearch), ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool focusFirst = ImGui::IsItemFocused() && ImGui::IsKeyPressed(ImGuiKey_DownArrow);
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+            ImGui::CloseCurrentPopup();
 
         ImGui::Separator();
 
@@ -1155,6 +1166,8 @@ void InspectorPanel::RenderAddComponentPopup(InxGUIContext * /*ctx*/)
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
             bool foundAny = false;
+            bool assignedKeyboardFocus = false;
+            bool handledKeyboardSelection = false;
             int uid = 0;
 
             // Group entries by category
@@ -1187,10 +1200,16 @@ void InspectorPanel::RenderAddComponentPopup(InxGUIContext * /*ctx*/)
                     foundAny = true;
                     ++uid;
                     std::string selectLabel = "  " + entry->displayName + "##" + std::to_string(uid);
-                    if (ImGui::Selectable(selectLabel.c_str())) {
+                    if (focusFirst && !assignedKeyboardFocus) {
+                        ImGui::SetKeyboardFocusHere();
+                        assignedKeyboardFocus = true;
+                    }
+                    const bool activateFromKeyboard = submitFirst && !handledKeyboardSelection;
+                    if (ImGui::Selectable(selectLabel.c_str()) || activateFromKeyboard) {
                         if (addComponent)
                             addComponent(entry->displayName, entry->isNative, entry->scriptPath);
                         ImGui::CloseCurrentPopup();
+                        handledKeyboardSelection = true;
                     }
                 }
                 ImGui::Dummy(ImVec2(0, 4));
@@ -1205,71 +1224,6 @@ void InspectorPanel::RenderAddComponentPopup(InxGUIContext * /*ctx*/)
     }
 
     ImGui::PopStyleVar(2);
-}
-
-// ============================================================================
-// Searchable combo helper
-// ============================================================================
-
-int InspectorPanel::SearchableCombo(InxGUIContext * /*ctx*/, const char *label, int currentIdx,
-                                    const std::vector<std::string> &items, float width)
-{
-    if (items.empty())
-        return currentIdx;
-
-    int safeIdx = (currentIdx >= 0 && currentIdx < static_cast<int>(items.size())) ? currentIdx : 0;
-    const std::string &currentText = items[safeIdx];
-
-    std::string comboId = std::string("##combo_") + label;
-    std::string popupId = std::string("##combopop_") + label;
-
-    if (width > 0.0f)
-        ImGui::SetNextItemWidth(width);
-
-    if (ImGui::Button((currentText + "##" + label).c_str(), ImVec2(width > 0.0f ? width : 0.0f, 0))) {
-        auto &state = m_comboStates[label];
-        state.filter[0] = '\0';
-        state.needsFocus = true;
-        ImGui::OpenPopup(popupId.c_str());
-    }
-
-    int result = currentIdx;
-
-    if (ImGui::BeginPopup(popupId.c_str())) {
-        auto &state = m_comboStates[label];
-
-        if (state.needsFocus) {
-            ImGui::SetKeyboardFocusHere();
-            state.needsFocus = false;
-        }
-
-        ImGui::SetNextItemWidth(EditorTheme::ADD_COMP_SEARCH_W);
-        ImGui::InputTextWithHint("##filter", "Filter...", state.filter, sizeof(state.filter));
-
-        std::string filterLower(state.filter);
-        std::transform(filterLower.begin(), filterLower.end(), filterLower.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-        for (int i = 0; i < static_cast<int>(items.size()); ++i) {
-            if (!filterLower.empty()) {
-                std::string itemLower = items[i];
-                std::transform(itemLower.begin(), itemLower.end(), itemLower.begin(),
-                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                if (itemLower.find(filterLower) == std::string::npos)
-                    continue;
-            }
-
-            bool selected = (i == currentIdx);
-            if (ImGui::Selectable(items[i].c_str(), selected)) {
-                result = i;
-                ImGui::CloseCurrentPopup();
-            }
-        }
-
-        ImGui::EndPopup();
-    }
-
-    return result;
 }
 
 } // namespace infernux

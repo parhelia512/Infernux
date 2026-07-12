@@ -91,6 +91,15 @@ def _reset_input_state():
     Input._game_viewport_origin = (0.0, 0.0)
 
 
+@pytest.fixture(autouse=True)
+def _reset_physics_state(engine):
+    """Keep process-wide physics settings isolated between tests."""
+    earth_gravity = Vector3(0.0, -9.81, 0.0)
+    Physics.set_gravity(earth_gravity)
+    yield
+    Physics.set_gravity(earth_gravity)
+
+
 def pytest_sessionfinish(session, exitstatus):
     """Clean up after the test session.
 

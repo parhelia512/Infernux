@@ -1,6 +1,8 @@
 #include "InxMaterial.h"
+#include "MaterialDocumentValidation.h"
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <core/config/EngineConfig.h>
 #include <core/log/InxLog.h>
 #include <cstring>
@@ -10,11 +12,14 @@
 #include <function/resources/AssetDependencyGraph.h>
 #include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <function/resources/InxFileLoader/InxShaderLoader.hpp>
+#include <function/resources/InxResource/InxResourceMeta.h>
 #include <function/scene/MeshRenderer.h>
 #include <functional>
 #include <nlohmann/json.hpp>
+#include <platform/filesystem/DocumentStore.h>
 #include <platform/filesystem/InxPath.h>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_set>
 
 using json = nlohmann::json;
@@ -24,6 +29,40 @@ namespace infernux
 
 namespace
 {
+
+bool IsBuiltinTextureToken(const std::string &value)
+{
+    return value == "white" || value == "black" || value == "normal";
+}
+
+std::string ResolveEngineTextureGuid(const std::string &textureRef)
+{
+    if (IsBuiltinTextureToken(textureRef))
+        return textureRef;
+    auto *database = AssetRegistry::Instance().GetAssetDatabase();
+    if (database == nullptr)
+        throw std::logic_error("engine texture bootstrap requires an initialized AssetDatabase");
+
+    namespace fs = std::filesystem;
+    std::error_code error;
+    const fs::path relative = ToFsPath(textureRef);
+    for (const auto &searchPath : InxShaderLoader::GetShaderSearchPaths()) {
+        fs::path current = ToFsPath(searchPath);
+        for (int depth = 0; depth < 8 && !current.empty(); ++depth) {
+            const fs::path candidate = current / relative;
+            if (fs::exists(candidate, error) && !error) {
+                const std::string resolved = FromFsPath(fs::weakly_canonical(candidate, error));
+                std::string guid = database->GetGuidFromPath(resolved);
+                if (guid.empty())
+                    guid = database->ImportAsset(resolved);
+                if (!guid.empty())
+                    return guid;
+            }
+            current = current.parent_path();
+        }
+    }
+    throw std::invalid_argument("engine texture cannot be resolved: " + textureRef);
+}
 
 std::shared_ptr<InxMaterial> CreateTexturedComponentGizmoIconMaterial(const std::string &name,
                                                                       const std::string &textureRef)
@@ -52,7 +91,7 @@ std::shared_ptr<InxMaterial> CreateTexturedComponentGizmoIconMaterial(const std:
     material->SyncAlphaClipProperty();
 
     material->SetColor("baseColor", glm::vec4(1.0f));
-    material->SetTextureGuid("texSampler", textureRef);
+    material->SetTextureGuid("texSampler", ResolveEngineTextureGuid(textureRef));
     material->SetBuiltin(true);
 
     return material;
@@ -292,6 +331,26 @@ size_t RenderState::Hash() const
 // InxMaterial Implementation
 // ============================================================================
 
+uint64_t InxMaterial::AllocateRuntimeId() noexcept
+{
+    static std::atomic<uint64_t> nextId{1};
+    return nextId.fetch_add(1, std::memory_order_relaxed);
+}
+
+size_t InxMaterial::GetRuntimeMemoryBytes() const noexcept
+{
+    size_t bytes = sizeof(*this) + m_name.capacity() + m_guid.capacity() + m_filePath.capacity() +
+                   m_vertShaderName.capacity() + m_fragShaderName.capacity() + m_passTag.capacity();
+    bytes += m_properties.bucket_count() * sizeof(void *);
+    bytes += m_properties.size() * sizeof(std::pair<const std::string, MaterialProperty>);
+    for (const auto &[key, property] : m_properties) {
+        bytes += key.capacity() + property.name.capacity();
+        if (const auto *text = std::get_if<std::string>(&property.value))
+            bytes += text->capacity();
+    }
+    return bytes;
+}
+
 InxMaterial::InxMaterial(const std::string &name) : m_name(name)
 {
 }
@@ -391,90 +450,47 @@ void InxMaterial::SetMatrix(const std::string &name, const glm::mat4 &matrix)
     ++m_version;
 }
 
-std::string InxMaterial::ResolveToTextureGuid(const std::string &textureRef)
+std::string InxMaterial::RequireTextureGuid(const std::string &textureGuid)
 {
-    if (textureRef.empty())
+    if (textureGuid.empty())
         return {};
-
-    // Built-in procedural textures are addressed by well-known name, not by
-    // GUID (created in-memory by the renderer, never on disk).
-    if (textureRef == "white" || textureRef == "black" || textureRef == "normal")
-        return textureRef;
-
-    auto *adb = AssetRegistry::Instance().GetAssetDatabase();
-    if (!adb) {
-        // No database yet (very early startup) — pass through unchanged so
-        // builtin materials created before InitRenderer still work; they are
-        // re-normalized on first SetTextureGuid after the database exists.
-        return textureRef;
-    }
-
-    // Already a GUID?
-    if (!adb->GetPathFromGuid(textureRef).empty())
-        return textureRef;
-
-    // A path that is already registered?
-    std::string guid = adb->GetGuidFromPath(textureRef);
-    if (!guid.empty())
-        return guid;
-
-    // An existing file that just isn't registered yet — mint a GUID.
-    std::error_code ec;
-    if (std::filesystem::exists(ToFsPath(textureRef), ec) && !ec) {
-        guid = adb->RegisterResource(textureRef, ResourceType::Texture);
-        if (!guid.empty())
-            return guid;
-    }
-
-    // Builtin-resource relative reference (e.g. "icons/light.png") — resolve
-    // against the shader search roots, then register.
-    {
-        namespace fs = std::filesystem;
-        fs::path relative = ToFsPath(textureRef);
-        for (const auto &searchPathStr : InxShaderLoader::GetShaderSearchPaths()) {
-            fs::path current = ToFsPath(searchPathStr);
-            for (int depth = 0; depth < 8 && !current.empty(); ++depth) {
-                fs::path candidate = current / relative;
-                if (fs::exists(candidate, ec) && !ec) {
-                    std::string resolved = FromFsPath(fs::weakly_canonical(candidate, ec));
-                    guid = adb->GetGuidFromPath(resolved);
-                    if (guid.empty())
-                        guid = adb->RegisterResource(resolved, ResourceType::Texture);
-                    if (!guid.empty())
-                        return guid;
-                }
-                current = current.parent_path();
-            }
-        }
-    }
-
-    INXLOG_WARN("InxMaterial::ResolveToTextureGuid: cannot resolve texture reference '", textureRef, "' to a GUID.");
-    return {};
+    if (IsBuiltinTextureToken(textureGuid))
+        return textureGuid;
+    auto *database = AssetRegistry::Instance().GetAssetDatabase();
+    if (database == nullptr)
+        throw std::logic_error("texture GUID validation requires an initialized AssetDatabase");
+    const auto metadata = database->GetMetaByGuid(textureGuid);
+    if (!metadata)
+        throw std::invalid_argument("texture GUID does not exist: " + textureGuid);
+    if (metadata->GetResourceType() != ResourceType::Texture)
+        throw std::invalid_argument("asset GUID is not a Texture: " + textureGuid);
+    return textureGuid;
 }
 
 void InxMaterial::SetTextureGuid(const std::string &name, const std::string &textureGuid)
 {
-    // GUID-only contract: normalize any legacy path-style reference here so
-    // every downstream consumer (cache keys, invalidation, dependency graph)
-    // sees a GUID. Empty result for unresolvable refs clears the slot.
-    const std::string normalized = ResolveToTextureGuid(textureGuid);
+    const std::string validatedGuid = RequireTextureGuid(textureGuid);
 
-    // Early-out: skip if the GUID is already identical (avoids dirty flag + GPU rebuild).
     auto it = m_properties.find(name);
+    std::string previousGuid;
     if (it != m_properties.end() && it->second.type == MaterialPropertyType::Texture2D) {
         const auto *existing = std::get_if<std::string>(&it->second.value);
-        if (existing && *existing == normalized)
-            return;
+        if (existing) {
+            if (*existing == validatedGuid)
+                return;
+            previousGuid = *existing;
+        }
     }
 
-    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Texture2D, normalized};
+    if (!m_guid.empty() && !previousGuid.empty() && !IsBuiltinTextureToken(previousGuid))
+        AssetDependencyGraph::Instance().RemoveAssetDependency(m_guid, previousGuid);
+
+    m_properties[name] = MaterialProperty{name, MaterialPropertyType::Texture2D, validatedGuid};
     m_propertiesDirty = true;
     ++m_version;
 
-    // Update dependency graph: this material depends on the texture (by GUID).
-    if (!m_guid.empty() && !normalized.empty()) {
-        AssetDependencyGraph::Instance().AddDependency(m_guid, normalized);
-    }
+    if (!m_guid.empty() && !validatedGuid.empty() && !IsBuiltinTextureToken(validatedGuid))
+        AssetDependencyGraph::Instance().AddAssetDependency(m_guid, validatedGuid);
 }
 
 void InxMaterial::ClearTexture(const std::string &name)
@@ -487,7 +503,7 @@ void InxMaterial::ClearTexture(const std::string &name)
             return;
         // Remove dependency for the old texture GUID
         if (!m_guid.empty() && oldGuid && !oldGuid->empty()) {
-            AssetDependencyGraph::Instance().RemoveDependency(m_guid, *oldGuid);
+            AssetDependencyGraph::Instance().RemoveAssetDependency(m_guid, *oldGuid);
         }
         it->second.value = std::string{};
         m_propertiesDirty = true;
@@ -611,7 +627,7 @@ void InxMaterial::SyncAlphaClipProperty()
     SetFloat("_AlphaClipThreshold", value);
 }
 
-std::string InxMaterial::Serialize() const
+nlohmann::json InxMaterial::SerializeDocument() const
 {
     json j;
     j["material_version"] = 3;
@@ -627,6 +643,12 @@ std::string InxMaterial::Serialize() const
     rs["cullMode"] = static_cast<int>(m_renderState.cullMode);
     rs["frontFace"] = static_cast<int>(m_renderState.frontFace);
     rs["polygonMode"] = static_cast<int>(m_renderState.polygonMode);
+    rs["lineWidth"] = m_renderState.lineWidth;
+    rs["depthBiasEnable"] = m_renderState.depthBiasEnable;
+    rs["depthBiasConstantFactor"] = m_renderState.depthBiasConstantFactor;
+    rs["depthBiasSlopeFactor"] = m_renderState.depthBiasSlopeFactor;
+    rs["depthBiasClamp"] = m_renderState.depthBiasClamp;
+    rs["topology"] = static_cast<int>(m_renderState.topology);
     rs["depthTestEnable"] = m_renderState.depthTestEnable;
     rs["depthWriteEnable"] = m_renderState.depthWriteEnable;
     rs["depthCompareOp"] = static_cast<int>(m_renderState.depthCompareOp);
@@ -634,6 +656,9 @@ std::string InxMaterial::Serialize() const
     rs["srcColorBlendFactor"] = static_cast<int>(m_renderState.srcColorBlendFactor);
     rs["dstColorBlendFactor"] = static_cast<int>(m_renderState.dstColorBlendFactor);
     rs["colorBlendOp"] = static_cast<int>(m_renderState.colorBlendOp);
+    rs["srcAlphaBlendFactor"] = static_cast<int>(m_renderState.srcAlphaBlendFactor);
+    rs["dstAlphaBlendFactor"] = static_cast<int>(m_renderState.dstAlphaBlendFactor);
+    rs["alphaBlendOp"] = static_cast<int>(m_renderState.alphaBlendOp);
     rs["alphaClipEnabled"] = m_renderState.alphaClipEnabled;
     rs["alphaClipThreshold"] = m_renderState.alphaClipThreshold;
     rs["renderQueue"] = m_renderState.renderQueue;
@@ -716,7 +741,12 @@ std::string InxMaterial::Serialize() const
     }
     j["properties"] = props;
 
-    return j.dump(2);
+    return j;
+}
+
+std::string InxMaterial::Serialize() const
+{
+    return SerializeDocument().dump(2);
 }
 
 bool InxMaterial::SaveToFile() const
@@ -730,14 +760,8 @@ bool InxMaterial::SaveToFile() const
         return false;
     }
     try {
-        std::string jsonStr = Serialize();
-        std::ofstream file = OpenOutputFile(m_filePath, std::ios::out | std::ios::trunc);
-        if (!file.is_open()) {
-            INXLOG_ERROR("InxMaterial::SaveToFile: Failed to open file '", m_filePath, "'");
-            return false;
-        }
-        file << jsonStr;
-        file.close();
+        const std::string jsonStr = Serialize();
+        DocumentStore::Instance().WriteAndWait(m_filePath, jsonStr);
         INXLOG_DEBUG("InxMaterial::SaveToFile: Saved material '", m_name, "' to '", m_filePath, "'");
         return true;
     } catch (const std::exception &e) {
@@ -753,14 +777,8 @@ bool InxMaterial::SaveToFile(const std::string &path)
         return false;
     }
     try {
-        std::string jsonStr = Serialize();
-        std::ofstream file = OpenOutputFile(path, std::ios::out | std::ios::trunc);
-        if (!file.is_open()) {
-            INXLOG_ERROR("InxMaterial::SaveToFile: Failed to open file '", path, "'");
-            return false;
-        }
-        file << jsonStr;
-        file.close();
+        const std::string jsonStr = Serialize();
+        DocumentStore::Instance().WriteAndWait(path, jsonStr);
 
         // Update stored file path
         const_cast<InxMaterial *>(this)->m_filePath = path;
@@ -776,158 +794,141 @@ bool InxMaterial::SaveToFile(const std::string &path)
 bool InxMaterial::Deserialize(const std::string &jsonStr)
 {
     try {
-        json j = json::parse(jsonStr);
+        return DeserializeDocument(json::parse(jsonStr));
+    } catch (const std::exception &e) {
+        INXLOG_ERROR("Failed to parse material document: ", e.what());
+        return false;
+    }
+}
 
-        if (j.contains("name")) {
-            m_name = j["name"].get<std::string>();
-        }
-        // GUID is set by AssetRegistry from AssetDatabase.
-        // "builtin" is a runtime flag set during initialization.
-        if (j.contains("builtin")) {
-            m_builtin = j["builtin"].get<bool>();
-        }
+bool InxMaterial::DeserializeDocument(const nlohmann::json &document)
+{
+    InxMaterial staged(*this);
+    if (!staged.ApplyDocument(document)) {
+        return false;
+    }
 
-        // Shader name — supports separate vertex/fragment identities.
-        if (j.contains("shaders")) {
-            auto &shaders = j["shaders"];
-            if (shaders.contains("vertex")) {
-                m_vertShaderName = shaders["vertex"].get<std::string>();
-            }
-            if (shaders.contains("fragment")) {
-                m_fragShaderName = shaders["fragment"].get<std::string>();
-            }
-            // If only one key is present, mirror to the other.
-            if (m_vertShaderName.empty() && !m_fragShaderName.empty()) {
-                m_vertShaderName = m_fragShaderName;
-            } else if (m_fragShaderName.empty() && !m_vertShaderName.empty()) {
-                m_fragShaderName = m_vertShaderName;
-            }
-        }
+    m_name = std::move(staged.m_name);
+    m_builtin = staged.m_builtin;
+    m_vertShaderName = std::move(staged.m_vertShaderName);
+    m_fragShaderName = std::move(staged.m_fragShaderName);
+    m_passTag = std::move(staged.m_passTag);
+    m_renderState = staged.m_renderState;
+    m_renderStateOverrides = staged.m_renderStateOverrides;
+    m_properties = std::move(staged.m_properties);
+    m_pipelineDirty = true;
+    m_propertiesDirty = true;
+    ++m_version;
+    return true;
+}
 
-        // Render state
-        if (j.contains("renderState")) {
-            auto &rs = j["renderState"];
-            if (rs.contains("cullMode"))
-                m_renderState.cullMode = static_cast<VkCullModeFlags>(rs["cullMode"].get<int>());
-            if (rs.contains("frontFace"))
-                m_renderState.frontFace = static_cast<VkFrontFace>(rs["frontFace"].get<int>());
-            if (rs.contains("polygonMode"))
-                m_renderState.polygonMode = static_cast<VkPolygonMode>(rs["polygonMode"].get<int>());
-            if (rs.contains("depthTestEnable"))
-                m_renderState.depthTestEnable = rs["depthTestEnable"].get<bool>();
-            if (rs.contains("depthWriteEnable"))
-                m_renderState.depthWriteEnable = rs["depthWriteEnable"].get<bool>();
-            if (rs.contains("depthCompareOp"))
-                m_renderState.depthCompareOp = static_cast<VkCompareOp>(rs["depthCompareOp"].get<int>());
-            if (rs.contains("blendEnable"))
-                m_renderState.blendEnable = rs["blendEnable"].get<bool>();
-            if (rs.contains("srcColorBlendFactor"))
-                m_renderState.srcColorBlendFactor = static_cast<VkBlendFactor>(rs["srcColorBlendFactor"].get<int>());
-            if (rs.contains("dstColorBlendFactor"))
-                m_renderState.dstColorBlendFactor = static_cast<VkBlendFactor>(rs["dstColorBlendFactor"].get<int>());
-            if (rs.contains("colorBlendOp"))
-                m_renderState.colorBlendOp = static_cast<VkBlendOp>(rs["colorBlendOp"].get<int>());
-            if (rs.contains("alphaClipEnabled"))
-                m_renderState.alphaClipEnabled = rs["alphaClipEnabled"].get<bool>();
-            if (rs.contains("alphaClipThreshold"))
-                m_renderState.alphaClipThreshold = rs["alphaClipThreshold"].get<float>();
-            if (rs.contains("renderQueue"))
-                m_renderState.renderQueue = rs["renderQueue"].get<int32_t>();
-            if (rs.contains("stencilTestEnable"))
-                m_renderState.stencilTestEnable = rs["stencilTestEnable"].get<bool>();
-            auto jsonToStencilOp = [](const json &s) {
-                VkStencilOpState op{};
-                if (s.contains("failOp"))
-                    op.failOp = static_cast<VkStencilOp>(s["failOp"].get<int>());
-                if (s.contains("passOp"))
-                    op.passOp = static_cast<VkStencilOp>(s["passOp"].get<int>());
-                if (s.contains("depthFailOp"))
-                    op.depthFailOp = static_cast<VkStencilOp>(s["depthFailOp"].get<int>());
-                if (s.contains("compareOp"))
-                    op.compareOp = static_cast<VkCompareOp>(s["compareOp"].get<int>());
-                if (s.contains("compareMask"))
-                    op.compareMask = s["compareMask"].get<uint32_t>();
-                if (s.contains("writeMask"))
-                    op.writeMask = s["writeMask"].get<uint32_t>();
-                if (s.contains("reference"))
-                    op.reference = s["reference"].get<uint32_t>();
-                return op;
+bool InxMaterial::ApplyDocument(const nlohmann::json &j)
+{
+    try {
+        material_document_validation::ValidateMaterialDocument(j);
+        m_name = j["name"].get<std::string>();
+        m_builtin = j["builtin"].get<bool>();
+
+        const auto &shaders = j["shaders"];
+        m_vertShaderName = shaders["vertex"].get<std::string>();
+        m_fragShaderName = shaders["fragment"].get<std::string>();
+
+        const auto &rs = j["renderState"];
+        m_renderState.cullMode = static_cast<VkCullModeFlags>(rs["cullMode"].get<int>());
+        m_renderState.frontFace = static_cast<VkFrontFace>(rs["frontFace"].get<int>());
+        m_renderState.polygonMode = static_cast<VkPolygonMode>(rs["polygonMode"].get<int>());
+        m_renderState.lineWidth = rs["lineWidth"].get<float>();
+        m_renderState.depthBiasEnable = rs["depthBiasEnable"].get<bool>();
+        m_renderState.depthBiasConstantFactor = rs["depthBiasConstantFactor"].get<float>();
+        m_renderState.depthBiasSlopeFactor = rs["depthBiasSlopeFactor"].get<float>();
+        m_renderState.depthBiasClamp = rs["depthBiasClamp"].get<float>();
+        m_renderState.topology = static_cast<VkPrimitiveTopology>(rs["topology"].get<int>());
+        m_renderState.depthTestEnable = rs["depthTestEnable"].get<bool>();
+        m_renderState.depthWriteEnable = rs["depthWriteEnable"].get<bool>();
+        m_renderState.depthCompareOp = static_cast<VkCompareOp>(rs["depthCompareOp"].get<int>());
+        m_renderState.blendEnable = rs["blendEnable"].get<bool>();
+        m_renderState.srcColorBlendFactor = static_cast<VkBlendFactor>(rs["srcColorBlendFactor"].get<int>());
+        m_renderState.dstColorBlendFactor = static_cast<VkBlendFactor>(rs["dstColorBlendFactor"].get<int>());
+        m_renderState.colorBlendOp = static_cast<VkBlendOp>(rs["colorBlendOp"].get<int>());
+        m_renderState.srcAlphaBlendFactor = static_cast<VkBlendFactor>(rs["srcAlphaBlendFactor"].get<int>());
+        m_renderState.dstAlphaBlendFactor = static_cast<VkBlendFactor>(rs["dstAlphaBlendFactor"].get<int>());
+        m_renderState.alphaBlendOp = static_cast<VkBlendOp>(rs["alphaBlendOp"].get<int>());
+        m_renderState.alphaClipEnabled = rs["alphaClipEnabled"].get<bool>();
+        m_renderState.alphaClipThreshold = rs["alphaClipThreshold"].get<float>();
+        m_renderState.renderQueue = rs["renderQueue"].get<int32_t>();
+        m_renderState.stencilTestEnable = rs["stencilTestEnable"].get<bool>();
+        m_renderState.stencilFront = {};
+        m_renderState.stencilBack = {};
+        if (m_renderState.stencilTestEnable) {
+            const auto jsonToStencilOp = [](const json &state) {
+                VkStencilOpState result{};
+                result.failOp = static_cast<VkStencilOp>(state["failOp"].get<int>());
+                result.passOp = static_cast<VkStencilOp>(state["passOp"].get<int>());
+                result.depthFailOp = static_cast<VkStencilOp>(state["depthFailOp"].get<int>());
+                result.compareOp = static_cast<VkCompareOp>(state["compareOp"].get<int>());
+                result.compareMask = state["compareMask"].get<uint32_t>();
+                result.writeMask = state["writeMask"].get<uint32_t>();
+                result.reference = state["reference"].get<uint32_t>();
+                return result;
             };
-            if (rs.contains("stencilFront"))
-                m_renderState.stencilFront = jsonToStencilOp(rs["stencilFront"]);
-            if (rs.contains("stencilBack"))
-                m_renderState.stencilBack = jsonToStencilOp(rs["stencilBack"]);
+            m_renderState.stencilFront = jsonToStencilOp(rs["stencilFront"]);
+            m_renderState.stencilBack = jsonToStencilOp(rs["stencilBack"]);
         }
 
-        // Pass tag
-        if (j.contains("passTag")) {
-            m_passTag = j["passTag"].get<std::string>();
-        }
+        m_passTag = j.value("passTag", std::string());
+        m_renderStateOverrides = j.value("renderStateOverrides", uint32_t{0});
 
-        // Render state override bitmask
-        if (j.contains("renderStateOverrides")) {
-            m_renderStateOverrides = j["renderStateOverrides"].get<uint32_t>();
-        } else {
-            m_renderStateOverrides = 0;
-        }
+        m_properties.clear();
+        for (const auto &[propName, propJson] : j["properties"].items()) {
+            const int typeValue = propJson["type"].get<int>();
+            MaterialProperty prop;
+            prop.name = propName;
+            prop.type = static_cast<MaterialPropertyType>(typeValue);
 
-        // Properties
-        if (j.contains("properties") && j["properties"].is_object()) {
-            m_properties.clear();
-            for (auto &[propName, propJson] : j["properties"].items()) {
-                MaterialProperty prop;
-                prop.name = propName;
-                prop.type = static_cast<MaterialPropertyType>(propJson["type"].get<int>());
-
-                switch (prop.type) {
-                case MaterialPropertyType::Float:
-                    prop.value = propJson["value"].get<float>();
-                    break;
-                case MaterialPropertyType::Float2:
-                    prop.value = glm::vec2(propJson["value"][0].get<float>(), propJson["value"][1].get<float>());
-                    break;
-                case MaterialPropertyType::Float3:
-                    prop.value = glm::vec3(propJson["value"][0].get<float>(), propJson["value"][1].get<float>(),
-                                           propJson["value"][2].get<float>());
-                    break;
-                case MaterialPropertyType::Float4:
-                case MaterialPropertyType::Color:
-                    prop.value = glm::vec4(propJson["value"][0].get<float>(), propJson["value"][1].get<float>(),
-                                           propJson["value"][2].get<float>(), propJson["value"][3].get<float>());
-                    break;
-                case MaterialPropertyType::Int:
-                    prop.value = propJson["value"].get<int>();
-                    break;
-                case MaterialPropertyType::Mat4: {
-                    glm::mat4 m;
-                    auto &arr = propJson["value"];
-                    for (int i = 0; i < 4; i++) {
-                        for (int k = 0; k < 4; k++) {
-                            m[i][k] = arr[i * 4 + k].get<float>();
-                        }
-                    }
-                    prop.value = m;
-                    break;
-                }
-                case MaterialPropertyType::Texture2D:
-                    // v2: texture GUID stored under "guid" key (only format).
-                    // Normalize on load so legacy files that stored a path
-                    // under the "guid" key heal into real GUIDs transparently.
-                    if (propJson.contains("guid")) {
-                        prop.value = ResolveToTextureGuid(propJson["guid"].get<std::string>());
-                    } else {
-                        prop.value = std::string{};
-                    }
-                    break;
-                }
-                m_properties[propName] = prop;
+            switch (prop.type) {
+            case MaterialPropertyType::Float:
+                prop.value = propJson["value"].get<float>();
+                break;
+            case MaterialPropertyType::Float2: {
+                const auto &value = propJson["value"];
+                prop.value = glm::vec2(value[0].get<float>(), value[1].get<float>());
+                break;
             }
+            case MaterialPropertyType::Float3: {
+                const auto &value = propJson["value"];
+                prop.value = glm::vec3(value[0].get<float>(), value[1].get<float>(), value[2].get<float>());
+                break;
+            }
+            case MaterialPropertyType::Float4:
+            case MaterialPropertyType::Color: {
+                const auto &value = propJson["value"];
+                prop.value = glm::vec4(value[0].get<float>(), value[1].get<float>(), value[2].get<float>(),
+                                       value[3].get<float>());
+                break;
+            }
+            case MaterialPropertyType::Int:
+                prop.value = propJson["value"].get<int>();
+                break;
+            case MaterialPropertyType::Mat4: {
+                glm::mat4 m;
+                const auto &value = propJson["value"];
+                for (int i = 0; i < 4; i++) {
+                    for (int k = 0; k < 4; k++) {
+                        m[i][k] = value[i * 4 + k].get<float>();
+                    }
+                }
+                prop.value = m;
+                break;
+            }
+            case MaterialPropertyType::Texture2D:
+                prop.value = RequireTextureGuid(propJson["guid"].get<std::string>());
+                break;
+            }
+            m_properties[propName] = std::move(prop);
         }
 
         m_pipelineDirty = true;
-        m_propertiesDirty = true; // Ensure UBO gets updated with loaded values
-
-        // Sync the _AlphaClipThreshold property from the deserialized render state
+        m_propertiesDirty = true;
         SyncAlphaClipProperty();
 
         return true;

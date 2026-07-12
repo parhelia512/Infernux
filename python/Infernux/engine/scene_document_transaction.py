@@ -1,0 +1,317 @@
+"""Explicit owner-thread transactions for complete Scene documents."""
+
+from __future__ import annotations
+
+import copy
+import os
+import threading
+import time
+from enum import Enum
+from typing import Any, Callable, Optional
+
+from Infernux.lib import (
+    _SceneDocumentReadTicket,
+    _preflight_scene_resource_dependencies,
+    _schedule_scene_document_read,
+)
+
+
+class SceneDocumentTransactionError(RuntimeError):
+    """Raised when a Scene document transaction cannot complete."""
+
+
+class SceneDocumentTransactionState(Enum):
+    CREATED = "created"
+    READING = "reading"
+    DOCUMENT_READY = "document_ready"
+    RESOURCE_PREFLIGHTING = "resource_preflighting"
+    RESOURCES_READY = "resources_ready"
+    PREFLIGHTING = "preflighting"
+    READY_TO_COMMIT = "ready_to_commit"
+    COMMITTING = "committing"
+    ROLLING_BACK = "rolling_back"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+_TERMINAL_STATES = frozenset(
+    {
+        SceneDocumentTransactionState.COMPLETED,
+        SceneDocumentTransactionState.FAILED,
+        SceneDocumentTransactionState.CANCELLED,
+    }
+)
+
+
+class SceneDocumentTransaction:
+    """Read, preflight, commit, and publish one complete Scene document.
+
+    File IO and native structural validation run on the native JobSystem. Every
+    Python operation and live-scene mutation is restricted to the thread that
+    constructs the transaction.
+    """
+
+    def __init__(
+        self,
+        scene: Any,
+        *,
+        path: Optional[os.PathLike[str] | str] = None,
+        document: Optional[dict[str, Any]] = None,
+        asset_database: Any = None,
+        clear_registries: bool = True,
+        before_commit: Optional[Callable[[], None]] = None,
+        after_publish: Optional[Callable[[], None]] = None,
+    ) -> None:
+        if scene is None:
+            raise ValueError("scene is required")
+        if (path is None) == (document is None):
+            raise ValueError("exactly one of path or document is required")
+        if document is not None and not isinstance(document, dict):
+            raise TypeError("scene document must be a dict")
+
+        self._scene = scene
+        self._path = os.fspath(path) if path is not None else None
+        self._document = copy.deepcopy(document) if document is not None else None
+        self._asset_database = asset_database
+        self._clear_registries = bool(clear_registries)
+        self._before_commit = before_commit
+        self._after_publish = after_publish
+        self._owner_thread_id = threading.get_ident()
+        self._state = SceneDocumentTransactionState.CREATED
+        self._ticket: Optional[_SceneDocumentReadTicket] = None
+        self._prepared_graph = None
+        self._rollback_document: Optional[dict[str, Any]] = None
+        self._rollback_graph = None
+        self._native_committed = False
+        self._rolled_back = False
+        self._rollback_error = ""
+        self._error = ""
+        self._failure_exception: Optional[BaseException] = None
+
+    @property
+    def state(self) -> SceneDocumentTransactionState:
+        return self._state
+
+    @property
+    def status(self) -> str:
+        return self._state.value
+
+    @property
+    def error(self) -> str:
+        return self._error
+
+    @property
+    def failure_exception(self) -> Optional[BaseException]:
+        return self._failure_exception
+
+    @property
+    def is_complete(self) -> bool:
+        return self._state in _TERMINAL_STATES
+
+    @property
+    def succeeded(self) -> bool:
+        return self._state is SceneDocumentTransactionState.COMPLETED
+
+    @property
+    def ran_on_worker(self) -> bool:
+        return bool(self._ticket is not None and self._ticket.ran_on_worker)
+
+    @property
+    def rolled_back(self) -> bool:
+        return self._rolled_back
+
+    @property
+    def rollback_error(self) -> str:
+        return self._rollback_error
+
+    @property
+    def document(self) -> Optional[dict[str, Any]]:
+        return copy.deepcopy(self._document)
+
+    def _require_owner_thread(self) -> None:
+        if threading.get_ident() != self._owner_thread_id:
+            raise RuntimeError("SceneDocumentTransaction must run on its owner thread")
+
+    def _fail(self, error: str | BaseException) -> None:
+        if isinstance(error, BaseException):
+            self._failure_exception = error
+            self._error = str(error) or type(error).__name__
+        else:
+            self._error = error
+        for graph in (self._prepared_graph, self._rollback_graph):
+            if graph is not None:
+                graph.discard()
+        self._prepared_graph = None
+        self._rollback_graph = None
+        self._rollback_document = None
+        self._state = SceneDocumentTransactionState.FAILED
+
+    def _prepare_rollback_snapshot(self) -> None:
+        from Infernux.engine.component_restore import preflight_scene_python_components
+
+        rollback_document = self._scene.serialize_document()
+        if not isinstance(rollback_document, dict):
+            raise SceneDocumentTransactionError("live scene returned a non-object rollback document")
+        _preflight_scene_resource_dependencies(rollback_document)
+        rollback_graph = preflight_scene_python_components(
+            rollback_document,
+            asset_database=self._asset_database,
+        )
+        self._rollback_document = rollback_document
+        self._rollback_graph = rollback_graph
+
+    def _discard_rollback_snapshot(self) -> None:
+        if self._rollback_graph is not None:
+            self._rollback_graph.discard()
+        self._rollback_graph = None
+        self._rollback_document = None
+
+    def _rollback_after_commit(self, cause: BaseException) -> None:
+        from Infernux.engine.component_restore import publish_prepared_scene_python_components
+
+        self._state = SceneDocumentTransactionState.ROLLING_BACK
+        if self._prepared_graph is not None:
+            self._prepared_graph.discard()
+            self._prepared_graph = None
+        try:
+            if self._rollback_document is None or self._rollback_graph is None:
+                raise SceneDocumentTransactionError("rollback snapshot is unavailable")
+            if not self._scene._commit_document(self._rollback_document):
+                raise SceneDocumentTransactionError("native rollback document commit was rejected")
+            publish_prepared_scene_python_components(
+                self._scene,
+                self._rollback_graph,
+                clear_registries=self._clear_registries,
+            )
+            self._rollback_graph = None
+            self._rollback_document = None
+            self._native_committed = False
+            self._rolled_back = True
+        except Exception as rollback_exc:
+            self._rollback_error = str(rollback_exc) or type(rollback_exc).__name__
+            failure = SceneDocumentTransactionError(
+                f"scene publish failed ({cause}); rollback also failed ({self._rollback_error})"
+            )
+            failure.__cause__ = rollback_exc
+            self._fail(failure)
+            return
+        self._fail(cause)
+
+    def start(self) -> "SceneDocumentTransaction":
+        self._require_owner_thread()
+        if self._state is not SceneDocumentTransactionState.CREATED:
+            raise RuntimeError(f"cannot start transaction in state {self.status}")
+        if self._path is None:
+            self._state = SceneDocumentTransactionState.DOCUMENT_READY
+        else:
+            self._ticket = _schedule_scene_document_read(os.path.abspath(self._path))
+            self._state = SceneDocumentTransactionState.READING
+        return self
+
+    def poll(self) -> bool:
+        """Advance at most one transaction phase; return whether it is terminal."""
+        self._require_owner_thread()
+        if self._state is SceneDocumentTransactionState.CREATED:
+            raise RuntimeError("transaction must be started before polling")
+        if self.is_complete:
+            return True
+
+        try:
+            if self._state is SceneDocumentTransactionState.READING:
+                assert self._ticket is not None
+                if not self._ticket.is_complete:
+                    return False
+                if self._ticket.status == "cancelled":
+                    self._state = SceneDocumentTransactionState.CANCELLED
+                    return True
+                if not self._ticket.is_ready:
+                    self._fail(self._ticket.error or "scene document read failed")
+                    return True
+                document = self._ticket._take_document()
+                if not isinstance(document, dict):
+                    self._fail("native scene reader returned a non-object document")
+                    return True
+                self._document = document
+                self._state = SceneDocumentTransactionState.DOCUMENT_READY
+                return False
+
+            if self._state is SceneDocumentTransactionState.DOCUMENT_READY:
+                assert self._document is not None
+                self._state = SceneDocumentTransactionState.RESOURCE_PREFLIGHTING
+                _preflight_scene_resource_dependencies(self._document)
+                self._state = SceneDocumentTransactionState.RESOURCES_READY
+                return False
+
+            if self._state is SceneDocumentTransactionState.RESOURCES_READY:
+                from Infernux.engine.component_restore import preflight_scene_python_components
+
+                assert self._document is not None
+                self._state = SceneDocumentTransactionState.PREFLIGHTING
+                self._prepared_graph = preflight_scene_python_components(
+                    self._document,
+                    asset_database=self._asset_database,
+                )
+                self._state = SceneDocumentTransactionState.READY_TO_COMMIT
+                return False
+
+            if self._state is SceneDocumentTransactionState.READY_TO_COMMIT:
+                from Infernux.engine.component_restore import publish_prepared_scene_python_components
+
+                assert self._document is not None
+                assert self._prepared_graph is not None
+                self._state = SceneDocumentTransactionState.COMMITTING
+                self._prepare_rollback_snapshot()
+                if self._before_commit is not None:
+                    self._before_commit()
+                if not self._scene._commit_document(self._document):
+                    self._fail("native scene document commit was rejected")
+                    return True
+                self._native_committed = True
+                publish_prepared_scene_python_components(
+                    self._scene,
+                    self._prepared_graph,
+                    clear_registries=self._clear_registries,
+                )
+                self._prepared_graph = None
+                if self._after_publish is not None:
+                    self._after_publish()
+                self._native_committed = False
+                self._discard_rollback_snapshot()
+                self._state = SceneDocumentTransactionState.COMPLETED
+                return True
+
+            raise RuntimeError(f"invalid transaction state {self.status}")
+        except Exception as exc:
+            if self._native_committed:
+                self._rollback_after_commit(exc)
+            else:
+                self._fail(exc)
+            return True
+
+    def cancel(self) -> bool:
+        """Cancel before commit begins; live scene state is left untouched."""
+        self._require_owner_thread()
+        if self.is_complete or self._state is SceneDocumentTransactionState.COMMITTING:
+            return False
+        if self._ticket is not None:
+            self._ticket.cancel()
+        if self._prepared_graph is not None:
+            self._prepared_graph.discard()
+        self._prepared_graph = None
+        self._state = SceneDocumentTransactionState.CANCELLED
+        return True
+
+    def run_to_completion(self, *, raise_on_failure: bool = True) -> bool:
+        """Run all phases synchronously on the owner thread."""
+        self._require_owner_thread()
+        if self._state is SceneDocumentTransactionState.CREATED:
+            self.start()
+        while not self.poll():
+            if self._state is SceneDocumentTransactionState.READING:
+                time.sleep(0.001)
+        if raise_on_failure and self._state is SceneDocumentTransactionState.FAILED:
+            if self._failure_exception is not None:
+                raise self._failure_exception
+            raise SceneDocumentTransactionError(self._error)
+        return self.succeeded

@@ -1,6 +1,7 @@
 #pragma once
 
 // Minimal includes required for public API value types and POD members
+#include "GpuResidency.h"
 #include "InxRenderStruct.h"
 #include "ProfileConfig.h"
 #include <array>
@@ -39,6 +40,10 @@ class SceneRenderTarget;
 class TransientResourcePool;
 class InxGUIContext;
 class InxScreenUIRenderer;
+namespace vk
+{
+class ImageReadbackTicket;
+}
 
 class InxRenderer
 {
@@ -71,6 +76,39 @@ class InxRenderer
 
     /// @brief Drain GPU work before destructive scene/resource replacement.
     void WaitForGpuIdle();
+    [[nodiscard]] size_t GetPendingMeshUploadCount() const;
+    [[nodiscard]] uint64_t GetSubmittedMeshUploadCount() const;
+    [[nodiscard]] uint64_t GetCompletedMeshUploadCount() const;
+    [[nodiscard]] uint64_t GetAsyncMeshUploadCount() const;
+    [[nodiscard]] size_t GetPendingTextureCpuLoadCount() const;
+    [[nodiscard]] size_t GetPendingTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetSubmittedTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetCompletedTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetAsyncTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetStagingPoolBytes() const;
+    [[nodiscard]] size_t GetStagingPoolBufferCount() const;
+    [[nodiscard]] uint64_t GetStagingAllocationCount() const;
+    [[nodiscard]] uint64_t GetStagingReuseCount() const;
+    [[nodiscard]] uint64_t GetStagingDiscardCount() const;
+    [[nodiscard]] uint64_t GetTextureGpuResidentBytes() const;
+    [[nodiscard]] uint64_t GetTextureGpuBudgetBytes() const;
+    [[nodiscard]] size_t GetTextureGpuCacheEntryCount() const;
+    [[nodiscard]] size_t GetRetiredTextureGpuLeaseCount() const;
+    [[nodiscard]] uint64_t GetTextureGpuEvictionCount() const;
+    void SetTextureGpuBudgetBytes(uint64_t bytes);
+    [[nodiscard]] size_t TrimTextureGpuBudget();
+    [[nodiscard]] uint64_t GetMeshGpuResidentBytes() const;
+    [[nodiscard]] uint64_t GetMeshGpuBudgetBytes() const;
+    [[nodiscard]] size_t GetMeshGpuCacheEntryCount() const;
+    [[nodiscard]] size_t GetRetiredMeshGpuLeaseCount() const;
+    [[nodiscard]] uint64_t GetMeshGpuEvictionCount() const;
+    void SetMeshGpuBudgetBytes(uint64_t bytes);
+    [[nodiscard]] size_t TrimMeshGpuBudget();
+    [[nodiscard]] GpuResidencySnapshot GetGpuResidencySnapshot() const;
+    [[nodiscard]] uint64_t GetGpuResidencyBudgetBytes() const;
+    void SetGpuResidencyBudgetBytes(uint64_t bytes);
+    [[nodiscard]] size_t TrimGpuResidencyBudget();
+    [[nodiscard]] std::vector<GpuAssetResidencyRecord> GetAssetGpuResidency() const;
 
     void LoadShader(const char *name, const std::vector<char> &code, const char *type);
     bool HasShader(const std::string &name, const std::string &type) const;
@@ -102,11 +140,24 @@ class InxRenderer
     void SetGUIPlayerMode(bool enabled);
 
     // ImGui texture management
-    uint64_t UploadTextureForImGui(const std::string &name, const unsigned char *pixels, int width, int height,
-                                   VkFilter filter = VK_FILTER_LINEAR);
+    uint64_t SubmitTextureForImGui(const std::string &name, const unsigned char *pixels, size_t byteCount, int width,
+                                   int height, VkFilter filter = VK_FILTER_LINEAR, bool pinned = false);
     void RemoveImGuiTexture(const std::string &name);
     bool HasImGuiTexture(const std::string &name) const;
     uint64_t GetImGuiTextureId(const std::string &name) const;
+    uint64_t GetImGuiTextureVersion(const std::string &name) const;
+    uint64_t GetFailedImGuiTextureVersion(const std::string &name) const;
+    void SetImGuiTextureBudgetBytes(uint64_t bytes);
+    [[nodiscard]] size_t TrimImGuiTextureBudget();
+    [[nodiscard]] uint64_t GetImGuiTextureBudgetBytes() const;
+    [[nodiscard]] uint64_t GetImGuiTextureResidentBytes() const;
+    [[nodiscard]] size_t GetImGuiTextureEntryCount() const;
+    [[nodiscard]] size_t GetPendingImGuiTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetPendingImGuiTextureUploadBytes() const;
+    [[nodiscard]] uint64_t GetSubmittedImGuiTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetCompletedImGuiTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetAsyncImGuiTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetImGuiTextureEvictionCount() const;
 
     // Resource preview manager
     ResourcePreviewManager *GetResourcePreviewManager();
@@ -123,6 +174,7 @@ class InxRenderer
     // Scene render target for offscreen rendering
     uint64_t GetSceneTextureId() const;
     void ResizeSceneRenderTarget(uint32_t width, uint32_t height);
+    [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket> RequestRenderTargetReadback(bool gameView);
 
     // Editor gizmos
     void SetShowGrid(bool show);
@@ -156,20 +208,15 @@ class InxRenderer
     // Material pipeline refresh - call this after modifying material shader paths
     bool RefreshMaterialPipeline(std::shared_ptr<InxMaterial> material);
 
-    /// @brief Render a material preview sphere using the material's real GPU pipeline.
-    /// @return true if GPU rendering succeeded and outPixels was filled.
-    bool RenderMaterialPreviewGPU(std::shared_ptr<InxMaterial> material, int size,
-                                  std::vector<unsigned char> &outPixels);
+    [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket>
+    BeginMaterialPreviewGPU(const std::shared_ptr<InxMaterial> &material, int size);
+    bool TryCompleteMaterialPreviewGPU(const std::shared_ptr<vk::ImageReadbackTicket> &ticket, int outputSize,
+                                       std::vector<unsigned char> &outPixels);
 
-    /// @brief Render a mesh preview using real GPU shaders with per-submesh materials.
-    /// @return true if GPU rendering succeeded and outPixels was filled.
-    bool RenderMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
-                              std::vector<unsigned char> &outPixels);
-
-    /// @brief Mesh preview with an explicit camera (no auto-fit) — interactive Timeline viewport.
-    bool RenderMeshPreviewGPUCamera(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials,
-                                    int size, const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
-                                    std::vector<unsigned char> &outPixels, bool cloneMaterials = true);
+    [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket>
+    BeginMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size);
+    bool TryCompleteMeshPreviewGPU(const std::shared_ptr<vk::ImageReadbackTicket> &ticket, int outputSize,
+                                   std::vector<unsigned char> &outPixels);
 
     uint64_t RenderMeshPreviewGPUImGuiCamera(const InxMesh &mesh,
                                              const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
@@ -280,6 +327,13 @@ class InxRenderer
     /// @brief Set present mode: 0=IMMEDIATE, 1=MAILBOX, 2=FIFO, 3=FIFO_RELAXED
     void SetPresentMode(int mode);
 
+    /// @brief Set a callback invoked immediately before scene Update.
+    /// Gameplay timing is advanced here so scripts observe the current frame.
+    void SetPreSceneUpdateCallback(std::function<void(float)> callback)
+    {
+        m_preSceneUpdateCallback = std::move(callback);
+    }
+
     /// @brief Set a callback invoked each frame before GUI::BuildFrame().
     /// Scene-mutating deferred tasks run here to prevent stale-reference hangs.
     void SetPreGuiCallback(std::function<void()> callback)
@@ -360,6 +414,8 @@ class InxRenderer
     std::unique_ptr<GizmosDrawCallBuffer> m_componentGizmos;
     std::unique_ptr<OutlineRenderer> m_outlineRenderer;
     std::unique_ptr<TransientResourcePool> m_transientResourcePool;
+    uint64_t m_gpuResidencyBudgetBytes = 0;
+    uint32_t m_gpuResidencyCheckFrames = 0;
 
     // Game Camera: separate render target + graph for Game View
     std::unique_ptr<SceneRenderTarget> m_gameRenderTarget;
@@ -438,6 +494,9 @@ class InxRenderer
     /// operations (deserialize, scene load) complete before any ImGui
     /// panel renders — preventing stale-reference hangs.
     std::function<void()> m_preGuiCallback;
+
+    /// Callback invoked before SceneManager::Update with the raw frame delta.
+    std::function<void(float)> m_preSceneUpdateCallback;
 
     /// Callback invoked once per frame AFTER VkCore::DrawFrame() + EndFrame().
     /// Used by Python to run heavy scene loads between frames, avoiding

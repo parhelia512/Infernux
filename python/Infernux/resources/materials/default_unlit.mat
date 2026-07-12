@@ -1,5 +1,7 @@
 {
+  "material_version": 3,
   "name": "DefaultUnlit",
+  "builtin": false,
   "shaders": {
     "vertex": "standard",
     "fragment": "unlit"
@@ -8,6 +10,12 @@
     "cullMode": 1,
     "frontFace": 1,
     "polygonMode": 0,
+    "lineWidth": 1.0,
+    "depthBiasEnable": false,
+    "depthBiasConstantFactor": 0.0,
+    "depthBiasSlopeFactor": 0.0,
+    "depthBiasClamp": 0.0,
+    "topology": 3,
     "depthTestEnable": true,
     "depthWriteEnable": true,
     "depthCompareOp": 1,
@@ -15,7 +23,13 @@
     "srcColorBlendFactor": 6,
     "dstColorBlendFactor": 7,
     "colorBlendOp": 0,
-    "renderQueue": 2000
+    "srcAlphaBlendFactor": 0,
+    "dstAlphaBlendFactor": 1,
+    "alphaBlendOp": 0,
+    "alphaClipEnabled": false,
+    "alphaClipThreshold": 0.5,
+    "renderQueue": 2000,
+    "stencilTestEnable": false
   },
   "properties": {
     "baseColor": {

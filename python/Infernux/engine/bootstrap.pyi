@@ -42,7 +42,6 @@ class EditorBootstrap:
     services: Optional[EditorServices]
     event_bus: Optional[EditorEventBus]
 
-    frame_scheduler: object
     menu_bar: object
     toolbar: object
     status_bar: object

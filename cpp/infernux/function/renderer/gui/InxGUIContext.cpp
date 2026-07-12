@@ -2,10 +2,12 @@
 #include "InxTextLayout.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <cstring>
 #include <imgui_internal.h>
+#include <stdexcept>
 #include <type_traits>
 
 namespace infernux
@@ -593,6 +595,137 @@ bool InxGUIContext::IsAnyItemActive()
 bool InxGUIContext::IsItemHovered()
 {
     return ImGui::IsItemHovered();
+}
+
+int InxGUIContext::SearchableCombo(const std::string &id, int currentItem, const std::vector<std::string> &items,
+                                   float width, int maxVisibleItems, const std::string &searchHint,
+                                   const std::string &emptyText)
+{
+    if (id.empty())
+        throw std::invalid_argument("SearchableCombo id cannot be empty");
+    if (maxVisibleItems <= 0)
+        throw std::invalid_argument("SearchableCombo maxVisibleItems must be positive");
+
+    auto &state = m_searchableComboStates[id];
+    const int safeCurrent = currentItem >= 0 && currentItem < static_cast<int>(items.size()) ? currentItem : -1;
+    const std::string display = safeCurrent >= 0 ? items[safeCurrent] : std::string{};
+    int result = currentItem;
+
+    ImGui::PushID(id.c_str());
+    if (ImGui::Button((display + "##trigger").c_str(), ImVec2(width > 0.0f ? width : 0.0f, 0.0f))) {
+        state.filter.fill('\0');
+        state.highlightedItem = safeCurrent;
+        state.needsSearchFocus = true;
+        state.scrollToHighlight = true;
+        ImGui::OpenPopup("##popup");
+    }
+    if (state.restoreTriggerFocus) {
+        ImGui::SetItemDefaultFocus();
+        state.restoreTriggerFocus = false;
+    }
+
+    const float popupWidth = std::max(width, 220.0f * s_dpiScale);
+    const float rowHeight = ImGui::GetTextLineHeightWithSpacing();
+    const float listHeight = rowHeight * static_cast<float>(maxVisibleItems) + ImGui::GetStyle().WindowPadding.y * 2.0f;
+    ImGui::SetNextWindowSizeConstraints(ImVec2(popupWidth, 0.0f), ImVec2(popupWidth, FLT_MAX));
+    if (ImGui::BeginPopup("##popup")) {
+        state.wasOpen = true;
+        if (state.needsSearchFocus) {
+            ImGui::SetKeyboardFocusHere();
+            state.needsSearchFocus = false;
+        }
+
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        const std::string previousFilter(state.filter.data());
+        const bool submitted =
+            ImGui::InputTextWithHint("##search", searchHint.c_str(), state.filter.data(), state.filter.size(),
+                                     ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool searchFocused = ImGui::IsItemFocused();
+        const bool filterChanged = previousFilter != state.filter.data();
+
+        std::string filterLower(state.filter.data());
+        std::transform(filterLower.begin(), filterLower.end(), filterLower.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::vector<int> filtered;
+        filtered.reserve(items.size());
+        for (int index = 0; index < static_cast<int>(items.size()); ++index) {
+            std::string itemLower = items[index];
+            std::transform(itemLower.begin(), itemLower.end(), itemLower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (filterLower.empty() || itemLower.find(filterLower) != std::string::npos)
+                filtered.push_back(index);
+        }
+
+        auto highlighted = std::find(filtered.begin(), filtered.end(), state.highlightedItem);
+        if (filterChanged || highlighted == filtered.end()) {
+            auto current = std::find(filtered.begin(), filtered.end(), safeCurrent);
+            state.highlightedItem = current != filtered.end() ? *current : (filtered.empty() ? -1 : filtered.front());
+            state.scrollToHighlight = true;
+            highlighted = std::find(filtered.begin(), filtered.end(), state.highlightedItem);
+        }
+
+        if (searchFocused && !filtered.empty()) {
+            int position = highlighted == filtered.end() ? 0 : static_cast<int>(highlighted - filtered.begin());
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+                position = (position + 1) % static_cast<int>(filtered.size());
+                state.highlightedItem = filtered[position];
+                state.scrollToHighlight = true;
+            } else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+                position = (position + static_cast<int>(filtered.size()) - 1) % static_cast<int>(filtered.size());
+                state.highlightedItem = filtered[position];
+                state.scrollToHighlight = true;
+            }
+        }
+
+        bool closePopup = false;
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            closePopup = true;
+        } else if (submitted && state.highlightedItem >= 0) {
+            result = state.highlightedItem;
+            closePopup = true;
+        }
+
+        ImGui::Separator();
+        if (ImGui::BeginChild("##results", ImVec2(0.0f, listHeight), ImGuiChildFlags_None)) {
+            if (filtered.empty()) {
+                ImGui::TextDisabled("%s", emptyText.c_str());
+            } else {
+                for (int index : filtered) {
+                    const bool highlightedItem = index == state.highlightedItem;
+                    ImGui::PushID(index);
+                    if (ImGui::Selectable((items[index] + "##item").c_str(), highlightedItem)) {
+                        result = index;
+                        closePopup = true;
+                    }
+                    if (ImGui::IsItemHovered())
+                        state.highlightedItem = index;
+                    if (highlightedItem && state.scrollToHighlight) {
+                        ImGui::SetScrollHereY(0.5f);
+                        state.scrollToHighlight = false;
+                    }
+                    ImGui::PopID();
+                }
+            }
+        }
+        ImGui::EndChild();
+
+        if (closePopup) {
+            ImGui::CloseCurrentPopup();
+            state.wasOpen = false;
+            state.restoreTriggerFocus = true;
+        }
+        ImGui::EndPopup();
+    } else if (state.wasOpen) {
+        state.wasOpen = false;
+        state.restoreTriggerFocus = true;
+    }
+    ImGui::PopID();
+    return result;
+}
+
+bool InxGUIContext::IsItemFocused()
+{
+    return ImGui::IsItemFocused();
 }
 
 /* focus & activation */

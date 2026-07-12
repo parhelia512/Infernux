@@ -201,6 +201,11 @@ SceneRenderGraph::~SceneRenderGraph()
     Destroy();
 }
 
+uint64_t SceneRenderGraph::GetTransientResidentBytes() const
+{
+    return m_renderGraph ? m_renderGraph->GetTransientResidentBytes() : 0;
+}
+
 // ============================================================================
 // Initialization
 // ============================================================================

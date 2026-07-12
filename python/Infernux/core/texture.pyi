@@ -32,14 +32,8 @@ class Texture:
         """Load a texture from an image file (PNG, JPG, BMP, TGA)."""
         ...
     @staticmethod
-    def from_memory(
-        data: bytes,
-        width: int,
-        height: int,
-        channels: int = ...,
-        name: str = ...,
-    ) -> Optional[Texture]:
-        """Create a texture from raw pixel data in memory."""
+    def decode(data: bytes, name: str = ...) -> Optional[Texture]:
+        """Decode PNG/JPEG/BMP/TGA bytes into a texture."""
         ...
     @staticmethod
     def solid_color(

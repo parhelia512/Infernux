@@ -19,7 +19,6 @@
 #include "FullscreenRenderer.h"
 #include "InxRenderStruct.h"
 #include "RenderGraphDescription.h"
-#include "RenderPassOutput.h"
 #include "vk/RenderGraph.h"
 #include "vk/VkDeviceContext.h"
 #include "vk/VkPipelineManager.h"
@@ -128,6 +127,8 @@ class SceneRenderGraph
      * @brief Cleanup resources
      */
     void Destroy();
+
+    [[nodiscard]] uint64_t GetTransientResidentBytes() const;
 
     // ========================================================================
     // RenderGraph topology defined from Python

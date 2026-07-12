@@ -52,13 +52,28 @@ class AssetManager:
         """Apply import settings to an asset and reimport it."""
         ...
     @classmethod
-    def reimport_asset(cls, path: str) -> bool:
+    def import_asset(cls, path: str, *, database: Any = ..., suppress_watcher_echo: bool = ...) -> str:
+        """Import a new asset and publish its creation."""
+        ...
+    @classmethod
+    def reimport_asset(cls, path: str, *, database: Any = ..., suppress_watcher_echo: bool = ...) -> bool:
         """Reimport an asset from disk."""
         ...
     @classmethod
-    def move_asset(cls, old_path: str, new_path: str) -> bool:
+    def move_asset(cls, old_path: str, new_path: str, *, database: Any = ...,
+                   suppress_watcher_echo: bool = ...) -> bool:
         """Move or rename an asset, updating all references."""
         ...
+    @classmethod
+    def delete_asset(cls, path: str, *, database: Any = ..., suppress_watcher_echo: bool = ...) -> bool:
+        """Delete an asset after evicting loaded state."""
+        ...
+    @classmethod
+    def is_meta_watcher_suppressed(cls, path: str) -> bool: ...
+    @classmethod
+    def is_watcher_echo_suppressed(cls, event_type: str, path: str, destination: str = ...) -> bool: ...
+    @classmethod
+    def invalidate_project_panel_cache(cls) -> None: ...
     @classmethod
     def schedule_save(cls, key: str, save_fn: Callable[[], object], debounce_sec: float = ...) -> None:
         """Schedule a debounced save operation."""
@@ -70,18 +85,6 @@ class AssetManager:
     @classmethod
     def flush_scheduled_saves(cls, key: Optional[str] = ...) -> None:
         """Flush pending scheduled saves immediately."""
-        ...
-    @classmethod
-    def on_asset_deleted(cls, path: str) -> None:
-        """Notify the manager that an asset was deleted."""
-        ...
-    @classmethod
-    def on_asset_moved(cls, old_path: str, new_path: str) -> None:
-        """Notify the manager that an asset was moved."""
-        ...
-    @classmethod
-    def on_asset_modified(cls, path: str) -> None:
-        """Notify the manager that an asset was modified on disk."""
         ...
     @classmethod
     def on_material_saved(cls, path: str) -> None:

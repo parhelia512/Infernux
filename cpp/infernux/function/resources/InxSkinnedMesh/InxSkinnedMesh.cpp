@@ -136,6 +136,60 @@ float SkinnedRuntimeAnimation::DurationSeconds() const
     return static_cast<float>(durationTicks / ticksPerSecond);
 }
 
+size_t InxSkinnedMesh::GetRuntimeMemoryBytes() const noexcept
+{
+    size_t bytes = sizeof(*this) + sourcePath.capacity() + guid.capacity();
+    bytes += baseVertices.capacity() * sizeof(Vertex);
+    bytes += influences.capacity() * sizeof(SkinInfluence);
+    bytes += indices.capacity() * sizeof(uint32_t);
+    bytes += subMeshes.capacity() * sizeof(SubMesh);
+    for (const auto &subMesh : subMeshes)
+        bytes += subMesh.name.capacity();
+    bytes += nodes.capacity() * sizeof(SkinnedRuntimeNode);
+    for (const auto &node : nodes)
+        bytes += node.name.capacity();
+    bytes += nodeByName.bucket_count() * sizeof(void *);
+    for (const auto &[name, index] : nodeByName) {
+        (void)index;
+        bytes += sizeof(std::pair<const std::string, int>) + name.capacity();
+    }
+    bytes += bones.capacity() * sizeof(SkinnedRuntimeBone);
+    for (const auto &bone : bones)
+        bytes += bone.name.capacity();
+    bytes += boneByName.bucket_count() * sizeof(void *);
+    for (const auto &[name, index] : boneByName) {
+        (void)index;
+        bytes += sizeof(std::pair<const std::string, uint32_t>) + name.capacity();
+    }
+    bytes += animations.capacity() * sizeof(SkinnedRuntimeAnimation);
+    for (const auto &animation : animations) {
+        bytes += animation.name.capacity();
+        bytes += animation.tracks.capacity() * sizeof(SkinnedRuntimeTrack);
+        for (const auto &track : animation.tracks) {
+            bytes += track.nodeName.capacity();
+            bytes += track.positions.capacity() * sizeof(decltype(track.positions)::value_type);
+            bytes += track.rotations.capacity() * sizeof(decltype(track.rotations)::value_type);
+            bytes += track.scales.capacity() * sizeof(decltype(track.scales)::value_type);
+        }
+        bytes += animation.trackByNode.bucket_count() * sizeof(void *);
+        for (const auto &[name, index] : animation.trackByNode) {
+            (void)index;
+            bytes += sizeof(std::pair<const std::string, size_t>) + name.capacity();
+        }
+    }
+    bytes += m_gpuPaletteCache.bucket_count() * sizeof(void *);
+    for (const auto &[key, palette] : m_gpuPaletteCache) {
+        bytes +=
+            sizeof(decltype(m_gpuPaletteCache)::value_type) + key.takeName.capacity() + key.blendTakeName.capacity();
+        if (palette)
+            bytes += sizeof(*palette) + palette->capacity() * sizeof(glm::mat4);
+    }
+    bytes += m_gpuPaletteCacheOrder.capacity() * sizeof(PaletteCacheKey);
+    for (const auto &key : m_gpuPaletteCacheOrder)
+        bytes += key.takeName.capacity() + key.blendTakeName.capacity();
+    return bytes;
+}
+
 const SkinnedRuntimeAnimation *InxSkinnedMesh::FindAnimation(const std::string &takeName) const
 {
     if (animations.empty())

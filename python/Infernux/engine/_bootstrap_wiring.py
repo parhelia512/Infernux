@@ -22,7 +22,6 @@ from Infernux.engine.resources_manager import ResourcesManager
 from Infernux.engine.play_mode import PlayModeManager, PlayModeState
 from Infernux.engine.scene_manager import SceneFileManager
 from Infernux.engine.ui import (
-    FrameSchedulerPanel,
     SceneViewPanel,
     GameViewPanel,
     WindowManager,
@@ -236,7 +235,7 @@ class BootstrapWiringMixin:
         hierarchy = self.hierarchy
         scene_view = self.scene_view
         game_view = self.game_view
-        from Infernux.engine.ui.closable_panel import ClosablePanel
+        from Infernux.engine.ui.event_bus import EditorEvent, EditorEventBus
 
         def on_ui_mode_request(enter: bool):
             hierarchy.set_ui_mode(enter)
@@ -262,9 +261,14 @@ class BootstrapWiringMixin:
 
         hierarchy.on_selection_changed_ui_editor = on_hierarchy_ui_sync
 
-        def on_panel_focus_changed(_old_panel_id: str, new_panel_id: str):
+        def on_panel_focused(panel_id: str):
             if self.window_manager is not None:
-                self.window_manager.note_panel_focus(new_panel_id)
+                self.window_manager.note_panel_focus(panel_id)
 
-        ClosablePanel.set_on_panel_focus_changed(on_panel_focus_changed)
+        bus = EditorEventBus.instance()
+        previous = getattr(self, "_panel_focus_event_handler", None)
+        if previous is not None:
+            bus.unsubscribe(EditorEvent.PANEL_FOCUSED, previous)
+        self._panel_focus_event_handler = on_panel_focused
+        bus.subscribe(EditorEvent.PANEL_FOCUSED, on_panel_focused)
 

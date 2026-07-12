@@ -61,15 +61,11 @@ inline RigidbodyConstraints operator~(RigidbodyConstraints a)
     return static_cast<RigidbodyConstraints>(~static_cast<int>(a));
 }
 
-/**
- * @brief Unity-style CollisionDetectionMode.
- */
+/// Collision algorithms actually supported by the Jolt backend.
 enum class CollisionDetectionMode : int
 {
     Discrete = 0,
-    Continuous = 1,
-    ContinuousDynamic = 2,
-    ContinuousSpeculative = 3
+    Continuous = 1
 };
 
 enum class RigidbodyInterpolation : int
@@ -190,16 +186,6 @@ class Rigidbody : public Component
     }
     void SetMaxLinearVelocity(float vel);
 
-    /// @brief Maximum depenetration velocity (Unity: Rigidbody.maxDepenetrationVelocity). Default 1e10.
-    [[nodiscard]] float GetMaxDepenetrationVelocity() const
-    {
-        return Data().maxDepenetrationVelocity;
-    }
-    void SetMaxDepenetrationVelocity(float vel)
-    {
-        DataMut().maxDepenetrationVelocity = vel > 0.0f ? vel : 0.0f;
-    }
-
     // ---- Velocity (read/write) ----
 
     /// @brief Linear velocity in world space (Unity: Rigidbody.velocity).
@@ -223,10 +209,12 @@ class Rigidbody : public Component
 
     // ---- Kinematic movement ----
 
-    /// @brief Move kinematic body to target position (Unity: Rigidbody.MovePosition).
+    /// @brief Schedule a kinematic move; presentation follows the configured interpolation mode.
+    /// @throws std::logic_error if this is not an active kinematic body with an enabled Collider.
     void MovePosition(const glm::vec3 &position);
 
-    /// @brief Rotate kinematic body to target rotation (Unity: Rigidbody.MoveRotation).
+    /// @brief Schedule a kinematic rotation without teleporting the presentation Transform.
+    /// @throws std::logic_error if this is not an active kinematic body with an enabled Collider.
     void MoveRotation(const glm::quat &rotation);
 
     // ---- Read-only world info ----
@@ -236,9 +224,11 @@ class Rigidbody : public Component
 
     /// @brief World-space position of the rigidbody (Unity: Rigidbody.position).
     [[nodiscard]] glm::vec3 GetPosition() const;
+    void SetPosition(const glm::vec3 &position);
 
     /// @brief World-space rotation of the rigidbody (Unity: Rigidbody.rotation).
     [[nodiscard]] glm::quat GetRotation() const;
+    void SetRotation(const glm::quat &rotation);
 
     // ---- Sleep ----
 
@@ -270,6 +260,14 @@ class Rigidbody : public Component
     ///        Returns true when enabled and has collider siblings.
     [[nodiscard]] bool HasLinkedColliders() const;
 
+    /// @brief Apply the complete Rigidbody configuration to a newly created or
+    ///        motion-type-changed actor body.
+    void ApplyConfigurationToBody(uint32_t bodyId);
+
+    /// @brief Submit forces queued before deferred body creation.
+    ///        Called after the body has entered the Jolt broadphase.
+    void FlushPendingForceCommands();
+
     // ====================================================================
     // Type info
     // ====================================================================
@@ -289,11 +287,30 @@ class Rigidbody : public Component
     // Serialization
     // ====================================================================
 
-    [[nodiscard]] std::string Serialize() const override;
-    bool Deserialize(const std::string &jsonStr) override;
+    [[nodiscard]] nlohmann::json SerializeDocument() const override;
+    static void ValidateSerializedDocument(const nlohmann::json &document);
+    bool DeserializeDocument(const nlohmann::json &document) override;
     [[nodiscard]] std::unique_ptr<Component> Clone() const override;
 
   private:
+    enum class ForceCommandKind : uint8_t
+    {
+        Force,
+        Torque,
+        ForceAtPosition,
+    };
+
+    struct ForceCommand
+    {
+        ForceCommandKind kind = ForceCommandKind::Force;
+        glm::vec3 value{0.0f};
+        glm::vec3 position{0.0f};
+        ForceMode mode = ForceMode::Force;
+    };
+
+    void SubmitForceCommand(ForceCommand command);
+    void ApplyForceCommand(class PhysicsWorld &world, uint32_t bodyId, const ForceCommand &command);
+
     /// Notify all sibling Colliders to rebuild their Jolt body type.
     void NotifyCollidersBodyTypeChanged();
 
@@ -317,8 +334,8 @@ class Rigidbody : public Component
     /// Invoke @p fn(PhysicsWorld&, bodyId) for every unique Jolt body on this GO.
     template <typename Fn> void ForEachBody(Fn &&fn);
 
-    /// Teleport all sibling collider bodies to @p pos / @p rot, zero velocities,
-    /// and update the physics-pose cache.  Used by SyncExternalMovesToPhysics.
+    /// Teleport the actor body to @p pos / @p rot while preserving velocity,
+    /// and update the transform/interpolation caches.
     void TeleportBodies(PhysicsWorld &pw, GameObject *go, const glm::vec3 &pos, const glm::quat &rot);
 
     /// Pool-backed data — read access
@@ -333,6 +350,7 @@ class Rigidbody : public Component
     }
 
     ECSHandle m_ecsHandle;
+    std::vector<ForceCommand> m_pendingForceCommands;
 };
 
 } // namespace infernux

@@ -13,9 +13,13 @@
 #include "physics/PhysicsECSStore.h"
 #include "physics/PhysicsWorld.h"
 #include <InxLog.h>
+#include <function/resources/AssetDependencyGraph.h>
+#include <function/resources/AssetRegistry/AssetRegistry.h>
 
 #include <algorithm>
+#include <cmath>
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 
 namespace infernux
 {
@@ -31,12 +35,90 @@ Collider::Collider()
 
 Collider::~Collider()
 {
+    if (m_physicMaterial.HasGuid())
+        AssetDependencyGraph::Instance().RemoveRuntimeDependency(GetInstanceGuid(), m_physicMaterial.GetGuid());
+
     // Safe: UnregisterBody checks bodyId == 0xFFFFFFFF and returns early
     // if already cleaned up via OnDestroy().
     UnregisterBody();
 
+    auto &store = PhysicsECSStore::Instance();
+    if (store.IsValid(Data().actorHandle))
+        store.ReleaseActor(Data().actorHandle, this);
+
     // Release pool slot
-    PhysicsECSStore::Instance().ReleaseCollider(m_ecsHandle);
+    store.ReleaseCollider(m_ecsHandle);
+}
+
+void Collider::EnsureActor()
+{
+    auto &store = PhysicsECSStore::Instance();
+    auto &data = DataMut();
+    if (store.IsValid(data.actorHandle))
+        return;
+    auto *gameObject = GetGameObject();
+    if (!gameObject)
+        throw std::logic_error("Collider must be attached to a GameObject before accessing its physics actor");
+    data.actorHandle = store.AcquireActor(gameObject, this);
+}
+
+PhysicsActorData &Collider::ActorMut()
+{
+    EnsureActor();
+    return PhysicsECSStore::Instance().GetActor(Data().actorHandle);
+}
+
+const PhysicsActorData &Collider::Actor() const
+{
+    const_cast<Collider *>(this)->EnsureActor();
+    return PhysicsECSStore::Instance().GetActor(Data().actorHandle);
+}
+
+uint32_t Collider::GetBodyId() const
+{
+    auto &store = PhysicsECSStore::Instance();
+    if (!store.IsValid(Data().actorHandle)) {
+        if (!GetGameObject())
+            return 0xFFFFFFFF;
+        const_cast<Collider *>(this)->EnsureActor();
+    }
+    return store.GetActor(Data().actorHandle).bodyId;
+}
+
+void Collider::SetCachedRigidbody(Rigidbody *rigidbody)
+{
+    ActorMut().rigidbody = rigidbody;
+}
+
+Rigidbody *Collider::GetCachedRigidbody() const
+{
+    return Actor().rigidbody;
+}
+
+void Collider::SetLastSyncedTransform(const glm::vec3 &position, const glm::quat &rotation)
+{
+    auto &actor = ActorMut();
+    actor.lastSyncedPos = position;
+    actor.lastSyncedRot = rotation;
+}
+
+uint32_t Collider::GetSharedBodyId(const GameObject *gameObject)
+{
+    if (!gameObject)
+        return 0xFFFFFFFF;
+
+    uint32_t sharedBodyId = 0xFFFFFFFF;
+    for (const auto &component : gameObject->GetAllComponents()) {
+        auto *collider = dynamic_cast<Collider *>(component.get());
+        if (!collider || collider->GetBodyId() == 0xFFFFFFFF)
+            continue;
+        if (sharedBodyId == 0xFFFFFFFF) {
+            sharedBodyId = collider->GetBodyId();
+        } else if (collider->GetBodyId() != sharedBodyId) {
+            throw std::logic_error("A GameObject's colliders must share exactly one physics body");
+        }
+    }
+    return sharedBodyId;
 }
 
 // ============================================================================
@@ -45,6 +127,7 @@ Collider::~Collider()
 
 void Collider::Awake()
 {
+    EnsureActor();
     // If a sibling Rigidbody already exists and is enabled, cache it before
     // body creation so the body is created as dynamic/kinematic instead of
     // static.  This handles the case where the Collider is added *after* the
@@ -52,7 +135,7 @@ void Collider::Awake()
     if (auto *go = GetGameObject()) {
         auto *rb = go->GetComponent<Rigidbody>();
         if (rb && rb->IsEnabled())
-            DataMut().cachedRigidbody = rb;
+            ActorMut().rigidbody = rb;
     }
 
     if (!Data().deserialized) {
@@ -68,11 +151,14 @@ void Collider::Awake()
 
 void Collider::OnEnable()
 {
-    if (Data().bodyId == 0xFFFFFFFF) {
+    if (GetBodyId() == 0xFFFFFFFF) {
         // Body not yet created (deferred from Awake) — ensure it's queued.
         PhysicsECSStore::Instance().QueueBodyCreation(m_ecsHandle);
         return;
     }
+    auto &actor = ActorMut();
+    if (!actor.primaryCollider || !actor.primaryCollider->IsEnabled())
+        actor.primaryCollider = this;
     // Re-enable after disable — body already exists, normal path.
     PhysicsWorld::Instance().UpdateBodyShape(this);
     AddToBroadphase();
@@ -85,14 +171,15 @@ void Collider::OnDisable()
     }
 
     auto *go = GetGameObject();
-    if (go && Data().bodyId != 0xFFFFFFFF) {
+    const uint32_t bodyId = GetBodyId();
+    if (go && bodyId != 0xFFFFFFFF) {
         bool hasOtherEnabledSibling = false;
         Collider *replacement = nullptr;
         auto colliders = go->GetComponents<Collider>();
         for (auto *col : colliders) {
             if (!col || col == this || !col->IsEnabled())
                 continue;
-            if (col->GetBodyId() == Data().bodyId) {
+            if (col->GetBodyId() == bodyId) {
                 hasOtherEnabledSibling = true;
                 replacement = col;
                 break;
@@ -100,8 +187,11 @@ void Collider::OnDisable()
         }
 
         if (hasOtherEnabledSibling) {
-            PhysicsWorld::Instance().RebindBodyCollider(Data().bodyId, replacement);
+            ActorMut().primaryCollider = replacement;
+            PhysicsWorld::Instance().RebindBodyCollider(bodyId, replacement);
             PhysicsWorld::Instance().UpdateBodyShape(this, this);
+        } else if (Actor().primaryCollider == this) {
+            ActorMut().primaryCollider = nullptr;
         }
     }
 
@@ -124,38 +214,44 @@ void Collider::SetIsTrigger(bool trigger)
         return;
     d.isTrigger = trigger;
 
-    if (d.bodyId != 0xFFFFFFFF) {
-        bool groupIsTrigger = false;
+    const uint32_t bodyId = GetBodyId();
+    if (bodyId != 0xFFFFFFFF) {
+        bool hasEnabledCollider = false;
+        bool groupIsTrigger = true;
         if (auto *go = GetGameObject()) {
             auto colliders = go->GetComponents<Collider>();
             for (auto *col : colliders) {
                 if (!col || !col->IsEnabled())
                     continue;
-                if (col->GetBodyId() == d.bodyId && col->IsTrigger()) {
-                    groupIsTrigger = true;
-                    break;
-                }
+                if (col->GetBodyId() != bodyId)
+                    continue;
+                hasEnabledCollider = true;
+                groupIsTrigger = groupIsTrigger && col->IsTrigger();
             }
         } else {
+            hasEnabledCollider = true;
             groupIsTrigger = trigger;
         }
+        groupIsTrigger = hasEnabledCollider && groupIsTrigger;
 
         auto &physics = PhysicsWorld::Instance();
-        physics.SetBodyIsSensor(d.bodyId, groupIsTrigger);
+        physics.SetBodyIsSensor(bodyId, groupIsTrigger);
 
         // Wake dynamic bodies that may be resting on (or overlapping) this
         // collider so they re-evaluate the changed sensor state.
-        physics.WakeBodiesTouchingStatic(d.bodyId);
+        physics.WakeBodiesTouchingStatic(bodyId);
 
         // Clear stale contact-pair tracking so the listener produces fresh
         // Enter events (Trigger or Collision) on the next physics step
         // instead of suppressing them as wake-from-sleep duplicates.
-        physics.InvalidateContactPairsForBody(d.bodyId);
+        physics.InvalidateContactPairsForBody(bodyId);
     }
 }
 
 void Collider::SetCenter(const glm::vec3 &center)
 {
+    if (!std::isfinite(center.x) || !std::isfinite(center.y) || !std::isfinite(center.z))
+        throw std::invalid_argument("collider center must contain finite values");
     auto &d = DataMut();
     if (d.center == center)
         return;
@@ -165,52 +261,103 @@ void Collider::SetCenter(const glm::vec3 &center)
 
 // ---- Friction / Bounciness helpers ----
 
-/// @brief Recompute max friction & bounciness across all enabled colliders on the same body
-///        and push the values to Jolt.
+/// @brief Update Jolt's body-level fallback material from the primary enabled collider.
+/// Actual contacts are combined per subshape by InxContactListener.
 static void ApplyMaterialToBody(Collider *self)
 {
-    auto &d = PhysicsECSStore::Instance().GetCollider(self->GetECSHandle());
-    if (d.bodyId == 0xFFFFFFFF)
+    const uint32_t bodyId = self->GetBodyId();
+    if (bodyId == 0xFFFFFFFF)
         return;
 
     auto *go = self->GetGameObject();
     if (!go)
         return;
 
-    float maxFriction = 0.0f;
-    float maxBounciness = 0.0f;
     auto colliders = go->GetComponents<Collider>();
     for (auto *col : colliders) {
         if (!col || !col->IsEnabled())
             continue;
-        const auto &cd = PhysicsECSStore::Instance().GetCollider(col->GetECSHandle());
-        maxFriction = std::max(maxFriction, cd.friction);
-        maxBounciness = std::max(maxBounciness, cd.bounciness);
+        auto &pw = PhysicsWorld::Instance();
+        pw.SetBodyFriction(bodyId, col->GetFriction());
+        pw.SetBodyRestitution(bodyId, col->GetBounciness());
+        return;
     }
-
-    auto &pw = PhysicsWorld::Instance();
-    pw.SetBodyFriction(d.bodyId, maxFriction);
-    pw.SetBodyRestitution(d.bodyId, maxBounciness);
 }
 
-void Collider::SetFriction(float friction)
+std::shared_ptr<PhysicMaterial> Collider::GetPhysicMaterial() const
 {
-    auto &d = DataMut();
-    friction = std::max(friction, 0.0f);
-    if (d.friction == friction)
+    return m_physicMaterial.Get();
+}
+
+const std::string &Collider::GetPhysicMaterialGuid() const
+{
+    return m_physicMaterial.GetGuid();
+}
+
+void Collider::SetPhysicMaterial(std::shared_ptr<PhysicMaterial> material)
+{
+    const std::string guid = material ? material->GetGuid() : std::string();
+    if (m_physicMaterial.Get() == material && m_physicMaterial.GetGuid() == guid)
         return;
-    d.friction = friction;
+    auto &graph = AssetDependencyGraph::Instance();
+    if (m_physicMaterial.HasGuid())
+        graph.RemoveRuntimeDependency(GetInstanceGuid(), m_physicMaterial.GetGuid());
+    const uint64_t runtimeVersion = guid.empty() ? 0 : AssetRegistry::Instance().GetAssetVersion(guid);
+    m_physicMaterial = AssetRef<PhysicMaterial>(guid, std::move(material), runtimeVersion);
+    if (!guid.empty())
+        graph.AddRuntimeDependency(GetInstanceGuid(), guid);
     ApplyMaterialToBody(this);
 }
 
-void Collider::SetBounciness(float bounciness)
+void Collider::SetPhysicMaterialGuid(const std::string &guid)
 {
-    auto &d = DataMut();
-    bounciness = std::clamp(bounciness, 0.0f, 1.0f);
-    if (d.bounciness == bounciness)
+    if (guid.empty()) {
+        ClearPhysicMaterial();
         return;
-    d.bounciness = bounciness;
-    ApplyMaterialToBody(this);
+    }
+    auto material = AssetRegistry::Instance().LoadAsset<PhysicMaterial>(guid, ResourceType::PhysicMaterial);
+    if (!material)
+        throw std::invalid_argument("PhysicMaterial GUID cannot be resolved: " + guid);
+    SetPhysicMaterial(std::move(material));
+}
+
+void Collider::ClearPhysicMaterial()
+{
+    SetPhysicMaterial(nullptr);
+}
+
+void Collider::OnPhysicMaterialAssetEvent(AssetEvent event)
+{
+    if (event == AssetEvent::Deleted) {
+        ClearPhysicMaterial();
+        return;
+    }
+    if (event == AssetEvent::Modified)
+        ApplyMaterialToBody(this);
+}
+
+float Collider::GetFriction() const
+{
+    const auto material = m_physicMaterial.Get();
+    return material ? material->GetFriction() : 0.4f;
+}
+
+float Collider::GetBounciness() const
+{
+    const auto material = m_physicMaterial.Get();
+    return material ? material->GetBounciness() : 0.0f;
+}
+
+PhysicsMaterialCombine Collider::GetFrictionCombine() const
+{
+    const auto material = m_physicMaterial.Get();
+    return material ? material->GetFrictionCombine() : PhysicsMaterialCombine::Average;
+}
+
+PhysicsMaterialCombine Collider::GetBounceCombine() const
+{
+    const auto material = m_physicMaterial.Get();
+    return material ? material->GetBounceCombine() : PhysicsMaterialCombine::Average;
 }
 
 // ============================================================================
@@ -243,10 +390,7 @@ void Collider::RegisterBody()
     if (!pw.IsInitialized())
         return;
 
-    auto &d = DataMut();
-
-    if (d.bodyId != 0xFFFFFFFF)
-        return; // already registered
+    auto &actor = ActorMut();
 
     auto *go = GetGameObject();
     if (!go)
@@ -257,64 +401,37 @@ void Collider::RegisterBody()
     if (go->GetScene() != SceneManager::Instance().GetActiveScene())
         return;
 
-    auto colliders = go->GetComponents<Collider>();
-    for (auto *col : colliders) {
-        if (!col || col == this)
-            continue;
-
-        const auto &otherData = col->Data();
-        if (otherData.bodyId == 0xFFFFFFFF)
-            continue;
-
-        d.bodyId = otherData.bodyId;
-        d.bodyInBroadphase = otherData.bodyInBroadphase;
-
-        if (auto *tf = go->GetTransform()) {
-            const glm::quat rot = tf->GetWorldRotation();
-            d.lastSyncedRot = rot;
-            d.lastSyncedPos = tf->GetPosition();
-            d.lastScale = tf->GetWorldScale();
-        }
-
+    if (actor.bodyId != 0xFFFFFFFF) {
+        if (!actor.primaryCollider || !actor.primaryCollider->IsEnabled())
+            actor.primaryCollider = this;
         pw.UpdateBodyShape(this);
         return;
     }
 
-    // Use cached Rigidbody pointer
-    bool isStatic = (d.cachedRigidbody == nullptr || !d.cachedRigidbody->IsEnabled());
+    auto colliders = go->GetComponents<Collider>();
+    bool isStatic = (actor.rigidbody == nullptr || !actor.rigidbody->IsEnabled());
 
-    bool groupIsTrigger = false;
+    bool hasEnabledCollider = false;
+    bool groupIsTrigger = true;
     for (auto *col : colliders) {
         if (!col || !col->IsEnabled())
             continue;
-        if (col->IsTrigger()) {
-            groupIsTrigger = true;
-            break;
-        }
+        hasEnabledCollider = true;
+        groupIsTrigger = groupIsTrigger && col->IsTrigger();
     }
+    groupIsTrigger = hasEnabledCollider && groupIsTrigger;
 
-    d.bodyId = pw.CreateBody(this, isStatic, groupIsTrigger);
+    actor.primaryCollider = this;
+    actor.bodyId = pw.CreateBody(this, isStatic, groupIsTrigger);
+    actor.bodyInBroadphase = false;
 
     // Initialize cached transform so first SyncTransformToPhysics doesn't
     // see a spurious move from the (0,0,0) default.
     if (auto *tf = go->GetTransform()) {
         glm::quat rot = tf->GetWorldRotation();
-        d.lastSyncedRot = rot;
-        d.lastSyncedPos = tf->GetPosition();
-        d.lastScale = tf->GetWorldScale();
-    }
-
-    for (auto *col : colliders) {
-        if (!col)
-            continue;
-        auto &other = col->DataMut();
-        other.bodyId = d.bodyId;
-        other.bodyInBroadphase = false;
-        if (auto *tf = go->GetTransform()) {
-            other.lastSyncedPos = tf->GetPosition();
-            other.lastSyncedRot = tf->GetWorldRotation();
-            other.lastScale = tf->GetWorldScale();
-        }
+        actor.lastSyncedRot = rot;
+        actor.lastSyncedPos = tf->GetPosition();
+        actor.lastScale = tf->GetWorldScale();
     }
 
     // ========================================================================
@@ -324,42 +441,20 @@ void Collider::RegisterBody()
     // have skipped this body.  Apply the Rigidbody's full configuration now
     // that the body exists.
     // ========================================================================
-    if (d.cachedRigidbody && d.cachedRigidbody->IsEnabled() && d.bodyId != 0xFFFFFFFF) {
-        int motionType = d.cachedRigidbody->IsKinematic() ? 1 : 2;
-        pw.SetBodyMotionType(d.bodyId, motionType);
-        pw.SetBodyMassProperties(d.bodyId, d.cachedRigidbody->GetMass());
-        pw.SetBodyDamping(d.bodyId, d.cachedRigidbody->GetDrag(), d.cachedRigidbody->GetAngularDrag());
-        pw.SetBodyGravityFactor(d.bodyId, d.cachedRigidbody->GetUseGravity() ? 1.0f : 0.0f);
-
-        // Keep new rigidbodies on Jolt's LinearCast path by default. Scripts can
-        // still explicitly set Discrete when they want the cheaper mode.
-        const int collisionMode = d.cachedRigidbody->GetCollisionDetectionMode();
-        const bool isKinematicBody = d.cachedRigidbody->IsKinematic();
-        int joltQuality = 0;
-        if (collisionMode == 2) {
-            joltQuality = 1;
-        } else if (collisionMode == 1) {
-            joltQuality = isKinematicBody ? 0 : 1;
-        }
-        pw.SetBodyMotionQuality(d.bodyId, joltQuality);
-
-        // Constraints (allowed DOFs)
-        int constraints = d.cachedRigidbody->GetConstraints();
-        if (constraints != 0) {
-            int joltAllowed = 0x3F & ~(constraints >> 1);
-            pw.SetBodyAllowedDOFs(d.bodyId, joltAllowed, d.cachedRigidbody->GetMass());
-        }
-
-        // Max angular velocity
-        pw.SetBodyMaxAngularVelocity(d.bodyId, d.cachedRigidbody->GetMaxAngularVelocity());
-        pw.SetBodyMaxLinearVelocity(d.bodyId, d.cachedRigidbody->GetMaxLinearVelocity());
+    if (actor.rigidbody && actor.rigidbody->IsEnabled() && actor.bodyId != 0xFFFFFFFF) {
+        int motionType = actor.rigidbody->IsKinematic() ? 1 : 2;
+        pw.SetBodyMotionType(actor.bodyId, motionType);
+        actor.rigidbody->ApplyConfigurationToBody(actor.bodyId);
     }
 }
 
 void Collider::UnregisterBody()
 {
-    auto &d = DataMut();
-    if (d.bodyId == 0xFFFFFFFF)
+    auto &store = PhysicsECSStore::Instance();
+    if (!store.IsValid(Data().actorHandle))
+        return;
+    auto &actor = store.GetActor(Data().actorHandle);
+    if (actor.bodyId == 0xFFFFFFFF)
         return;
 
     auto *go = GetGameObject();
@@ -369,7 +464,7 @@ void Collider::UnregisterBody()
         for (auto *col : colliders) {
             if (!col || col == this)
                 continue;
-            if (col->GetBodyId() == d.bodyId) {
+            if (col->GetBodyId() == actor.bodyId) {
                 replacement = col;
                 break;
             }
@@ -377,20 +472,21 @@ void Collider::UnregisterBody()
     }
 
     if (replacement) {
-        PhysicsWorld::Instance().RebindBodyCollider(d.bodyId, replacement);
+        actor.primaryCollider = replacement;
+        PhysicsWorld::Instance().RebindBodyCollider(actor.bodyId, replacement);
 
         // Teardown fast path: when this collider dies as part of GameObject /
         // scene destruction, every sibling is about to die too. Rebuilding the
         // compound shape per destroyed collider is O(n²) churn with no
         // observable effect — skip it and let the last sibling destroy the body.
-        if (!IsBeingDestroyed()) {
+        if (!go || !go->IsDestroying()) {
             bool hasOtherEnabledSibling = false;
             if (go) {
                 auto colliders = go->GetComponents<Collider>();
                 for (auto *col : colliders) {
                     if (!col || col == this || !col->IsEnabled())
                         continue;
-                    if (col->GetBodyId() == d.bodyId) {
+                    if (col->GetBodyId() == actor.bodyId) {
                         hasOtherEnabledSibling = true;
                         break;
                     }
@@ -404,56 +500,33 @@ void Collider::UnregisterBody()
     } else {
         RemoveFromBroadphase();
         PhysicsWorld::Instance().DestroyBody(this);
+        actor.bodyId = 0xFFFFFFFF;
+        actor.bodyInBroadphase = false;
+        actor.primaryCollider = nullptr;
     }
-
-    d.bodyId = 0xFFFFFFFF;
-    d.bodyInBroadphase = false;
 }
 
 void Collider::AddToBroadphase()
 {
-    auto &d = DataMut();
-    if (d.bodyId == 0xFFFFFFFF)
+    auto &actor = ActorMut();
+    if (actor.bodyId == 0xFFFFFFFF)
+        return;
+    if (actor.bodyInBroadphase)
         return;
 
-    auto *go = GetGameObject();
-    if (go) {
-        auto colliders = go->GetComponents<Collider>();
-        for (auto *col : colliders) {
-            if (!col)
-                continue;
-            if (col != this && col->GetBodyId() == d.bodyId && col->Data().bodyInBroadphase) {
-                d.bodyInBroadphase = true;
-                return;
-            }
-        }
-    }
-
-    if (d.bodyInBroadphase)
-        return;
-
-    bool isStatic = (d.cachedRigidbody == nullptr || !d.cachedRigidbody->IsEnabled());
+    bool isStatic = (actor.rigidbody == nullptr || !actor.rigidbody->IsEnabled());
 
     // Defer broadphase addition to the next pre-physics flush (Unity-style).
     // The body exists in Jolt but won't participate in queries/simulation
     // until SceneManager flushes the pending queue.
-    PhysicsECSStore::Instance().QueueBroadphaseAdd(d.bodyId, isStatic);
-    d.bodyInBroadphase = true;
-
-    if (go) {
-        auto colliders = go->GetComponents<Collider>();
-        for (auto *col : colliders) {
-            if (col && col->GetBodyId() == d.bodyId) {
-                col->DataMut().bodyInBroadphase = true;
-            }
-        }
-    }
+    PhysicsECSStore::Instance().QueueBroadphaseAdd(actor.bodyId, isStatic);
+    actor.bodyInBroadphase = true;
 }
 
 void Collider::RemoveFromBroadphase()
 {
-    auto &d = DataMut();
-    if (d.bodyId == 0xFFFFFFFF || !d.bodyInBroadphase)
+    auto &actor = ActorMut();
+    if (actor.bodyId == 0xFFFFFFFF || !actor.bodyInBroadphase)
         return;
 
     auto *go = GetGameObject();
@@ -462,80 +535,43 @@ void Collider::RemoveFromBroadphase()
         for (auto *col : colliders) {
             if (!col || col == this || !col->IsEnabled())
                 continue;
-            if (col->GetBodyId() == d.bodyId) {
-                d.bodyInBroadphase = true;
+            if (col->GetBodyId() == actor.bodyId) {
                 return;
             }
         }
     }
 
-    PhysicsWorld::Instance().RemoveBodyFromBroadphase(d.bodyId);
-    d.bodyInBroadphase = false;
-
-    if (go) {
-        auto colliders = go->GetComponents<Collider>();
-        for (auto *col : colliders) {
-            if (col && col->GetBodyId() == d.bodyId) {
-                col->DataMut().bodyInBroadphase = false;
-            }
-        }
-    }
+    PhysicsWorld::Instance().RemoveBodyFromBroadphase(actor.bodyId);
+    actor.bodyInBroadphase = false;
 }
 
 void Collider::RebuildShape()
 {
-    auto &d = DataMut();
-    if (d.bodyId == 0xFFFFFFFF)
+    auto &actor = ActorMut();
+    if (actor.bodyId == 0xFFFFFFFF)
         return;
 
-    auto *go = GetGameObject();
-    if (go) {
-        auto colliders = go->GetComponents<Collider>();
-        for (auto *col : colliders) {
-            if (!col || !col->IsEnabled() || col->GetBodyId() != d.bodyId)
-                continue;
-            if (col != this) {
-                return;
-            }
-            break;
-        }
-    }
-
     PhysicsWorld::Instance().UpdateBodyShape(this);
+    ++actor.shapeRevision;
 
     // If this is a static body (no Rigidbody), wake nearby dynamic
     // bodies so they react to the shape change immediately.
-    bool isStatic = (d.cachedRigidbody == nullptr || !d.cachedRigidbody->IsEnabled());
+    bool isStatic = (actor.rigidbody == nullptr || !actor.rigidbody->IsEnabled());
     if (isStatic) {
-        PhysicsWorld::Instance().WakeBodiesTouchingStatic(d.bodyId);
+        PhysicsWorld::Instance().WakeBodiesTouchingStatic(actor.bodyId);
     }
 }
 
 void Collider::SyncTransformToPhysics(float fixedDeltaTime)
 {
-    auto &d = DataMut();
-    if (d.bodyId == 0xFFFFFFFF)
+    auto &actor = ActorMut();
+    if (actor.bodyId == 0xFFFFFFFF)
         return;
-
-    if (auto *go = GetGameObject()) {
-        auto colliders = go->GetComponents<Collider>();
-        for (auto *col : colliders) {
-            if (!col || !col->IsEnabled() || col->GetBodyId() != d.bodyId)
-                continue;
-            if (col != this) {
-                return;
-            }
-            break;
-        }
-    }
+    if (actor.primaryCollider != this)
+        return;
 
     // Use cached Rigidbody pointer — no dynamic_cast needed.
-    Rigidbody *rb = d.cachedRigidbody;
-
-    // If a Rigidbody sibling exists and is enabled, the body is dynamic.
-    // Dynamic bodies are driven by physics — don't overwrite their position.
-    if (rb && rb->IsEnabled() && !rb->IsKinematic())
-        return;
+    Rigidbody *rb = actor.rigidbody;
 
     auto *go = GetGameObject();
     if (!go)
@@ -549,33 +585,39 @@ void Collider::SyncTransformToPhysics(float fixedDeltaTime)
     // Collider geometry is baked using world-space scale, so parent scaling
     // must also invalidate the body shape.
     glm::vec3 currentScale = tf->GetWorldScale();
-    if (currentScale != d.lastScale) {
-        d.lastScale = currentScale;
+    if (currentScale != actor.lastScale) {
+        actor.lastScale = currentScale;
         RebuildShape();
     }
+
+    // Dynamic pose changes are handled by Rigidbody using the same dirty actor
+    // queue. Scale still reaches this point so dynamic shapes can be rebuilt.
+    if (rb && rb->IsEnabled() && !rb->IsKinematic())
+        return;
 
     glm::quat rot = tf->GetWorldRotation();
     glm::vec3 pos = tf->GetPosition();
 
     // Compare against cached last-synced values (pure C++ — no Jolt lock)
-    bool moved = (pos != d.lastSyncedPos || rot != d.lastSyncedRot);
+    bool moved = (pos != actor.lastSyncedPos || rot != actor.lastSyncedRot);
 
     if (moved) {
-        d.lastSyncedPos = pos;
-        d.lastSyncedRot = rot;
+        actor.lastSyncedPos = pos;
+        actor.lastSyncedRot = rot;
+        ++actor.transformRevision;
 
         PhysicsWorld &physicsWorld = PhysicsWorld::Instance();
         bool isKinematicBody = (rb != nullptr && rb->IsEnabled() && rb->IsKinematic());
         if (isKinematicBody && fixedDeltaTime > 0.0f) {
-            physicsWorld.MoveBodyKinematic(d.bodyId, pos, rot, fixedDeltaTime);
+            physicsWorld.MoveBodyKinematic(actor.bodyId, pos, rot, fixedDeltaTime);
         } else {
-            physicsWorld.SetBodyPosition(d.bodyId, pos, rot);
+            physicsWorld.SetBodyPosition(actor.bodyId, pos, rot);
         }
 
         // After moving a static/kinematic body, wake nearby dynamic bodies.
         bool isStaticBody = (rb == nullptr || !rb->IsEnabled());
         if (isStaticBody) {
-            physicsWorld.WakeBodiesTouchingStatic(d.bodyId);
+            physicsWorld.WakeBodiesTouchingStatic(actor.bodyId);
         }
     }
 }
@@ -584,39 +626,37 @@ void Collider::SyncTransformToPhysics(float fixedDeltaTime)
 // Serialization
 // ============================================================================
 
-std::string Collider::Serialize() const
+nlohmann::json Collider::SerializeDocument() const
 {
     const auto &d = Data();
-    // Start from Component base (provides type, component_id, enabled, schema_version)
-    auto j = nlohmann::json::parse(Component::Serialize());
+    auto j = Component::SerializeDocument();
     j["is_trigger"] = d.isTrigger;
     j["center"] = {d.center.x, d.center.y, d.center.z};
-    j["friction"] = d.friction;
-    j["bounciness"] = d.bounciness;
-    return j.dump();
+    j["physic_material_guid"] = m_physicMaterial.GetGuid();
+    return j;
 }
 
-bool Collider::Deserialize(const std::string &jsonStr)
+bool Collider::DeserializeDocument(const nlohmann::json &j)
 {
-    // Deserialize Component base fields first (enabled, component_id)
-    if (!Component::Deserialize(jsonStr))
-        return false;
-
-    auto &d = DataMut();
-    d.deserialized = true;
-
     try {
-        auto j = nlohmann::json::parse(jsonStr);
-        if (j.contains("is_trigger"))
-            d.isTrigger = j["is_trigger"].get<bool>();
-        if (j.contains("center")) {
-            auto &c = j["center"];
-            d.center = glm::vec3(c[0].get<float>(), c[1].get<float>(), c[2].get<float>());
+        ColliderECSData staged = Data();
+        staged.isTrigger = j.at("is_trigger").get<bool>();
+        const auto &center = j.at("center");
+        staged.center = glm::vec3(center[0].get<float>(), center[1].get<float>(), center[2].get<float>());
+        const std::string materialGuid = j.at("physic_material_guid").get<std::string>();
+        std::shared_ptr<PhysicMaterial> stagedMaterial;
+        if (!materialGuid.empty()) {
+            stagedMaterial =
+                AssetRegistry::Instance().LoadAsset<PhysicMaterial>(materialGuid, ResourceType::PhysicMaterial);
+            if (!stagedMaterial)
+                throw std::invalid_argument("physic_material_guid cannot be resolved: " + materialGuid);
         }
-        if (j.contains("friction"))
-            d.friction = j["friction"].get<float>();
-        if (j.contains("bounciness"))
-            d.bounciness = j["bounciness"].get<float>();
+
+        if (!Component::DeserializeDocument(j))
+            return false;
+        staged.deserialized = true;
+        DataMut() = staged;
+        SetPhysicMaterial(std::move(stagedMaterial));
         // NOTE: RebuildShape() is called by derived classes after their own
         // fields are deserialized (so both base + derived changes are applied
         // in a single shape rebuild).
@@ -635,8 +675,7 @@ void Collider::CloneBaseColliderData(Collider &target) const
     auto &dst = target.DataMut();
     dst.isTrigger = src.isTrigger;
     dst.center = src.center;
-    dst.friction = src.friction;
-    dst.bounciness = src.bounciness;
+    target.SetPhysicMaterial(m_physicMaterial.Get());
 }
 
 } // namespace infernux

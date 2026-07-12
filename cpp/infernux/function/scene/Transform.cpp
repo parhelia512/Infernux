@@ -1,4 +1,5 @@
 #include "Transform.h"
+#include "ComponentDocumentValidation.h"
 #include "ComponentFactory.h"
 #include "GameObject.h"
 #include "Scene.h"
@@ -14,7 +15,7 @@ using json = nlohmann::json;
 namespace infernux
 {
 
-INFERNUX_REGISTER_COMPONENT("Transform", Transform)
+INFERNUX_REGISTER_VALIDATED_COMPONENT("Transform", Transform)
 
 Transform::Transform() : m_ecsHandle(TransformECSStore::Instance().Allocate(this))
 {
@@ -495,13 +496,9 @@ void Transform::LookAt(const glm::vec3 &target, const glm::vec3 &up)
 // Serialization (stores LOCAL transform)
 // ============================================================================
 
-std::string Transform::Serialize() const
+nlohmann::json Transform::SerializeDocument() const
 {
-    json j;
-    j["schema_version"] = 1;
-    j["type"] = GetTypeName();
-    j["enabled"] = IsEnabled();
-    j["component_id"] = GetComponentID();
+    json j = Component::SerializeDocument();
 
     // Position
     glm::vec3 pos = GetLocalPosition();
@@ -515,35 +512,30 @@ std::string Transform::Serialize() const
     glm::vec3 scale = GetLocalScale();
     j["scale"] = {scale.x, scale.y, scale.z};
 
-    return j.dump(2);
+    return j;
 }
 
-bool Transform::Deserialize(const std::string &jsonStr)
+void Transform::ValidateSerializedDocument(const nlohmann::json &document)
+{
+    using namespace component_document_validation;
+    ValidateComponentDocument(document, "Transform", 1, {"position", "rotation", "scale"});
+    RequireFiniteVector(document, "position", 3, "Transform");
+    RequireFiniteVector(document, "rotation", 3, "Transform");
+    RequireFiniteVector(document, "scale", 3, "Transform");
+}
+
+bool Transform::DeserializeDocument(const nlohmann::json &j)
 {
     try {
-        json j = json::parse(jsonStr);
-
-        // Call base class deserialize
-        Component::Deserialize(jsonStr);
-
-        // Position
-        if (j.contains("position") && j["position"].is_array() && j["position"].size() == 3) {
-            SetLocalPosition(j["position"][0].get<float>(), j["position"][1].get<float>(),
-                             j["position"][2].get<float>());
+        ValidateSerializedDocument(j);
+        if (!Component::DeserializeDocument(j)) {
+            return false;
         }
 
-        // Rotation
-        if (j.contains("rotation") && j["rotation"].is_array() && j["rotation"].size() == 3) {
-            float x = j["rotation"][0].get<float>();
-            float y = j["rotation"][1].get<float>();
-            float z = j["rotation"][2].get<float>();
-            SetLocalEulerAngles(x, y, z);
-        }
-
-        // Scale
-        if (j.contains("scale") && j["scale"].is_array() && j["scale"].size() == 3) {
-            SetLocalScale(j["scale"][0].get<float>(), j["scale"][1].get<float>(), j["scale"][2].get<float>());
-        }
+        SetLocalPosition(j["position"][0].get<float>(), j["position"][1].get<float>(), j["position"][2].get<float>());
+        SetLocalEulerAngles(j["rotation"][0].get<float>(), j["rotation"][1].get<float>(),
+                            j["rotation"][2].get<float>());
+        SetLocalScale(j["scale"][0].get<float>(), j["scale"][1].get<float>(), j["scale"][2].get<float>());
 
         auto &store = TransformECSStore::Instance();
         store.SetDirty(m_ecsHandle, true);

@@ -307,10 +307,8 @@ class PrefabRef:
     # -- serialization -----------------------------------------------------
 
     def _serialize(self) -> dict:
-        d: dict = {"__prefab_ref__": self._guid}
-        if self._path_hint:
-            d["__path_hint__"] = self._path_hint
-        return d
+        from .value_document import make_asset_ref
+        return make_asset_ref("Prefab", self._guid, self._path_hint)
 
     @classmethod
     def _from_dict(cls, guid: str, path_hint: str = "") -> "PrefabRef":
@@ -459,9 +457,7 @@ class ComponentRef:
                 if ctrl:
                     ctrl.do_something()
 
-    Serialization format::
-
-        {"__component_ref__": {"go_id": 12345, "type_name": "PlayerController"}}
+    Serialization uses the current typed value-document schema.
     """
 
     __slots__ = ("_go_id", "_component_type", "_cached")
@@ -562,18 +558,14 @@ class ComponentRef:
     # -- serialization -----------------------------------------------------
 
     def _serialize(self) -> dict:
-        return {
-            "__component_ref__": {
-                "go_id": self._go_id,
-                "type_name": self._component_type,
-            }
-        }
+        from .value_document import make_component_ref
+        return make_component_ref(self._go_id, self._component_type)
 
     @classmethod
     def _from_dict(cls, data: dict) -> "ComponentRef":
         return cls(
-            go_id=int(data.get("go_id", 0)),
-            component_type=str(data.get("type_name", "")),
+            go_id=data["game_object_id"],
+            component_type=data["component_type"],
         )
 
     # -- dunder helpers ----------------------------------------------------

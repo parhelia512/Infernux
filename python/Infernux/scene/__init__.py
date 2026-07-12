@@ -142,6 +142,9 @@ class SceneManager:
 
     # Pending scene load request — deferred until end-of-frame when in play mode
     _pending_scene_load: Optional[str] = None  # resolved file path
+    _active_scene_transaction = None
+    _active_scene_load_path: Optional[str] = None
+    _active_scene_file_manager = None
 
     # ------------------------------------------------------------------
     # Unity-aligned API
@@ -277,6 +280,9 @@ class SceneManager:
 
         # --- Defer during play mode to avoid invalidating C++ iterators ---
         if SceneManager._is_in_play_mode():
+            if SceneManager._pending_scene_load is not None or SceneManager._active_scene_transaction is not None:
+                Debug.log_warning("SceneManager: a runtime scene load is already in progress.")
+                return False
             SceneManager._pending_scene_load = path
             Debug.log_internal(
                 f"SceneManager: Scene load deferred to end-of-frame — "
@@ -304,28 +310,29 @@ class SceneManager:
         from Infernux.engine.scene_manager import SceneFileManager
         sfm = SceneFileManager.instance()
         if sfm:
-            if SceneManager._is_in_play_mode():
-                # Play-mode runtime load: reuse SceneFileManager's standard
-                # deferred path instead of bypassing straight to _do_open_scene().
-                # process_pending_load() already runs outside C++ iteration, so
-                # we can immediately consume the deferred request here without
-                # depending on menu_bar polling.
-                sfm._begin_deferred_open(path)
-                sfm.poll_deferred_load()
-                return os.path.abspath(path) == sfm.current_scene_path
             return sfm.open_scene(path)
 
-        # Fallback — direct C++ load
+        # Runtime/current-schema path. Python component validation must happen
+        # before the native staging graph commits.
         sm = _NativeSceneManager.instance()
         active = sm.get_active_scene()
         if not active:
             active = sm.create_scene("Scene")
-        if active.load_from_file(path):
-            Debug.log_internal(f"Scene loaded (runtime): {os.path.basename(path)}")
-            return True
-        else:
-            Debug.log_warning(f"SceneManager: Failed to load {path}")
+        from Infernux.lib import AssetRegistry
+        asset_database = AssetRegistry.instance().get_asset_database()
+        from Infernux.engine.scene_document_transaction import SceneDocumentTransaction
+        transaction = SceneDocumentTransaction(
+            active,
+            path=path,
+            asset_database=asset_database,
+            clear_registries=True,
+        )
+        loaded = transaction.run_to_completion(raise_on_failure=False)
+        if not loaded:
+            Debug.log_warning(f"SceneManager: failed to load {path}: {transaction.error}")
             return False
+        Debug.log_internal(f"Scene loaded (runtime): {os.path.basename(path)}")
+        return True
 
     @staticmethod
     def process_pending_load():
@@ -334,26 +341,63 @@ class SceneManager:
         Called by ``PlayModeManager.tick()`` once per frame, after C++
         lifecycle calls (Update / LateUpdate / EndFrame) have finished.
         """
-        path = SceneManager._pending_scene_load
-        if path is None:
+        transaction = SceneManager._active_scene_transaction
+        if transaction is None:
+            path = SceneManager._pending_scene_load
+            if path is None:
+                return
+            SceneManager._pending_scene_load = None
+
+            from Infernux.engine.scene_manager import SceneFileManager
+            sfm = SceneFileManager.instance()
+            if sfm is not None:
+                transaction = sfm._create_open_scene_transaction(path)
+            else:
+                sm = _NativeSceneManager.instance()
+                scene = sm.get_active_scene()
+                if scene is None:
+                    scene = sm.create_scene("Scene")
+                from Infernux.lib import AssetRegistry
+                asset_database = AssetRegistry.instance().get_asset_database()
+                from Infernux.engine.scene_document_transaction import SceneDocumentTransaction
+                transaction = SceneDocumentTransaction(
+                    scene,
+                    path=path,
+                    asset_database=asset_database,
+                    clear_registries=True,
+                )
+            if transaction is None:
+                return
+            try:
+                transaction.start()
+            except Exception as exc:
+                Debug.log_error(f"SceneManager: failed to start scene load: {exc}")
+                return
+            SceneManager._active_scene_transaction = transaction
+            SceneManager._active_scene_load_path = path
+            SceneManager._active_scene_file_manager = sfm
+            Debug.log_internal(f"SceneManager: started runtime load - {os.path.basename(path)}")
             return
-        SceneManager._pending_scene_load = None
 
-        Debug.log_internal(
-            f"SceneManager: Processing deferred load — "
-            f"{os.path.basename(path)}"
-        )
-        success = SceneManager._do_load(path)
+        if not transaction.poll():
+            return
 
-        if success:
-            # The new scene has m_hasStarted == false and isPlaying == false
-            # after Deserialize.  Mark it as playing and trigger Start() so
-            # the new scene's components receive Awake + Start.
-            sm = _NativeSceneManager.instance()
-            scene = sm.get_active_scene()
-            if scene:
-                scene.set_playing(True)
-                scene.start()
+        path = SceneManager._active_scene_load_path
+        sfm = SceneManager._active_scene_file_manager
+        SceneManager._active_scene_transaction = None
+        SceneManager._active_scene_load_path = None
+        SceneManager._active_scene_file_manager = None
+        if not transaction.succeeded:
+            Debug.log_error(f"SceneManager: runtime scene load failed for {path}: {transaction.error}")
+            return
+        if sfm is not None:
+            sfm._finish_open_scene(path)
+
+        sm = _NativeSceneManager.instance()
+        scene = sm.get_active_scene()
+        if scene:
+            scene.set_playing(True)
+            scene.start()
 
     # ------------------------------------------------------------------
     # Build-list queries

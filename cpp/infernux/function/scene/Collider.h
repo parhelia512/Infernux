@@ -13,12 +13,18 @@
 
 #include "Component.h"
 #include "physics/PhysicsECSStore.h"
+#include <function/resources/AssetRef.h>
+#include <function/resources/PhysicMaterial/PhysicMaterial.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <initializer_list>
 #include <memory>
+#include <string_view>
 
 namespace infernux
 {
+
+enum class AssetEvent;
 
 // Forward declaration — Collider caches a Rigidbody* pointer but does not
 // dereference it in the header (only in Collider.cpp which includes Rigidbody.h).
@@ -66,19 +72,17 @@ class Collider : public Component
     }
     void SetCenter(const glm::vec3 &center);
 
-    /// @brief Dynamic friction coefficient [0..1].
-    [[nodiscard]] float GetFriction() const
-    {
-        return Data().friction;
-    }
-    void SetFriction(float friction);
+    [[nodiscard]] std::shared_ptr<PhysicMaterial> GetPhysicMaterial() const;
+    [[nodiscard]] const std::string &GetPhysicMaterialGuid() const;
+    void SetPhysicMaterial(std::shared_ptr<PhysicMaterial> material);
+    void SetPhysicMaterialGuid(const std::string &guid);
+    void ClearPhysicMaterial();
+    void OnPhysicMaterialAssetEvent(AssetEvent event);
 
-    /// @brief Bounciness / restitution [0..1].
-    [[nodiscard]] float GetBounciness() const
-    {
-        return Data().bounciness;
-    }
-    void SetBounciness(float bounciness);
+    [[nodiscard]] float GetFriction() const;
+    [[nodiscard]] float GetBounciness() const;
+    [[nodiscard]] PhysicsMaterialCombine GetFrictionCombine() const;
+    [[nodiscard]] PhysicsMaterialCombine GetBounceCombine() const;
 
     // ====================================================================
     // Jolt integration (opaque — Jolt types hidden from header)
@@ -93,10 +97,11 @@ class Collider : public Component
     [[nodiscard]] glm::vec3 GetWorldScale() const;
 
     /// @brief Get the Jolt body ID (0xFFFFFFFF = not registered).
-    [[nodiscard]] uint32_t GetBodyId() const
-    {
-        return Data().bodyId;
-    }
+    [[nodiscard]] uint32_t GetBodyId() const;
+
+    /// Return the one body shared by all colliders on a GameObject.
+    /// Throws if collider state has split across multiple bodies.
+    [[nodiscard]] static uint32_t GetSharedBodyId(const GameObject *gameObject);
 
     /// @brief Sync the body transform with the GameObject's Transform.
     void SyncTransformToPhysics(float fixedDeltaTime = 0.0f);
@@ -135,8 +140,8 @@ class Collider : public Component
     // Serialization
     // ====================================================================
 
-    [[nodiscard]] std::string Serialize() const override;
-    bool Deserialize(const std::string &jsonStr) override;
+    [[nodiscard]] nlohmann::json SerializeDocument() const override;
+    bool DeserializeDocument(const nlohmann::json &document) override;
 
     /// @brief Auto-fit collider shape to sibling MeshRenderer bounds.
     ///        Called in Awake() for freshly-added colliders (not deserialized).
@@ -145,25 +150,14 @@ class Collider : public Component
 
     /// @brief Cache (or invalidate) the sibling Rigidbody pointer.
     ///        Called by Rigidbody::OnEnable / OnDisable.
-    void SetCachedRigidbody(Rigidbody *rb)
-    {
-        DataMut().cachedRigidbody = rb;
-    }
+    void SetCachedRigidbody(Rigidbody *rb);
 
     /// @brief Get the cached Rigidbody (may be nullptr).
-    [[nodiscard]] Rigidbody *GetCachedRigidbody() const
-    {
-        return Data().cachedRigidbody;
-    }
+    [[nodiscard]] Rigidbody *GetCachedRigidbody() const;
 
     /// @brief Update the cached last-synced position/rotation after physics step
     ///        writes back to Transform. Called by Rigidbody::SyncPhysicsToTransform.
-    void SetLastSyncedTransform(const glm::vec3 &pos, const glm::quat &rot)
-    {
-        auto &d = DataMut();
-        d.lastSyncedPos = pos;
-        d.lastSyncedRot = rot;
-    }
+    void SetLastSyncedTransform(const glm::vec3 &pos, const glm::quat &rot);
 
     /// @brief Get the ECS pool handle.
     [[nodiscard]] ECSHandle GetECSHandle() const
@@ -190,7 +184,12 @@ class Collider : public Component
         return PhysicsECSStore::Instance().GetCollider(m_ecsHandle);
     }
 
+    [[nodiscard]] PhysicsActorData &ActorMut();
+    [[nodiscard]] const PhysicsActorData &Actor() const;
+    void EnsureActor();
+
     ECSHandle m_ecsHandle;
+    AssetRef<PhysicMaterial> m_physicMaterial;
 };
 
 } // namespace infernux

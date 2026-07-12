@@ -3,6 +3,7 @@ from Infernux.runtime_utf8 import configure_process_utf8
 configure_process_utf8()
 
 import atexit
+import importlib
 import json
 import os
 import uuid
@@ -19,38 +20,26 @@ from .engine import Engine, LogLevel
 from .play_mode import PlayModeManager, PlayModeState
 from .scene_manager import SceneFileManager
 
-if not _PLAYER_MODE:
-    from .resources_manager import ResourcesManager
+from .headless import run_headless
 
-# ── Editor-only imports ─────────────────────────────────────────────
-# Skipped in standalone player builds (env _INFERNUX_PLAYER_MODE=1)
-# to avoid pulling in the entire editor UI and keep Nuitka compilation
-# fast and focused on player-relevant code only.
+_EDITOR_UI_EXPORTS = {
+    "MenuBarPanel", "ToolbarPanel", "HierarchyPanel",
+    "InspectorPanel", "ConsolePanel", "SceneViewPanel", "GameViewPanel",
+    "ProjectPanel", "WindowManager", "TagLayerSettingsPanel", "StatusBarPanel",
+    "BuildSettingsPanel", "UIEditorPanel", "EditorPanel", "EditorServices",
+    "EditorEventBus", "EditorEvent", "PanelRegistry", "editor_panel",
+}
 
-if not _PLAYER_MODE:
-    from .ui import (
-        MenuBarPanel,
-        FrameSchedulerPanel,
-        ToolbarPanel,
-        HierarchyPanel,
-        InspectorPanel,
-        ConsolePanel,
-        SceneViewPanel,
-        GameViewPanel,
-        ProjectPanel,
-        WindowManager,
-        TagLayerSettingsPanel,
-        StatusBarPanel,
-        BuildSettingsPanel,
-        UIEditorPanel,
-        EditorPanel,
-        EditorServices,
-        EditorEventBus,
-        EditorEvent,
-        PanelRegistry,
-        editor_panel,
-    )
-    from .ui import panel_state as _panel_state
+
+def __getattr__(name: str):
+    if name == "ResourcesManager":
+        value = importlib.import_module(".resources_manager", __name__).ResourcesManager
+    elif name in _EDITOR_UI_EXPORTS:
+        value = getattr(importlib.import_module(".ui", __name__), name)
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    globals()[name] = value
+    return value
 
 
 def _signal_engine_loaded() -> None:
@@ -290,6 +279,7 @@ __all__ = [
     "TextureData",
     "release_engine",
     "run_player",
+    "run_headless",
 ]
 
 if not _PLAYER_MODE:

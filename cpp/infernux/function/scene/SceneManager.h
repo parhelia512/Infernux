@@ -4,8 +4,10 @@
 #include "Scene.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -45,6 +47,11 @@ class SceneManager
         double audioMs = 0.0;
         double endFrameMs = 0.0;
         double fixedSteps = 0.0;
+        double colliderSyncCandidates = 0.0;
+        double rigidbodySyncCandidates = 0.0;
+        double interpolationCandidates = 0.0;
+        double contactEvents = 0.0;
+        double dynamicCCDSplits = 0.0;
     };
 
     // Singleton access
@@ -94,6 +101,11 @@ class SceneManager
         return m_scenes;
     }
 
+    [[nodiscard]] size_t GetSceneCount() const
+    {
+        return m_scenes.size();
+    }
+
     // ========================================================================
     // Frame update
     // ========================================================================
@@ -124,6 +136,21 @@ class SceneManager
     [[nodiscard]] const FrameProfile &GetLastFrameProfile() const
     {
         return m_lastFrameProfile;
+    }
+
+    [[nodiscard]] size_t GetLastColliderSyncCandidateCount() const
+    {
+        return static_cast<size_t>(m_lastFrameProfile.colliderSyncCandidates);
+    }
+
+    [[nodiscard]] size_t GetLastRigidbodySyncCandidateCount() const
+    {
+        return static_cast<size_t>(m_lastFrameProfile.rigidbodySyncCandidates);
+    }
+
+    [[nodiscard]] size_t GetLastInterpolationCandidateCount() const
+    {
+        return static_cast<size_t>(m_lastFrameProfile.interpolationCandidates);
     }
 
     // ========================================================================
@@ -207,7 +234,9 @@ class SceneManager
     /// @brief Set the fixed physics timestep in seconds.
     void SetFixedTimeStep(float value)
     {
-        m_fixedTimeStep = std::max(0.001f, value);
+        if (!std::isfinite(value) || value < 0.001f)
+            throw std::invalid_argument("fixed time step must be finite and at least 0.001 seconds");
+        m_fixedTimeStep = value;
         m_maxFixedDeltaTime = std::max(m_maxFixedDeltaTime, m_fixedTimeStep);
     }
 
@@ -220,7 +249,34 @@ class SceneManager
     /// @brief Set the max clamped frame delta used by the fixed-step accumulator.
     void SetMaxFixedDeltaTime(float value)
     {
-        m_maxFixedDeltaTime = std::max(m_fixedTimeStep, value);
+        if (!std::isfinite(value) || value < m_fixedTimeStep)
+            throw std::invalid_argument("max fixed delta time must be finite and not less than the fixed time step");
+        m_maxFixedDeltaTime = value;
+    }
+
+    /// @brief Global gameplay time scale. Zero keeps Update running with dt=0
+    ///        while suspending fixed-step simulation.
+    [[nodiscard]] float GetTimeScale() const
+    {
+        return m_timeScale;
+    }
+    void SetTimeScale(float value)
+    {
+        if (!std::isfinite(value) || value < 0.0f)
+            throw std::invalid_argument("time scale must be finite and non-negative");
+        m_timeScale = value;
+    }
+
+    /// @brief Scaled simulation time at the current fixed step.
+    [[nodiscard]] double GetFixedTime() const
+    {
+        return m_fixedTime;
+    }
+
+    /// @brief Real time represented by completed fixed steps.
+    [[nodiscard]] double GetFixedUnscaledTime() const
+    {
+        return m_fixedUnscaledTime;
     }
 
     // ========================================================================
@@ -307,15 +363,11 @@ class SceneManager
     /// respond to gravity until explicitly activated.
     void ActivateAllDynamicBodies();
 
-    /// Walk all Rigidbodies and write Jolt position/rotation back to Transform.
+    /// Write active Jolt body poses back to their owning Rigidbody transforms.
     void SyncRigidbodiesToTransform();
 
-    /// Apply presentation interpolation for dynamic rigidbodies.
+    /// Apply presentation interpolation for the latest dense active-body set.
     void ApplyInterpolatedRigidbodies(float alpha);
-
-    /// Detect user-driven Transform changes on dynamic Rigidbodies and teleport
-    /// their Jolt bodies before the physics step.
-    void SyncExternalRigidbodyMoves();
 
     /// Detach persistent (DontDestroyOnLoad) root objects from a scene
     /// into m_persistentObjects, keeping them alive across scene switches.
@@ -336,6 +388,10 @@ class SceneManager
     float m_fixedTimeStep = 1.0f / 50.0f; // 50 Hz default (Unity default)
     float m_fixedTimeAccumulator = 0.0f;
     float m_maxFixedDeltaTime = 0.1f; // cap to avoid spiral-of-death
+    float m_timeScale = 1.0f;
+    float m_lastScaledDeltaTime = 0.0f;
+    double m_fixedTime = 0.0;
+    double m_fixedUnscaledTime = 0.0;
 
     // Play mode state
     bool m_isPlaying = false;
@@ -357,10 +413,8 @@ class SceneManager
     // Avoids per-frame GetAllObjects() + GetComponent<Light>() in CollectLights/ComputeShadowVP.
     std::vector<Light *> m_activeLights;
 
-    // ── Physics sync state (Unity-style deferred transform sync) ─────
-    /// Cached TransformECSStore global serial at last SyncCollidersToPhysics.
-    /// When the store serial hasn't changed, the entire sync is skipped.
-    uint64_t m_lastPhysicsSyncTransformSerial = 0;
+    // Full generation-aware body IDs that still need presentation updates.
+    std::vector<uint32_t> m_posePresentationBodyIds;
 
     FrameProfile m_lastFrameProfile;
 };

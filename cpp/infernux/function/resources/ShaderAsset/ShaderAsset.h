@@ -51,6 +51,15 @@ struct ShaderAsset
 
     /// Render-state annotations (fragment shaders only)
     ShaderRenderMeta renderMeta;
+
+    [[nodiscard]] size_t GetRuntimeMemoryBytes() const noexcept
+    {
+        return sizeof(*this) + shaderId.capacity() + shaderType.capacity() + filePath.capacity() +
+               spirvForward.capacity() + spirvShadow.capacity() + spirvShadowVertex.capacity() +
+               spirvGBuffer.capacity() + renderMeta.cullMode.capacity() + renderMeta.depthWrite.capacity() +
+               renderMeta.depthTest.capacity() + renderMeta.blend.capacity() + renderMeta.passTag.capacity() +
+               renderMeta.stencil.capacity() + renderMeta.alphaClip.capacity();
+    }
 };
 
 } // namespace infernux

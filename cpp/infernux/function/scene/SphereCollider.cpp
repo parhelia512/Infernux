@@ -8,6 +8,7 @@
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 
+#include "ComponentDocumentValidation.h"
 #include "ComponentFactory.h"
 #include "GameObject.h"
 #include "MeshRenderer.h"
@@ -22,11 +23,13 @@
 namespace infernux
 {
 
-INFERNUX_REGISTER_COMPONENT("SphereCollider", SphereCollider)
+INFERNUX_REGISTER_VALIDATED_COMPONENT("SphereCollider", SphereCollider)
 
 void SphereCollider::SetRadius(float radius)
 {
-    m_radius = std::max(radius, 0.001f);
+    if (!std::isfinite(radius) || radius < 0.001f)
+        throw std::invalid_argument("sphere radius must be finite and at least 0.001");
+    m_radius = radius;
     RebuildShape();
 }
 
@@ -73,22 +76,32 @@ void *SphereCollider::CreateJoltShapeRaw() const
 // Serialization
 // ============================================================================
 
-std::string SphereCollider::Serialize() const
+nlohmann::json SphereCollider::SerializeDocument() const
 {
-    auto baseJson = nlohmann::json::parse(Collider::Serialize());
+    auto baseJson = Collider::SerializeDocument();
     baseJson["radius"] = m_radius;
-    return baseJson.dump();
+    return baseJson;
 }
 
-bool SphereCollider::Deserialize(const std::string &jsonStr)
+void SphereCollider::ValidateSerializedDocument(const nlohmann::json &j)
 {
-    if (!Collider::Deserialize(jsonStr))
-        return false;
+    using namespace component_document_validation;
+    ValidateComponentDocument(j, "SphereCollider", 1, {"is_trigger", "center", "physic_material_guid", "radius"});
+    RequireBoolean(j, "is_trigger", "SphereCollider");
+    RequireFiniteVector(j, "center", 3, "SphereCollider");
+    RequireString(j, "physic_material_guid", "SphereCollider");
+    if (RequireFiniteFloat(j, "radius", "SphereCollider") < 0.001f)
+        throw std::invalid_argument("SphereCollider.radius must be at least 0.001");
+}
 
+bool SphereCollider::DeserializeDocument(const nlohmann::json &j)
+{
     try {
-        auto j = nlohmann::json::parse(jsonStr);
-        if (j.contains("radius"))
-            m_radius = j["radius"].get<float>();
+        ValidateSerializedDocument(j);
+        const float stagedRadius = j["radius"].get<float>();
+        if (!Collider::DeserializeDocument(j))
+            return false;
+        m_radius = stagedRadius;
         RebuildShape();
         return true;
     } catch (const std::exception &e) {

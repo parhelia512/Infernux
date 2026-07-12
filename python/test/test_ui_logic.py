@@ -132,6 +132,108 @@ class TestWindowManager:
         from Infernux.engine.ui.window_manager import WindowManager
         assert WindowManager.instance() is WindowManager.instance()
 
+    def test_explicit_dynamic_window_state_machine(self):
+        from Infernux.engine.ui.window_manager import WindowManager, WindowState
+
+        class Engine:
+            def __init__(self):
+                self.registered = {}
+                self.focused = []
+
+            def register_gui(self, window_id, instance):
+                self.registered[window_id] = instance
+
+            def unregister_gui(self, window_id):
+                self.registered.pop(window_id)
+
+            def select_docked_window(self, window_id):
+                self.focused.append(window_id)
+
+        class Panel:
+            def __init__(self):
+                self._is_open = False
+
+            @property
+            def is_open(self):
+                return self._is_open
+
+            def set_window_manager(self, manager):
+                self.manager = manager
+
+            def open(self):
+                self._is_open = True
+
+        previous = WindowManager._instance
+        try:
+            engine = Engine()
+            manager = WindowManager(engine)
+            manager.register_window_type("dynamic", Panel, "Dynamic", factory=Panel)
+            panel = manager.open_window("dynamic")
+            assert manager.get_window_state("dynamic") is WindowState.OPENING
+            manager.process_pending_actions()
+            assert manager.get_window_state("dynamic") is WindowState.OPEN
+            assert engine.registered["dynamic"] is panel
+
+            assert manager.open_window("dynamic") is panel
+            assert manager.get_window_state("dynamic") is WindowState.FOCUS_REQUESTED
+            manager.process_pending_actions()
+            assert manager.get_window_state("dynamic") is WindowState.FOCUSED
+            assert engine.focused == ["dynamic"]
+
+            manager.close_window("dynamic")
+            assert manager.get_window_state("dynamic") is WindowState.CLOSING
+            manager.process_pending_actions()
+            assert manager.get_window_state("dynamic") is WindowState.CLOSED
+            assert "dynamic" not in engine.registered
+        finally:
+            WindowManager._instance = previous
+
+    def test_builtin_window_closes_without_unregistering(self):
+        from Infernux.engine.ui.window_manager import WindowManager, WindowState
+
+        class Engine:
+            def __init__(self):
+                self.registered = {}
+                self.focused = []
+
+            def register_gui(self, window_id, instance):
+                self.registered[window_id] = instance
+
+            def unregister_gui(self, window_id):
+                raise AssertionError("builtin window must remain registered")
+
+            def select_docked_window(self, window_id):
+                self.focused.append(window_id)
+
+        class Panel:
+            def __init__(self):
+                self.is_open = True
+
+            def set_open(self, value):
+                self.is_open = value
+
+        previous = WindowManager._instance
+        try:
+            engine = Engine()
+            manager = WindowManager(engine)
+            panel = Panel()
+            engine.registered["builtin"] = panel
+            manager.register_window_type("builtin", Panel, "Builtin", factory=Panel)
+            manager.register_existing_window("builtin", panel, "builtin")
+
+            manager.close_window("builtin")
+            assert manager.get_window_state("builtin") is WindowState.CLOSED
+            assert engine.registered["builtin"] is panel
+            assert panel.is_open is False
+
+            assert manager.open_window("builtin") is panel
+            manager.process_pending_actions()
+            assert manager.get_window_state("builtin") is WindowState.FOCUSED
+            assert panel.is_open is True
+            assert engine.focused == ["builtin"]
+        finally:
+            WindowManager._instance = previous
+
 
 # ── scene view math helpers ──────────────────────────────────────────────
 
@@ -154,3 +256,29 @@ class TestIGUIFilters:
         filt = "mesh"
         filtered = [l for l in labels if filt.lower() in l.lower()]
         assert filtered == ["MeshRenderer", "SkinnedMeshRenderer"]
+
+
+class TestPanelFocusEvents:
+    def test_closable_panel_emits_single_canonical_focus_event(self):
+        from Infernux.engine.ui.closable_panel import ClosablePanel
+        from Infernux.engine.ui.event_bus import EditorEvent, EditorEventBus
+
+        class FocusContext:
+            def set_window_focus(self):
+                pass
+
+        bus = EditorEventBus.instance()
+        received = []
+        handler = received.append
+        previous_active = ClosablePanel._active_panel_id
+        bus.subscribe(EditorEvent.PANEL_FOCUSED, handler)
+        try:
+            panel = ClosablePanel("Focus Test", "focus_test")
+            ClosablePanel._active_panel_id = None
+            panel._activate_panel(FocusContext(), focus_window=True)
+            panel._activate_panel(FocusContext(), focus_window=True)
+            assert received == ["focus_test"]
+            assert not hasattr(ClosablePanel, "set_on_panel_focus_changed")
+        finally:
+            bus.unsubscribe(EditorEvent.PANEL_FOCUSED, handler)
+            ClosablePanel._active_panel_id = previous_active

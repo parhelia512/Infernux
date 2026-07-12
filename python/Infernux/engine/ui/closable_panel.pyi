@@ -6,7 +6,7 @@ and focus tracking. Subclassed by :class:`EditorPanel`.
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Optional
 
 from Infernux.lib import InxGUIRenderable, InxGUIContext
 
@@ -38,15 +38,6 @@ class ClosablePanel(InxGUIRenderable):
 
     def request_focus(self, ctx: InxGUIContext) -> None:
         """Request ImGui keyboard focus for this panel."""
-        ...
-
-    @classmethod
-    def set_on_panel_focus_changed(cls, callback: Optional[Callable[[str, str], None]]) -> None:
-        """Register a global callback for panel focus changes.
-
-        Args:
-            callback: ``(old_panel_id, new_panel_id)`` handler.
-        """
         ...
 
     @classmethod

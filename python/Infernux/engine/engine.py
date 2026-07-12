@@ -1,28 +1,28 @@
 import gc
 import os
 import time
+import weakref
 
-from Infernux.lib import Infernux, InxGUIRenderable, LogLevel, lib_dir
+from Infernux.lib import Infernux, InxGUIRenderable, LogLevel, RuntimeMode, lib_dir
 from Infernux.engine.play_mode import PlayModeManager
 from Infernux.engine.project_context import set_project_root
 from Infernux.engine.path_utils import safe_path as _safe_path
 from Infernux.debug import Debug
 
 _PLAYER_MODE = os.environ.get("_INFERNUX_PLAYER_MODE")
-if not _PLAYER_MODE:
-    from Infernux.engine.resources_manager import ResourcesManager
 
 
 class Engine():
-    def __init__(self, engine_log_level=LogLevel.Info):
-        self._engine = Infernux(_safe_path(lib_dir))
+    def __init__(self, engine_log_level=LogLevel.Info, mode=RuntimeMode.Graphical):
+        self._mode = RuntimeMode(mode)
+        self._engine = Infernux(_safe_path(lib_dir), self._mode)
         self.set_log_level(engine_log_level)
         self._gui_objects = {}
         self._play_mode_manager = None
         self._render_pipeline = None  # prevents GC of pybind11 trampoline
         self._last_frame_time = time.time()
         self._gizmos_collector = None  # lazy-init GizmosCollector
-        self._scene_view_visible = not _PLAYER_MODE  # no Scene View in player
+        self._scene_view_visible = self._mode == RuntimeMode.Graphical and not _PLAYER_MODE
         self._next_reload_poll_time = 0.0
         self._next_gizmo_collect_time = 0.0
         self._reload_poll_interval = 0.1   # 10 Hz is enough for watcher events
@@ -72,6 +72,9 @@ class Engine():
             Debug.log_warning(f"Failed to apply startup present mode override '{raw}': {exc}")
 
     def init_renderer(self, width, height, project_path):
+        if self._mode != RuntimeMode.Graphical:
+            raise RuntimeError("init_renderer is unavailable in headless mode")
+        self._apply_project_settings(project_path)
         from Infernux.resources import resources_path
         self._engine.init_renderer(
             width, height,
@@ -86,6 +89,7 @@ class Engine():
         self._engine.set_scene_view_visible(bool(self._scene_view_visible))
 
         if not _PLAYER_MODE:
+            from Infernux.engine.resources_manager import ResourcesManager
             self._resources_manager = ResourcesManager(
                 project_path=project_path, engine=self._engine
             )
@@ -102,6 +106,7 @@ class Engine():
         self._play_mode_manager = PlayModeManager()
         self._play_mode_manager.set_asset_database(self.get_asset_database())
         self._play_mode_manager._native_engine = self._engine
+        self._install_pre_scene_time_callback()
         Debug.log_internal("PlayModeManager initialized")
 
         # Auto-activate Python SRP rendering path
@@ -109,6 +114,52 @@ class Engine():
         from Infernux.renderstack import RenderStackPipeline
         self.set_render_pipeline(RenderStackPipeline())
         Debug.log_internal("RenderStackPipeline activated (Python SRP path)")
+
+    def init_headless(self, project_path):
+        if self._mode != RuntimeMode.Headless:
+            raise RuntimeError("init_headless requires RuntimeMode.Headless")
+
+        self._apply_project_settings(project_path)
+        from Infernux.resources import resources_path
+        self._engine.init_headless(
+            _safe_path(project_path),
+            _safe_path(resources_path),
+        )
+        set_project_root(project_path)
+
+        from Infernux.core.assets import AssetManager
+        AssetManager.initialize(self)
+
+        self._play_mode_manager = PlayModeManager()
+        self._play_mode_manager.set_asset_database(self.get_asset_database())
+        self._play_mode_manager._native_engine = self._engine
+        self._install_pre_scene_time_callback()
+        Debug.log_internal("Headless engine initialized")
+
+    def _install_pre_scene_time_callback(self):
+        """Advance Python timing before native gameplay callbacks run."""
+        engine_ref = weakref.ref(self)
+
+        def _pre_scene_tick(delta_time):
+            engine = engine_ref()
+            if engine is not None:
+                engine.tick_play_mode(float(delta_time))
+
+        self._engine.set_pre_scene_update_callback(_pre_scene_tick)
+
+    @staticmethod
+    def _apply_project_settings(project_path):
+        from Infernux.physics import settings as physics_settings
+
+        settings = physics_settings.load(project_path)
+        physics_settings.apply(settings)
+
+        tag_layer_path = os.path.join(project_path, "ProjectSettings", "TagLayerSettings.json")
+        if os.path.isfile(tag_layer_path):
+            from Infernux.lib import TagLayerManager
+
+            if not TagLayerManager.instance().load_from_file(_safe_path(tag_layer_path)):
+                raise RuntimeError(f"Invalid tag/layer settings document: {tag_layer_path}")
     
     def _load_project_materials(self, project_path):
         """Load all .mat files from the project via AssetRegistry.
@@ -161,6 +212,11 @@ class Engine():
             Debug.log_internal(f"Loaded {extra_count} additional project material(s)")
 
     def run(self):
+        if self._mode == RuntimeMode.Headless:
+            self._engine.run()
+            self.exit()
+            return
+
         if self._resources_manager:
             self._resources_manager.start()
 
@@ -244,14 +300,35 @@ class Engine():
         #  3. Join the ResourcesManager thread (should already have exited
         #     during step 2, so the join returns instantly).
         self.exit()
+
+    def tick(self, delta_time: float):
+        if self._mode != RuntimeMode.Headless:
+            raise RuntimeError("tick is only available in headless mode")
+
+        from Infernux.engine.deferred_task import DeferredTaskRunner
+        DeferredTaskRunner.instance().tick()
+
+        from Infernux.mcp.threading import MainThreadCommandQueue
+        MainThreadCommandQueue.instance().drain()
+
+        self._engine.tick(float(delta_time))
+
+    def request_exit(self):
+        """Request the active native run loop to stop without cleaning up yet."""
+        if self._engine:
+            self._engine.exit()
     
-    def tick_play_mode(self):
+    def tick_play_mode(self, external_delta_time: float | None = None):
         """
         Called each frame to update play mode timing only.
         Lifecycle updates are driven by C++.
         """
         current_time = time.time()
-        delta_time = current_time - self._last_frame_time
+        delta_time = (
+            current_time - self._last_frame_time
+            if external_delta_time is None
+            else float(external_delta_time)
+        )
         self._last_frame_time = current_time
         
         # Process pending script reloads on the main thread, but throttle polling.
@@ -267,9 +344,17 @@ class Engine():
         pmm = self._play_mode_manager
         is_playing = pmm is not None and pmm.is_playing
 
-        # Tick play mode manager (timing only)
-        if pmm:
+        # The editor owns play transitions through PlayModeManager. Headless
+        # callers may drive the native SceneManager directly, so keep Time
+        # valid for that composition as well.
+        if is_playing:
             pmm.tick(delta_time)
+        else:
+            from Infernux.lib import SceneManager
+            native_scene_manager = SceneManager.instance()
+            if native_scene_manager.is_playing() and not native_scene_manager.is_paused():
+                from Infernux.timing import Time
+                Time._tick(delta_time)
 
         # Flush throttled material saves — skip during play mode
         if not is_playing:
@@ -341,16 +426,14 @@ class Engine():
         """
         Clean up and exit the engine completely.
 
-        Shutdown order (optimised to run ResourcesManager stop in parallel
-        with C++ Vulkan teardown):
+        Shutdown order keeps all file-system commits ahead of native teardown:
           0. Force-stop play mode (destroy Python components cleanly)
-          1. Signal ResourcesManager stop (non-blocking — just sets _stop_event)
-          2. C++ Cleanup (the heavy part — GPU drain + resource destruction)
-          3. Join ResourcesManager thread (should already have exited by now)
+          1. Stop ResourcesManager and drain coalesced events on the main thread
+          2. C++ Cleanup (GPU drain + resource destruction)
         """
         # Ask dirty editor panels (e.g. animation editors) for save/discard/cancel
         # before we start irreversible shutdown.
-        if not self._confirm_dirty_panels_before_exit():
+        if self._mode == RuntimeMode.Graphical and not self._confirm_dirty_panels_before_exit():
             return
 
         if callable(self._before_exit_callback):
@@ -362,9 +445,12 @@ class Engine():
         # Safety net: if cleanup hangs (C++ deadlock, thread stuck), force-kill
         # the process after a generous timeout so we never leave zombie procs.
         import threading as _th
+        shutdown_complete = _th.Event()
+
         def _force_exit():
-            import time; time.sleep(15)
-            os._exit(1)
+            if not shutdown_complete.wait(15):
+                os._exit(1)
+
         _th.Thread(target=_force_exit, daemon=True, name="ShutdownWatchdog").start()
 
         # 0. If still in play mode, tear down Python components before C++
@@ -373,25 +459,20 @@ class Engine():
         #    on already-invalid Python state, and physics/audio may block.
         self._shutdown_play_mode()
 
-        # 1. Signal the file-watcher / scanning thread to stop (non-blocking).
-        #    The thread will wake within 0.25 s and begin its own teardown
-        #    while C++ cleanup runs in parallel on this thread.
+        # 1. Stop the observer and commit any events it already delivered while
+        #    AssetDatabase, AssetRegistry, renderer, and editor caches are alive.
         if self._resources_manager:
-            self._resources_manager._stop_event.set()
+            self._resources_manager.cleanup()
 
         # 2. C++ Cleanup — destroys renderer, Vulkan device, etc.
         if self._engine:
             self._engine.cleanup()
         
-        # 3. Join the ResourcesManager thread.  It had the entire C++ cleanup
-        #    duration to shut itself down, so the join should be near-instant.
-        if self._resources_manager:
-            self._resources_manager.cleanup()
-        
         # Clear all references
         self._gui_objects.clear()
         self._engine = None
         self._resources_manager = None
+        shutdown_complete.set()
 
     def _shutdown_play_mode(self):
         """Immediately tear down play-mode components for a clean shutdown.
@@ -624,6 +705,10 @@ class Engine():
         """Resize the game render target to match game viewport size."""
         if self._engine:
             self._engine.resize_game_render_target(width, height)
+
+    def request_render_target_readback(self, game_view: bool = True):
+        """Return a non-blocking ticket for the latest submitted render target."""
+        return self._engine.request_render_target_readback(game_view)
 
     def set_game_camera_enabled(self, enabled: bool):
         """Enable or disable game camera rendering."""

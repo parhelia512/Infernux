@@ -73,9 +73,9 @@ class PreferencesStore:
     def save(self, data: dict) -> None:
         """Save the full preferences dictionary."""
         try:
-            with open(self._path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-        except OSError as exc:
+            from Infernux.core.document_store import write_document_text
+            write_document_text(self._path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        except (OSError, RuntimeError) as exc:
             Debug.log_suppressed("preferences_store.save", exc)
 
     def get(self, key: str, default=None):

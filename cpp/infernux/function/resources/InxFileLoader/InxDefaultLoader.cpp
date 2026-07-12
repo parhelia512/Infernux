@@ -15,14 +15,8 @@ InxDefaultTextLoader::InxDefaultTextLoader()
 {
 }
 
-bool InxDefaultTextLoader::LoadMeta(const char *content, const std::string &filePath, InxResourceMeta &metaData)
-{
-    // not implemented yet
-    return false;
-}
-
 void InxDefaultTextLoader::CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
-                                      InxResourceMeta &metaData)
+                                      InxResourceMeta &metaData) const
 {
     INXLOG_DEBUG("Creating metadata for text file: ", filePath);
     metaData.Init(content, contentSize, filePath, ResourceType::DefaultText);
@@ -48,15 +42,7 @@ void InxDefaultTextLoader::CreateMeta(const char *content, size_t contentSize, c
     bool hasNonAscii = std::any_of(contentStr.begin(), contentStr.end(), [](unsigned char c) { return c > 127; });
     metaData.AddMetadata("encoding", hasNonAscii ? std::string("utf-8") : std::string("ascii"));
 
-    // Add file size information
-    try {
-        if (std::filesystem::exists(path)) {
-            auto fileSize = std::filesystem::file_size(path);
-            metaData.AddMetadata("file_size", static_cast<size_t>(fileSize));
-        }
-    } catch (const std::filesystem::filesystem_error &e) {
-        INXLOG_ERROR("Failed to get file size for ", filePath, " : ", e.what());
-    }
+    metaData.AddMetadata("file_size", contentSize);
 
     INXLOG_DEBUG("Text file metadata created for ", filePath, " lines: ", lineCount, " chars: ", contentStr.length());
 }
@@ -67,14 +53,8 @@ InxDefaultBinaryLoader::InxDefaultBinaryLoader()
 {
 }
 
-bool InxDefaultBinaryLoader::LoadMeta(const char *content, const std::string &filePath, InxResourceMeta &metaData)
-{
-    // not implemented yet
-    return false;
-}
-
 void InxDefaultBinaryLoader::CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
-                                        InxResourceMeta &metaData)
+                                        InxResourceMeta &metaData) const
 {
     metaData.Init(content, contentSize, filePath, ResourceType::DefaultBinary);
 
@@ -90,28 +70,18 @@ void InxDefaultBinaryLoader::CreateMeta(const char *content, size_t contentSize,
     std::string binaryType = GetBinaryTypeFromExtension(extension);
     metaData.AddMetadata("binary_type", binaryType);
 
-    // Add file size information
-    try {
-        if (std::filesystem::exists(path)) {
-            auto fileSize = std::filesystem::file_size(path);
-            metaData.AddMetadata("file_size", static_cast<size_t>(fileSize));
-
-            // Add size category for binary files
-            std::string sizeCategory;
-            if (fileSize < 1024) {
-                sizeCategory = "tiny";
-            } else if (fileSize < 1024 * 1024) {
-                sizeCategory = "small";
-            } else if (fileSize < 10 * 1024 * 1024) {
-                sizeCategory = "medium";
-            } else {
-                sizeCategory = "large";
-            }
-            metaData.AddMetadata("size_category", sizeCategory);
-        }
-    } catch (const std::filesystem::filesystem_error &e) {
-        INXLOG_ERROR("Failed to get file size for :", filePath, e.what());
+    metaData.AddMetadata("file_size", contentSize);
+    std::string sizeCategory;
+    if (contentSize < 1024) {
+        sizeCategory = "tiny";
+    } else if (contentSize < 1024 * 1024) {
+        sizeCategory = "small";
+    } else if (contentSize < 10 * 1024 * 1024) {
+        sizeCategory = "medium";
+    } else {
+        sizeCategory = "large";
     }
+    metaData.AddMetadata("size_category", sizeCategory);
 
     INXLOG_DEBUG("Binary file metadata created for ", filePath, ", type: ", binaryType);
 }

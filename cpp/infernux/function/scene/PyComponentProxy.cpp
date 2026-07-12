@@ -4,6 +4,7 @@
 #include "physics/PhysicsContactListener.h"
 #include <core/log/InxLog.h>
 #include <nlohmann/json.hpp>
+#include <tools/pybinding/JsonPyBridge.h>
 
 using json = nlohmann::json;
 
@@ -468,11 +469,12 @@ std::vector<std::string> PyComponentProxy::GetRequiredComponentTypes() const
     return result;
 }
 
-std::string PyComponentProxy::Serialize() const
+nlohmann::json PyComponentProxy::SerializeDocument() const
 {
-    json j;
-    j["schema_version"] = 1;
-    j["type"] = "PyComponentProxy";
+    if (m_scriptGuid.empty() || m_typeGuid.empty())
+        throw std::logic_error("Python component '" + m_typeName + "' has no stable script/type GUID");
+
+    json j = Component::SerializeDocument();
     j["py_type_name"] = m_typeName;
     j["type_guid"] = m_typeGuid; // Stable type GUID for deserialization
     j["execution_order"] = GetExecutionOrder();
@@ -486,38 +488,27 @@ std::string PyComponentProxy::Serialize() const
 
     // Serialize Python component's serializable fields
     if (!m_pyComponent.is_none()) {
-        try {
-            // Call Python side serialization if available
-            if (py::hasattr(m_pyComponent, "_serialize_fields")) {
-                py::object fieldsJson = m_pyComponent.attr("_serialize_fields")();
-                if (!fieldsJson.is_none()) {
-                    std::string fieldsStr = fieldsJson.cast<std::string>();
-                    j["py_fields"] = json::parse(fieldsStr);
-                }
-            }
-        } catch (const py::error_already_set &e) {
-            INXLOG_ERROR("[PyComponentProxy] Error serializing fields: ", e.what());
-        } catch (const std::exception &e) {
-            INXLOG_ERROR("[PyComponentProxy] Exception serializing fields for ", m_typeName, ": ", e.what());
-        }
+        j["py_fields"] = SerializePyFieldsDocument();
     }
 
-    return j.dump(2);
+    return j;
 }
 
-bool PyComponentProxy::Deserialize(const std::string &jsonStr)
+bool PyComponentProxy::DeserializeDocument(const nlohmann::json &j)
 {
+    if (!Component::DeserializeDocument(j)) {
+        return false;
+    }
+
     try {
-        json j = json::parse(jsonStr);
-
-        // Base class deserialize
-        Component::Deserialize(jsonStr);
-
         if (j.contains("py_type_name")) {
             m_typeName = j["py_type_name"].get<std::string>();
         }
         if (j.contains("script_guid")) {
             m_scriptGuid = j["script_guid"].get<std::string>();
+        }
+        if (j.contains("type_guid")) {
+            m_typeGuid = j["type_guid"].get<std::string>();
         }
 
         // Python component and fields will be restored by Python side
@@ -550,23 +541,17 @@ std::unique_ptr<Component> PyComponentProxy::Clone() const
     return nullptr;
 }
 
-std::string PyComponentProxy::SerializePyFields() const
+nlohmann::json PyComponentProxy::SerializePyFieldsDocument() const
 {
     if (m_pyComponent.is_none())
-        return {};
-    try {
-        if (py::hasattr(m_pyComponent, "_serialize_fields")) {
-            py::object fieldsJson = m_pyComponent.attr("_serialize_fields")();
-            if (!fieldsJson.is_none()) {
-                return fieldsJson.cast<std::string>();
-            }
-        }
-    } catch (const py::error_already_set &e) {
-        INXLOG_ERROR("[PyComponentProxy] Error serializing fields for clone: ", e.what());
-    } catch (const std::exception &e) {
-        INXLOG_ERROR("[PyComponentProxy] Exception serializing fields for clone (", m_typeName, "): ", e.what());
-    }
-    return {};
+        throw std::logic_error("cannot serialize fields from an unbound Python component proxy");
+    if (!py::hasattr(m_pyComponent, "_serialize_fields_document"))
+        throw std::logic_error("Python component '" + m_typeName + "' has no _serialize_fields_document method");
+    py::object document = m_pyComponent.attr("_serialize_fields_document")();
+    if (!py::isinstance<py::dict>(document))
+        throw std::invalid_argument("Python component '" + m_typeName +
+                                    "' _serialize_fields_document must return dict");
+    return PythonToJson(document);
 }
 
 } // namespace infernux

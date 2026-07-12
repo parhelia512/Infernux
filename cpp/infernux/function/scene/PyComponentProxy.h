@@ -122,16 +122,15 @@ class PyComponentProxy : public Component
     // Serialization
     // ========================================================================
 
-    [[nodiscard]] std::string Serialize() const override;
-    bool Deserialize(const std::string &jsonStr) override;
+    [[nodiscard]] nlohmann::json SerializeDocument() const override;
+    bool DeserializeDocument(const nlohmann::json &document) override;
 
     /// @brief PyComponentProxy does not support native Clone (Python objects need
     /// Python-side reconstruction). Returns nullptr.
     [[nodiscard]] std::unique_ptr<Component> Clone() const override;
 
-    /// @brief Serialize only the py_fields portion (for native clone pending info).
-    /// Avoids the full Serialize→parse round-trip. Returns empty string on failure.
-    [[nodiscard]] std::string SerializePyFields() const;
+    /// @brief Serialize only the py_fields portion for native clone pending info.
+    [[nodiscard]] nlohmann::json SerializePyFieldsDocument() const;
 
     /// @brief Get the script GUID associated with this component
     [[nodiscard]] const std::string &GetScriptGuid() const

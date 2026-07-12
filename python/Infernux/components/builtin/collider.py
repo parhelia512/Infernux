@@ -18,8 +18,46 @@ Example::
 
 from __future__ import annotations
 
+from enum import IntEnum
+
 from Infernux.components.builtin_component import BuiltinComponent, CppProperty
 from Infernux.components.serialized_field import FieldType
+from Infernux.core.asset_ref import PhysicMaterialRef
+
+
+class PhysicsMaterialCombine(IntEnum):
+    """How two collider material values are combined for a contact."""
+
+    Average = 0
+    Minimum = 1
+    Multiply = 2
+    Maximum = 3
+
+
+def _wrap_physic_material(native) -> PhysicMaterialRef:
+    if native is None:
+        return PhysicMaterialRef()
+    ref = PhysicMaterialRef(guid=native.guid, path_hint=native.file_path)
+    from Infernux.core.physic_material import PhysicMaterial
+    ref._cached = PhysicMaterial(native)
+    return ref
+
+
+def _unwrap_physic_material(value):
+    if value is None:
+        return None
+    if isinstance(value, PhysicMaterialRef):
+        resolved = value.resolve()
+        if resolved is None:
+            raise ValueError(f"PhysicMaterial reference cannot be resolved: {value.guid}")
+        return resolved.native
+    from Infernux.core.physic_material import PhysicMaterial
+    if isinstance(value, PhysicMaterial):
+        return value.native
+    from Infernux.lib import InxPhysicMaterial as NativePhysicMaterial
+    if isinstance(value, NativePhysicMaterial):
+        return value
+    raise TypeError("physic_material must be PhysicMaterial, PhysicMaterialRef, or None")
 
 
 class Collider(BuiltinComponent):
@@ -51,17 +89,12 @@ class Collider(BuiltinComponent):
         default=False,
         tooltip="Is this collider a trigger volume?",
     )
-    friction = CppProperty(
-        "friction",
-        FieldType.FLOAT,
-        default=0.4,
-        tooltip="Dynamic friction coefficient [0..1]",
-        range=(0.0, 1.0),
-    )
-    bounciness = CppProperty(
-        "bounciness",
-        FieldType.FLOAT,
-        default=0.0,
-        tooltip="Bounciness / restitution [0..1]",
-        range=(0.0, 1.0),
+    physic_material = CppProperty(
+        "physic_material",
+        FieldType.ASSET,
+        default=PhysicMaterialRef(),
+        asset_type="PhysicMaterial",
+        tooltip="Shared physics surface material.",
+        get_converter=_wrap_physic_material,
+        set_converter=_unwrap_physic_material,
     )

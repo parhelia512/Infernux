@@ -117,5 +117,51 @@
         "infernux_hub_installer"
       ]
     }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "RelWithDebInfo",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release-macos",
+      "configurePreset": "release-macos",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-macos",
+      "configurePreset": "debug-macos",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release-linux",
+      "configurePreset": "release-linux",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-linux",
+      "configurePreset": "debug-linux",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
   ]
 }

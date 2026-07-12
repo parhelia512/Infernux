@@ -257,9 +257,6 @@ def load_component_class_from_file(file_path: str, type_name: str = "") -> Optio
         for component_class in components:
             if component_class.__name__ == type_name:
                 return component_class
-        # Class was likely renamed — if exactly one subclass exists, use it.
-        if len(components) == 1:
-            return components[0]
         return None
 
     if len(components) != 1:
@@ -319,10 +316,16 @@ def load_and_create_component(file_path: str, asset_database=None,
     # Resolve and store script GUID
     guid = asset_database.get_guid_from_path(file_path)
     if not guid:
-        guid = asset_database.import_asset(file_path)
+        from Infernux.core.assets import AssetManager
+        guid = AssetManager.import_asset(
+            file_path,
+            database=asset_database,
+            suppress_watcher_echo=False,
+        )
     if not guid:
         raise ScriptLoadError(f"Failed to resolve GUID for script: {file_path}")
     instance._script_guid = guid
+    component_class._asset_script_guid_ = guid
     return instance
 
 

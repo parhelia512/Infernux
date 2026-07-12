@@ -6,12 +6,11 @@
 
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 #include <unordered_set>
 
 namespace infernux
 {
-
-class AssetDatabase; // forward — used by MaterialImporter for path→GUID resolution
 
 // ==========================================================================
 // TextureImporter
@@ -30,17 +29,9 @@ class TextureImporter final : public AssetImporter
         return {".png", ".jpg", ".jpeg", ".bmp", ".tga", ".gif", ".psd", ".hdr", ".pic", ".pnm", ".pgm", ".ppm"};
     }
 
-    bool Import(const ImportContext &ctx) override
-    {
-        // Texture loading is handled by InxTextureLoader in the asset pipeline.
-        // This Import() ensures the meta file is created (already done by RegisterResource).
-        if (!ctx.meta)
-            return false;
-        EnsureDefaultSettings(*ctx.meta);
-        return true;
-    }
+    [[nodiscard]] ImportArtifact Import(const ImportRequest &request) const override;
 
-    void EnsureDefaultSettings(InxResourceMeta &meta) override
+    void EnsureDefaultSettings(InxResourceMeta &meta) const override
     {
         if (!meta.HasKey("wrap_mode"))
             meta.AddMetadata("wrap_mode", std::string("repeat"));
@@ -69,18 +60,17 @@ class ShaderImporter final : public AssetImporter
 
     [[nodiscard]] std::vector<std::string> GetSupportedExtensions() const override
     {
-        return {".vert", ".frag", ".geom", ".tesc", ".tese"};
+        return {".vert", ".frag"};
     }
 
-    bool Import(const ImportContext &ctx) override
+    [[nodiscard]] ImportArtifact Import(const ImportRequest &request) const override
     {
-        if (!ctx.meta)
-            return false;
-        EnsureDefaultSettings(*ctx.meta);
-        return true;
+        ImportArtifact artifact(request.metadata);
+        EnsureDefaultSettings(artifact.metadata);
+        return artifact;
     }
 
-    void EnsureDefaultSettings(InxResourceMeta & /*meta*/) override
+    void EnsureDefaultSettings(InxResourceMeta & /*meta*/) const override
     {
         // Shader-specific settings can be added later (e.g. optimization level)
     }
@@ -93,12 +83,6 @@ class ShaderImporter final : public AssetImporter
 class MaterialImporter final : public AssetImporter
 {
   public:
-    /// Set the AssetDatabase pointer so we can resolve paths → GUIDs.
-    void SetAssetDatabase(AssetDatabase *db)
-    {
-        m_assetDb = db;
-    }
-
     [[nodiscard]] ResourceType GetResourceType() const override
     {
         return ResourceType::Material;
@@ -109,24 +93,29 @@ class MaterialImporter final : public AssetImporter
         return {".mat"};
     }
 
-    bool Import(const ImportContext &ctx) override
-    {
-        if (!ctx.meta)
-            return false;
-        ScanDependencies(ctx);
-        return true;
-    }
-
-    bool Reimport(const ImportContext &ctx) override
-    {
-        return Import(ctx); // re-scan deps on reimport
-    }
+    [[nodiscard]] ImportArtifact Import(const ImportRequest &request) const override;
 
   private:
-    AssetDatabase *m_assetDb = nullptr;
+    [[nodiscard]] std::vector<std::string> ScanDependencies(const ImportRequest &request) const;
+};
 
-    /// Parse .mat JSON → extract texture paths & shader paths → register as dependencies.
-    void ScanDependencies(const ImportContext &ctx);
+class PhysicMaterialImporter final : public AssetImporter
+{
+  public:
+    [[nodiscard]] ResourceType GetResourceType() const override
+    {
+        return ResourceType::PhysicMaterial;
+    }
+
+    [[nodiscard]] std::vector<std::string> GetSupportedExtensions() const override
+    {
+        return {".physicmaterial"};
+    }
+
+    [[nodiscard]] ImportArtifact Import(const ImportRequest &request) const override
+    {
+        return ImportArtifact(request.metadata);
+    }
 };
 
 // ==========================================================================
@@ -146,11 +135,9 @@ class ScriptImporter final : public AssetImporter
         return {".py"};
     }
 
-    bool Import(const ImportContext &ctx) override
+    [[nodiscard]] ImportArtifact Import(const ImportRequest &request) const override
     {
-        if (!ctx.meta)
-            return false;
-        return true;
+        return ImportArtifact(request.metadata);
     }
 };
 
@@ -171,15 +158,14 @@ class AudioImporter final : public AssetImporter
         return {".wav"};
     }
 
-    bool Import(const ImportContext &ctx) override
+    [[nodiscard]] ImportArtifact Import(const ImportRequest &request) const override
     {
-        if (!ctx.meta)
-            return false;
-        EnsureDefaultSettings(*ctx.meta);
-        return true;
+        ImportArtifact artifact(request.metadata);
+        EnsureDefaultSettings(artifact.metadata);
+        return artifact;
     }
 
-    void EnsureDefaultSettings(InxResourceMeta &meta) override
+    void EnsureDefaultSettings(InxResourceMeta &meta) const override
     {
         if (!meta.HasKey("force_mono"))
             meta.AddMetadata("force_mono", false);
@@ -207,9 +193,9 @@ class ModelImporter final : public AssetImporter
         return {".fbx", ".obj", ".gltf", ".glb", ".dae", ".3ds", ".ply", ".stl"};
     }
 
-    bool Import(const ImportContext &ctx) override;
+    [[nodiscard]] ImportArtifact Import(const ImportRequest &request) const override;
 
-    void EnsureDefaultSettings(InxResourceMeta &meta) override
+    void EnsureDefaultSettings(InxResourceMeta &meta) const override
     {
         if (!meta.HasKey("scale_factor"))
             meta.AddMetadata("scale_factor", 0.01f);
@@ -223,13 +209,10 @@ class ModelImporter final : public AssetImporter
             meta.AddMetadata("swap_uv_channels", false);
         if (!meta.HasKey("optimize_mesh"))
             meta.AddMetadata("optimize_mesh", true);
-        const int importerVersion = meta.HasKey("importer_version") ? meta.GetDataAs<int>("importer_version") : 1;
-        if (importerVersion < 2) {
-            // Migrate old defaults to Unity-like behavior for DCC-authored assets.
-            meta.AddMetadata("flip_uvs", true);
-            if (!meta.HasKey("swap_uv_channels"))
-                meta.AddMetadata("swap_uv_channels", false);
-            meta.AddMetadata("importer_version", 2);
+        if (!meta.HasKey("importer_version")) {
+            meta.AddMetadata("importer_version", InxResourceMeta::ImporterVersion);
+        } else if (meta.GetDataAs<int>("importer_version") != InxResourceMeta::ImporterVersion) {
+            throw std::runtime_error("ModelImporter metadata uses an unsupported importer_version");
         }
     }
 };

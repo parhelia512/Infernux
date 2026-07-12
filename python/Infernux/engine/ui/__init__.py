@@ -1,71 +1,56 @@
-import os as _os
+"""Lazy exports for editor UI modules.
 
-# ── Editor-only imports ─────────────────────────────────────────────
-# In standalone player builds (_INFERNUX_PLAYER_MODE=1) the heavy
-# editor panels are never needed.  Skipping them avoids pulling in
-# dozens of editor-only modules and keeps startup fast.
-if not _os.environ.get("_INFERNUX_PLAYER_MODE"):
-    from Infernux.lib import MenuBarPanel
-    from .closable_panel import ClosablePanel
-    from Infernux.lib import HierarchyPanel
-    from Infernux.lib import InspectorPanel
-    from Infernux.lib import ConsolePanel
-    from .scene_view_panel import SceneViewPanel
-    from .game_view_panel import GameViewPanel
-    from Infernux.lib import ProjectPanel
-    from .window_manager import WindowManager, WindowInfo
-    from Infernux.lib import ToolbarPanel
-    from .frame_scheduler_panel import FrameSchedulerPanel
-    from .tag_layer_settings import TagLayerSettingsPanel
-    from Infernux.lib import StatusBarPanel
-    from .engine_status import EngineStatus
-    from .build_settings_panel import BuildSettingsPanel
-    from .viewport_utils import ViewportInfo, capture_viewport_info
-    from .ui_editor_panel import UIEditorPanel
-    from .selection_manager import SelectionManager
-    from .animclip2d_editor_panel import AnimClip2DEditorPanel
-    from .animfsm_editor_panel import AnimFSMEditorPanel
-    from .animtimeline_editor_panel import AnimTimelineEditorPanel
+Importing a leaf module such as ``Infernux.engine.ui.theme`` must not construct
+the entire editor panel graph. Besides startup cost, eager aggregation creates
+cycles with the runtime ``Infernux.ui`` package.
+"""
 
-    # New panel framework
-    from .editor_panel import EditorPanel
-    from .editor_services import EditorServices
-    from .event_bus import EditorEventBus, EditorEvent
-    from .panel_registry import PanelRegistry, editor_panel
-    from .editor_window import EditorWindow, editor_window
+from __future__ import annotations
 
-    __all__ = [
-        "MenuBarPanel",
-        "ToolbarPanel",
-        "FrameSchedulerPanel",
-        "HierarchyPanel",
-        "InspectorPanel",
-        "ConsolePanel",
-        "SceneViewPanel",
-        "GameViewPanel",
-        "ProjectPanel",
-        "ClosablePanel",
-        "WindowManager",
-        "WindowInfo",
-        "TagLayerSettingsPanel",
-        "StatusBarPanel",
-        "EngineStatus",
-        "BuildSettingsPanel",
-        "ViewportInfo",
-        "capture_viewport_info",
-        "UIEditorPanel",
-        "SelectionManager",
-        "AnimClip2DEditorPanel",
-        "AnimTimelineEditorPanel",
-        # New panel framework
-        "EditorPanel",
-        "EditorServices",
-        "EditorEventBus",
-        "EditorEvent",
-        "PanelRegistry",
-        "editor_panel",
-        "EditorWindow",
-        "editor_window",
-    ]
-else:
-    __all__ = []
+import importlib
+import os
+
+_EXPORTS = {
+    "MenuBarPanel": ("Infernux.lib", "MenuBarPanel"),
+    "ToolbarPanel": ("Infernux.lib", "ToolbarPanel"),
+    "HierarchyPanel": ("Infernux.lib", "HierarchyPanel"),
+    "InspectorPanel": ("Infernux.lib", "InspectorPanel"),
+    "ConsolePanel": ("Infernux.lib", "ConsolePanel"),
+    "ProjectPanel": ("Infernux.lib", "ProjectPanel"),
+    "StatusBarPanel": ("Infernux.lib", "StatusBarPanel"),
+    "ClosablePanel": (".closable_panel", "ClosablePanel"),
+    "SceneViewPanel": (".scene_view_panel", "SceneViewPanel"),
+    "GameViewPanel": (".game_view_panel", "GameViewPanel"),
+    "WindowManager": (".window_manager", "WindowManager"),
+    "WindowInfo": (".window_manager", "WindowInfo"),
+    "TagLayerSettingsPanel": (".tag_layer_settings", "TagLayerSettingsPanel"),
+    "EngineStatus": (".engine_status", "EngineStatus"),
+    "BuildSettingsPanel": (".build_settings_panel", "BuildSettingsPanel"),
+    "ViewportInfo": (".viewport_utils", "ViewportInfo"),
+    "capture_viewport_info": (".viewport_utils", "capture_viewport_info"),
+    "UIEditorPanel": (".ui_editor_panel", "UIEditorPanel"),
+    "SelectionManager": (".selection_manager", "SelectionManager"),
+    "AnimClip2DEditorPanel": (".animclip2d_editor_panel", "AnimClip2DEditorPanel"),
+    "AnimFSMEditorPanel": (".animfsm_editor_panel", "AnimFSMEditorPanel"),
+    "AnimTimelineEditorPanel": (".animtimeline_editor_panel", "AnimTimelineEditorPanel"),
+    "EditorPanel": (".editor_panel", "EditorPanel"),
+    "EditorServices": (".editor_services", "EditorServices"),
+    "EditorEventBus": (".event_bus", "EditorEventBus"),
+    "EditorEvent": (".event_bus", "EditorEvent"),
+    "PanelRegistry": (".panel_registry", "PanelRegistry"),
+    "editor_panel": (".panel_registry", "editor_panel"),
+    "EditorWindow": (".editor_window", "EditorWindow"),
+    "editor_window": (".editor_window", "editor_window"),
+}
+
+__all__ = [] if os.environ.get("_INFERNUX_PLAYER_MODE") else list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute = _EXPORTS[name]
+    module = importlib.import_module(module_name, __name__)
+    value = getattr(module, attribute)
+    globals()[name] = value
+    return value

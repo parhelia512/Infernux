@@ -15,6 +15,7 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
 #include <cstdint>
 #include <mutex>
 #include <unordered_map>
@@ -49,7 +50,6 @@ struct CollisionInfo
     glm::vec3 contactPoint{0.0f};     ///< World-space contact point (first contact)
     glm::vec3 contactNormal{0.0f};    ///< Contact normal (points from other → this)
     glm::vec3 relativeVelocity{0.0f}; ///< Relative velocity between the bodies
-    float impulse = 0.0f;             ///< Total impulse magnitude of the contact
 };
 
 // ============================================================================
@@ -76,7 +76,6 @@ struct ContactEvent
     glm::vec3 contactPoint{0.0f};
     glm::vec3 contactNormal{0.0f};
     glm::vec3 relativeVelocity{0.0f};
-    float impulse = 0.0f;
 };
 
 // ============================================================================
@@ -120,18 +119,42 @@ class InxContactListener : public JPH::ContactListener
     void OnContactRemoved(const JPH::SubShapeIDPair &inSubShapePair) override;
 
   private:
+    static constexpr size_t kEventShardCount = 16;
+
     void PushEvent(ContactEventType type, const JPH::Body &bodyA, const JPH::Body &bodyB,
                    const JPH::ContactManifold *manifold);
+    void PushRawEvent(ContactEvent event);
+    void MergeRawEvents();
 
-    /// Create a symmetric key for a body-pair (order-independent).
-    static uint64_t MakePairKey(uint32_t a, uint32_t b)
+    struct ContactPairKey
     {
-        if (a > b)
-            std::swap(a, b);
-        return (static_cast<uint64_t>(a) << 32) | b;
-    }
+        uint32_t bodyA;
+        uint32_t subShapeA;
+        uint32_t bodyB;
+        uint32_t subShapeB;
 
-    std::vector<ContactEvent> m_rawEvents; ///< Buffered from Jolt callbacks (during Step)
+        bool operator==(const ContactPairKey &other) const
+        {
+            return bodyA == other.bodyA && subShapeA == other.subShapeA && bodyB == other.bodyB &&
+                   subShapeB == other.subShapeB;
+        }
+    };
+
+    struct ContactPairKeyHash
+    {
+        size_t operator()(const ContactPairKey &key) const;
+    };
+
+    static ContactPairKey MakePairKey(const ContactEvent &event);
+
+    struct alignas(64) EventShard
+    {
+        std::mutex mutex;
+        std::vector<ContactEvent> events;
+    };
+
+    std::array<EventShard, kEventShardCount> m_eventShards;
+    std::vector<ContactEvent> m_rawEvents; ///< Main-thread aggregate built after Step
     std::vector<ContactEvent> m_events;    ///< Resolved events for dispatch
 
     /// Persistent pair tracking across physics steps.
@@ -139,10 +162,12 @@ class InxContactListener : public JPH::ContactListener
     {
         bool touchedThisStep = false;
         bool sleeping = false; ///< Exit was suppressed because a body went to sleep
+        ContactEvent lastEvent{};
     };
-    std::unordered_map<uint64_t, PairState> m_contactPairs;
+    std::unordered_map<ContactPairKey, PairState, ContactPairKeyHash> m_contactPairs;
 
-    std::mutex m_mutex; ///< Jolt may call from worker threads
+    // m_contactPairs and m_events are main-thread only. Jolt worker callbacks
+    // write exclusively to m_eventShards.
 };
 
 } // namespace infernux

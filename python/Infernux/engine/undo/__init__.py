@@ -1,7 +1,6 @@
 """Undo/Redo system for Infernux editor.
 
-All public symbols are re-exported here so that existing code using
-``from Infernux.engine.undo import ...`` continues to work unchanged.
+All public symbols are re-exported here.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ from Infernux.engine.undo._property_commands import (
     SetPropertyCommand,
     BuiltinPropertyCommand,
     GenericComponentCommand,
-    MaterialJsonCommand,
+    MaterialDocumentCommand,
     SetMaterialSlotCommand,
 )
 
@@ -97,7 +96,7 @@ from Infernux.engine.undo._renderstack import (
 
 # -- Recreate --
 from Infernux.engine.undo._recreate import (
-    _recreate_game_object_from_json,
+    _recreate_game_object_from_document,
 )
 
 # -- AnimFSM --
@@ -111,7 +110,7 @@ from Infernux.engine.undo._animfsm_commands import (
 __all__ = [
     "UndoCommand", "CompoundCommand", "LambdaCommand",
     "SetPropertyCommand", "BuiltinPropertyCommand",
-    "GenericComponentCommand", "MaterialJsonCommand", "SetMaterialSlotCommand",
+    "GenericComponentCommand", "MaterialDocumentCommand", "SetMaterialSlotCommand",
     "CreateGameObjectCommand", "DeleteGameObjectCommand",
     "ReparentCommand", "MoveGameObjectCommand",
     "SelectionCommand", "EditorSelectionCommand", "PrefabModeCommand",

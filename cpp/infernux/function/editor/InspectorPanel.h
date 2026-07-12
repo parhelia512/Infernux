@@ -224,7 +224,7 @@ class InspectorPanel : public EditorPanel
     // ── Add Component popup state ────────────────────────────────────
     char m_addCompSearch[256] = {};
     std::vector<AddComponentEntry> m_addCompEntries;
-    bool m_addCompPopupOpen = false;
+    bool m_addCompNeedsFocus = false;
 
     // ── Idle-skip state ──────────────────────────────────────────────
     int m_idleFrames = 0;
@@ -304,16 +304,6 @@ class InspectorPanel : public EditorPanel
     void RenderAddComponentPopup(InxGUIContext *ctx);
 
     void RefreshTagLayerCache();
-
-    // ── Searchable combo helper ──────────────────────────────────────
-    struct ComboState
-    {
-        char filter[256] = {};
-        bool needsFocus = false;
-    };
-    std::unordered_map<std::string, ComboState> m_comboStates;
-    int SearchableCombo(InxGUIContext *ctx, const char *label, int currentIdx, const std::vector<std::string> &items,
-                        float width = 0.0f);
 };
 
 } // namespace infernux

@@ -165,7 +165,7 @@ def wire_clipboard(ctx):
             parent = obj.get_parent()
             transform = getattr(obj, "transform", None)
             entries.append({
-                "json": obj.serialize(),
+                "document": obj.serialize_document(),
                 "source_parent_id": parent.id if parent else None,
                 "source_sibling_index": transform.get_sibling_index() if transform else 0,
                 "source_world_position": transform.position.to_tuple() if transform else None,
@@ -198,9 +198,12 @@ def wire_clipboard(ctx):
             return False
         from Infernux.lib import SceneManager, Vector3, quatf
         from Infernux.engine.undo import CompoundCommand, CreateGameObjectCommand, UndoManager
-        from Infernux.engine.component_restore import restore_pending_py_components
+        from Infernux.engine.component_restore import (
+            instantiate_prepared_game_object_document,
+            preflight_game_object_python_components,
+        )
         from Infernux.engine.prefab_manager import _strip_prefab_runtime_fields
-        import json
+        import copy
         scene = SceneManager.instance().get_active_scene()
         if not scene:
             return False
@@ -210,44 +213,76 @@ def wire_clipboard(ctx):
         anchor_insert_index = anchor_index + 1 if anchor_index >= 0 else None
         per_parent_insert_offsets = {}
         created = []
-        for entry in _clipboard["entries"]:
-            src_parent = None
-            src_pid = entry.get("source_parent_id")
-            if src_pid is not None:
-                src_parent = scene.find_by_id(src_pid)
-            parent = anchor_parent if anchor is not None else src_parent
-            try:
-                obj_data = json.loads(entry["json"])
-            except Exception as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                continue
-            _strip_prefab_runtime_fields(obj_data)
-            new_obj = scene.instantiate_from_json(json.dumps(obj_data), src_parent)
-            if new_obj:
-                if new_obj.get_parent() is not parent:
-                    new_obj.set_parent(parent, True)
-                transform = getattr(new_obj, "transform", None)
-                if transform is not None:
-                    world_position = entry.get("source_world_position")
-                    if world_position and len(world_position) == 3:
-                        transform.position = Vector3(float(world_position[0]), float(world_position[1]), float(world_position[2]))
-                    world_rotation = entry.get("source_world_rotation")
-                    if world_rotation and len(world_rotation) == 4:
-                        transform.rotation = quatf(float(world_rotation[0]), float(world_rotation[1]),
-                                                   float(world_rotation[2]), float(world_rotation[3]))
-                    if anchor_insert_index is not None:
-                        base_index = anchor_insert_index
-                    else:
-                        base_index = int(entry.get("source_sibling_index", 0)) + 1
-                    parent_key = parent.id if parent else 0
-                    offset = per_parent_insert_offsets.get(parent_key, 0)
-                    transform.set_sibling_index(max(0, base_index + offset))
-                    per_parent_insert_offsets[parent_key] = offset + 1
-                created.append(new_obj)
-        if created and scene.has_pending_py_components():
-            sfm2 = bs.scene_file_manager
-            adb = getattr(sfm2, "_asset_database", None) if sfm2 else None
-            restore_pending_py_components(scene, asset_database=adb)
+        sfm2 = bs.scene_file_manager
+        adb = getattr(sfm2, "_asset_database", None) if sfm2 else None
+        prepared_entries = []
+        try:
+            for entry in _clipboard["entries"]:
+                obj_data = copy.deepcopy(entry["document"])
+                _strip_prefab_runtime_fields(obj_data)
+                prepared = preflight_game_object_python_components(
+                    obj_data,
+                    asset_database=adb,
+                    preserve_document_ids=False,
+                )
+                prepared_entries.append((entry, obj_data, prepared))
+        except RuntimeError as exc:
+            for _entry, _document, prepared in prepared_entries:
+                prepared.discard()
+            Debug.log_error(f"Paste preflight failed: {exc}")
+            return False
+
+        try:
+            for entry, obj_data, prepared in prepared_entries:
+                src_parent = None
+                src_pid = entry.get("source_parent_id")
+                if src_pid is not None:
+                    src_parent = scene.find_by_id(src_pid)
+                parent = anchor_parent if anchor is not None else src_parent
+                new_obj = instantiate_prepared_game_object_document(
+                    scene,
+                    obj_data,
+                    prepared,
+                    parent,
+                )
+                if new_obj:
+                    if new_obj.get_parent() is not parent:
+                        new_obj.set_parent(parent, True)
+                    transform = getattr(new_obj, "transform", None)
+                    if transform is not None:
+                        world_position = entry.get("source_world_position")
+                        if world_position and len(world_position) == 3:
+                            transform.position = Vector3(
+                                float(world_position[0]),
+                                float(world_position[1]),
+                                float(world_position[2]),
+                            )
+                        world_rotation = entry.get("source_world_rotation")
+                        if world_rotation and len(world_rotation) == 4:
+                            transform.rotation = quatf(
+                                float(world_rotation[0]),
+                                float(world_rotation[1]),
+                                float(world_rotation[2]),
+                                float(world_rotation[3]),
+                            )
+                        if anchor_insert_index is not None:
+                            base_index = anchor_insert_index
+                        else:
+                            base_index = int(entry.get("source_sibling_index", 0)) + 1
+                        parent_key = parent.id if parent else 0
+                        offset = per_parent_insert_offsets.get(parent_key, 0)
+                        transform.set_sibling_index(max(0, base_index + offset))
+                        per_parent_insert_offsets[parent_key] = offset + 1
+                    created.append(new_obj)
+        except Exception as exc:
+            for created_object in reversed(created):
+                scene.destroy_game_object(created_object)
+            scene.process_pending_destroys()
+            Debug.log_error(f"Paste commit failed: {exc}")
+            return False
+        finally:
+            for _entry, _document, prepared in prepared_entries:
+                prepared.discard()
         if not created:
             return False
         cids = [o.id for o in created]

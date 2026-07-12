@@ -154,10 +154,10 @@ class AnimationClip3D:
         if not target:
             return False
         try:
-            with open(target, "w", encoding="utf-8") as f:
-                json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+            from Infernux.core.document_store import write_document_text
+            write_document_text(target, json.dumps(self.to_dict(), indent=2, ensure_ascii=False) + "\n")
             return True
-        except OSError:
+        except (OSError, RuntimeError):
             return False
 
     @classmethod

@@ -1,11 +1,15 @@
 #include "InxFileLoader/InxTextureLoader.hpp"
 #include "InxResource/InxResourceMeta.h"
+#include "JsonPyBridge.h"
 #include <function/resources/AssetDatabase/AssetDatabase.h>
 #include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <function/resources/InxMaterial/InxMaterial.h>
+#include <function/resources/PhysicMaterial/PhysicMaterial.h>
+#include <platform/filesystem/DocumentStore.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <stdexcept>
 
 namespace py = pybind11;
 
@@ -14,6 +18,23 @@ namespace infernux
 
 void RegisterResourceBindings(py::module_ &m)
 {
+    py::register_exception<DocumentWriteSuperseded>(m, "DocumentWriteSuperseded");
+
+    py::class_<DocumentWriteTicket, std::shared_ptr<DocumentWriteTicket>>(m, "DocumentWriteTicket")
+        .def_property_readonly("path", &DocumentWriteTicket::GetPath)
+        .def_property_readonly("generation", &DocumentWriteTicket::GetGeneration)
+        .def("wait", &DocumentWriteTicket::Wait, py::call_guard<py::gil_scoped_release>());
+
+    py::class_<DocumentStore>(m, "NativeDocumentStore")
+        .def_static("instance", &DocumentStore::Instance, py::return_value_policy::reference)
+        .def("submit", &DocumentStore::Submit, py::arg("path"), py::arg("content"))
+        .def("write_and_wait", &DocumentStore::WriteAndWait, py::arg("path"), py::arg("content"),
+             py::call_guard<py::gil_scoped_release>())
+        .def("flush_all", py::overload_cast<>(&DocumentStore::Flush), py::call_guard<py::gil_scoped_release>())
+        .def("flush_path", py::overload_cast<const std::string &>(&DocumentStore::Flush), py::arg("path"),
+             py::call_guard<py::gil_scoped_release>())
+        .def("shutdown", &DocumentStore::Shutdown, py::call_guard<py::gil_scoped_release>());
+
     // ResourceType enum
     py::enum_<ResourceType>(m, "ResourceType")
         .value("Meta", ResourceType::Meta)
@@ -25,10 +46,11 @@ void RegisterResourceBindings(py::module_ &m)
         .value("Audio", ResourceType::Audio)
         .value("DefaultText", ResourceType::DefaultText)
         .value("DefaultBinary", ResourceType::DefaultBinary)
+        .value("PhysicMaterial", ResourceType::PhysicMaterial)
         .export_values();
 
     // InxResourceMeta - resource metadata
-    py::class_<InxResourceMeta>(m, "ResourceMeta")
+    py::class_<InxResourceMeta, std::shared_ptr<InxResourceMeta>>(m, "ResourceMeta")
         .def(py::init<>())
         .def("get_resource_name", &InxResourceMeta::GetResourceName,
              "Get the resource name (filename without extension)")
@@ -58,7 +80,38 @@ void RegisterResourceBindings(py::module_ &m)
                     return 0.0f;
                 return self.GetDataAs<float>(key);
             },
-            py::arg("key"), "Get a float metadata value");
+            py::arg("key"), "Get a float metadata value")
+        .def("serialize_document", [](const InxResourceMeta &self) { return JsonToPython(self.SerializeDocument()); })
+        .def(
+            "deserialize_document",
+            [](InxResourceMeta &self, const py::object &document) { self.DeserializeDocument(PythonToJson(document)); },
+            py::arg("document"));
+
+    py::class_<PhysicMaterial, std::shared_ptr<PhysicMaterial>>(m, "InxPhysicMaterial")
+        .def(py::init<>())
+        .def_property_readonly("name", &PhysicMaterial::GetName)
+        .def_property_readonly("guid", &PhysicMaterial::GetGuid)
+        .def_property_readonly("file_path", &PhysicMaterial::GetFilePath)
+        .def_property("friction", &PhysicMaterial::GetFriction, &PhysicMaterial::SetFriction)
+        .def_property("bounciness", &PhysicMaterial::GetBounciness, &PhysicMaterial::SetBounciness)
+        .def_property(
+            "friction_combine",
+            [](const PhysicMaterial &material) { return static_cast<int>(material.GetFrictionCombine()); },
+            [](PhysicMaterial &material, int value) {
+                material.SetFrictionCombine(static_cast<PhysicsMaterialCombine>(value));
+            })
+        .def_property(
+            "bounce_combine",
+            [](const PhysicMaterial &material) { return static_cast<int>(material.GetBounceCombine()); },
+            [](PhysicMaterial &material, int value) {
+                material.SetBounceCombine(static_cast<PhysicsMaterialCombine>(value));
+            })
+        .def("serialize_document",
+             [](const PhysicMaterial &material) { return JsonToPython(material.SerializeDocument()); })
+        .def("deserialize_document", [](PhysicMaterial &material,
+                                        py::handle document) { material.DeserializeDocument(PythonToJson(document)); })
+        .def("save", py::overload_cast<>(&PhysicMaterial::SaveToFile, py::const_))
+        .def("save_to", py::overload_cast<const std::string &>(&PhysicMaterial::SaveToFile), py::arg("path"));
 
     // InxTextureData - raw texture data accessible from Python
     py::class_<InxTextureData>(m, "TextureData")
@@ -80,10 +133,10 @@ void RegisterResourceBindings(py::module_ &m)
         .def(
             "get_pixels_list",
             [](const InxTextureData &self) {
-                // Return pixels as list of unsigned char for passing to upload_texture_for_imgui
+                // Return pixels as RGBA8 bytes for submit_imgui_texture.
                 return self.pixels;
             },
-            "Get raw pixel data as list of unsigned char (for upload_texture_for_imgui)");
+            "Get raw RGBA8 pixel data for submit_imgui_texture");
 
     // InxTextureLoader - static methods for loading textures
     py::class_<InxTextureLoader>(m, "TextureLoader")
@@ -299,21 +352,11 @@ void RegisterResourceBindings(py::module_ &m)
                     return;
                 }
 
-                auto resolveGuidFromPath = [](const std::string &path) -> std::string {
-                    auto *adb = AssetRegistry::Instance().GetAssetDatabase();
-                    if (!adb || path.empty())
-                        return {};
-                    return adb->GetGuidFromPath(path);
-                };
-
                 auto applyString = [&](const std::string &text) {
                     if (text.empty()) {
                         mat.ClearTexture(name);
                         return;
                     }
-                    // SetTextureGuid normalizes GUIDs, registered paths, raw
-                    // file paths, and builtin-resource relative refs to a GUID
-                    // (GUID-only contract enforced in one place).
                     mat.SetTextureGuid(name, text);
                 };
 
@@ -333,47 +376,10 @@ void RegisterResourceBindings(py::module_ &m)
                     }
                 }
 
-                if (py::hasattr(value, "source_path")) {
-                    py::object pathObj = value.attr("source_path");
-                    if (!pathObj.is_none()) {
-                        std::string guid = resolveGuidFromPath(py::cast<std::string>(pathObj));
-                        if (!guid.empty()) {
-                            mat.SetTextureGuid(name, guid);
-                            return;
-                        }
-                    }
-                }
-
-                if (py::hasattr(value, "native")) {
-                    py::object native = value.attr("native");
-                    if (!native.is_none()) {
-                        if (py::hasattr(native, "guid")) {
-                            py::object guidObj = native.attr("guid");
-                            if (!guidObj.is_none()) {
-                                std::string guid = py::cast<std::string>(guidObj);
-                                if (!guid.empty()) {
-                                    mat.SetTextureGuid(name, guid);
-                                    return;
-                                }
-                            }
-                        }
-                        if (py::hasattr(native, "source_path")) {
-                            py::object pathObj = native.attr("source_path");
-                            if (!pathObj.is_none()) {
-                                std::string guid = resolveGuidFromPath(py::cast<std::string>(pathObj));
-                                if (!guid.empty()) {
-                                    mat.SetTextureGuid(name, guid);
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                }
-
                 throw std::runtime_error(
-                    "set_texture: expected None, a GUID/path string, or an object with guid/source_path/native.");
+                    "set_texture: expected None, a Texture GUID/builtin token, or an object with guid.");
             },
-            py::arg("name"), py::arg("value"), "Set a texture property from GUID, path, or texture-like object")
+            py::arg("name"), py::arg("value"), "Set a texture property from a Texture GUID or texture object")
         // Individual property getters (convenience wrappers over GetProperty)
         .def(
             "get_float",
@@ -527,6 +533,16 @@ void RegisterResourceBindings(py::module_ &m)
         // Serialization
         .def("serialize", &InxMaterial::Serialize, "Serialize material to JSON string")
         .def("deserialize", &InxMaterial::Deserialize, py::arg("json_str"), "Deserialize material from JSON string")
+        .def(
+            "serialize_document",
+            [](const InxMaterial &material) { return JsonToPython(material.SerializeDocument()); },
+            "Serialize material to a Python document")
+        .def(
+            "deserialize_document",
+            [](InxMaterial &material, py::handle document) {
+                return material.DeserializeDocument(PythonToJson(document));
+            },
+            py::arg("document"), "Deserialize material from a Python document")
         .def_static("create_default_lit", &InxMaterial::CreateDefaultLit,
                     "Create the default lit opaque material (built-in)")
         .def_static("create_default_unlit", &InxMaterial::CreateDefaultUnlit, "Create a default unlit opaque material")

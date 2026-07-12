@@ -15,18 +15,8 @@ InxPythonScriptLoader::InxPythonScriptLoader()
     INXLOG_DEBUG("InxPythonScriptLoader initialized");
 }
 
-bool InxPythonScriptLoader::LoadMeta(const char *content, const std::string &filePath, InxResourceMeta &metaData)
-{
-    // Try to load existing meta file
-    std::string metaPath = InxResourceMeta::GetMetaFilePath(filePath);
-    if (std::filesystem::exists(ToFsPath(metaPath))) {
-        return metaData.LoadFromFile(metaPath);
-    }
-    return false;
-}
-
 void InxPythonScriptLoader::CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
-                                       InxResourceMeta &metaData)
+                                       InxResourceMeta &metaData) const
 {
     INXLOG_DEBUG("Creating metadata for Python script: ", filePath);
 

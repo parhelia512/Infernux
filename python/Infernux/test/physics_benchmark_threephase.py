@@ -36,7 +36,7 @@ Physics alignment notes (match these in Unity):
 
 from Infernux.components import InxComponent
 from Infernux.instantiate import Destroy
-from Infernux.lib import SceneManager, PrimitiveType, Vector3
+from Infernux.lib import InxPhysicMaterial, SceneManager, PrimitiveType, Vector3
 from Infernux.debug import debug
 import csv
 import os
@@ -72,6 +72,9 @@ class PhysicsBenchmarkTimeline(InxComponent):
         self._sweep_queue = []    # remaining counts for run_sweep()
         self._running = False
         self._done    = True
+        self._physic_material = InxPhysicMaterial()
+        self._physic_material.friction = FRICTION
+        self._physic_material.bounciness = RESTITUTION
 
         self._init_scene()
         self._begin_run(self.cube_count)
@@ -148,8 +151,7 @@ class PhysicsBenchmarkTimeline(InxComponent):
         )
         self._floor.transform.position = Vector3(0, 0, 0)
         col = self._floor.add_component("BoxCollider")
-        col.friction   = FRICTION
-        col.bounciness = RESTITUTION
+        col.physic_material = self._physic_material
 
     def _begin_run(self, num: int):
         """Reset counters, spawn *num* cubes, start recording."""
@@ -186,8 +188,7 @@ class PhysicsBenchmarkTimeline(InxComponent):
             cube.transform.position = Vector3(x, y, z)
 
             col = cube.add_component("BoxCollider")
-            col.friction   = FRICTION
-            col.bounciness = RESTITUTION
+            col.physic_material = self._physic_material
 
             rb = cube.add_component("Rigidbody")
             rb.mass = 1.0

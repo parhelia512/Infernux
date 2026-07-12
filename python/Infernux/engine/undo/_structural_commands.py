@@ -14,14 +14,14 @@ from Infernux.engine.undo._helpers import (
 
 
 class CreateGameObjectCommand(UndoCommand):
-    """Undo destroys the object; redo recreates from JSON snapshot."""
+    """Undo destroys the object; redo recreates from a document snapshot."""
 
     _selection_restore_fn: Optional[Callable[[List[int]], None]] = None
 
     def __init__(self, object_id: int, description: str = "Create GameObject"):
         super().__init__(description)
         self._object_id = object_id
-        self._snapshot_json: Optional[str] = None
+        self._document: Optional[dict] = None
         self._parent_id: Optional[int] = None
         self._sibling_index: int = 0
         self._post_create_ids: List[int] = _get_current_selection_ids()
@@ -34,7 +34,7 @@ class CreateGameObjectCommand(UndoCommand):
         if scene:
             obj = scene.find_by_id(self._object_id)
             if obj:
-                self._snapshot_json = obj.serialize()
+                self._document = obj.serialize_document()
                 parent = obj.get_parent()
                 self._parent_id = parent.id if parent else None
                 t = getattr(obj, "transform", None)
@@ -45,10 +45,10 @@ class CreateGameObjectCommand(UndoCommand):
             fn([])
 
     def redo(self) -> None:
-        if self._snapshot_json:
-            from Infernux.engine.undo._recreate import _recreate_game_object_from_json
-            _recreate_game_object_from_json(
-                self._snapshot_json, self._parent_id, self._sibling_index)
+        if self._document is not None:
+            from Infernux.engine.undo._recreate import _recreate_game_object_from_document
+            _recreate_game_object_from_document(
+                self._document, self._parent_id, self._sibling_index)
             _bump_inspector_structure()
             _notify_gizmos_scene_changed()
             fn = type(self)._selection_restore_fn
@@ -57,14 +57,14 @@ class CreateGameObjectCommand(UndoCommand):
 
 
 class DeleteGameObjectCommand(UndoCommand):
-    """Undo recreates from JSON snapshot; redo re-destroys."""
+    """Undo recreates from a document snapshot; redo re-destroys."""
 
     _selection_restore_fn: Optional[Callable[[List[int]], None]] = None
 
     def __init__(self, object_id: int, description: str = "Delete GameObject"):
         super().__init__(description)
         self._object_id = object_id
-        self._snapshot_json: Optional[str] = None
+        self._document: Optional[dict] = None
         self._parent_id: Optional[int] = None
         self._sibling_index: int = 0
         self._pre_delete_selection_ids: List[int] = []
@@ -73,7 +73,7 @@ class DeleteGameObjectCommand(UndoCommand):
         if scene:
             obj = scene.find_by_id(object_id)
             if obj:
-                self._snapshot_json = obj.serialize()
+                self._document = obj.serialize_document()
                 parent = obj.get_parent()
                 self._parent_id = parent.id if parent else None
                 t = getattr(obj, "transform", None)
@@ -88,10 +88,10 @@ class DeleteGameObjectCommand(UndoCommand):
                 _destroy_game_object_immediately(scene, obj)
 
     def undo(self) -> None:
-        if self._snapshot_json:
-            from Infernux.engine.undo._recreate import _recreate_game_object_from_json
-            _recreate_game_object_from_json(
-                self._snapshot_json, self._parent_id, self._sibling_index)
+        if self._document is not None:
+            from Infernux.engine.undo._recreate import _recreate_game_object_from_document
+            _recreate_game_object_from_document(
+                self._document, self._parent_id, self._sibling_index)
             _bump_inspector_structure()
             _notify_gizmos_scene_changed()
             fn = type(self)._selection_restore_fn
@@ -103,7 +103,7 @@ class DeleteGameObjectCommand(UndoCommand):
         if scene:
             obj = scene.find_by_id(self._object_id)
             if obj:
-                self._snapshot_json = obj.serialize()
+                self._document = obj.serialize_document()
                 _destroy_game_object_immediately(scene, obj)
         fn = type(self)._selection_restore_fn
         if fn:

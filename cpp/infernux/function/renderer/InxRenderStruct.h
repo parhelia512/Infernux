@@ -173,6 +173,8 @@ struct DrawCall
     // Used by the renderer to create/update per-object GPU buffers.
     const std::vector<Vertex> *meshVertices = nullptr;
     const std::vector<uint32_t> *meshIndices = nullptr;
+    std::string meshAssetGuid;
+    uint64_t meshRuntimeVersion = 0;
 
     // Optional GPU skinning palette. When present, vertex data is the bind-pose
     // skinned mesh stream and the vertex shader applies these matrices.

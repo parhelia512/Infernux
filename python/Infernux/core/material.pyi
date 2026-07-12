@@ -34,6 +34,12 @@ class Material:
     def from_native(native: InxMaterial) -> Material:
         """Wrap an existing C++ InxMaterial instance."""
         ...
+    def to_dict(self) -> dict:
+        """Return the material document without encoding JSON text."""
+        ...
+    def apply_dict(self, document: dict) -> bool:
+        """Transactionally apply a material document."""
+        ...
     @staticmethod
     def load(file_path: str) -> Optional[Material]:
         """Load a material from a file path."""

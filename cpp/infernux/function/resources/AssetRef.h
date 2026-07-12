@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace infernux
@@ -30,9 +31,14 @@ template <typename T> class AssetRef
     {
     }
 
-    /// @brief Construct with GUID and a pre-resolved pointer
-    AssetRef(const std::string &guid, std::shared_ptr<T> asset) : m_guid(guid), m_cached(std::move(asset))
+    /// @brief Construct with a pre-resolved pointer and its published runtime version.
+    AssetRef(const std::string &guid, std::shared_ptr<T> asset, uint64_t runtimeVersion)
+        : m_guid(guid), m_cached(std::move(asset)), m_cachedVersion(runtimeVersion), m_resolved(true)
     {
+        if (m_guid.empty() != (m_cachedVersion == 0))
+            throw std::invalid_argument("GUID-backed AssetRef requires a non-zero runtime version");
+        if (m_cachedVersion != 0 && !m_cached)
+            throw std::invalid_argument("Published AssetRef requires a payload");
     }
 
     // ---- GUID accessors ----
@@ -47,6 +53,8 @@ template <typename T> class AssetRef
         if (m_guid != guid) {
             m_guid = guid;
             m_cached.reset(); // invalidate cache on GUID change
+            m_cachedVersion = 0;
+            m_resolved = false;
         }
     }
 
@@ -83,40 +91,26 @@ template <typename T> class AssetRef
     }
 
     /// @brief Set the cached pointer directly (e.g. after loading)
-    void SetCached(std::shared_ptr<T> asset)
+    void SetCached(std::shared_ptr<T> asset, uint64_t runtimeVersion)
     {
+        if (m_guid.empty() || !asset || runtimeVersion == 0)
+            throw std::invalid_argument("AssetRef cached publication requires GUID, payload and runtime version");
         m_cached = std::move(asset);
+        m_cachedVersion = runtimeVersion;
+        m_resolved = true;
+    }
+
+    [[nodiscard]] uint64_t GetCachedVersion() const noexcept
+    {
+        return m_cachedVersion;
     }
 
     /// @brief Invalidate the cached pointer without clearing the GUID
     void Invalidate()
     {
         m_cached.reset();
+        m_cachedVersion = 0;
         m_resolved = false;
-    }
-
-    // ---- Resolution ----
-
-    /// @brief Resolve the reference using a resolver callback.
-    /// The callback receives the GUID and should return a shared_ptr<T>.
-    /// Returns true if resolve succeeded (non-null result).
-    using ResolverFn = std::function<std::shared_ptr<T>(const std::string &guid)>;
-
-    bool Resolve(const ResolverFn &resolver)
-    {
-        if (m_guid.empty())
-            return false;
-        m_cached = resolver(m_guid);
-        m_resolved = true;
-        return m_cached != nullptr;
-    }
-
-    /// @brief Resolve only if not already cached
-    bool ResolveIfNeeded(const ResolverFn &resolver)
-    {
-        if (m_cached)
-            return true;
-        return Resolve(resolver);
     }
 
     // ---- Missing / deleted state ----
@@ -137,6 +131,7 @@ template <typename T> class AssetRef
     void MarkStale()
     {
         m_cached.reset();
+        m_cachedVersion = 0;
         m_resolved = false;
     }
 
@@ -145,6 +140,7 @@ template <typename T> class AssetRef
     {
         m_guid.clear();
         m_cached.reset();
+        m_cachedVersion = 0;
         m_resolved = false;
     }
 
@@ -163,6 +159,7 @@ template <typename T> class AssetRef
   private:
     std::string m_guid;
     std::shared_ptr<T> m_cached;
+    uint64_t m_cachedVersion = 0;
     bool m_resolved = false; ///< true after at least one Resolve() attempt
 };
 

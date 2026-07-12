@@ -1,8 +1,8 @@
 """
 SkinnedMeshRenderer — Python wrapper for the native SkinnedMeshRenderer component.
 
-This currently reuses MeshRenderer's rendering/material API while exposing
-animated-model metadata and the active take selection used by SkeletalAnimator.
+It reuses MeshRenderer's GUID-backed mesh/material API while exposing animated
+model metadata and the active take selection used by SkeletalAnimator.
 """
 
 from __future__ import annotations
@@ -28,14 +28,6 @@ class SkinnedMeshRenderer(MeshRenderer):
         visible_when=lambda _c: False,
         tooltip="GUID of the source animated model asset",
     )
-    source_model_path = CppProperty(
-        "source_model_path",
-        FieldType.STRING,
-        default="",
-        readonly=True,
-        visible_when=lambda _c: False,
-        tooltip="Filesystem path of the source animated model",
-    )
     active_take_name = CppProperty(
         "active_take_name",
         FieldType.STRING,
@@ -53,11 +45,6 @@ class SkinnedMeshRenderer(MeshRenderer):
         cpp = self._cpp_component
         if cpp is not None and hasattr(cpp, "set_source_model_guid"):
             cpp.set_source_model_guid(guid or "")
-
-    def set_source_model_path(self, path: str) -> None:
-        cpp = self._cpp_component
-        if cpp is not None and hasattr(cpp, "set_source_model_path"):
-            cpp.set_source_model_path(path or "")
 
     @property
     def animation_take_count(self) -> int:

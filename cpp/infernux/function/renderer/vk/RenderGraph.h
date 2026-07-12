@@ -724,6 +724,7 @@ class RenderGraph
 
     [[nodiscard]] VkImageView ResolveTextureView(ResourceHandle handle) const;
     [[nodiscard]] VkBuffer ResolveBuffer(ResourceHandle handle) const;
+    [[nodiscard]] uint64_t GetTransientResidentBytes() const;
 
   private:
     // ========================================================================

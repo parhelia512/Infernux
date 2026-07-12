@@ -20,7 +20,6 @@ import logging
 import os
 from typing import Dict, List, Optional
 
-from Infernux.lib import TagLayerManager
 import Infernux.resources as _resources
 from Infernux.engine.engine import Engine, LogLevel
 from Infernux.engine.scene_manager import SceneFileManager
@@ -79,7 +78,6 @@ class PlayerBootstrap:
         """Execute all bootstrap phases and start the main loop."""
         self._ensure_project_requirements()
         self._init_engine()
-        self._load_tag_layer_settings()
         self._create_managers()
         self._setup_game_camera()
         self._register_player_gui()
@@ -122,11 +120,6 @@ class PlayerBootstrap:
 
         self.engine.set_gui_font(_resources.engine_font_path, 15)
 
-
-    def _load_tag_layer_settings(self):
-        path = os.path.join(self.project_path, "ProjectSettings", "TagLayerSettings.json")
-        if os.path.isfile(path):
-            TagLayerManager.instance().load_from_file(_safe_path(path))
 
 
     def _create_managers(self):
@@ -186,8 +179,6 @@ class PlayerBootstrap:
     def _enter_play_mode(self):
         """Enter play mode immediately (no deferred task, no save guard)."""
         from Infernux.lib import SceneManager as _NativeSM
-        from Infernux.components.component import InxComponent
-        from Infernux.components.builtin_component import BuiltinComponent
         from Infernux.renderstack.render_stack import RenderStack
         from Infernux.timing import Time
         from Infernux.engine.play_mode import PlayModeState
@@ -203,8 +194,8 @@ class PlayerBootstrap:
             Debug.log_warning("No active scene — play mode skipped")
             return
 
-        # Serialize current state as "backup" (player never restores, but PM needs it)
-        snapshot = scene.serialize()
+        # Capture a typed document (player never restores it, but PM needs it).
+        snapshot = scene.serialize_document()
         if not snapshot:
             Debug.log_error("Scene serialization failed — play mode skipped")
             return
@@ -213,37 +204,28 @@ class PlayerBootstrap:
         # Reset timing
         Time._reset()
 
-        # Rebuild scene from snapshot to get fresh component instances in play mode
-        RenderStack._active_instance = None
-        scene.deserialize(snapshot)
-        InxComponent._clear_all_instances()
-        BuiltinComponent._clear_cache()
+        def after_publish():
+            RenderStack._active_instance = None
+            scene.set_playing(True)
+            try:
+                from Infernux.components.builtin.sprite_renderer import SpriteRenderer
+                SpriteRenderer.init_all_in_scene(scene)
+            except Exception as exc:
+                Debug.log_internal(f"Player SpriteRenderer init before py restore: {exc}")
+            pm._state = PlayModeState.PLAYING
+            pm._last_frame_time = __import__("time").time()
 
-        # Mark scene as playing BEFORE restoring Python components
-        scene.set_playing(True)
-
-        # Match the editor play-mode path: SpriteRenderer wrappers must be
-        # recreated before Python components wake up, otherwise packaged
-        # games can rebuild the scene into play mode with missing sprite
-        # material/texture bindings.
-        try:
-            from Infernux.components.builtin.sprite_renderer import SpriteRenderer
-
-            SpriteRenderer.init_all_in_scene(scene)
-        except Exception as exc:
-            Debug.log_internal(f"Player SpriteRenderer init before py restore: {exc}")
-
-        # Activate play mode state so tick() / is_playing work correctly
-        pm._state = PlayModeState.PLAYING
-        pm._last_frame_time = __import__("time").time()
-
-        # Restore Python components BEFORE sm.play() — matches the editor
-        # flow (_rebuild_active_scene restores components, then step_activate
-        # calls sm.play on the next frame).  If sm.play() runs first,
-        # Scene::Start() sees zero Python components and sets
-        # m_hasStarted = true, causing later-added components to have their
-        # start() queued instead of called synchronously.
-        pm._restore_pending_py_components()
+        from Infernux.engine.scene_document_transaction import SceneDocumentTransaction
+        transaction = SceneDocumentTransaction(
+            scene,
+            document=snapshot,
+            asset_database=pm._asset_database,
+            clear_registries=True,
+            after_publish=after_publish,
+        )
+        if not transaction.run_to_completion(raise_on_failure=False):
+            Debug.log_error(f"Scene document transaction failed - play mode skipped: {transaction.error}")
+            return
 
         # Run once more after Python restore so any lazily-created or
         # animator-driven SpriteRenderers also have bound materials before

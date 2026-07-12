@@ -112,7 +112,7 @@ def _try_cds_gather(targets: Sequence, prop_name: str):
         return None
     field_id, type_code = entry
 
-    # Collect slot indices.
+    # Collect generational slot handles as an (N, 2) uint32 array.
     np = _get_np()
     slots = np.array([t._cds_slot for t in targets], dtype=np.uint32)
     lib = _get_lib()
@@ -325,9 +325,11 @@ def batch_write(targets: Sequence, data: NDArray, prop: Any) -> None:
 
 
 def create_batch_handle(targets: list) -> "TransformBatchHandle":
-    """Create a ``TransformBatchHandle`` that caches the C++ Transform
-    pointers for *targets*.  Re-use the handle across ``batch_read`` /
-    ``batch_write`` calls to avoid repeated pybind11 extraction overhead.
+    """Create a validated ``TransformBatchHandle`` for *targets*.
+
+    Re-use the handle across ``batch_read`` / ``batch_write`` calls to avoid
+    repeated pybind11 extraction overhead. Every operation validates the
+    stored ECS generations and rejects transforms destroyed since creation.
     """
     lib = _get_lib()
     return lib.TransformBatchHandle(targets)

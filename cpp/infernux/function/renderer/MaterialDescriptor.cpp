@@ -273,7 +273,6 @@ void MaterialDescriptorManager::Shutdown()
 
     m_device = VK_NULL_HANDLE;
     m_physicalDevice = VK_NULL_HANDLE;
-    m_retiredDescriptorSets.clear();
     m_liveDescriptorHandles.clear();
 }
 
@@ -349,13 +348,11 @@ bool MaterialDescriptorManager::TryResolveExplicitTextureBinding(
         return false;
     }
 
-    auto [imageView, sampler] = m_textureResolver(texturePath, bindingName);
-    if (imageView == VK_NULL_HANDLE || sampler == VK_NULL_HANDLE) {
+    outBinding = m_textureResolver(texturePath, bindingName);
+    if (outBinding.imageView == VK_NULL_HANDLE || outBinding.sampler == VK_NULL_HANDLE || !outBinding.keepAlive) {
         outBinding = {};
         return false;
     }
-
-    outBinding = {imageView, sampler};
     return true;
 }
 
@@ -390,18 +387,12 @@ MaterialDescriptorSet *MaterialDescriptorManager::GetOrCreateDescriptorSet(const
             return it->second.get();
         } else {
             INXLOG_INFO("Material '", materialName, "' descriptor requirements changed, recreating descriptor set");
-            // Do NOT free the old descriptor set here.  Scene-facing InxMaterial objects
-            // may still carry the old handle in their cached m_passPipelines state.
-            // Freeing (even deferred via deletion queue) produces "Invalid VkDescriptorSet"
-            // validation errors when those cached handles are bound on the next frame.
-            // Instead, retire the stale entry: keep it alive until Clear()/Shutdown()
-            // resets the pool, at which point all physical memory is reclaimed at once.
             auto staleEntry = std::shared_ptr<MaterialDescriptorSet>(std::move(it->second));
             if (staleEntry && staleEntry->descriptorSet != VK_NULL_HANDLE) {
                 m_liveDescriptorHandles.erase(reinterpret_cast<uint64_t>(staleEntry->descriptorSet));
             }
             m_descriptorSets.erase(it);
-            m_retiredDescriptorSets.emplace_back(std::move(staleEntry));
+            RetireDescriptorSet(std::move(staleEntry));
         }
     }
 
@@ -773,20 +764,42 @@ void MaterialDescriptorManager::RemoveDescriptorSet(const std::string &materialN
 {
     auto it = m_descriptorSets.find(materialName);
     if (it != m_descriptorSets.end()) {
-        // Important safety rule:
-        // Do NOT free individual descriptor sets during runtime invalidation.
-        // Scene-facing material instances may still transiently carry old handles;
-        // freeing here can turn those stale references into hard-invalid Vulkan
-        // objects (vkCmdBindDescriptorSets Invalid VkDescriptorSet).
-        // We retire sets logically and reclaim them only when pools are reset
-        // during Clear()/Shutdown().
         auto retiredEntry = std::shared_ptr<MaterialDescriptorSet>(std::move(it->second));
         if (retiredEntry && retiredEntry->descriptorSet != VK_NULL_HANDLE) {
-            m_liveDescriptorHandles.erase(reinterpret_cast<uint64_t>(retiredEntry->descriptorSet));
+            const uint64_t handle = reinterpret_cast<uint64_t>(retiredEntry->descriptorSet);
+            m_liveDescriptorHandles.erase(handle);
+            m_allocatedHandles.erase(handle);
         }
-        m_retiredDescriptorSets.emplace_back(std::move(retiredEntry));
         m_descriptorSets.erase(it);
+        RetireDescriptorSet(std::move(retiredEntry));
     }
+}
+
+void MaterialDescriptorManager::RetireDescriptorSet(std::shared_ptr<MaterialDescriptorSet> descriptorSet)
+{
+    if (!descriptorSet)
+        throw std::invalid_argument("Cannot retire an empty material descriptor set");
+
+    const VkDevice device = m_device;
+    const VkDescriptorPool ownerPool = descriptorSet->ownerPool;
+    const VkDescriptorSet handle = descriptorSet->descriptorSet;
+    auto pending = m_pendingDescriptorSetReleases;
+
+    if (m_deletionQueue) {
+        pending->fetch_add(1, std::memory_order_relaxed);
+        m_deletionQueue->Push([device, ownerPool, handle, descriptorSet = std::move(descriptorSet),
+                               pending = std::move(pending)]() mutable {
+            vkFreeDescriptorSets(device, ownerPool, 1, &handle);
+            descriptorSet->descriptorSet = VK_NULL_HANDLE;
+            descriptorSet.reset();
+            pending->fetch_sub(1, std::memory_order_relaxed);
+        });
+        return;
+    }
+
+    vkDeviceWaitIdle(device);
+    vkFreeDescriptorSets(device, ownerPool, 1, &handle);
+    descriptorSet->descriptorSet = VK_NULL_HANDLE;
 }
 
 void MaterialDescriptorManager::Clear()
@@ -800,7 +813,6 @@ void MaterialDescriptorManager::Clear()
         }
     }
     m_descriptorSets.clear();
-    m_retiredDescriptorSets.clear();
     // All handles are now invalid — clear the live-handle tracking set.
     m_allocatedHandles.clear();
     m_liveDescriptorHandles.clear();

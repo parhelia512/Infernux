@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
@@ -41,6 +42,7 @@ struct TransformECSData
 class TransformECSStore
 {
   public:
+    using InvalidationObserver = std::function<void(Transform *)>;
     // Keep the same Handle type for binary compatibility.
     struct Handle
     {
@@ -75,6 +77,11 @@ class TransformECSStore
     void Reserve(size_t capacity);
 
     void InvalidateSubtree(Transform *root, bool clearWorldEulerExact = false) const;
+
+    void SetInvalidationObserver(InvalidationObserver observer)
+    {
+        m_invalidationObserver = std::move(observer);
+    }
 
     void SyncSceneWorldMatrices(Scene *scene);
 
@@ -374,6 +381,7 @@ class TransformECSStore
     std::vector<uint8_t> m_fcDirty;
     bool m_frameCacheActive = false;
     Scene *m_fcScene = nullptr; // scene pointer for EndFrameCache sync
+    InvalidationObserver m_invalidationObserver;
 };
 
 } // namespace infernux

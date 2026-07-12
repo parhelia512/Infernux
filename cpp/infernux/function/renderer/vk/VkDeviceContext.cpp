@@ -149,7 +149,8 @@ VkDeviceContext::VkDeviceContext(VkDeviceContext &&other) noexcept
       m_transferQueue(other.m_transferQueue), m_hasDedicatedTransferQueue(other.m_hasDedicatedTransferQueue),
       m_queueIndices(other.m_queueIndices), m_deviceProperties(other.m_deviceProperties),
       m_deviceFeatures(other.m_deviceFeatures), m_descriptorIndexingEnabled(other.m_descriptorIndexingEnabled),
-      m_timelineSemaphoreEnabled(other.m_timelineSemaphoreEnabled), m_validationEnabled(other.m_validationEnabled)
+      m_timelineSemaphoreEnabled(other.m_timelineSemaphoreEnabled), m_validationEnabled(other.m_validationEnabled),
+      m_shuttingDown(other.m_shuttingDown), m_waitIdleCount(other.m_waitIdleCount)
 {
     other.m_instance = VK_NULL_HANDLE;
     other.m_debugMessenger = VK_NULL_HANDLE;
@@ -163,6 +164,8 @@ VkDeviceContext::VkDeviceContext(VkDeviceContext &&other) noexcept
     other.m_hasDedicatedTransferQueue = false;
     other.m_descriptorIndexingEnabled = false;
     other.m_timelineSemaphoreEnabled = false;
+    other.m_shuttingDown = false;
+    other.m_waitIdleCount = 0;
 }
 
 VkDeviceContext &VkDeviceContext::operator=(VkDeviceContext &&other) noexcept
@@ -186,6 +189,8 @@ VkDeviceContext &VkDeviceContext::operator=(VkDeviceContext &&other) noexcept
         m_descriptorIndexingEnabled = other.m_descriptorIndexingEnabled;
         m_timelineSemaphoreEnabled = other.m_timelineSemaphoreEnabled;
         m_validationEnabled = other.m_validationEnabled;
+        m_shuttingDown = other.m_shuttingDown;
+        m_waitIdleCount = other.m_waitIdleCount;
 
         other.m_instance = VK_NULL_HANDLE;
         other.m_debugMessenger = VK_NULL_HANDLE;
@@ -199,6 +204,8 @@ VkDeviceContext &VkDeviceContext::operator=(VkDeviceContext &&other) noexcept
         other.m_hasDedicatedTransferQueue = false;
         other.m_descriptorIndexingEnabled = false;
         other.m_timelineSemaphoreEnabled = false;
+        other.m_shuttingDown = false;
+        other.m_waitIdleCount = 0;
     }
     return *this;
 }
@@ -323,6 +330,7 @@ bool VkDeviceContext::InitializeDevice(VkSurfaceKHR surface, const DeviceConfig 
 void VkDeviceContext::WaitIdle() const
 {
     if (m_device != VK_NULL_HANDLE && !m_shuttingDown) {
+        ++m_waitIdleCount;
         vkDeviceWaitIdle(m_device);
     }
 }

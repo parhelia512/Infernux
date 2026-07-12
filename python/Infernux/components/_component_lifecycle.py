@@ -145,8 +145,8 @@ class ComponentLifecycleMixin:
         self._safe_lifecycle_call("reset")
 
     def _call_on_after_deserialize(self):
-        """Internal: Trigger on_after_deserialize lifecycle."""
-        self._safe_lifecycle_call("on_after_deserialize")
+        """Trigger the transactional post-deserialize hook and propagate failure."""
+        self.on_after_deserialize()
 
     def _call_on_before_serialize(self):
         """Internal: Trigger on_before_serialize lifecycle."""

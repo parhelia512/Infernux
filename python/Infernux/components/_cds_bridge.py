@@ -12,6 +12,7 @@ GAME_OBJECT, MATERIAL, …) remain in the Python-side dict.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -74,8 +75,27 @@ def cds_type_code(field_type) -> int:
 
 # ── Per-class registry ──────────────────────────────────────────────────
 
-# class qualname → (cds_class_id, {field_name: (cds_field_id, cds_type_code)})
+# stable component type GUID + layout revision -> CDS field registration
 _class_registry: Dict[str, tuple] = {}
+
+
+def _class_key(cls) -> str:
+    fields = getattr(cls, "_serialized_fields_", {})
+    layout = []
+    for name, metadata in sorted(fields.items()):
+        field_type = getattr(getattr(metadata, "field_type", None), "name", "")
+        element_type = getattr(getattr(metadata, "element_type", None), "name", "")
+        enum_type = getattr(metadata, "enum_type", None)
+        serializable_type = getattr(metadata, "serializable_class", None)
+        layout.append((
+            name,
+            field_type,
+            element_type,
+            f"{getattr(enum_type, '__module__', '')}:{getattr(enum_type, '__qualname__', '')}",
+            f"{getattr(serializable_type, '__module__', '')}:{getattr(serializable_type, '__qualname__', '')}",
+        ))
+    revision = hashlib.sha256(repr(layout).encode("utf-8")).hexdigest()[:16]
+    return f"{cls._get_type_guid()}@{revision}"
 
 
 def register_class(cls) -> Optional[int]:
@@ -85,7 +105,7 @@ def register_class(cls) -> Optional[int]:
     Only registers if the class has at least one CDS-backed numeric field.
     Returns the class_id or None if no numeric fields.
     """
-    key = cls.__qualname__
+    key = _class_key(cls)
     if key in _class_registry:
         return _class_registry[key][0]
 
@@ -124,14 +144,14 @@ def register_class(cls) -> Optional[int]:
 
 def get_class_info(cls):
     """Return (class_id, field_map) or None."""
-    return _class_registry.get(cls.__qualname__)
+    return _class_registry.get(_class_key(cls))
 
 
 # ── Slot management ─────────────────────────────────────────────────────
 
-def allocate_slot(cls) -> Optional[int]:
+def allocate_slot(cls) -> Optional[tuple[int, int]]:
     """Allocate a CDS slot for a new component instance. Returns slot or None."""
-    info = _class_registry.get(cls.__qualname__)
+    info = _class_registry.get(_class_key(cls))
     if info is None:
         return None
     lib = _get_lib()
@@ -140,15 +160,28 @@ def allocate_slot(cls) -> Optional[int]:
 
 def get_class_id(cls) -> Optional[int]:
     """Return the CDS class_id for *cls*, or None if not registered."""
-    info = _class_registry.get(cls.__qualname__)
+    info = _class_registry.get(_class_key(cls))
     if info is None:
         return None
     return info[0]
 
 
-def release_slot(cls, slot: int) -> None:
+def reserve_class(cls, capacity: int) -> None:
+    """Reserve numeric-field storage for at least *capacity* live instances."""
+    if type(capacity) is not int or capacity < 0:
+        raise ValueError("CDS reserve capacity must be a non-negative integer")
+    info = _class_registry.get(_class_key(cls))
+    if info is None:
+        register_class(cls)
+        info = _class_registry.get(_class_key(cls))
+    if info is None:
+        raise TypeError(f"{cls.__qualname__} has no CDS-backed numeric fields")
+    _get_lib()._cds_reserve(info[0], capacity)
+
+
+def release_slot(cls, slot: tuple[int, int]) -> None:
     """Release a CDS slot."""
-    info = _class_registry.get(cls.__qualname__)
+    info = _class_registry.get(_class_key(cls))
     if info is None:
         return
     lib = _get_lib()
@@ -157,7 +190,7 @@ def release_slot(cls, slot: int) -> None:
 
 # ── Single-element access (called from SerializedFieldDescriptor) ───────
 
-def cds_get(class_id: int, field_id: int, type_code: int, slot: int) -> Any:
+def cds_get(class_id: int, field_id: int, type_code: int, slot: tuple[int, int]) -> Any:
     """Read one value from the C++ store."""
     lib = _get_lib()
     raw = lib._cds_get(class_id, field_id, slot, type_code)
@@ -171,7 +204,7 @@ def cds_get(class_id: int, field_id: int, type_code: int, slot: int) -> Any:
     return raw
 
 
-def cds_set(class_id: int, field_id: int, type_code: int, slot: int, value: Any) -> None:
+def cds_set(class_id: int, field_id: int, type_code: int, slot: tuple[int, int], value: Any) -> None:
     """Write one value to the C++ store."""
     lib = _get_lib()
     lib._cds_set(class_id, field_id, slot, type_code, value)

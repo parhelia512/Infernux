@@ -15,6 +15,7 @@
 #include "gui/InxGUIContext.h"
 #include "gui/InxScreenUIRenderer.h"
 #include "vk/RenderGraph.h"
+#include "vk/VmaContext.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <chrono>
@@ -36,6 +37,7 @@
 #include <iostream>
 #include <platform/window/InxView.h>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_set>
 
 namespace infernux
@@ -80,6 +82,8 @@ InxRenderer::~InxRenderer()
     m_editorTools.reset();
     m_componentGizmos.reset();
 
+    if (m_vkCore)
+        m_vkCore->ReleaseGpuPreviews();
     m_gui.reset();
 
     // 3. Now safe to destroy the Vulkan device itself.
@@ -510,6 +514,8 @@ void InxRenderer::DrawFrame()
     // Update scene system
     auto _sceneUpdateStart = std::chrono::high_resolution_clock::now();
     auto _scenePhaseT0 = std::chrono::high_resolution_clock::now();
+    if (m_preSceneUpdateCallback)
+        m_preSceneUpdateCallback(m_deltaTime);
     TransformECSStore::Instance().BeginFrameCache(SceneManager::Instance().GetActiveScene());
 #if INFERNUX_FRAME_PROFILE
     m_frameDetailTiming.frameCacheBeginMs =
@@ -735,6 +741,11 @@ void InxRenderer::DrawFrame()
 #endif
 
     SceneManager::Instance().EndFrame();
+
+    if (++m_gpuResidencyCheckFrames == 60) {
+        m_gpuResidencyCheckFrames = 0;
+        (void)TrimGpuResidencyBudget();
+    }
 
     // Compute game-only frame cost: sum of game phases, excluding editor UI.
     m_gameOnlyFrameMs = m_sceneUpdateMs + m_prepareFrameMs + m_lastGameRenderMs;
@@ -1167,6 +1178,306 @@ void InxRenderer::WaitForGpuIdle()
     SDL_PumpEvents();
 }
 
+size_t InxRenderer::GetPendingMeshUploadCount() const
+{
+    return m_vkCore ? m_vkCore->GetPendingMeshUploadCount() : 0;
+}
+
+uint64_t InxRenderer::GetSubmittedMeshUploadCount() const
+{
+    return m_vkCore ? m_vkCore->GetSubmittedMeshUploadCount() : 0;
+}
+
+uint64_t InxRenderer::GetCompletedMeshUploadCount() const
+{
+    return m_vkCore ? m_vkCore->GetCompletedMeshUploadCount() : 0;
+}
+
+uint64_t InxRenderer::GetAsyncMeshUploadCount() const
+{
+    return m_vkCore ? m_vkCore->GetAsyncMeshUploadCount() : 0;
+}
+
+size_t InxRenderer::GetPendingTextureCpuLoadCount() const
+{
+    return m_vkCore ? m_vkCore->GetPendingTextureCpuLoadCount() : 0;
+}
+
+size_t InxRenderer::GetPendingTextureUploadCount() const
+{
+    return m_vkCore ? m_vkCore->GetPendingTextureUploadCount() : 0;
+}
+
+uint64_t InxRenderer::GetSubmittedTextureUploadCount() const
+{
+    return m_vkCore ? m_vkCore->GetSubmittedTextureUploadCount() : 0;
+}
+
+uint64_t InxRenderer::GetCompletedTextureUploadCount() const
+{
+    return m_vkCore ? m_vkCore->GetCompletedTextureUploadCount() : 0;
+}
+
+uint64_t InxRenderer::GetAsyncTextureUploadCount() const
+{
+    return m_vkCore ? m_vkCore->GetAsyncTextureUploadCount() : 0;
+}
+
+uint64_t InxRenderer::GetStagingPoolBytes() const
+{
+    return m_vkCore ? m_vkCore->GetStagingPoolBytes() : 0;
+}
+
+size_t InxRenderer::GetStagingPoolBufferCount() const
+{
+    return m_vkCore ? m_vkCore->GetStagingPoolBufferCount() : 0;
+}
+
+uint64_t InxRenderer::GetStagingAllocationCount() const
+{
+    return m_vkCore ? m_vkCore->GetStagingAllocationCount() : 0;
+}
+
+uint64_t InxRenderer::GetStagingReuseCount() const
+{
+    return m_vkCore ? m_vkCore->GetStagingReuseCount() : 0;
+}
+
+uint64_t InxRenderer::GetStagingDiscardCount() const
+{
+    return m_vkCore ? m_vkCore->GetStagingDiscardCount() : 0;
+}
+
+uint64_t InxRenderer::GetTextureGpuResidentBytes() const
+{
+    return m_vkCore ? m_vkCore->GetTextureGpuResidentBytes() : 0;
+}
+
+uint64_t InxRenderer::GetTextureGpuBudgetBytes() const
+{
+    return m_vkCore ? m_vkCore->GetTextureGpuBudgetBytes() : 0;
+}
+
+size_t InxRenderer::GetTextureGpuCacheEntryCount() const
+{
+    return m_vkCore ? m_vkCore->GetTextureGpuCacheEntryCount() : 0;
+}
+
+size_t InxRenderer::GetRetiredTextureGpuLeaseCount() const
+{
+    return m_vkCore ? m_vkCore->GetRetiredTextureGpuLeaseCount() : 0;
+}
+
+uint64_t InxRenderer::GetTextureGpuEvictionCount() const
+{
+    return m_vkCore ? m_vkCore->GetTextureGpuEvictionCount() : 0;
+}
+
+void InxRenderer::SetTextureGpuBudgetBytes(uint64_t bytes)
+{
+    if (!m_vkCore)
+        throw std::logic_error("Cannot set the GPU texture budget before renderer initialization");
+    m_vkCore->SetTextureGpuBudgetBytes(bytes);
+}
+
+size_t InxRenderer::TrimTextureGpuBudget()
+{
+    if (!m_vkCore)
+        throw std::logic_error("Cannot trim the GPU texture budget before renderer initialization");
+    return m_vkCore->TrimTextureGpuBudget();
+}
+
+uint64_t InxRenderer::GetMeshGpuResidentBytes() const
+{
+    return m_vkCore ? m_vkCore->GetMeshGpuResidentBytes() : 0;
+}
+
+uint64_t InxRenderer::GetMeshGpuBudgetBytes() const
+{
+    return m_vkCore ? m_vkCore->GetMeshGpuBudgetBytes() : 0;
+}
+
+size_t InxRenderer::GetMeshGpuCacheEntryCount() const
+{
+    return m_vkCore ? m_vkCore->GetMeshGpuCacheEntryCount() : 0;
+}
+
+size_t InxRenderer::GetRetiredMeshGpuLeaseCount() const
+{
+    return m_vkCore ? m_vkCore->GetRetiredMeshGpuLeaseCount() : 0;
+}
+
+uint64_t InxRenderer::GetMeshGpuEvictionCount() const
+{
+    return m_vkCore ? m_vkCore->GetMeshGpuEvictionCount() : 0;
+}
+
+void InxRenderer::SetMeshGpuBudgetBytes(uint64_t bytes)
+{
+    if (!m_vkCore)
+        throw std::logic_error("Cannot set the GPU mesh budget before renderer initialization");
+    m_vkCore->SetMeshGpuBudgetBytes(bytes);
+}
+
+size_t InxRenderer::TrimMeshGpuBudget()
+{
+    if (!m_vkCore)
+        throw std::logic_error("Cannot trim the GPU mesh budget before renderer initialization");
+    return m_vkCore->TrimMeshGpuBudget();
+}
+
+uint64_t InxRenderer::GetGpuResidencyBudgetBytes() const
+{
+    if (m_gpuResidencyBudgetBytes != 0)
+        return m_gpuResidencyBudgetBytes;
+    if (!m_vkCore)
+        return 0;
+    const auto statistics = vk::QueryVmaRuntimeStatistics(m_vkCore->GetDeviceContext().GetVmaAllocator(),
+                                                          m_vkCore->GetDeviceContext().GetPhysicalDevice());
+    constexpr uint64_t AutoBudgetCap = 1536ULL * 1024ULL * 1024ULL;
+    const uint64_t deviceBudget = (statistics.deviceLocalBudgetBytes / 10ULL) * 7ULL;
+    return std::min(AutoBudgetCap, deviceBudget);
+}
+
+GpuResidencySnapshot InxRenderer::GetGpuResidencySnapshot() const
+{
+    GpuResidencySnapshot snapshot;
+    if (!m_vkCore)
+        return snapshot;
+
+    const auto statistics = vk::QueryVmaRuntimeStatistics(m_vkCore->GetDeviceContext().GetVmaAllocator(),
+                                                          m_vkCore->GetDeviceContext().GetPhysicalDevice());
+    constexpr uint64_t AutoBudgetCap = 1536ULL * 1024ULL * 1024ULL;
+    snapshot.budgetBytes = m_gpuResidencyBudgetBytes != 0
+                               ? m_gpuResidencyBudgetBytes
+                               : std::min(AutoBudgetCap, (statistics.deviceLocalBudgetBytes / 10ULL) * 7ULL);
+    snapshot.allocatorAllocationBytes = statistics.allocationBytes;
+    snapshot.allocatorBlockBytes = statistics.blockBytes;
+    snapshot.deviceLocalAllocationBytes = statistics.deviceLocalAllocationBytes;
+    snapshot.deviceLocalUsageBytes = statistics.deviceLocalUsageBytes;
+    snapshot.deviceLocalBudgetBytes = statistics.deviceLocalBudgetBytes;
+    snapshot.allocatorAllocationCount = statistics.allocationCount;
+    snapshot.meshBytes = m_vkCore->GetMeshGpuResidentBytes();
+    snapshot.textureBytes = m_vkCore->GetTextureGpuResidentBytes();
+    snapshot.imguiTextureBytes = m_gui ? m_gui->GetImGuiTextureResidentBytes() : 0;
+    snapshot.pendingImguiTextureBytes = m_gui ? m_gui->GetPendingImGuiTextureUploadBytes() : 0;
+    snapshot.stagingPoolBytes = m_vkCore->GetStagingPoolBytes();
+    snapshot.pendingReadbackBytes = m_vkCore->GetResourceManager().GetPendingImageReadbackBytes();
+    snapshot.pendingReadbackCount = m_vkCore->GetResourceManager().GetPendingImageReadbackCount();
+    snapshot.pendingGpuTransferCount = m_vkCore->GetResourceManager().GetPendingGpuTransferCount();
+    snapshot.uploadTimelineEnabled = m_vkCore->GetResourceManager().IsUploadTimelineEnabled();
+    snapshot.timelineUploadPublicationCount = m_vkCore->GetResourceManager().GetTimelineUploadPublicationCount();
+    snapshot.requiredUploadTimelineValue = m_vkCore->GetResourceManager().GetRequiredUploadTimelineValue();
+    snapshot.deviceWaitIdleCount = m_vkCore->GetDeviceContext().GetWaitIdleCount();
+    snapshot.shaderHotReloadRetirementCount = m_vkCore->GetShaderHotReloadRetirementCount();
+    snapshot.pendingAsyncGraphicsSubmissionCount =
+        m_vkCore->GetResourceManager().GetPendingAsyncGraphicsSubmissionCount();
+    snapshot.asyncGraphicsSubmissionCount = m_vkCore->GetResourceManager().GetAsyncGraphicsSubmissionCount();
+    snapshot.renderTargetBytes = (m_sceneRenderTarget ? m_sceneRenderTarget->GetResidentBytes() : 0) +
+                                 (m_gameRenderTarget ? m_gameRenderTarget->GetResidentBytes() : 0);
+    snapshot.renderGraphBytes = (m_sceneRenderGraph ? m_sceneRenderGraph->GetTransientResidentBytes() : 0) +
+                                (m_gameRenderGraph ? m_gameRenderGraph->GetTransientResidentBytes() : 0);
+    snapshot.transientPoolBytes = m_transientResourcePool ? m_transientResourcePool->GetResidentBytes() : 0;
+    const MaterialGpuResidencySnapshot materialResidency = m_vkCore->GetMaterialGpuResidency();
+    snapshot.materialUboBytes = materialResidency.uboBytes;
+    snapshot.materialRenderDataCount = materialResidency.renderDataCount;
+    snapshot.runtimeMaterialCount = materialResidency.runtimeMaterialCount;
+    snapshot.assetMaterialCount = materialResidency.assetMaterialCount;
+    snapshot.materialDescriptorSetCount = materialResidency.descriptorSetCount;
+    snapshot.retiredMaterialDescriptorSetCount = materialResidency.retiredDescriptorSetCount;
+    snapshot.materialDescriptorPoolCount = materialResidency.descriptorPoolCount;
+    snapshot.materialPipelineCount = materialResidency.pipelineCount;
+    snapshot.runtimeMeshEntryCount = m_vkCore->GetRuntimeMeshGpuEntryCount();
+    snapshot.runtimeMeshBytes = m_vkCore->GetRuntimeMeshGpuResidentBytes();
+    snapshot.scheduledReleaseBytes = m_vkCore->GetRetiredMeshGpuLeaseBytes() +
+                                     m_vkCore->GetRetiredTextureGpuLeaseBytes() +
+                                     (m_gui ? m_gui->GetScheduledTextureReleaseBytes() : 0);
+    snapshot.trackedBytes = snapshot.meshBytes + snapshot.textureBytes + snapshot.imguiTextureBytes +
+                            snapshot.pendingImguiTextureBytes + snapshot.stagingPoolBytes +
+                            snapshot.pendingReadbackBytes + snapshot.renderTargetBytes + snapshot.renderGraphBytes +
+                            snapshot.transientPoolBytes + snapshot.materialUboBytes;
+    snapshot.unclassifiedBytes = snapshot.allocatorAllocationBytes > snapshot.trackedBytes
+                                     ? snapshot.allocatorAllocationBytes - snapshot.trackedBytes
+                                     : 0;
+    snapshot.effectiveAllocationBytes = snapshot.deviceLocalAllocationBytes > snapshot.scheduledReleaseBytes
+                                            ? snapshot.deviceLocalAllocationBytes - snapshot.scheduledReleaseBytes
+                                            : 0;
+    snapshot.overBudgetBytes = snapshot.effectiveAllocationBytes > snapshot.budgetBytes
+                                   ? snapshot.effectiveAllocationBytes - snapshot.budgetBytes
+                                   : 0;
+    return snapshot;
+}
+
+void InxRenderer::SetGpuResidencyBudgetBytes(uint64_t bytes)
+{
+    if (bytes == 0)
+        throw std::invalid_argument("GPU residency budget must be greater than zero");
+    m_gpuResidencyBudgetBytes = bytes;
+    (void)TrimGpuResidencyBudget();
+}
+
+size_t InxRenderer::TrimGpuResidencyBudget()
+{
+    if (!m_vkCore)
+        throw std::logic_error("Cannot trim GPU residency before renderer initialization");
+
+    auto snapshot = GetGpuResidencySnapshot();
+    uint64_t projectedBytes = snapshot.effectiveAllocationBytes;
+    size_t evicted = 0;
+    while (projectedBytes > snapshot.budgetBytes) {
+        enum class Domain
+        {
+            None,
+            Mesh,
+            Texture,
+            ImGui
+        };
+        Domain domain = Domain::None;
+        GpuEvictionCandidate selected;
+        const auto consider = [&](Domain candidateDomain, GpuEvictionCandidate candidate) {
+            if (!candidate.valid)
+                return;
+            if (!selected.valid || candidate.lastUsedFrame < selected.lastUsedFrame ||
+                (candidate.lastUsedFrame == selected.lastUsedFrame &&
+                 candidate.residentBytes > selected.residentBytes)) {
+                selected = candidate;
+                domain = candidateDomain;
+            }
+        };
+        consider(Domain::Mesh, m_vkCore->PeekOldestMeshGpuEvictable());
+        consider(Domain::Texture, m_vkCore->PeekOldestTextureGpuEvictable());
+        if (m_gui)
+            consider(Domain::ImGui, m_gui->PeekOldestImGuiTextureEvictable());
+        if (!selected.valid)
+            break;
+
+        uint64_t releasedBytes = 0;
+        switch (domain) {
+        case Domain::Mesh:
+            releasedBytes = m_vkCore->EvictOldestMeshGpu();
+            break;
+        case Domain::Texture:
+            releasedBytes = m_vkCore->EvictOldestTextureGpu();
+            break;
+        case Domain::ImGui:
+            releasedBytes = m_gui->EvictOldestImGuiTexture();
+            break;
+        case Domain::None:
+            break;
+        }
+        if (releasedBytes == 0)
+            break;
+        projectedBytes -= std::min(projectedBytes, releasedBytes);
+        ++evicted;
+    }
+    return evicted;
+}
+
+std::vector<GpuAssetResidencyRecord> InxRenderer::GetAssetGpuResidency() const
+{
+    return m_vkCore ? m_vkCore->GetAssetGpuResidency() : std::vector<GpuAssetResidencyRecord>{};
+}
+
 void InxRenderer::LoadShader(const char *name, const std::vector<char> &code, const char *type)
 {
     m_vkCore->LoadShader(name, code, type);
@@ -1308,15 +1619,12 @@ void InxRenderer::QueueDockTabSelection(const char *windowId)
     }
 }
 
-uint64_t InxRenderer::UploadTextureForImGui(const std::string &name, const unsigned char *pixels, int width, int height,
-                                            VkFilter filter)
+uint64_t InxRenderer::SubmitTextureForImGui(const std::string &name, const unsigned char *pixels, size_t byteCount,
+                                            int width, int height, VkFilter filter, bool pinned)
 {
-    if (m_gui) {
-        return m_gui->UploadTextureForImGui(name, pixels, width, height, filter);
-    } else {
-        INXLOG_ERROR("InxGUI is not initialized.");
-        return 0;
-    }
+    if (!m_gui)
+        throw std::logic_error("ImGui texture submission requires an initialized GUI");
+    return m_gui->SubmitTextureForImGui(name, pixels, byteCount, width, height, filter, pinned);
 }
 
 void InxRenderer::RemoveImGuiTexture(const std::string &name)
@@ -1342,6 +1650,75 @@ uint64_t InxRenderer::GetImGuiTextureId(const std::string &name) const
         return m_gui->GetImGuiTextureId(name);
     }
     return 0;
+}
+
+uint64_t InxRenderer::GetImGuiTextureVersion(const std::string &name) const
+{
+    return m_gui ? m_gui->GetImGuiTextureVersion(name) : 0;
+}
+
+uint64_t InxRenderer::GetFailedImGuiTextureVersion(const std::string &name) const
+{
+    return m_gui ? m_gui->GetFailedImGuiTextureVersion(name) : 0;
+}
+
+void InxRenderer::SetImGuiTextureBudgetBytes(uint64_t bytes)
+{
+    if (!m_gui)
+        throw std::logic_error("ImGui texture budgeting requires an initialized GUI");
+    m_gui->SetImGuiTextureBudgetBytes(bytes);
+}
+
+size_t InxRenderer::TrimImGuiTextureBudget()
+{
+    if (!m_gui)
+        throw std::logic_error("ImGui texture budgeting requires an initialized GUI");
+    return m_gui->TrimImGuiTextureBudget();
+}
+
+uint64_t InxRenderer::GetImGuiTextureBudgetBytes() const
+{
+    return m_gui ? m_gui->GetImGuiTextureBudgetBytes() : 0;
+}
+
+uint64_t InxRenderer::GetImGuiTextureResidentBytes() const
+{
+    return m_gui ? m_gui->GetImGuiTextureResidentBytes() : 0;
+}
+
+size_t InxRenderer::GetImGuiTextureEntryCount() const
+{
+    return m_gui ? m_gui->GetImGuiTextureEntryCount() : 0;
+}
+
+size_t InxRenderer::GetPendingImGuiTextureUploadCount() const
+{
+    return m_gui ? m_gui->GetPendingImGuiTextureUploadCount() : 0;
+}
+
+uint64_t InxRenderer::GetPendingImGuiTextureUploadBytes() const
+{
+    return m_gui ? m_gui->GetPendingImGuiTextureUploadBytes() : 0;
+}
+
+uint64_t InxRenderer::GetSubmittedImGuiTextureUploadCount() const
+{
+    return m_gui ? m_gui->GetSubmittedImGuiTextureUploadCount() : 0;
+}
+
+uint64_t InxRenderer::GetCompletedImGuiTextureUploadCount() const
+{
+    return m_gui ? m_gui->GetCompletedImGuiTextureUploadCount() : 0;
+}
+
+uint64_t InxRenderer::GetAsyncImGuiTextureUploadCount() const
+{
+    return m_gui ? m_gui->GetAsyncImGuiTextureUploadCount() : 0;
+}
+
+uint64_t InxRenderer::GetImGuiTextureEvictionCount() const
+{
+    return m_gui ? m_gui->GetImGuiTextureEvictionCount() : 0;
 }
 
 ResourcePreviewManager *InxRenderer::GetResourcePreviewManager()
@@ -1506,6 +1883,19 @@ uint64_t InxRenderer::GetSceneTextureId() const
     return 0;
 }
 
+std::shared_ptr<vk::ImageReadbackTicket> InxRenderer::RequestRenderTargetReadback(bool gameView)
+{
+    SceneRenderTarget *target = gameView ? m_gameRenderTarget.get() : m_sceneRenderTarget.get();
+    if (!m_vkCore || !target || !target->IsReady())
+        throw std::logic_error(gameView ? "Game render target is not initialized"
+                                        : "Scene render target is not initialized");
+
+    return m_vkCore->GetResourceManager().BeginImageReadback(
+        target->GetColorImage(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT, target->GetWidth(), target->GetHeight(),
+        target->GetColorFormat());
+}
+
 void InxRenderer::ResizeSceneRenderTarget(uint32_t width, uint32_t height)
 {
     if (m_sceneRenderTarget && width > 0 && height > 0) {
@@ -1589,31 +1979,37 @@ bool InxRenderer::RefreshMaterialPipeline(std::shared_ptr<InxMaterial> material)
     return m_vkCore->RefreshMaterialPipeline(material, vertName, fragName);
 }
 
-bool InxRenderer::RenderMaterialPreviewGPU(std::shared_ptr<InxMaterial> material, int size,
-                                           std::vector<unsigned char> &outPixels)
+std::shared_ptr<vk::ImageReadbackTicket>
+InxRenderer::BeginMaterialPreviewGPU(const std::shared_ptr<InxMaterial> &material, int size)
 {
     if (!m_vkCore || !material)
-        return false;
-    return m_vkCore->RenderMaterialPreviewGPU(material, size, outPixels);
+        return nullptr;
+    return m_vkCore->BeginMaterialPreviewGPU(material, size);
 }
 
-bool InxRenderer::RenderMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials,
-                                       int size, std::vector<unsigned char> &outPixels)
+bool InxRenderer::TryCompleteMaterialPreviewGPU(const std::shared_ptr<vk::ImageReadbackTicket> &ticket, int outputSize,
+                                                std::vector<unsigned char> &outPixels)
 {
     if (!m_vkCore)
         return false;
-    return m_vkCore->RenderMeshPreviewGPU(mesh, materials, size, outPixels);
+    return m_vkCore->TryCompleteMaterialPreviewGPU(ticket, outputSize, outPixels);
 }
 
-bool InxRenderer::RenderMeshPreviewGPUCamera(const InxMesh &mesh,
-                                             const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
-                                             const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
-                                             std::vector<unsigned char> &outPixels, bool cloneMaterials)
+std::shared_ptr<vk::ImageReadbackTicket>
+InxRenderer::BeginMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials,
+                                 int size)
+{
+    if (!m_vkCore)
+        return nullptr;
+    return m_vkCore->BeginMeshPreviewGPU(mesh, materials, size);
+}
+
+bool InxRenderer::TryCompleteMeshPreviewGPU(const std::shared_ptr<vk::ImageReadbackTicket> &ticket, int outputSize,
+                                            std::vector<unsigned char> &outPixels)
 {
     if (!m_vkCore)
         return false;
-    return m_vkCore->RenderMeshPreviewGPUCamera(mesh, materials, size, view, proj, cameraPos, outPixels,
-                                                cloneMaterials);
+    return m_vkCore->TryCompleteMeshPreviewGPU(ticket, outputSize, outPixels);
 }
 
 uint64_t InxRenderer::RenderMeshPreviewGPUImGuiCamera(const InxMesh &mesh,

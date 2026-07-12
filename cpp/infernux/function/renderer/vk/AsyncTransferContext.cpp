@@ -42,7 +42,7 @@ AsyncTransferContext::~AsyncTransferContext()
 }
 
 bool AsyncTransferContext::Initialize(VkDevice device, uint32_t transferQueueFamily, VkQueue transferQueue,
-                                      bool hasDedicatedTransferQueue)
+                                      bool hasDedicatedTransferQueue, bool enableTimelineSemaphore)
 {
     if (device == VK_NULL_HANDLE || transferQueue == VK_NULL_HANDLE) {
         INXLOG_ERROR("AsyncTransferContext::Initialize: null device or queue");
@@ -69,6 +69,18 @@ bool AsyncTransferContext::Initialize(VkDevice device, uint32_t transferQueueFam
         INXLOG_ERROR("AsyncTransferContext::Initialize: vkCreateCommandPool failed (family ", transferQueueFamily, ")");
         m_device = VK_NULL_HANDLE;
         return false;
+    }
+
+    if (enableTimelineSemaphore) {
+        VkSemaphoreTypeCreateInfo timelineInfo{};
+        timelineInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+        timelineInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+        timelineInfo.initialValue = 0;
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        semaphoreInfo.pNext = &timelineInfo;
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &m_timelineSemaphore) != VK_SUCCESS)
+            INXLOG_WARN("AsyncTransferContext: timeline semaphore creation failed; fence publication fallback active");
     }
 
     INXLOG_INFO("AsyncTransferContext initialized on queue family ", transferQueueFamily,
@@ -112,11 +124,16 @@ void AsyncTransferContext::Destroy() noexcept
         vkDestroyCommandPool(m_device, m_pool, nullptr);
         m_pool = VK_NULL_HANDLE;
     }
+    if (m_timelineSemaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(m_device, m_timelineSemaphore, nullptr);
+        m_timelineSemaphore = VK_NULL_HANDLE;
+    }
 
     m_device = VK_NULL_HANDLE;
     m_queue = VK_NULL_HANDLE;
     m_queueFamily = 0;
     m_hasDedicatedQueue = false;
+    m_nextTimelineValue.store(1, std::memory_order_relaxed);
 }
 
 VkCommandBuffer AsyncTransferContext::AcquireCommandBufferLocked()
@@ -231,9 +248,9 @@ void AsyncTransferContext::EndSync(VkCommandBuffer cmd)
     m_freeCmdBuffers.push_back(cmd);
 }
 
-AsyncUploadHandle AsyncTransferContext::EndAsync(VkCommandBuffer cmd)
+AsyncSubmissionHandle AsyncTransferContext::EndAsync(VkCommandBuffer cmd)
 {
-    AsyncUploadHandle handle{};
+    AsyncSubmissionHandle handle{};
     if (cmd == VK_NULL_HANDLE) {
         return handle;
     }
@@ -254,6 +271,18 @@ AsyncUploadHandle AsyncTransferContext::EndAsync(VkCommandBuffer cmd)
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &cmd;
 
+    VkTimelineSemaphoreSubmitInfo timelineSubmit{};
+    uint64_t timelineValue = 0;
+    if (m_timelineSemaphore != VK_NULL_HANDLE) {
+        timelineValue = m_nextTimelineValue.fetch_add(1, std::memory_order_relaxed);
+        timelineSubmit.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+        timelineSubmit.signalSemaphoreValueCount = 1;
+        timelineSubmit.pSignalSemaphoreValues = &timelineValue;
+        submit.pNext = &timelineSubmit;
+        submit.signalSemaphoreCount = 1;
+        submit.pSignalSemaphores = &m_timelineSemaphore;
+    }
+
     if (vkQueueSubmit(m_queue, 1, &submit, fence) != VK_SUCCESS) {
         INXLOG_ERROR("AsyncTransferContext::EndAsync: vkQueueSubmit failed");
         std::lock_guard<std::mutex> guard(m_mutex);
@@ -263,6 +292,7 @@ AsyncUploadHandle AsyncTransferContext::EndAsync(VkCommandBuffer cmd)
     }
 
     handle.id = m_nextId.fetch_add(1, std::memory_order_relaxed);
+    handle.timelineValue = timelineValue;
 
     std::lock_guard<std::mutex> guard(m_mutex);
     m_inFlight.push_back({handle.id, fence, cmd});
@@ -297,7 +327,7 @@ void AsyncTransferContext::RetireLocked(uint64_t id, VkFence &fence, VkCommandBu
     }
 }
 
-bool AsyncTransferContext::IsComplete(AsyncUploadHandle handle)
+bool AsyncTransferContext::IsComplete(AsyncSubmissionHandle handle)
 {
     if (!handle.IsValid() || m_device == VK_NULL_HANDLE) {
         return true;
@@ -326,7 +356,7 @@ bool AsyncTransferContext::IsComplete(AsyncUploadHandle handle)
     return true;
 }
 
-void AsyncTransferContext::Wait(AsyncUploadHandle handle)
+void AsyncTransferContext::Wait(AsyncSubmissionHandle handle)
 {
     if (!handle.IsValid() || m_device == VK_NULL_HANDLE) {
         return;

@@ -22,8 +22,6 @@ class CollisionDetectionMode(IntEnum):
     """Collision detection algorithm used by the rigidbody."""
     Discrete = 0
     Continuous = 1
-    ContinuousDynamic = 2
-    ContinuousSpeculative = 3
 
 class RigidbodyInterpolation(IntEnum):
     """Interpolation mode for rigidbody movement smoothing."""
@@ -200,10 +198,14 @@ class Rigidbody(BuiltinComponent):
     def position(self) -> Any:
         """The position of the rigidbody in world space."""
         ...
+    @position.setter
+    def position(self, value: Any) -> None: ...
     @property
     def rotation(self) -> Tuple[float, float, float, float]:
         """The rotation of the rigidbody as a quaternion (x, y, z, w)."""
         ...
+    @rotation.setter
+    def rotation(self, value: Any) -> None: ...
 
     # ---- Force / Torque API ----
 

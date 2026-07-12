@@ -13,7 +13,7 @@ Usage::
         ("重建场景...",  0.6, rebuild_fn),
     ], on_done=lambda ok: EngineStatus.flash("Done", 1.0))
 
-The runner is ticked once per frame by ``FrameSchedulerPanel``.
+The runner is ticked once per frame by the engine's pre-GUI callback.
 """
 
 from __future__ import annotations

@@ -707,23 +707,24 @@ def resolve_asset_path(project_path: str, path: str | None, *, default_name: str
 
 
 def notify_asset_changed(path: str, action: str = "modified") -> None:
-    """Best-effort AssetDatabase notification for external MCP file writes."""
+    """Commit one external file mutation through the canonical asset pipeline."""
     adb = get_asset_database()
-    if not adb:
+    if adb is None:
+        raise RuntimeError("AssetDatabase is not available")
+    from Infernux.core.assets import AssetManager
+
+    if action == "deleted":
+        if not AssetManager.delete_asset(path, database=adb):
+            raise RuntimeError(f"AssetDatabase failed to delete '{path}'")
         return
-    method_names = {
-        "created": ("on_asset_created", "import_asset"),
-        "modified": ("on_asset_modified", "import_asset"),
-        "deleted": ("on_asset_deleted",),
-    }.get(action, ("on_asset_modified",))
-    for method_name in method_names:
-        method = getattr(adb, method_name, None)
-        if callable(method):
-            try:
-                method(path)
-                return
-            except Exception:
-                pass
+    if action not in {"created", "modified"}:
+        raise ValueError(f"unknown asset change action: {action!r}")
+
+    if adb.contains_path(path):
+        if not AssetManager.reimport_asset(path, database=adb):
+            raise RuntimeError(f"AssetDatabase failed to reimport '{path}'")
+    else:
+        AssetManager.import_asset(path, database=adb)
 
 
 def track_project_path_before_change(project_path: str, path: str, operation: str = "modify") -> None:

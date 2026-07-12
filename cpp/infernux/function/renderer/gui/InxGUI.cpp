@@ -3,6 +3,8 @@
 #include <function/editor/EditorTheme.h>
 #include <function/editor/EditorThemeRegistry.h>
 #include <function/renderer/vk/VkRenderUtils.h>
+#include <function/renderer/vk/VkResourceManager.h>
+#include <function/resources/InxTexture/TextureDecoder.h>
 
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -13,8 +15,10 @@
 #include <core/log/InxLog.h>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <limits>
 #include <memory>
 #include <platform/input/InputManager.h>
+#include <stdexcept>
 
 namespace infernux
 {
@@ -232,74 +236,131 @@ void InxGUI::SetGUIFont(const char *fontPath, float fontSize)
     // No need to manually call ImGui_ImplVulkan_CreateFontsTexture()
 }
 
+void InxGUI::ReleaseTextureResource(ImGuiTextureResource &resource)
+{
+    if (resource.descriptorSet != VK_NULL_HANDLE)
+        ImGui_ImplVulkan_RemoveTexture(resource.descriptorSet);
+    if (resource.residentBytes > m_textureResidentBytes)
+        throw std::logic_error("ImGui texture residency byte counter underflow");
+    m_textureResidentBytes -= resource.residentBytes;
+    resource = {};
+}
+
+void InxGUI::DeferTextureRelease(ImGuiTextureResource resource)
+{
+    constexpr uint64_t TextureReleaseGraceFrames = 8;
+    if (!resource.texture || resource.descriptorSet == VK_NULL_HANDLE)
+        throw std::logic_error("cannot defer an invalid ImGui texture resource");
+    m_deferredTextureReleases.push_back(
+        DeferredTextureRelease{std::move(resource), m_guiFrameCounter + TextureReleaseGraceFrames});
+}
+
+void InxGUI::PumpTextureUploads()
+{
+    auto &resourceManager = m_vkCore_ptr->GetResourceManager();
+    size_t writeIndex = 0;
+    for (size_t index = 0; index < m_pendingTextureUploads.size(); ++index) {
+        auto &pending = m_pendingTextureUploads[index];
+        bool complete = false;
+        bool failed = false;
+        try {
+            complete = resourceManager.TryPublishTextureUpload(pending.ticket);
+        } catch (const std::exception &error) {
+            INXLOG_ERROR("ImGui texture upload failed for '", pending.name, "': ", error.what());
+            complete = true;
+            failed = true;
+        }
+        if (!complete) {
+            if (writeIndex != index)
+                m_pendingTextureUploads[writeIndex] = std::move(pending);
+            ++writeIndex;
+            continue;
+        }
+
+        ++m_completedTextureUploadCount;
+        const uint64_t pendingBytes = pending.ticket->GetResidentBytes();
+        if (pendingBytes > m_pendingTextureUploadBytes)
+            throw std::logic_error("pending ImGui texture byte counter underflow");
+        m_pendingTextureUploadBytes -= pendingBytes;
+        if (failed || !pending.ticket->IsPublished()) {
+            m_failedTextureUploadVersions[pending.name] =
+                (std::max)(m_failedTextureUploadVersions[pending.name], pending.generation);
+            continue;
+        }
+        const auto generation = m_textureUploadGenerations.find(pending.name);
+        if (generation == m_textureUploadGenerations.end() || generation->second != pending.generation)
+            continue;
+
+        auto texture = pending.ticket->GetTexture();
+        if (!texture) {
+            m_failedTextureUploadVersions[pending.name] = pending.generation;
+            continue;
+        }
+        const VkDescriptorSet descriptor = ImGui_ImplVulkan_AddTexture(texture->GetSampler(), texture->GetView(),
+                                                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (descriptor == VK_NULL_HANDLE) {
+            INXLOG_ERROR("Failed to allocate ImGui texture descriptor for '", pending.name, "'");
+            m_failedTextureUploadVersions[pending.name] = pending.generation;
+            continue;
+        }
+
+        auto existing = m_textures_umap.find(pending.name);
+        if (existing != m_textures_umap.end()) {
+            DeferTextureRelease(std::move(existing->second));
+            m_textures_umap.erase(existing);
+        }
+
+        const uint64_t residentBytes = texture->GetResidentBytes();
+        if (residentBytes > std::numeric_limits<uint64_t>::max() - m_textureResidentBytes) {
+            ImGui_ImplVulkan_RemoveTexture(descriptor);
+            throw std::overflow_error("ImGui texture residency byte counter overflow");
+        }
+        m_textureResidentBytes += residentBytes;
+        m_textures_umap.emplace(pending.name,
+                                ImGuiTextureResource{std::move(texture), descriptor, residentBytes, m_guiFrameCounter,
+                                                     pending.generation, pending.pinned});
+    }
+    m_pendingTextureUploads.resize(writeIndex);
+}
+
 void InxGUI::BuildFrame()
 {
     static auto ctx = std::make_unique<InxGUIContext>();
     ++m_guiFrameCounter;
 
-    constexpr uint64_t kTextureReleaseGraceFrames = 8;
-
-    auto releaseTextureResourceNow = [&](const ImGuiTextureResource &tex) {
-        VkDevice device = m_vkCore_ptr->GetDevice();
-        if (tex.descriptorSet != VK_NULL_HANDLE)
-            ImGui_ImplVulkan_RemoveTexture(tex.descriptorSet);
-        if (tex.sampler != VK_NULL_HANDLE)
-            vkDestroySampler(device, tex.sampler, nullptr);
-        if (tex.imageView != VK_NULL_HANDLE)
-            vkDestroyImageView(device, tex.imageView, nullptr);
-        if (tex.image != VK_NULL_HANDLE) {
-            VmaAllocator allocator = m_vkCore_ptr->GetDeviceContext().GetVmaAllocator();
-            vmaDestroyImage(allocator, tex.image, tex.allocation);
-        }
-    };
+    PumpTextureUploads();
 
     // Queue removals first, then release after a grace window.
     // Some panels may still emit one or two frames with stale cached TexID;
     // delaying descriptor destruction prevents invalid VkDescriptorSet binds.
-    if (!m_pendingTextureRemovals.empty() || !m_pendingTextureResourceReleases.empty()) {
+    if (!m_pendingTextureRemovals.empty()) {
         for (const auto &name : m_pendingTextureRemovals) {
             auto it = m_textures_umap.find(name);
             if (it == m_textures_umap.end())
                 continue;
 
-            m_deferredTextureReleases.push_back(
-                DeferredTextureRelease{it->second, m_guiFrameCounter + kTextureReleaseGraceFrames});
+            DeferTextureRelease(std::move(it->second));
             m_textures_umap.erase(it);
         }
-
-        for (auto &tex : m_pendingTextureResourceReleases) {
-            m_deferredTextureReleases.push_back(
-                DeferredTextureRelease{tex, m_guiFrameCounter + kTextureReleaseGraceFrames});
-        }
-
-        m_pendingTextureResourceReleases.clear();
         m_pendingTextureRemovals.clear();
     }
 
     if (!m_deferredTextureReleases.empty()) {
         std::vector<DeferredTextureRelease> stillDeferred;
-        std::vector<ImGuiTextureResource> readyToRelease;
         stillDeferred.reserve(m_deferredTextureReleases.size());
-        readyToRelease.reserve(m_deferredTextureReleases.size());
 
         for (auto &entry : m_deferredTextureReleases) {
             if (entry.releaseFrame > m_guiFrameCounter) {
-                stillDeferred.push_back(entry);
+                stillDeferred.push_back(std::move(entry));
                 continue;
             }
-            readyToRelease.push_back(entry.resource);
-        }
-
-        if (!readyToRelease.empty()) {
-            // Some panels cache TexID for longer than the grace window.
-            // Runtime destruction can still invalidate those stale IDs.
-            // Keep retired resources alive and release them in Shutdown().
-            m_retiredTextureResources.insert(m_retiredTextureResources.end(), readyToRelease.begin(),
-                                             readyToRelease.end());
+            ReleaseTextureResource(entry.resource);
         }
 
         m_deferredTextureReleases.swap(stillDeferred);
     }
+
+    (void)TrimImGuiTextureBudget();
 
     ImGui_ImplSDL3_NewFrame();
     ImGui_ImplVulkan_NewFrame();
@@ -494,61 +555,19 @@ void InxGUI::Shutdown()
     VkDevice device = m_vkCore_ptr->GetDevice();
     vkDeviceWaitIdle(device);
 
-    // Flush any pending replaced textures that have not yet reached BuildFrame cleanup.
-    for (auto &tex : m_pendingTextureResourceReleases) {
-        if (tex.descriptorSet != VK_NULL_HANDLE)
-            ImGui_ImplVulkan_RemoveTexture(tex.descriptorSet);
-        if (tex.sampler != VK_NULL_HANDLE)
-            vkDestroySampler(m_vkCore_ptr->GetDevice(), tex.sampler, nullptr);
-        if (tex.imageView != VK_NULL_HANDLE)
-            vkDestroyImageView(m_vkCore_ptr->GetDevice(), tex.imageView, nullptr);
-        if (tex.image != VK_NULL_HANDLE) {
-            vmaDestroyImage(m_vkCore_ptr->GetDeviceContext().GetVmaAllocator(), tex.image, tex.allocation);
-        }
-    }
-    m_pendingTextureResourceReleases.clear();
-
+    m_pendingTextureUploads.clear();
+    m_pendingTextureUploadBytes = 0;
     for (auto &entry : m_deferredTextureReleases) {
-        auto &tex = entry.resource;
-        if (tex.descriptorSet != VK_NULL_HANDLE)
-            ImGui_ImplVulkan_RemoveTexture(tex.descriptorSet);
-        if (tex.sampler != VK_NULL_HANDLE)
-            vkDestroySampler(m_vkCore_ptr->GetDevice(), tex.sampler, nullptr);
-        if (tex.imageView != VK_NULL_HANDLE)
-            vkDestroyImageView(m_vkCore_ptr->GetDevice(), tex.imageView, nullptr);
-        if (tex.image != VK_NULL_HANDLE) {
-            vmaDestroyImage(m_vkCore_ptr->GetDeviceContext().GetVmaAllocator(), tex.image, tex.allocation);
-        }
+        ReleaseTextureResource(entry.resource);
     }
     m_deferredTextureReleases.clear();
-
-    for (auto &tex : m_retiredTextureResources) {
-        if (tex.descriptorSet != VK_NULL_HANDLE)
-            ImGui_ImplVulkan_RemoveTexture(tex.descriptorSet);
-        if (tex.sampler != VK_NULL_HANDLE)
-            vkDestroySampler(m_vkCore_ptr->GetDevice(), tex.sampler, nullptr);
-        if (tex.imageView != VK_NULL_HANDLE)
-            vkDestroyImageView(m_vkCore_ptr->GetDevice(), tex.imageView, nullptr);
-        if (tex.image != VK_NULL_HANDLE) {
-            vmaDestroyImage(m_vkCore_ptr->GetDeviceContext().GetVmaAllocator(), tex.image, tex.allocation);
-        }
-    }
-    m_retiredTextureResources.clear();
     m_pendingTextureRemovals.clear();
+    m_textureUploadGenerations.clear();
+    m_failedTextureUploadVersions.clear();
 
-    // Clean up InxGUI-owned textures (image, imageView, sampler, memory).
-    // Descriptor sets allocated from m_descriptorPool_vk are freed implicitly
-    // when the pool is destroyed below, so we don't free them individually.
     for (auto &[name, tex] : m_textures_umap) {
-        if (tex.sampler != VK_NULL_HANDLE) {
-            vkDestroySampler(m_vkCore_ptr->GetDevice(), tex.sampler, nullptr);
-        }
-        if (tex.imageView != VK_NULL_HANDLE) {
-            vkDestroyImageView(m_vkCore_ptr->GetDevice(), tex.imageView, nullptr);
-        }
-        if (tex.image != VK_NULL_HANDLE) {
-            vmaDestroyImage(m_vkCore_ptr->GetDeviceContext().GetVmaAllocator(), tex.image, tex.allocation);
-        }
+        (void)name;
+        ReleaseTextureResource(tex);
     }
     m_textures_umap.clear();
 
@@ -596,251 +615,54 @@ void InxGUI::Unregister(const std::string &name)
     }
 }
 
-uint64_t InxGUI::UploadTextureForImGui(const std::string &name, const unsigned char *pixels, int width, int height,
-                                       VkFilter filter)
+uint64_t InxGUI::SubmitTextureForImGui(const std::string &name, const unsigned char *pixels, size_t byteCount,
+                                       int width, int height, VkFilter filter, bool pinned)
 {
-    // Keep current texture alive as a fallback while building a replacement.
-    auto existingIt = m_textures_umap.find(name);
-    const uint64_t fallbackTexId =
-        (existingIt != m_textures_umap.end()) ? reinterpret_cast<uint64_t>(existingIt->second.descriptorSet) : 0;
+    if (name.empty())
+        throw std::invalid_argument("ImGui texture name cannot be empty");
+    if (width <= 0 || height <= 0)
+        throw std::invalid_argument("ImGui texture dimensions must be positive");
+    if (filter != VK_FILTER_LINEAR && filter != VK_FILTER_NEAREST)
+        throw std::invalid_argument("ImGui texture filter must be linear or nearest");
+    const auto generationIt = m_textureUploadGenerations.find(name);
+    const uint64_t previousGeneration = generationIt == m_textureUploadGenerations.end() ? 0 : generationIt->second;
+    if (previousGeneration == std::numeric_limits<uint64_t>::max())
+        throw std::overflow_error("ImGui texture upload version overflow");
+    const uint64_t generation = previousGeneration + 1;
 
-    VkDevice device = m_vkCore_ptr->GetDevice();
-    VkPhysicalDevice physicalDevice = m_vkCore_ptr->GetPhysicalDevice();
-    constexpr VkFormat kGuiTextureFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    const auto cpuData = TextureDecoder::CreateRgba8(pixels, byteCount, static_cast<uint32_t>(width),
+                                                     static_cast<uint32_t>(height), filter != VK_FILTER_NEAREST);
+    auto ticket = m_vkCore_ptr->GetResourceManager().BeginTextureUpload(*cpuData, VK_FORMAT_R8G8B8A8_UNORM, filter,
+                                                                        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, 0);
+    const uint64_t pendingBytes = ticket->GetResidentBytes();
+    if (pendingBytes > std::numeric_limits<uint64_t>::max() - m_pendingTextureUploadBytes)
+        throw std::overflow_error("pending ImGui texture byte counter overflow");
 
-    VkDeviceSize imageSize = width * height * 4; // RGBA
+    m_textureUploadGenerations[name] = generation;
+    m_pendingTextureUploads.push_back(PendingTextureUpload{name, generation, pinned, std::move(ticket)});
+    m_pendingTextureUploadBytes += pendingBytes;
+    ++m_submittedTextureUploadCount;
+    if (m_pendingTextureUploads.back().ticket->IsAsync())
+        ++m_asyncTextureUploadCount;
 
-    uint32_t mipLevels = 1;
-    if (filter != VK_FILTER_NEAREST && width > 1 && height > 1) {
-        VkFormatProperties formatProps{};
-        vkGetPhysicalDeviceFormatProperties(physicalDevice, kGuiTextureFormat, &formatProps);
-        if ((formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0) {
-            mipLevels = static_cast<uint32_t>(std::floor(std::log2((std::max)(width, height)))) + 1;
-        }
-    }
-
-    // Create staging buffer via VMA
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAllocation;
-    m_vkCore_ptr->CreateBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                               stagingBuffer, stagingAllocation);
-
-    // Copy pixel data to staging buffer
-    VmaAllocator allocator = m_vkCore_ptr->GetDeviceContext().GetVmaAllocator();
-    void *data;
-    vmaMapMemory(allocator, stagingAllocation, &data);
-    memcpy(data, pixels, static_cast<size_t>(imageSize));
-    vmaUnmapMemory(allocator, stagingAllocation);
-
-    // Create image
-    ImGuiTextureResource tex{};
-
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = static_cast<uint32_t>(width);
-    imageInfo.extent.height = static_cast<uint32_t>(height);
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = mipLevels;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = kGuiTextureFormat;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    if (mipLevels > 1)
-        imageInfo.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-
-    // Create image + allocate memory via VMA (combined create+alloc+bind)
-    VmaAllocationCreateInfo allocCreateInfo{};
-    allocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-
-    VkResult result = vmaCreateImage(allocator, &imageInfo, &allocCreateInfo, &tex.image, &tex.allocation, nullptr);
-    if (result != VK_SUCCESS) {
-        INXLOG_ERROR("InxGUI::UploadTextureForImGui(): Failed to create image for '", name, "'");
-        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
-        return fallbackTexId;
-    }
-
-    // Transition image layout and copy buffer to image
-    VkCommandBuffer cmdBuf = m_vkCore_ptr->BeginSingleTimeCommands();
-
-    // Transition all mip levels to TRANSFER_DST.
-    VkImageMemoryBarrier barrier =
-        vkrender::MakeImageBarrier(tex.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                   VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
-    barrier.subresourceRange.levelCount = mipLevels;
-
-    vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &barrier);
-
-    // Copy buffer to image
-    VkBufferImageCopy region{};
-    region.bufferOffset = 0;
-    region.bufferRowLength = 0;
-    region.bufferImageHeight = 0;
-    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.imageSubresource.mipLevel = 0;
-    region.imageSubresource.baseArrayLayer = 0;
-    region.imageSubresource.layerCount = 1;
-    region.imageOffset = {0, 0, 0};
-    region.imageExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1};
-
-    vkCmdCopyBufferToImage(cmdBuf, stagingBuffer, tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-
-    if (mipLevels > 1) {
-        int32_t mipWidth = width;
-        int32_t mipHeight = height;
-
-        for (uint32_t i = 1; i < mipLevels; ++i) {
-            barrier.subresourceRange.baseMipLevel = i - 1;
-            barrier.subresourceRange.levelCount = 1;
-            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-
-            vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
-                                 0, nullptr, 1, &barrier);
-
-            VkImageBlit blit{};
-            blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            blit.srcSubresource.mipLevel = i - 1;
-            blit.srcSubresource.baseArrayLayer = 0;
-            blit.srcSubresource.layerCount = 1;
-            blit.srcOffsets[0] = {0, 0, 0};
-            blit.srcOffsets[1] = {mipWidth, mipHeight, 1};
-
-            const int32_t nextWidth = mipWidth > 1 ? mipWidth / 2 : 1;
-            const int32_t nextHeight = mipHeight > 1 ? mipHeight / 2 : 1;
-
-            blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            blit.dstSubresource.mipLevel = i;
-            blit.dstSubresource.baseArrayLayer = 0;
-            blit.dstSubresource.layerCount = 1;
-            blit.dstOffsets[0] = {0, 0, 0};
-            blit.dstOffsets[1] = {nextWidth, nextHeight, 1};
-
-            vkCmdBlitImage(cmdBuf, tex.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, tex.image,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
-
-            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-            vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
-                                 nullptr, 0, nullptr, 1, &barrier);
-
-            mipWidth = nextWidth;
-            mipHeight = nextHeight;
-        }
-
-        barrier.subresourceRange.baseMipLevel = mipLevels - 1;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-        vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
-                             nullptr, 0, nullptr, 1, &barrier);
-    } else {
-        barrier = vkrender::MakeImageBarrier(tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT,
-                                             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-
-        vkCmdPipelineBarrier(cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
-                             nullptr, 0, nullptr, 1, &barrier);
-    }
-
-    m_vkCore_ptr->EndSingleTimeCommands(cmdBuf);
-
-    // Clean up staging buffer
-    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
-
-    // Create image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = tex.image;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = kGuiTextureFormat;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = mipLevels;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-
-    if (vkCreateImageView(device, &viewInfo, nullptr, &tex.imageView) != VK_SUCCESS) {
-        INXLOG_ERROR("InxGUI::UploadTextureForImGui(): Failed to create image view for '", name, "'");
-        vmaDestroyImage(allocator, tex.image, tex.allocation);
-        return fallbackTexId;
-    }
-
-    // Create sampler
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = filter;
-    samplerInfo.minFilter = filter;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.maxAnisotropy = 1.0f;
-    samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    samplerInfo.unnormalizedCoordinates = VK_FALSE;
-    samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-    samplerInfo.mipmapMode =
-        (filter == VK_FILTER_NEAREST) ? VK_SAMPLER_MIPMAP_MODE_NEAREST : VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = static_cast<float>(mipLevels);
-
-    if (vkCreateSampler(device, &samplerInfo, nullptr, &tex.sampler) != VK_SUCCESS) {
-        INXLOG_ERROR("InxGUI::UploadTextureForImGui(): Failed to create sampler for '", name, "'");
-        vkDestroyImageView(device, tex.imageView, nullptr);
-        vmaDestroyImage(allocator, tex.image, tex.allocation);
-        return fallbackTexId;
-    }
-
-    // Create descriptor set for ImGui
-    tex.descriptorSet =
-        ImGui_ImplVulkan_AddTexture(tex.sampler, tex.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-    if (tex.descriptorSet == VK_NULL_HANDLE) {
-        INXLOG_ERROR("InxGUI::UploadTextureForImGui(): Failed to create ImGui texture descriptor for '", name, "'");
-        vkDestroySampler(device, tex.sampler, nullptr);
-        vkDestroyImageView(device, tex.imageView, nullptr);
-        vmaDestroyImage(allocator, tex.image, tex.allocation);
-        return fallbackTexId;
-    }
-
-    // New texture is ready. Swap mapping atomically and defer old resource release.
-    if (existingIt != m_textures_umap.end()) {
-        m_pendingTextureResourceReleases.push_back(existingIt->second);
-        m_pendingTextureRemovals.erase(
-            std::remove(m_pendingTextureRemovals.begin(), m_pendingTextureRemovals.end(), name),
-            m_pendingTextureRemovals.end());
-    }
-
-    m_textures_umap[name] = tex;
-
-    return reinterpret_cast<uint64_t>(tex.descriptorSet);
+    m_pendingTextureRemovals.erase(std::remove(m_pendingTextureRemovals.begin(), m_pendingTextureRemovals.end(), name),
+                                   m_pendingTextureRemovals.end());
+    return generation;
 }
 
 void InxGUI::RemoveImGuiTexture(const std::string &name)
 {
-    auto it = m_textures_umap.find(name);
-    if (it == m_textures_umap.end()) {
-        return;
-    }
+    if (name.empty())
+        throw std::invalid_argument("ImGui texture name cannot be empty");
+    auto &generation = m_textureUploadGenerations[name];
+    if (generation == std::numeric_limits<uint64_t>::max())
+        throw std::overflow_error("ImGui texture upload version overflow");
+    ++generation;
 
-    // Defer actual destruction to the start of the next frame.
-    // Destroying descriptor sets / Vulkan resources mid-frame would
-    // invalidate draw commands already emitted by other panels.
-    m_pendingTextureRemovals.push_back(name);
+    if (m_textures_umap.find(name) != m_textures_umap.end() &&
+        std::find(m_pendingTextureRemovals.begin(), m_pendingTextureRemovals.end(), name) ==
+            m_pendingTextureRemovals.end())
+        m_pendingTextureRemovals.push_back(name);
 }
 
 bool InxGUI::HasImGuiTexture(const std::string &name) const
@@ -855,7 +677,7 @@ bool InxGUI::HasImGuiTexture(const std::string &name) const
     return true;
 }
 
-uint64_t InxGUI::GetImGuiTextureId(const std::string &name) const
+uint64_t InxGUI::GetImGuiTextureId(const std::string &name)
 {
     // Treat pending-removal textures as absent
     for (const auto &pending : m_pendingTextureRemovals) {
@@ -864,9 +686,96 @@ uint64_t InxGUI::GetImGuiTextureId(const std::string &name) const
     }
     auto it = m_textures_umap.find(name);
     if (it != m_textures_umap.end()) {
+        it->second.lastUsedFrame = m_guiFrameCounter;
         return reinterpret_cast<uint64_t>(it->second.descriptorSet);
     }
     return 0;
+}
+
+uint64_t InxGUI::GetImGuiTextureVersion(const std::string &name) const
+{
+    if (std::find(m_pendingTextureRemovals.begin(), m_pendingTextureRemovals.end(), name) !=
+        m_pendingTextureRemovals.end())
+        return 0;
+    auto it = m_textures_umap.find(name);
+    if (it == m_textures_umap.end())
+        return 0;
+    return it->second.uploadGeneration;
+}
+
+uint64_t InxGUI::GetFailedImGuiTextureVersion(const std::string &name) const
+{
+    auto it = m_failedTextureUploadVersions.find(name);
+    return it == m_failedTextureUploadVersions.end() ? 0 : it->second;
+}
+
+void InxGUI::SetImGuiTextureBudgetBytes(uint64_t bytes)
+{
+    if (bytes == 0)
+        throw std::invalid_argument("ImGui texture budget must be greater than zero");
+    m_textureBudgetBytes = bytes;
+    (void)TrimImGuiTextureBudget();
+}
+
+size_t InxGUI::TrimImGuiTextureBudget()
+{
+    size_t evicted = 0;
+    while (m_textureResidentBytes > m_textureBudgetBytes) {
+        auto candidate = m_textures_umap.end();
+        for (auto entry = m_textures_umap.begin(); entry != m_textures_umap.end(); ++entry) {
+            if (entry->second.pinned)
+                continue;
+            if (candidate == m_textures_umap.end() || entry->second.lastUsedFrame < candidate->second.lastUsedFrame)
+                candidate = entry;
+        }
+        if (candidate == m_textures_umap.end())
+            break;
+        DeferTextureRelease(std::move(candidate->second));
+        m_textures_umap.erase(candidate);
+        ++evicted;
+        ++m_textureEvictionCount;
+    }
+    return evicted;
+}
+
+uint64_t InxGUI::GetScheduledTextureReleaseBytes() const noexcept
+{
+    uint64_t bytes = 0;
+    for (const auto &release : m_deferredTextureReleases)
+        bytes += release.resource.residentBytes;
+    return bytes;
+}
+
+GpuEvictionCandidate InxGUI::PeekOldestImGuiTextureEvictable() const noexcept
+{
+    auto candidate = m_textures_umap.end();
+    for (auto entry = m_textures_umap.begin(); entry != m_textures_umap.end(); ++entry) {
+        if (entry->second.pinned)
+            continue;
+        if (candidate == m_textures_umap.end() || entry->second.lastUsedFrame < candidate->second.lastUsedFrame)
+            candidate = entry;
+    }
+    if (candidate == m_textures_umap.end())
+        return {};
+    return {candidate->second.lastUsedFrame, candidate->second.residentBytes, true};
+}
+
+uint64_t InxGUI::EvictOldestImGuiTexture()
+{
+    auto candidate = m_textures_umap.end();
+    for (auto entry = m_textures_umap.begin(); entry != m_textures_umap.end(); ++entry) {
+        if (entry->second.pinned)
+            continue;
+        if (candidate == m_textures_umap.end() || entry->second.lastUsedFrame < candidate->second.lastUsedFrame)
+            candidate = entry;
+    }
+    if (candidate == m_textures_umap.end())
+        return 0;
+    const uint64_t bytes = candidate->second.residentBytes;
+    DeferTextureRelease(std::move(candidate->second));
+    m_textures_umap.erase(candidate);
+    ++m_textureEvictionCount;
+    return bytes;
 }
 
 } // namespace infernux

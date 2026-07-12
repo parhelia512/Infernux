@@ -57,7 +57,7 @@ class CppProperty:
     Args:
         cpp_attr: Attribute name on the pybind11 C++ component object.
         field_type: FieldType for Inspector rendering.
-        default: Fallback value when the C++ component is not yet bound.
+        default: Inspector and serialization metadata default.
         readonly: If ``True``, the property cannot be set from Python.
         tooltip: Hover text for the Inspector panel.
         header: Group header shown above this field in the Inspector.
@@ -86,6 +86,7 @@ class CppProperty:
         enum_type=None,
         enum_labels: Optional[list] = None,
         visible_when=None,
+        asset_type: Optional[str] = None,
         get_converter=None,
         set_converter=None,
         hdr: bool = False,
@@ -105,6 +106,7 @@ class CppProperty:
             enum_type=enum_type,
             enum_labels=enum_labels,
             visible_when=visible_when,
+            asset_type=asset_type,
             hdr=hdr,
             slider=slider,
         )
@@ -117,37 +119,29 @@ class CppProperty:
     def __get__(self, instance: Optional[Any], owner: type) -> Any:
         if instance is None:
             return self
-        cpp = getattr(instance, "_cpp_component", None)
-        if cpp is not None:
+        cpp = instance._require_cpp_component()
+        try:
+            value = getattr(cpp, self.cpp_attr)
+        except RuntimeError as exc:
+            instance._invalidate_native_binding()
+            raise ReferenceError(
+                f"{type(instance).__name__}.{self.metadata.name} accessed a destroyed native component"
+            ) from exc
+        enum_type = getattr(self.metadata, "enum_type", None)
+        if isinstance(enum_type, str):
             try:
-                value = getattr(cpp, self.cpp_attr)
-            except RuntimeError:
-                instance._invalidate_native_binding()
-                return self.metadata.default
-            except Exception as exc:
-                # Catch any pybind11 exception (AttributeError, SystemError, etc.)
-                from Infernux.debug import Debug
-                Debug.log_warning(
-                    f"[CppProperty] {self.metadata.name} read failed on "
-                    f"{type(instance).__name__}: {type(exc).__name__}: {exc}"
-                )
-                return self.metadata.default
-            enum_type = getattr(self.metadata, "enum_type", None)
-            if isinstance(enum_type, str):
-                try:
-                    import Infernux.lib as _lib
-                    enum_type = getattr(_lib, enum_type, None)
-                except (ImportError, AttributeError):
-                    enum_type = None
-            if enum_type is not None and value is not None:
-                try:
-                    return enum_type(value)
-                except (ValueError, KeyError, TypeError):
-                    return value
-            if self.get_converter is not None:
-                return self.get_converter(value)
-            return value
-        return self.metadata.default
+                import Infernux.lib as _lib
+                enum_type = getattr(_lib, enum_type, None)
+            except (ImportError, AttributeError):
+                enum_type = None
+        if enum_type is not None and value is not None:
+            try:
+                return enum_type(value)
+            except (ValueError, KeyError, TypeError):
+                return value
+        if self.get_converter is not None:
+            return self.get_converter(value)
+        return value
 
     def __set__(self, instance: Any, value: Any) -> None:
         if self.metadata.readonly:
@@ -168,9 +162,14 @@ class CppProperty:
                 value = enum_type(value)
         if self.set_converter is not None:
             value = self.set_converter(value)
-        cpp = getattr(instance, "_cpp_component", None)
-        if cpp is not None:
+        cpp = instance._require_cpp_component()
+        try:
             setattr(cpp, self.cpp_attr, value)
+        except RuntimeError as exc:
+            instance._invalidate_native_binding()
+            raise ReferenceError(
+                f"{type(instance).__name__}.{self.metadata.name} accessed a destroyed native component"
+            ) from exc
 
 
 # =============================================================================
@@ -205,6 +204,8 @@ class BuiltinComponent(InxComponent):
 
     # ---- Must be overridden in concrete subclasses ----
     _cpp_type_name: str = ""
+    _registers_active_instance = False
+    _uses_component_data_store = False
 
     # ---- Instance state (set by _bind_cpp) ----
     _cpp_component: Optional[Any] = None  # pybind11 C++ component reference
@@ -275,9 +276,25 @@ class BuiltinComponent(InxComponent):
                 Debug.log_warning(f"[BuiltinComponent] cache clear failed: {exc}")
         BuiltinComponent._wrapper_cache.clear()
 
+    @classmethod
+    def _invalidate_component_ids(cls, component_ids) -> None:
+        """Invalidate wrappers whose native components were transactionally replaced."""
+        for component_id in component_ids:
+            wrapper = BuiltinComponent._wrapper_cache.pop(int(component_id), None)
+            if wrapper is not None:
+                wrapper._invalidate_native_binding()
+
     # ------------------------------------------------------------------
     # Property overrides (delegate to C++)
     # ------------------------------------------------------------------
+
+    def _require_cpp_component(self):
+        cpp = self._get_bound_native_component()
+        if cpp is None:
+            raise ReferenceError(
+                f"{type(self).__name__} is not bound to a live native component"
+            )
+        return cpp
 
     # ------------------------------------------------------------------
     # Inspector rendering (override in subclasses for custom layout)
@@ -372,13 +389,26 @@ class BuiltinComponent(InxComponent):
         cpp = self._get_bound_native_component()
         if cpp is not None:
             try:
-                cpp.deserialize(json_str)
-                return True
+                return bool(cpp.deserialize(json_str))
             except Exception as exc:
                 from Infernux.debug import Debug
                 Debug.log_warning(f"BuiltinComponent deserialize failed for {self._cpp_type_name}: {exc}")
                 self._invalidate_native_binding()
         return False
+
+    def serialize_document(self) -> dict:
+        """Return the native component document without a JSON text round-trip."""
+        cpp = self._get_bound_native_component()
+        if cpp is None:
+            raise RuntimeError(f"{self._cpp_type_name} is not bound to a native component")
+        return cpp.serialize_document()
+
+    def deserialize_document(self, document: dict) -> bool:
+        """Apply a native component document without a JSON text round-trip."""
+        cpp = self._get_bound_native_component()
+        if cpp is None:
+            raise RuntimeError(f"{self._cpp_type_name} is not bound to a native component")
+        return bool(cpp.deserialize_document(document))
 
     def _deserialize_fields(self, json_str: str) -> None:
         """Alias kept for InxComponent compatibility."""

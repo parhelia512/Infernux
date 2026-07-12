@@ -195,6 +195,10 @@ class TestShaderAssetInfo:
     def test_from_path_unknown(self):
         assert ShaderAssetInfo.from_path("test.txt").shader_type == "unknown"
 
+    @pytest.mark.parametrize("extension", [".comp", ".geom", ".tesc", ".tese"])
+    def test_unsupported_stage_is_unknown(self, extension):
+        assert ShaderAssetInfo.from_path(f"test{extension}").shader_type == "unknown"
+
 
 class TestFontAssetInfo:
     def test_from_path_ttf(self):
@@ -247,6 +251,7 @@ class TestAssetCategory:
         assert isinstance(IMAGE_EXTENSIONS, frozenset)
         assert isinstance(SHADER_EXTENSIONS, frozenset)
         assert isinstance(MESH_EXTENSIONS, frozenset)
+        assert SHADER_EXTENSIONS == frozenset({".vert", ".frag"})
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -266,8 +271,9 @@ class TestPythonTypeToMetaTag:
     def test_string(self):
         assert _python_type_to_meta_tag("hello") == "string"
 
-    def test_none_defaults_to_string(self):
-        assert _python_type_to_meta_tag(None) == "string"
+    def test_unsupported_value_is_rejected(self):
+        with pytest.raises(TypeError, match="unsupported metadata value type"):
+            _python_type_to_meta_tag(None)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -291,7 +297,7 @@ class TestReadMetaGuid:
         from Infernux.core.asset_types import read_meta_guid
         assert read_meta_guid(str(asset)) == "abc123def456"
 
-    def test_reads_legacy_root_guid(self, tmp_path):
+    def test_rejects_legacy_root_guid(self, tmp_path):
         asset = tmp_path / "legacy.fbx"
         asset.write_bytes(b"fbx")
         meta_path = str(asset) + ".meta"
@@ -299,4 +305,39 @@ class TestReadMetaGuid:
             json.dump({"guid": "legacy-root-guid"}, f)
 
         from Infernux.core.asset_types import read_meta_guid
-        assert read_meta_guid(str(asset)) == "legacy-root-guid"
+        assert read_meta_guid(str(asset)) == ""
+
+
+class TestNativeResourceMetaSchema:
+    def test_document_is_strict_and_transactional(self):
+        from Infernux.lib import ResourceMeta
+
+        valid = {
+            "meta_version": 2,
+            "metadata": {
+                "guid": {"type": "string", "value": "strict-guid"},
+                "resource_type": {
+                    "type": "enum infernux::ResourceType",
+                    "value": "DefaultText",
+                },
+            },
+        }
+        meta = ResourceMeta()
+        meta.deserialize_document(valid)
+        assert meta.serialize_document() == valid
+
+        invalid_documents = []
+        old_version = json.loads(json.dumps(valid))
+        old_version["meta_version"] = 1
+        invalid_documents.append(old_version)
+        unknown_field = json.loads(json.dumps(valid))
+        unknown_field["legacy_guid"] = "strict-guid"
+        invalid_documents.append(unknown_field)
+        wrong_value_type = json.loads(json.dumps(valid))
+        wrong_value_type["metadata"]["guid"]["value"] = ["strict-guid"]
+        invalid_documents.append(wrong_value_type)
+
+        for invalid in invalid_documents:
+            with pytest.raises(ValueError):
+                meta.deserialize_document(invalid)
+            assert meta.serialize_document() == valid

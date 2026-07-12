@@ -1,6 +1,5 @@
 import os
 import threading
-import time
 
 try:
     from watchdog.observers import Observer
@@ -15,7 +14,13 @@ except ImportError:
 
 from Infernux.lib import Infernux
 from Infernux.engine.script_compiler import get_script_compiler
+from Infernux.engine.import_coordinator import AssetFsEvent, AssetFsEventKind, ImportCoordinator
+from Infernux.core.asset_types import read_meta_guid
 from Infernux.debug import Debug
+
+
+class _AssetImportNotReady(RuntimeError):
+    pass
 
 
 class ResourceChangeHandler(FileSystemEventHandler):
@@ -23,24 +28,11 @@ class ResourceChangeHandler(FileSystemEventHandler):
     def __init__(self, engine: Infernux):
         self._engine = engine
         self._script_compiler = get_script_compiler()
-        # Queue for pending script reloads (processed in main thread)
-        self._pending_reload_queue = []
-        self._queue_lock = threading.Lock()
-        # Pending deletes for move-detection (path -> timestamp)
-        self._pending_deletes = {}
-        self._pending_lock = threading.Lock()
-        self._move_grace_seconds = 1.0
-        # Pending .meta deletions (meta_path -> timestamp). A meta rewrite uses
-        # tmp-file + atomic rename, which Windows reports as a transient DELETE of
-        # the target. We only rebuild a meta after a grace period IF it is still
-        # genuinely missing on disk — this avoids thrashing on every save (e.g.
-        # dragging a material colour rewrites the .meta many times per second).
-        self._pending_meta_deletes = {}
-        self._meta_delete_grace_seconds = 0.6
-        # Callbacks for shader cache invalidation
+        self._coordinator = ImportCoordinator()
         self._shader_cache_invalidation_callbacks = []
-        # Get AssetDatabase for resource registration
         self._asset_database = engine.get_asset_database()
+        if self._asset_database is None:
+            raise RuntimeError("ResourceChangeHandler requires an initialized AssetDatabase")
 
     @staticmethod
     def _is_meta_sidecar_path(file_path: str) -> bool:
@@ -50,29 +42,6 @@ class ResourceChangeHandler(FileSystemEventHandler):
     @staticmethod
     def _owner_path_for_meta_sidecar(meta_path: str) -> str:
         return meta_path[:-5]
-
-    def _process_pending_meta_deletes(self):
-        """Rebuild a meta ONLY if its sidecar is still genuinely missing after a grace period.
-
-        Filters out the transient delete that a tmp+rename meta rewrite produces,
-        so saving an asset (e.g. dragging a material colour) never triggers a meta
-        rebuild/reload — only an actual on-disk deletion does.
-        """
-        now = time.time()
-        ready = []
-        with self._pending_lock:
-            for meta_path, ts in list(self._pending_meta_deletes.items()):
-                if now - ts >= self._meta_delete_grace_seconds:
-                    ready.append(meta_path)
-                    del self._pending_meta_deletes[meta_path]
-        for meta_path in ready:
-            # Reappeared (rewrite/rename) → not a real deletion, ignore.
-            if os.path.exists(meta_path):
-                continue
-            owner_path = self._owner_path_for_meta_sidecar(meta_path)
-            if owner_path and os.path.isfile(owner_path):
-                Debug.log_internal(f"[Meta Deleted] confirmed missing -> rebuild {owner_path}")
-                self._process_meta_missing_rebuild(owner_path)
 
     def _should_ignore(self, file_path: str) -> bool:
         """Ignore meta/temp/cache files to avoid GUID churn and noisy events."""
@@ -86,196 +55,185 @@ class ResourceChangeHandler(FileSystemEventHandler):
             return True
         return False
 
-    def _try_match_move(self, new_path: str) -> str:
-        """Try to match a recent delete as a move; returns old_path if matched."""
-        new_base = os.path.basename(new_path)
-        now = time.time()
-        with self._pending_lock:
-            for old_path, ts in list(self._pending_deletes.items()):
-                if now - ts > self._move_grace_seconds:
-                    continue
-                if os.path.basename(old_path) == new_base:
-                    del self._pending_deletes[old_path]
-                    return old_path
-        return ""
-
-    def _process_pending_deletes(self):
-        """Finalize deletes that were not matched as moves."""
-        now = time.time()
-        expired = []
-        with self._pending_lock:
-            for path, ts in self._pending_deletes.items():
-                if now - ts >= self._move_grace_seconds:
-                    expired.append(path)
-            for path in expired:
-                del self._pending_deletes[path]
-
-        for path in expired:
-            # Cascade: evict from GPU caches, C++ registries, Python caches
-            from Infernux.core.assets import AssetManager
-            from Infernux.components.script_loader import clear_deleted_script_errors
-            AssetManager.on_asset_deleted(path)
-
-            if self._asset_database:
-                self._asset_database.delete_asset(path)
-            else:
-                self._engine.delete_resources(path)
-            if path.endswith('.py'):
-                clear_deleted_script_errors(path)
-                rm = ResourcesManager.instance()
-                if rm is not None:
-                    rm.notify_script_catalog_changed(path, "deleted")
-
-    def _import_with_retry(self, file_path: str) -> str:
-        """Try to import an asset, retrying on failure (handles file-still-being-written race)."""
-        max_retries = 3
-        for attempt in range(max_retries):
-            if self._asset_database:
-                guid = self._asset_database.import_asset(file_path)
-                if guid:
-                    return guid
-            if attempt < max_retries - 1:
-                time.sleep(0.15)
-        return ""
-
     def on_created(self, event):
-        if not event.is_directory:
-            if self._should_ignore(event.src_path):
-                return
-            # Debug.log_internal(f"[Added] {event.src_path}")
-            # Try to match a move (delete+add pattern)
-            old_path = self._try_match_move(event.src_path)
-            if old_path:
-                if self._asset_database:
-                    self._asset_database.on_asset_moved(old_path, event.src_path)
-                    # Debug.log_internal(f"[Moved] {old_path} -> {event.src_path}")
-                else:
-                    self._engine.move_resources(old_path, event.src_path)
-                # Notify AssetManager/AssetRegistry after DB mapping is updated
-                from Infernux.core.assets import AssetManager
-                from Infernux.components.script_loader import clear_deleted_script_errors
-                AssetManager.on_asset_moved(old_path, event.src_path)
-                # For moved scripts, queue reload
-                if event.src_path.endswith('.py'):
-                    clear_deleted_script_errors(old_path)
-                    self._queue_script_reload(event.src_path)
-                return
-            # Check Python scripts on creation
-            if event.src_path.endswith('.py'):
-                self._queue_script_reload(event.src_path)
+        if event.is_directory or self._should_ignore(event.src_path):
+            return
+        self._coordinator.submit(
+            AssetFsEventKind.CREATED,
+            event.src_path,
+            guid_hint=read_meta_guid(event.src_path),
+        )
 
     def on_deleted(self, event):
-        if not event.is_directory:
-            if self._is_meta_sidecar_path(event.src_path):
-                # Defer: a tmp+rename meta rewrite reports a transient delete.
-                # Only rebuild if the .meta is still gone after a grace period
-                # (verified in _process_pending_meta_deletes on the main thread).
-                with self._pending_lock:
-                    self._pending_meta_deletes[event.src_path] = time.time()
-                return
-            if self._should_ignore(event.src_path):
-                return
-            Debug.log_internal(f"[Deleted] {event.src_path}")
-            # Defer delete to detect move (delete+add)
-            with self._pending_lock:
-                self._pending_deletes[event.src_path] = time.time()
+        if event.is_directory:
+            return
+        if self._is_meta_sidecar_path(event.src_path):
+            self._coordinator.submit(
+                AssetFsEventKind.META_DELETED,
+                self._owner_path_for_meta_sidecar(event.src_path),
+            )
+            return
+        if self._should_ignore(event.src_path):
+            return
+        self._coordinator.submit(
+            AssetFsEventKind.DELETED,
+            event.src_path,
+            guid_hint=self._asset_database.get_guid_from_path(event.src_path),
+        )
 
     def on_modified(self, event):
-        if not event.is_directory:
-            src = event.src_path
-
-            if self._should_ignore(src):
-                return
-            # Asset content changed → queue for main-thread processing.
-            with self._queue_lock:
-                key = ("asset", src)
-                if key not in self._pending_reload_queue:
-                    self._pending_reload_queue.append(key)
-            # Check Python scripts on modification
-            if event.src_path.endswith('.py'):
-                self._queue_script_reload(event.src_path)
-            # Queue shader hot-reload
-            elif event.src_path.endswith('.vert') or event.src_path.endswith('.frag'):
-                self._queue_shader_reload(event.src_path)
+        if event.is_directory or self._should_ignore(event.src_path):
+            return
+        self._coordinator.submit(AssetFsEventKind.MODIFIED, event.src_path)
 
     def on_moved(self, event):
-        if not event.is_directory:
-            if self._should_ignore(event.src_path) or self._should_ignore(event.dest_path):
-                return
-            Debug.log_internal(f"[Moved] {event.src_path} -> {event.dest_path}")
-            with self._pending_lock:
-                if event.src_path in self._pending_deletes:
-                    del self._pending_deletes[event.src_path]
-            # IMPORTANT: Update AssetDatabase mapping FIRST so that
-            # AssetRegistry.OnAssetMoved can resolve GUID from the new path.
-            if self._asset_database:
-                self._asset_database.on_asset_moved(event.src_path, event.dest_path)
-            else:
-                self._engine.move_resources(event.src_path, event.dest_path)
-            # Now notify AssetManager/AssetRegistry (GUID→path map is up-to-date)
-            from Infernux.core.assets import AssetManager
-            from Infernux.components.script_loader import clear_deleted_script_errors
-            AssetManager.on_asset_moved(event.src_path, event.dest_path)
-            # Check Python scripts after move
-            if event.dest_path.endswith('.py'):
-                clear_deleted_script_errors(event.src_path)
-                self._queue_script_reload(event.dest_path)
-                rm = ResourcesManager.instance()
-                if rm is not None:
-                    rm.notify_script_catalog_changed(event.dest_path, "moved")
-    
-    def _queue_script_reload(self, file_path: str):
-        """Queue a script for reload (will be processed in main thread)."""
-        with self._queue_lock:
-            # Avoid duplicates
-            if file_path not in self._pending_reload_queue:
-                self._pending_reload_queue.append(file_path)
+        if event.is_directory:
+            return
+        if self._is_meta_sidecar_path(event.src_path) and self._is_meta_sidecar_path(event.dest_path):
+            return
+        if self._should_ignore(event.src_path) or self._should_ignore(event.dest_path):
+            return
+        self._coordinator.submit(
+            AssetFsEventKind.MOVED,
+            event.src_path,
+            destination=event.dest_path,
+            guid_hint=self._asset_database.get_guid_from_path(event.src_path),
+        )
 
-    @staticmethod
-    def _emit_asset_changed(file_path: str, event_type: str):
-        """Emit EditorEvent.ASSET_CHANGED so components can react to asset changes."""
-        try:
-            from Infernux.engine.ui.event_bus import EditorEventBus, EditorEvent
-            bus = EditorEventBus.instance()
-            bus.emit(EditorEvent.ASSET_CHANGED, file_path, event_type)
-        except Exception:
-            pass
+    @property
+    def pending_count(self) -> int:
+        return self._coordinator.pending_count
 
-    def _queue_shader_reload(self, file_path: str):
-        """Queue a shader for hot-reload (will be processed in main thread)."""
-        with self._queue_lock:
-            key = ("shader", file_path)
-            if key not in self._pending_reload_queue:
-                self._pending_reload_queue.append(key)
-    
-    def process_pending_reloads(self):
-        """Process pending script reloads. Call this from main thread (e.g., in update loop)."""
-        self._process_pending_deletes()
-        self._process_pending_meta_deletes()
-        with self._queue_lock:
-            pending = list(self._pending_reload_queue)
-            self._pending_reload_queue.clear()
-        
-        for item in pending:
+    def process_pending_reloads(self, *, force: bool = False) -> int:
+        """Commit coalesced events on the AssetDatabase owner thread."""
+        events = self._coordinator.drain(force=force)
+        for event in events:
             try:
-                if isinstance(item, tuple) and item[0] == "shader":
-                    self._reload_shader(item[1])
-                elif isinstance(item, tuple) and item[0] == "asset":
-                    self._process_asset_modified(item[1])
-                elif isinstance(item, str):
-                    self._check_script(item)
+                self._dispatch_event(event)
+            except _AssetImportNotReady as exc:
+                if not self._coordinator.retry(event):
+                    Debug.log_error(f"Asset event exhausted retries: {event}: {exc}")
             except Exception as exc:
-                Debug.log_error(f"Reload failed for {item}: {exc}")
+                Debug.log_error(f"Asset event failed: {event}: {exc}")
+        return len(events)
+
+    def _dispatch_event(self, event: AssetFsEvent) -> None:
+        if event.kind is not AssetFsEventKind.META_DELETED:
+            from Infernux.core.assets import AssetManager
+            if AssetManager.is_watcher_echo_suppressed(
+                event.kind.value,
+                event.path,
+                event.destination,
+            ):
+                Debug.log_internal(f"[AssetManager] suppressed watcher echo: {event}")
+                return
+        if event.kind is AssetFsEventKind.CREATED:
+            self._commit_created(event.path)
+        elif event.kind is AssetFsEventKind.MODIFIED:
+            self._commit_modified(event.path)
+        elif event.kind is AssetFsEventKind.DELETED:
+            self._commit_deleted(event.path)
+        elif event.kind is AssetFsEventKind.MOVED:
+            self._commit_moved(event.path, event.destination)
+        elif event.kind is AssetFsEventKind.META_DELETED:
+            if not os.path.isfile(event.path + ".meta"):
+                self._process_meta_missing_rebuild(event.path)
+        else:
+            raise RuntimeError(f"Unhandled asset event kind: {event.kind}")
+
+    def _commit_created(self, path: str) -> None:
+        if not os.path.isfile(path):
+            raise _AssetImportNotReady(f"created file is not ready: {path}")
+        from Infernux.core.assets import AssetManager
+        try:
+            AssetManager.import_asset(
+                path,
+                database=self._asset_database,
+                suppress_watcher_echo=False,
+            )
+        except RuntimeError as exc:
+            raise _AssetImportNotReady(str(exc)) from exc
+        if path.lower().endswith(".py"):
+            self._check_script(path, catalog_event="created")
+
+    def _commit_modified(self, path: str) -> None:
+        if path.lower().endswith(".scene") and self._is_active_scene_file(path):
+            Debug.log_internal(f"[Scene Modified] ignored watcher echo for active scene: {os.path.basename(path)}")
+            return
+        if not os.path.isfile(path):
+            raise _AssetImportNotReady(f"modified file is not ready: {path}")
+        from Infernux.core.assets import AssetManager
+        if AssetManager.is_meta_watcher_suppressed(path):
+            Debug.log_internal(f"[AssetManager] suppressed watcher echo for '{path}'")
+            return
+        if self._asset_database.contains_path(path):
+            if not AssetManager.reimport_asset(
+                path,
+                database=self._asset_database,
+                suppress_watcher_echo=False,
+            ):
+                raise _AssetImportNotReady(f"reimport failed: {path}")
+        else:
+            AssetManager.import_asset(
+                path,
+                database=self._asset_database,
+                suppress_watcher_echo=False,
+            )
+        if path.lower().endswith(".py"):
+            self._check_script(path, catalog_event="modified")
+        elif path.lower().endswith((".vert", ".frag")):
+            self._notify_shader_reloaded(path)
+
+    def _commit_deleted(self, path: str) -> None:
+        from Infernux.core.assets import AssetManager
+        if not AssetManager.delete_asset(
+            path,
+            database=self._asset_database,
+            suppress_watcher_echo=False,
+        ):
+            raise RuntimeError(f"asset deletion failed: {path}")
+        if path.lower().endswith(".py"):
+            from Infernux.components.script_loader import clear_deleted_script_errors
+            clear_deleted_script_errors(path)
+            manager = ResourcesManager.instance()
+            if manager is not None:
+                manager.notify_script_catalog_changed(path, "deleted")
+
+    def _commit_moved(self, old_path: str, new_path: str) -> None:
+        if not os.path.isfile(new_path):
+            raise _AssetImportNotReady(f"moved file is not ready: {new_path}")
+        from Infernux.core.assets import AssetManager
+        if not AssetManager.move_asset(
+            old_path,
+            new_path,
+            database=self._asset_database,
+            suppress_watcher_echo=False,
+        ):
+            raise RuntimeError(f"asset move failed: {old_path} -> {new_path}")
+        if new_path.lower().endswith(".py"):
+            from Infernux.components.script_loader import clear_deleted_script_errors
+            clear_deleted_script_errors(old_path)
+            manager = ResourcesManager.instance()
+            if manager is not None:
+                manager.notify_script_catalog_changed(new_path, "moved")
+            self._check_script(new_path, catalog_event=None)
+        elif new_path.lower().endswith((".vert", ".frag")):
+            if not AssetManager.reimport_asset(
+                new_path,
+                database=self._asset_database,
+                suppress_watcher_echo=False,
+            ):
+                raise RuntimeError(f"moved shader reimport failed: {new_path}")
+            self._notify_shader_reloaded(new_path)
 
     def _process_meta_missing_rebuild(self, owner_path: str):
         """Handle a deleted .meta sidecar (watchdog-driven, main thread).
 
         Deleting a .meta while the engine runs should immediately:
-          1. Regenerate the .meta sidecar — AssetDatabase.on_asset_modified() goes
-             through ModifyResource(), which recovers the *in-memory* GUID so the
-             stable asset id (and every scene reference to it) is preserved, then
-             re-runs the importer to rewrite mesh/animation/material metadata.
-          2. Reload the live resource + GPU caches so the change takes effect now
+          1. Reload any cached instance from current source/default settings.
+          2. Reimport through the canonical AssetDatabase transaction, which
+             regenerates the sidecar while preserving the in-memory GUID.
+          3. Reload the live resource + GPU caches so the change takes effect now
              (AssetRegistry in-place reload, mesh palette/SkinnedModelCache refresh,
              texture GPU re-upload, dependent material refresh).
         """
@@ -283,33 +241,14 @@ class ResourceChangeHandler(FileSystemEventHandler):
         if not owner_path or not os.path.isfile(owner_path):
             return
 
-        # 1) Regenerate the sidecar first so the reload in step 2 sees correct
-        #    import settings (mesh scale, srgb, etc.) and the preserved GUID.
-        if self._asset_database:
-            self._asset_database.on_asset_modified(owner_path)
-
-        # 2) Reload the in-memory asset + caches (mesh/material/texture).
         from Infernux.core.assets import AssetManager
-        AssetManager.on_asset_modified(owner_path)
+        if not AssetManager.reimport_asset(
+            owner_path,
+            database=self._asset_database,
+            suppress_watcher_echo=False,
+        ):
+            raise RuntimeError(f"failed to rebuild missing metadata: {owner_path}")
         AssetManager.invalidate_project_panel_cache()
-        self._emit_asset_changed(owner_path, "modified")
-
-    def _process_asset_modified(self, src_path: str):
-        """Handle asset content change on the main thread."""
-        if src_path.lower().endswith(".scene") and self._is_active_scene_file(src_path):
-            Debug.log_internal(f"[Scene Modified] ignored watcher echo for active scene: {os.path.basename(src_path)}")
-            return
-        from Infernux.core.assets import AssetManager
-        # AssetManager.on_asset_modified() already honours the per-path write
-        # suppression (set by apply_import_settings) to skip the in-place reload
-        # during our own debounced writes; we still emit ASSET_CHANGED so the
-        # Project panel thumbnail and other listeners refresh.
-        AssetManager.on_asset_modified(src_path)
-        if self._asset_database:
-            self._asset_database.on_asset_modified(src_path)
-        else:
-            self._engine.modify_resources(src_path)
-        self._emit_asset_changed(src_path, "modified")
 
     @staticmethod
     def _is_active_scene_file(path: str) -> bool:
@@ -321,7 +260,7 @@ class ResourceChangeHandler(FileSystemEventHandler):
         except Exception:
             return False
 
-    def _check_script(self, file_path: str):
+    def _check_script(self, file_path: str, *, catalog_event: str | None = "modified"):
         """Check a Python script for syntax errors and hot-reload components."""
         # Verify file exists and is readable (ensures write is complete)
         if not os.path.exists(file_path):
@@ -345,8 +284,8 @@ class ResourceChangeHandler(FileSystemEventHandler):
             _clear_script_error(file_path)
             Debug.log_internal(f"[OK] Script OK: {os.path.basename(file_path)}")
             rm = ResourcesManager.instance()
-            if rm is not None:
-                rm.notify_script_catalog_changed(file_path, "modified")
+            if rm is not None and catalog_event is not None:
+                rm.notify_script_catalog_changed(file_path, catalog_event)
             # Notify registered per-file callbacks (e.g. RenderStack pipeline reload)
             # Callbacks are stored on ResourcesManager to avoid handler-init races
             abs_path = os.path.abspath(file_path)
@@ -359,29 +298,12 @@ class ResourceChangeHandler(FileSystemEventHandler):
             if play_mode:
                 play_mode.reload_components_from_script(file_path)
 
-    def _reload_shader(self, file_path: str):
-        """Reload a shader file and update the rendering pipeline."""
-        if not os.path.exists(file_path):
-            return
-
-        Debug.log_internal(f"[Shader] Reloading: {os.path.basename(file_path)}")
-
+    def _notify_shader_reloaded(self, file_path: str):
+        """Invalidate editor shader caches after the canonical reimport succeeds."""
         # Invalidate shader caches in UI
         for callback in self._shader_cache_invalidation_callbacks:
             callback()
-
-        # Use the engine to reload shader
-        if hasattr(self._engine, 'reload_shader'):
-            result = self._engine.reload_shader(file_path)
-            if not result:  # empty string = success
-                Debug.log_internal(f"[OK] Shader reloaded: {os.path.basename(file_path)}")
-                # Bump property generation so inspectors re-sync @property annotations
-                from Infernux.engine.ui import inspector_shader_utils as _su
-                _su.bump_shader_property_generation()
-            else:
-                Debug.log_error(f"[ERROR] Shader compile error ({os.path.basename(file_path)}):\n{result}")
-        else:
-            Debug.log_warning("Engine does not support shader hot-reload yet")
+        Debug.log_internal(f"[OK] Shader reloaded: {os.path.basename(file_path)}")
     
     def register_shader_cache_callback(self, callback):
         """Register a callback to be called when shader cache should be invalidated."""
@@ -401,39 +323,45 @@ class ResourcesManager:
         self._engine = engine
         self._assets_path = os.path.join(project_path, "Assets")
         self._observer = None
+        self._observer_lock = threading.Lock()
         self._thread = None
         self._stop_event = threading.Event()
         self._event_handler = None
         self._script_reload_callbacks = {}  # file_path -> [callbacks]
         self._script_catalog_callbacks = []  # [callback(file_path, event_type)]
+        self._initial_scan_lock = threading.Lock()
+        self._initial_scan_artifact = None
 
-    def _shutdown_observer(self, *, join_timeout: float = 5.0) -> None:
-        """Stop watchdog threads aggressively so the Python process can exit."""
-        observer = self._observer
-        self._observer = None
+    def _shutdown_observer(self, *, join_timeout: float = 5.0) -> bool:
+        """Stop and join the currently published watchdog observer."""
+        with self._observer_lock:
+            observer = self._observer
+            self._observer = None
         if observer is None:
-            return
+            return True
 
         try:
             observer.stop()
         except Exception as _exc:
             Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
 
         try:
             observer.unschedule_all()
         except Exception as _exc:
             Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
 
         try:
             observer.join(timeout=join_timeout)
         except Exception as _exc:
             Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
 
         if getattr(observer, "is_alive", lambda: False)():
             Debug.log_warning("ResourcesManager observer did not stop cleanly before timeout")
+            with self._observer_lock:
+                if self._observer is None:
+                    self._observer = observer
+            return False
+        return True
 
     def start(self):
         """
@@ -446,7 +374,11 @@ class ResourcesManager:
             return
             
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._scan_resources, daemon=True)
+        self._thread = threading.Thread(
+            target=self._scan_resources,
+            daemon=False,
+            name="InfernuxResourceWatcher",
+        )
         self._thread.start()
 
     def _scan_resources(self):
@@ -456,20 +388,27 @@ class ResourcesManager:
         if not os.path.exists(self._assets_path):
             Debug.log_warning(f"Assets path not found: {self._assets_path}")
             return
+        if self._stop_event.is_set():
+            return
 
         self._event_handler = ResourceChangeHandler(self._engine)
-        self._observer = Observer()
+        observer = Observer()
         try:
-            # If watchdog fails to shut down for any reason, do not let its
-            # worker thread keep the entire engine process alive forever.
-            self._observer.daemon = True
+            observer.daemon = False
         except Exception as _exc:
             Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
 
         try:
-            self._observer.schedule(self._event_handler, self._assets_path, recursive=True)
-            self._observer.start()
+            observer.schedule(self._event_handler, self._assets_path, recursive=True)
+            with self._observer_lock:
+                if self._stop_event.is_set():
+                    return
+                self._observer = observer
+                try:
+                    observer.start()
+                except Exception:
+                    self._observer = None
+                    raise
 
             # Initial full scan: check every .py file in Assets/ so that
             # pre-existing script errors are detected on engine startup.
@@ -487,40 +426,71 @@ class ResourcesManager:
         starts so that errors present *before* the engine was opened
         are detected immediately.
         """
-        from Infernux.engine.script_compiler import get_script_compiler
-        from Infernux.components.script_loader import set_script_error, _clear_script_error
+        from Infernux.engine.script_compiler import ScriptCompiler
 
-        compiler = get_script_compiler()
-        error_count = 0
+        compiler = ScriptCompiler()
+        results = []
         for root, dirs, files in os.walk(self._assets_path):
+            if self._stop_event.is_set():
+                return
             dirs[:] = [d for d in dirs if d != '__pycache__']
             for fname in files:
                 if not fname.endswith('.py'):
                     continue
                 fpath = os.path.join(root, fname)
-                errors = compiler.check_file(fpath)
-                if errors:
-                    combined = "\n".join(
-                        f"{os.path.basename(e.file_path)}:{e.line_number}  {e.message}"
-                        for e in errors
-                    )
-                    set_script_error(fpath, combined)
-                    error_count += 1
-                    for e in errors:
-                        Debug.log_error(
-                            f"Script Error in {os.path.basename(e.file_path)}:{e.line_number}\n{e.message}",
-                            source_file=e.file_path,
-                            source_line=e.line_number,
-                        )
+                results.append((fpath, tuple(compiler.check_file(fpath))))
+
+        with self._initial_scan_lock:
+            if not self._stop_event.is_set():
+                self._initial_scan_artifact = tuple(results)
+
+    def _commit_initial_script_scan(self) -> int:
+        with self._initial_scan_lock:
+            artifact = self._initial_scan_artifact
+            self._initial_scan_artifact = None
+        if artifact is None:
+            return 0
+
+        from Infernux.components.script_loader import set_script_error, _clear_script_error
+
+        error_count = 0
+        for file_path, errors in artifact:
+            if not errors:
+                _clear_script_error(file_path)
+                continue
+            combined = "\n".join(
+                f"{os.path.basename(error.file_path)}:{error.line_number}  {error.message}"
+                for error in errors
+            )
+            set_script_error(file_path, combined)
+            error_count += 1
+            for error in errors:
+                Debug.log_error(
+                    f"Script Error in {os.path.basename(error.file_path)}:{error.line_number}\n{error.message}",
+                    source_file=error.file_path,
+                    source_line=error.line_number,
+                )
         if error_count:
             Debug.log_warning(f"Startup scan: {error_count} script(s) with errors")
         else:
-            Debug.log_internal("\u2713 All scripts passed startup validation")
+            Debug.log_internal("All scripts passed startup validation")
+        return len(artifact)
 
-    def process_pending_reloads(self):
-        """Process pending script reloads in main thread. Call this from update loop."""
+    def process_pending_reloads(self, *, force: bool = False) -> int:
+        """Commit worker artifacts and asset events on the main thread."""
+        processed = self._commit_initial_script_scan()
         if self._event_handler:
-            self._event_handler.process_pending_reloads()
+            processed += self._event_handler.process_pending_reloads(force=force)
+        return processed
+
+    def drain_pending_events(self) -> int:
+        """Force all bounded retries to finish after the observer has stopped."""
+        processed = 0
+        for _ in range(16):
+            processed += self.process_pending_reloads(force=True)
+            if self._event_handler is None or self._event_handler.pending_count == 0:
+                return processed
+        raise RuntimeError("asset event queue did not drain after observer shutdown")
 
     def register_script_reload_callback(self, file_path: str, callback) -> None:
         """Subscribe *callback(file_path)* to be called when *file_path* is saved.
@@ -581,7 +551,10 @@ class ResourcesManager:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5.0)
             if self._thread.is_alive():
-                Debug.log_warning("ResourcesManager thread did not stop cleanly before timeout")
+                raise RuntimeError("ResourcesManager thread did not stop before timeout")
+
+        if not self._shutdown_observer(join_timeout=5.0):
+            raise RuntimeError("ResourcesManager observer did not stop before timeout")
 
     def is_running(self):
         """
@@ -600,11 +573,11 @@ class ResourcesManager:
         This method ensures complete cleanup of the ResourcesManager.
         """
         self.stop()
-            
+        self.drain_pending_events()
+
         # Reset internal state
         self._observer = None
         self._thread = None
-        self._stop_event.clear()
         self._engine = None
         self._event_handler = None
         self._script_reload_callbacks.clear()

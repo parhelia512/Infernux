@@ -1,6 +1,7 @@
 #include "ShaderProgram.h"
 #include <algorithm>
 #include <core/log/InxLog.h>
+#include <stdexcept>
 
 namespace infernux
 {
@@ -576,53 +577,55 @@ bool ShaderProgramCache::HasProgram(const std::string &shaderId) const
     return m_programs.find(shaderId) != m_programs.end();
 }
 
-void ShaderProgramCache::RemoveProgram(const std::string &shaderId)
+std::vector<std::unique_ptr<ShaderProgram>>
+ShaderProgramCache::TakeProgramsContainingShader(const std::string &shaderName)
 {
-    m_programs.erase(shaderId);
-    m_failedPrograms.erase(shaderId);
-}
+    if (shaderName.empty())
+        throw std::invalid_argument("Shader program invalidation requires a non-empty shader identifier");
 
-void ShaderProgramCache::RemoveProgramsContainingShader(const std::string &shaderName)
-{
-    // Helper to extract shader name from path
-    auto extractShaderName = [](const std::string &path) -> std::string {
-        if (path.empty())
-            return "";
+    auto normalizeIdentifier = [](const std::string &path) {
         size_t lastSlash = path.find_last_of("/\\");
         std::string fileName = (lastSlash != std::string::npos) ? path.substr(lastSlash + 1) : path;
         size_t dotPos = fileName.find_last_of('.');
         if (dotPos != std::string::npos) {
-            return fileName.substr(0, dotPos);
+            fileName.resize(dotPos);
+            return fileName;
         }
-        return fileName;
+        return path;
+    };
+
+    auto matchesShader = [&](const std::string &stageId) {
+        if (stageId == shaderName || stageId.rfind(shaderName + "/", 0) == 0)
+            return true;
+        return normalizeIdentifier(stageId) == normalizeIdentifier(shaderName);
     };
 
     std::vector<std::string> toRemove;
     for (const auto &[key, program] : m_programs) {
+        (void)program;
         // Key format is "vert_path|frag_path"
-        // Check if either path's shader name matches
         size_t pipePos = key.find('|');
         if (pipePos != std::string::npos) {
-            std::string vertPath = key.substr(0, pipePos);
-            std::string fragPath = key.substr(pipePos + 1);
-
-            if (extractShaderName(vertPath) == shaderName || extractShaderName(fragPath) == shaderName) {
+            const std::string vertPath = key.substr(0, pipePos);
+            const std::string fragPath = key.substr(pipePos + 1);
+            if (matchesShader(vertPath) || matchesShader(fragPath)) {
                 toRemove.push_back(key);
-                INXLOG_DEBUG("Removing cached shader program: ", key);
             }
-        } else if (key == shaderName || extractShaderName(key) == shaderName) {
-            // Fallback for simple key format
+        } else if (matchesShader(key)) {
             toRemove.push_back(key);
-            INXLOG_DEBUG("Removing cached shader program (simple key): ", key);
         }
     }
 
+    std::vector<std::unique_ptr<ShaderProgram>> retired;
+    retired.reserve(toRemove.size());
     for (const auto &key : toRemove) {
-        m_programs.erase(key);
+        auto found = m_programs.find(key);
+        retired.push_back(std::move(found->second));
+        m_programs.erase(found);
         m_failedPrograms.erase(key);
     }
 
-    INXLOG_INFO("Removed ", toRemove.size(), " shader programs containing shader '", shaderName, "'");
+    return retired;
 }
 
 void ShaderProgramCache::Clear()

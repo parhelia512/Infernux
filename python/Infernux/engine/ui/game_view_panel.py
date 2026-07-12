@@ -223,8 +223,11 @@ class GameViewPanel(EditorPanel):
             "display_scale": f"{self._display_scale:.3f}",
             "fit_mode": str(self._fit_mode),
         }
-        with open(path, "w", encoding="utf-8") as f:
-            cp.write(f)
+        from io import StringIO
+        from Infernux.core.document_store import write_document_text
+        output = StringIO()
+        cp.write(output)
+        write_document_text(path, output.getvalue())
 
     def _current_target_resolution(self):
         _, w, h = self._RESOLUTION_PRESETS[self._selected_resolution_idx]

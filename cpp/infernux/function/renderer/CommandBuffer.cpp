@@ -143,26 +143,4 @@ void CommandBuffer::SetGlobalMatrix(const std::string &name, const std::array<fl
     m_commands.push_back({RenderCommandType::SetGlobalMatrix, params});
 }
 
-// ============================================================================
-// Async Readback
-// ============================================================================
-
-void CommandBuffer::RequestAsyncReadback(RenderTargetHandle handle, const std::string &callbackId)
-{
-    if (!handle.IsValid()) {
-        INXLOG_WARN("CommandBuffer '", m_name, "': RequestAsyncReadback with invalid handle");
-        return;
-    }
-    if (callbackId.empty()) {
-        INXLOG_WARN("CommandBuffer '", m_name, "': RequestAsyncReadback with empty callbackId");
-        return;
-    }
-
-    RequestAsyncReadbackParams params;
-    params.handleId = handle.id;
-    params.callbackId = callbackId;
-
-    m_commands.push_back({RenderCommandType::RequestAsyncReadback, params});
-}
-
 } // namespace infernux

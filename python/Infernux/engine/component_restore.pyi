@@ -1,67 +1,90 @@
-"""Component restoration — recreate Python components from C++ PendingPyComponent data.
-
-All code paths (scene load, prefab instantiation, play-mode transitions)
-funnel through :func:`restore_pending_py_components`.
-"""
+"""Transactional Python-component preflight and publication."""
 
 from __future__ import annotations
 
 from typing import Any, Optional
 
 
-def resolve_script_from_guid(
-    script_guid: str,
+class PythonComponentRestoreError(RuntimeError): ...
+
+
+class PreparedPythonComponent:
+    game_object_id: Optional[int]
+    source_object_id: int
+    document_path: str
+    type_name: str
+    script_guid: str
+    type_guid: str
+    enabled: bool
+    fields_document: dict[str, Any]
+    instance: Any
+
+
+class PreparedPythonComponentGraph:
+    components: list[PreparedPythonComponent]
+    def require_open(self) -> None: ...
+    def consume(self) -> None: ...
+    def discard(self) -> None: ...
+
+
+def preflight_scene_python_components(
+    document: dict[str, Any], asset_database: Any = None
+) -> PreparedPythonComponentGraph: ...
+def preflight_game_object_python_components(
+    document: dict[str, Any],
     asset_database: Any = None,
-) -> Optional[str]:
-    """Resolve a script GUID to an absolute filesystem path.
-
-    Args:
-        script_guid: The GUID string assigned by the asset database.
-        asset_database: Optional C++ ``AssetDatabase`` instance.
-
-    Returns:
-        Absolute path to the script file, or *None* if unresolvable.
-    """
-    ...
-
+    *,
+    preserve_document_ids: bool,
+) -> PreparedPythonComponentGraph: ...
+def publish_prepared_scene_python_components(
+    scene: Any,
+    prepared: PreparedPythonComponentGraph,
+    *,
+    clear_registries: bool,
+    object_id_map: Optional[dict[int, int]] = None,
+) -> None: ...
+def deserialize_scene_document_transactionally(
+    scene: Any,
+    document: dict[str, Any],
+    asset_database: Any = None,
+    *,
+    clear_registries: bool = True,
+    after_publish: Any = None,
+) -> bool: ...
+def deserialize_game_object_document_transactionally(
+    game_object: Any,
+    document: dict[str, Any],
+    asset_database: Any = None,
+    *,
+    preserve_document_ids: bool = True,
+) -> bool: ...
+def commit_prepared_game_object_document(
+    game_object: Any,
+    document: dict[str, Any],
+    prepared: PreparedPythonComponentGraph,
+) -> bool: ...
+def instantiate_game_object_document_transactionally(
+    scene: Any,
+    document: dict[str, Any],
+    parent: Any = None,
+    asset_database: Any = None,
+) -> Any: ...
+def instantiate_prepared_game_object_document(
+    scene: Any,
+    document: dict[str, Any],
+    prepared: PreparedPythonComponentGraph,
+    parent: Any = None,
+) -> Any: ...
+def clone_game_object_transactionally(
+    scene: Any,
+    source: Any,
+    parent: Any = None,
+    asset_database: Any = None,
+) -> Any: ...
+def resolve_script_from_guid(script_guid: str, asset_database: Any = None) -> Optional[str]: ...
 def create_component_instance(
     script_guid: str,
+    type_guid: str,
     type_name: str,
     asset_database: Any = None,
-) -> tuple[Optional[Any], Optional[str]]:
-    """Create a Python component instance from GUID / type name.
-
-    Returns:
-        ``(instance, script_path)`` — *instance* may be ``None`` if the
-        script cannot be loaded.
-    """
-    ...
-
-def restore_single_component(
-    scene: Any,
-    pc: Any,
-    asset_database: Any = None,
-) -> Optional[Any]:
-    """Restore a single PendingPyComponent onto its GameObject.
-
-    Args:
-        scene: The active scene.
-        pc: A ``PendingPyComponent`` record from C++.
-        asset_database: Optional C++ ``AssetDatabase``.
-
-    Returns:
-        The restored component instance, or *None* on failure.
-    """
-    ...
-
-def restore_pending_py_components(
-    scene: Any,
-    asset_database: Any = None,
-) -> None:
-    """Restore all pending Python components in *scene*.
-
-    Args:
-        scene: The active scene whose pending components should be restored.
-        asset_database: Optional C++ ``AssetDatabase`` for GUID look-ups.
-    """
-    ...
+) -> tuple[Optional[Any], Optional[str]]: ...

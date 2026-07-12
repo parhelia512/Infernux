@@ -10,6 +10,7 @@ State is managed by the unified ``asset_details_renderer`` module.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import time as _time
@@ -611,7 +612,7 @@ def _render_properties_section(ctx, mat_data, is_builtin, default_open):
 
 def _apply_material_changes(panel, state, mat_data, native_mat,
                             requires_deserialize, requires_pipeline_refresh,
-                            old_json, change_key, exec_layer):
+                            old_document, change_key, exec_layer):
     """Serialize and save material changes, record undo."""
     try:
         embedded_path = getattr(state, "file_path", "") or ""
@@ -621,7 +622,7 @@ def _apply_material_changes(panel, state, mat_data, native_mat,
         # native setters in render_material_property. Full JSON deserialize is
         # only needed when material structure changed (shader sync/texture slots).
         if requires_deserialize:
-            native_mat.deserialize(json.dumps(mat_data))
+            native_mat.deserialize_document(mat_data)
         if requires_pipeline_refresh:
             _refresh_pipeline(panel)
 
@@ -659,11 +660,12 @@ def _apply_material_changes(panel, state, mat_data, native_mat,
             if file_path:
                 from Infernux.core.assets import AssetManager
                 AssetManager.set_material_save_snapshot(file_path, new_json)
-            from Infernux.engine.undo import UndoManager, MaterialJsonCommand
+            from Infernux.engine.undo import UndoManager, MaterialDocumentCommand
             mgr = UndoManager.instance()
-            if mgr and not mgr.is_executing and mgr.enabled and old_json and new_json != old_json:
-                mgr.record(MaterialJsonCommand(
-                    native_mat, old_json, new_json, "Edit Material",
+            new_document = copy.deepcopy(mat_data)
+            if mgr and not mgr.is_executing and mgr.enabled and new_document != old_document:
+                mgr.record(MaterialDocumentCommand(
+                    native_mat, old_document, new_document, "Edit Material",
                     refresh_callback=lambda _mat: _refresh_pipeline(panel),
                     edit_key=change_key,
                 ))
@@ -671,7 +673,7 @@ def _apply_material_changes(panel, state, mat_data, native_mat,
             # Lightweight path: just remember that an undo commit is needed.
             if not state.extra.get("_undo_pending"):
                 # First frame of this drag — save the starting snapshot.
-                state.extra["_undo_old_json"] = old_json
+                state.extra["_undo_old_document"] = copy.deepcopy(old_document)
                 state.extra["_undo_edit_key"] = change_key
             state.extra["_undo_pending"] = True
     except (RuntimeError, ValueError) as _exc:
@@ -685,13 +687,13 @@ def _flush_deferred_undo(panel, state, mat_data, native_mat):
         return
     state.extra["_undo_pending"] = False
 
-    old_json = state.extra.pop("_undo_old_json", "")
+    old_document = state.extra.pop("_undo_old_document", None)
     edit_key = state.extra.pop("_undo_edit_key", "")
-    if not old_json:
+    if old_document is None:
         return
 
     try:
-        from Infernux.engine.undo import UndoManager, MaterialJsonCommand
+        from Infernux.engine.undo import UndoManager, MaterialDocumentCommand
         mgr = UndoManager.instance()
         if not (mgr and not mgr.is_executing and mgr.enabled):
             return
@@ -705,9 +707,10 @@ def _flush_deferred_undo(panel, state, mat_data, native_mat):
         if file_path:
             AssetManager.set_material_save_snapshot(file_path, new_json)
 
-        if new_json != old_json:
-            mgr.record(MaterialJsonCommand(
-                native_mat, old_json, new_json, "Edit Material",
+        new_document = copy.deepcopy(mat_data)
+        if new_document != old_document:
+            mgr.record(MaterialDocumentCommand(
+                native_mat, old_document, new_document, "Edit Material",
                 refresh_callback=lambda _mat: _refresh_pipeline(panel),
                 edit_key=edit_key,
             ))
@@ -778,9 +781,8 @@ def render_material_body(ctx: InxGUIContext, panel, state):
     _cached_data = state.extra["cached_data"]
     _shader_cache = state.extra["shader_cache"]
     exec_layer = state.exec_layer
-    old_json = state.extra.get("cached_json", "")
-
     mat_data = _cached_data
+    old_document = copy.deepcopy(mat_data)
     is_builtin = bool(getattr(_native_mat, "is_builtin", False) or mat_data.get("builtin", False))
     if is_builtin:
         mat_data["builtin"] = True
@@ -906,7 +908,7 @@ def render_material_body(ctx: InxGUIContext, panel, state):
         state.extra["_material_preview_ready_at"] = _time.time() + 0.30
         _apply_material_changes(panel, state, mat_data, _native_mat,
                                 requires_deserialize, requires_pipeline_refresh,
-                                old_json, change_key, exec_layer)
+                                old_document, change_key, exec_layer)
         # Mark the native version as "ours" so _refresh_material (called once
         # per frame by asset_details_renderer) can skip the expensive
         # serialize -> json.loads -> merge -> json.dumps round-trip.
@@ -1050,12 +1052,8 @@ def _get_inline_material_extra(panel, native_mat) -> dict:
         return extra
 
     try:
-        current_json = native_mat.serialize()
-    except RuntimeError:
-        current_json = ""
-    try:
-        fresh = json.loads(current_json) if current_json else {}
-    except (ValueError, json.JSONDecodeError):
+        fresh = native_mat.serialize_document()
+    except (RuntimeError, ValueError, TypeError):
         fresh = {}
 
     old_data = extra.get("cached_data", {}) if isinstance(extra, dict) else {}
@@ -1082,7 +1080,7 @@ def _get_inline_material_extra(panel, native_mat) -> dict:
     extra = {
         "native_mat": native_mat,
         "cached_data": fresh,
-        "cached_json": current_json or json.dumps(fresh),
+        "cached_json": json.dumps(fresh),
         "shader_cache": shader_cache,
         "shader_sync_key": extra.get("shader_sync_key", "") if isinstance(extra, dict) else "",
         "mat_version": mat_version,

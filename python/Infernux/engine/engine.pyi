@@ -2,25 +2,34 @@ from __future__ import annotations
 
 from typing import Any, List, Optional, Tuple
 
-from Infernux.lib import InxGUIRenderable, LogLevel
+from Infernux.lib import ImageReadbackTicket, InxGUIRenderable, LogLevel, RuntimeMode
 from Infernux.engine.play_mode import PlayModeManager
 
 
 class Engine:
     """High-level engine facade for initialization, rendering, and editor integration."""
 
-    def __init__(self, engine_log_level: LogLevel = ...) -> None: ...
+    def __init__(self, engine_log_level: LogLevel = ..., mode: RuntimeMode = ...) -> None: ...
     def init_renderer(self, width: int, height: int, project_path: str) -> None:
         """Initialize the Vulkan renderer with the given window size and project path."""
         ...
     def run(self) -> None:
         """Enter the main engine loop."""
         ...
+    def init_headless(self, project_path: str) -> None:
+        """Initialize assets, scene, physics, and workers without a graphics stack."""
+        ...
+    def tick(self, delta_time: float) -> None:
+        """Advance one deterministic headless frame."""
+        ...
+    def request_exit(self) -> None:
+        """Request the native run loop to stop without cleaning up."""
+        ...
     def exit(self) -> None:
         """Request engine shutdown."""
         ...
-    def tick_play_mode(self) -> float:
-        """Advance one play-mode frame and return delta time."""
+    def tick_play_mode(self, external_delta_time: Optional[float] = ...) -> float:
+        """Advance play-mode timing before the native scene update."""
         ...
     def set_gui_font(self, font_path: str, font_size: int = ...) -> None:
         """Set the ImGui font from a TTF file."""
@@ -89,6 +98,9 @@ class Engine:
         ...
     def resize_game_render_target(self, width: int, height: int) -> None:
         """Resize the game viewport render target."""
+        ...
+    def request_render_target_readback(self, game_view: bool = True) -> ImageReadbackTicket:
+        """Request a non-blocking readback of the latest scene or game target."""
         ...
     def set_game_camera_enabled(self, enabled: bool) -> None:
         """Enable or disable the game camera rendering."""

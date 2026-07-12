@@ -7,6 +7,11 @@
 namespace infernux
 {
 
+namespace vk
+{
+class ImageReadbackTicket;
+}
+
 class InxVkCoreModular;
 class InxMaterial;
 
@@ -22,15 +27,14 @@ class GPUMaterialPreview
     GPUMaterialPreview(const GPUMaterialPreview &) = delete;
     GPUMaterialPreview &operator=(const GPUMaterialPreview &) = delete;
 
-    /// @brief Render a material onto a sphere and return RGBA8 pixels.
-    /// @param material  Material with a valid Forward pipeline.
-    /// @param size      Output image width and height (square).
-    /// @param outPixels Receives size*size*4 bytes of RGBA8 pixel data.
-    /// @return true on success.
-    bool RenderToPixels(InxMaterial &material, int size, std::vector<unsigned char> &outPixels);
+    [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket> BeginRenderToPixels(InxMaterial &material, int size);
+    bool TryCompleteRenderToPixels(const std::shared_ptr<vk::ImageReadbackTicket> &ticket, int outputSize,
+                                   std::vector<unsigned char> &outPixels);
 
   private:
     bool EnsureResources(int size);
+    bool EnsureViewResources();
+    void DestroyViewResources();
     void CreateRenderPass();
     void CreateFramebuffer(int size);
     void CreateSphereBuffers();
@@ -51,9 +55,6 @@ class GPUMaterialPreview
 
     VkFramebuffer m_framebuffer = VK_NULL_HANDLE;
 
-    // Staging buffer for GPU → CPU readback
-    vk::VkBufferHandle m_staging;
-
     // Default per-view shadow descriptor used when no active scene descriptor
     // is available but the shader statically uses set 1.
     VkDescriptorSet m_fallbackShadowDescSet = VK_NULL_HANDLE;
@@ -62,6 +63,16 @@ class GPUMaterialPreview
     std::unique_ptr<vk::VkBufferHandle> m_sphereVBO;
     std::unique_ptr<vk::VkBufferHandle> m_sphereIBO;
     uint32_t m_sphereIndexCount = 0;
+
+    std::unique_ptr<vk::VkBufferHandle> m_previewSceneUbo;
+    std::unique_ptr<vk::VkBufferHandle> m_previewLightingUbo;
+    std::unique_ptr<vk::VkBufferHandle> m_previewGlobalsUbo;
+    std::unique_ptr<vk::VkBufferHandle> m_previewInstanceBuffer;
+    std::unique_ptr<vk::VkBufferHandle> m_previewSkinInstanceBuffer;
+    std::unique_ptr<vk::VkBufferHandle> m_previewSkinPaletteBuffer;
+    VkDescriptorPool m_previewGlobalsPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_previewGlobalsSet = VK_NULL_HANDLE;
+    std::shared_ptr<vk::ImageReadbackTicket> m_activeReadback;
 
     // Cached format info
     VkFormat m_colorFormat = VK_FORMAT_UNDEFINED;

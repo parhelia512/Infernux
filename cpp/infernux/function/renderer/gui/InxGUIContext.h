@@ -2,9 +2,11 @@
 
 #include <imgui.h>
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct SDL_Window;
@@ -107,6 +109,9 @@ class InxGUIContext
     /* combo & lists */
     bool Combo(const std::string &label, int *currentItem, const std::vector<std::string> &items,
                int popupMaxHeightInItems = -1);
+    int SearchableCombo(const std::string &id, int currentItem, const std::vector<std::string> &items,
+                        float width = 0.0f, int maxVisibleItems = 8, const std::string &searchHint = "Filter...",
+                        const std::string &emptyText = "No results");
     bool ListBox(const std::string &label, int *currentItem, const std::vector<std::string> &items,
                  int heightInItems = -1);
 
@@ -216,6 +221,7 @@ class InxGUIContext
     bool IsItemActive();
     bool IsAnyItemActive();
     bool IsItemHovered();
+    bool IsItemFocused();
 
     /* focus & activation */
     void SetKeyboardFocusHere(int offset = 0);
@@ -341,6 +347,16 @@ class InxGUIContext
     std::vector<PropertyChange> RenderPropertyBatch(const std::vector<PropertyDesc> &descriptors, float labelWidth);
 
   private:
+    struct SearchableComboState
+    {
+        std::array<char, 256> filter{};
+        int highlightedItem = -1;
+        bool needsSearchFocus = false;
+        bool scrollToHighlight = false;
+        bool wasOpen = false;
+        bool restoreTriggerFocus = false;
+    };
+
     // Infinite-drag helper: warps cursor to opposite screen edge when it
     // reaches the boundary, giving a Unity-style infinite-drag feel.
     void HandleDragCapture(); // call after every ImGui::DragXXX
@@ -348,6 +364,7 @@ class InxGUIContext
 
     bool m_dragCaptured = false;
     int m_ignoreMouseDeltaFrames = 0; // suppress N frames after SDL warp
+    std::unordered_map<std::string, SearchableComboState> m_searchableComboStates;
 };
 
 } // namespace infernux

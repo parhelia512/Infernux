@@ -79,17 +79,24 @@ class TestTimeFixedTick:
 
 
 class TestTimeProperties:
-    def test_time_scale_setter_clamps(self):
-        Time.time_scale = -5.0
-        assert Time.time_scale == 0.0
+    def test_time_scale_setter_rejects_invalid_values(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            Time.time_scale = -5.0
+        with pytest.raises(ValueError, match="finite"):
+            Time.time_scale = float("nan")
 
-    def test_fixed_delta_time_setter_clamps(self):
-        Time.fixed_delta_time = 0.0001
-        assert Time.fixed_delta_time >= 0.001
+    def test_fixed_delta_time_setter_is_native_and_strict(self):
+        Time.fixed_delta_time = 0.01
+        assert Time.fixed_delta_time == pytest.approx(0.01)
+        with pytest.raises(ValueError, match="at least 0.001"):
+            Time.fixed_delta_time = 0.0001
 
-    def test_maximum_delta_time_setter_clamps(self):
-        Time.maximum_delta_time = 0.001
-        assert Time.maximum_delta_time >= 0.01
+    def test_maximum_delta_time_setter_is_native_and_strict(self):
+        Time.fixed_delta_time = 0.01
+        Time.maximum_delta_time = 0.05
+        assert Time.maximum_delta_time == pytest.approx(0.05)
+        with pytest.raises(ValueError, match="not less than fixed_delta_time"):
+            Time.maximum_delta_time = 0.001
 
     def test_realtime_since_startup_positive(self):
         assert Time.realtime_since_startup >= 0
@@ -108,4 +115,4 @@ class TestTimeReset:
     def test_reset_preserves_maximum_delta_time(self):
         Time.maximum_delta_time = 0.05
         Time._reset()
-        assert Time.maximum_delta_time == 0.05
+        assert Time.maximum_delta_time == pytest.approx(0.05)

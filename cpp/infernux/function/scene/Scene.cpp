@@ -3,6 +3,7 @@
 #include "MeshRenderer.h"
 #include "SceneManager.h"
 #include "TransformECSStore.h"
+#include "platform/filesystem/DocumentStore.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <core/log/InxLog.h>
@@ -10,7 +11,7 @@
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <numeric>
-#include <platform/filesystem/InxPath.h>
+#include <type_traits>
 
 using json = nlohmann::json;
 
@@ -409,7 +410,61 @@ void Scene::EditorUpdateObject(GameObject *obj, float deltaTime)
 // Internal overload operating directly on a parsed json value.
 std::unique_ptr<GameObject> Scene::BuildGameObjectFromJsonImpl(const json &objJson, bool preserveIds)
 {
-    std::string name = objJson.value("name", std::string(preserveIds ? "GameObject" : "Prefab"));
+    const size_t pendingPyStart = m_pendingPyComponents.size();
+    const auto fail = [&]() -> std::unique_ptr<GameObject> {
+        m_pendingPyComponents.resize(pendingPyStart);
+        return nullptr;
+    };
+
+    if (!objJson.is_object() || !objJson.contains("schema_version") || !objJson["schema_version"].is_number_integer() ||
+        objJson["schema_version"].get<int>() != 1) {
+        INXLOG_ERROR("Scene object must use schema_version 1");
+        return fail();
+    }
+
+    static const std::unordered_set<std::string> allowedObjectFields = {
+        "schema_version", "name",        "id",        "active",     "is_static",     "tag",      "layer",
+        "prefab_guid",    "prefab_root", "transform", "components", "py_components", "children",
+    };
+    for (const auto &[key, value] : objJson.items()) {
+        (void)value;
+        if (allowedObjectFields.find(key) == allowedObjectFields.end()) {
+            INXLOG_ERROR("Scene object contains unknown field '", key, "'");
+            return fail();
+        }
+    }
+    if (!objJson.contains("name") || !objJson["name"].is_string() || !objJson.contains("active") ||
+        !objJson["active"].is_boolean() || !objJson.contains("is_static") || !objJson["is_static"].is_boolean() ||
+        !objJson.contains("tag") || !objJson["tag"].is_string() || !objJson.contains("layer") ||
+        !objJson["layer"].is_number_integer() || !objJson.contains("py_components") ||
+        !objJson["py_components"].is_array()) {
+        INXLOG_ERROR("Scene object is missing required typed fields");
+        return fail();
+    }
+    if (preserveIds &&
+        (!objJson.contains("id") || !objJson["id"].is_number_unsigned() || objJson["id"].get<uint64_t>() == 0)) {
+        INXLOG_ERROR("Scene object must contain a non-zero unsigned id");
+        return fail();
+    }
+    if (objJson.contains("id") && (!objJson["id"].is_number_unsigned() || objJson["id"].get<uint64_t>() == 0)) {
+        INXLOG_ERROR("Scene object id must be a non-zero unsigned integer");
+        return fail();
+    }
+    const int layer = objJson["layer"].get<int>();
+    if (layer < 0 || layer >= 32) {
+        INXLOG_ERROR("Scene object layer must be in [0, 31]");
+        return fail();
+    }
+    if (objJson.contains("prefab_guid") && !objJson["prefab_guid"].is_string()) {
+        INXLOG_ERROR("Scene object prefab_guid must be a string");
+        return fail();
+    }
+    if (objJson.contains("prefab_root") && !objJson["prefab_root"].is_boolean()) {
+        INXLOG_ERROR("Scene object prefab_root must be a boolean");
+        return fail();
+    }
+
+    std::string name = objJson["name"].get<std::string>();
     auto obj = std::make_unique<GameObject>(name);
     obj->m_scene = this;
 
@@ -419,69 +474,147 @@ std::unique_ptr<GameObject> Scene::BuildGameObjectFromJsonImpl(const json &objJs
         GameObject::EnsureNextID(obj->m_id);
     }
 
-    if (objJson.contains("active"))
-        obj->m_active = objJson["active"].get<bool>();
-    if (objJson.contains("is_static"))
-        obj->m_isStatic = objJson["is_static"].get<bool>();
-    if (objJson.contains("tag"))
-        obj->m_tag = objJson["tag"].get<std::string>();
-    if (objJson.contains("layer")) {
-        int l = objJson["layer"].get<int>();
-        obj->m_layer = (l >= 0 && l < 32) ? l : 0;
-    }
+    obj->m_active = objJson["active"].get<bool>();
+    obj->m_isStatic = objJson["is_static"].get<bool>();
+    obj->m_tag = objJson["tag"].get<std::string>();
+    obj->m_layer = layer;
     if (objJson.contains("prefab_guid"))
         obj->m_prefabGuid = objJson["prefab_guid"].get<std::string>();
     obj->m_prefabRoot = objJson.value("prefab_root", false);
 
     // Transform
-    if (objJson.contains("transform")) {
-        json tJson = objJson["transform"];
-        if (!preserveIds)
-            tJson.erase("component_id");
-        obj->m_transform.Deserialize(tJson.dump());
+    if (!objJson.contains("transform") || !objJson["transform"].is_object()) {
+        INXLOG_ERROR("Scene object '", name, "' is missing a valid transform document");
+        return fail();
+    }
+    json tJson = objJson["transform"];
+    if (!preserveIds)
+        tJson.erase("component_id");
+    if (!obj->m_transform.DeserializeDocument(tJson)) {
+        INXLOG_ERROR("Failed to deserialize transform on scene object '", name, "'");
+        return fail();
     }
 
     // C++ components (factory-based)
-    if (objJson.contains("components") && objJson["components"].is_array()) {
+    if (!objJson.contains("components") || !objJson["components"].is_array()) {
+        INXLOG_ERROR("Scene object '", name, "' is missing its components array");
+        return fail();
+    }
+    {
         for (const auto &compJson : objJson["components"]) {
             std::string typeName = compJson.value("type", std::string());
-            if (typeName.empty() || typeName == "Transform")
-                continue;
+            if (typeName.empty() || typeName == "Transform") {
+                INXLOG_ERROR("Scene object '", name, "' contains an invalid component type");
+                return fail();
+            }
             std::unique_ptr<Component> comp = ComponentFactory::Create(typeName);
-            if (!comp)
-                continue;
+            if (!comp) {
+                INXLOG_ERROR("Scene object '", name, "' references unknown component type '", typeName, "'");
+                return fail();
+            }
             json cJson = compJson;
             if (!preserveIds) {
                 cJson.erase("component_id");
-                cJson.erase("instance_guid");
             }
             comp->SetGameObject(obj.get());
-            comp->Deserialize(cJson.dump());
+            if (!comp->DeserializeDocument(cJson)) {
+                INXLOG_ERROR("Failed to deserialize component '", typeName, "' on scene object '", name, "'");
+                return fail();
+            }
             obj->m_components.push_back(std::move(comp));
         }
     }
 
     // Python components — store as pending for Python-side reconstruction
-    if (objJson.contains("py_components") && objJson["py_components"].is_array()) {
+    {
+        static const std::unordered_set<std::string> allowedPyComponentFields = {
+            "schema_version", "type",      "enabled",     "execution_order", "component_id",
+            "py_type_name",   "type_guid", "script_guid", "py_fields",
+        };
         uint64_t objId = obj->m_id ? obj->m_id : obj->GetID();
         for (const auto &pyCompJson : objJson["py_components"]) {
+            if (!pyCompJson.is_object()) {
+                INXLOG_ERROR("Python component descriptor must be an object");
+                return fail();
+            }
+            for (const auto &[key, value] : pyCompJson.items()) {
+                (void)value;
+                if (allowedPyComponentFields.find(key) == allowedPyComponentFields.end()) {
+                    INXLOG_ERROR("Python component descriptor contains unknown field '", key, "'");
+                    return fail();
+                }
+            }
+            if (!pyCompJson.contains("schema_version") || !pyCompJson["schema_version"].is_number_integer() ||
+                pyCompJson["schema_version"].get<int>() != 1 || !pyCompJson.contains("type") ||
+                !pyCompJson["type"].is_string() || !pyCompJson.contains("enabled") ||
+                !pyCompJson["enabled"].is_boolean() || !pyCompJson.contains("execution_order") ||
+                !pyCompJson["execution_order"].is_number_integer() || !pyCompJson.contains("py_type_name") ||
+                !pyCompJson["py_type_name"].is_string() || !pyCompJson.contains("type_guid") ||
+                !pyCompJson["type_guid"].is_string() || !pyCompJson.contains("script_guid") ||
+                !pyCompJson["script_guid"].is_string() || !pyCompJson.contains("py_fields") ||
+                !pyCompJson["py_fields"].is_object()) {
+                INXLOG_ERROR("Python component descriptor is missing required typed fields");
+                return fail();
+            }
+            const std::string pyTypeName = pyCompJson["py_type_name"].get<std::string>();
+            if (pyTypeName.empty() || pyCompJson["type"].get<std::string>() != pyTypeName) {
+                INXLOG_ERROR("Python component type and py_type_name must be the same non-empty string");
+                return fail();
+            }
+            if (pyCompJson["script_guid"].get_ref<const std::string &>().empty() ||
+                pyCompJson["type_guid"].get_ref<const std::string &>().empty()) {
+                INXLOG_ERROR("Python component script_guid and type_guid must be non-empty");
+                return fail();
+            }
+            if (preserveIds &&
+                (!pyCompJson.contains("component_id") || !pyCompJson["component_id"].is_number_unsigned() ||
+                 pyCompJson["component_id"].get<uint64_t>() == 0)) {
+                INXLOG_ERROR("Python component must contain a non-zero unsigned component_id");
+                return fail();
+            }
+            if (pyCompJson.contains("component_id") &&
+                (!pyCompJson["component_id"].is_number_unsigned() || pyCompJson["component_id"].get<uint64_t>() == 0)) {
+                INXLOG_ERROR("Python component component_id must be a non-zero unsigned integer");
+                return fail();
+            }
+            const auto &fields = pyCompJson["py_fields"];
+            if (!fields.contains("__schema_version__") || !fields["__schema_version__"].is_number_integer() ||
+                fields["__schema_version__"].get<int>() <= 0 || !fields.contains("__type_name__") ||
+                !fields["__type_name__"].is_string() || fields["__type_name__"].get<std::string>() != pyTypeName) {
+                INXLOG_ERROR("Python component py_fields schema/type metadata is invalid");
+                return fail();
+            }
+            const bool hasComponentId = pyCompJson.contains("component_id");
+            const bool fieldsHaveComponentId = fields.contains("__component_id__");
+            if (hasComponentId != fieldsHaveComponentId ||
+                (hasComponentId &&
+                 (!fields["__component_id__"].is_number_unsigned() || fields["__component_id__"].get<uint64_t>() == 0 ||
+                  fields["__component_id__"].get<uint64_t>() != pyCompJson["component_id"].get<uint64_t>()))) {
+                INXLOG_ERROR("Python component component_id metadata is inconsistent");
+                return fail();
+            }
             PendingPyComponent pending;
             pending.gameObjectId = objId;
-            pending.typeName = pyCompJson.value("py_type_name", std::string("PyComponent"));
-            pending.scriptGuid = pyCompJson.value("script_guid", std::string());
-            pending.enabled = pyCompJson.value("enabled", true);
-            if (pyCompJson.contains("py_fields"))
-                pending.fieldsJson = pyCompJson["py_fields"].dump();
+            pending.typeName = pyTypeName;
+            pending.scriptGuid = pyCompJson["script_guid"].get<std::string>();
+            pending.typeGuid = pyCompJson["type_guid"].get<std::string>();
+            pending.enabled = pyCompJson["enabled"].get<bool>();
+            pending.fieldsDocument = fields;
             m_pendingPyComponents.push_back(pending);
         }
     }
 
     // Recurse children
-    if (objJson.contains("children") && objJson["children"].is_array()) {
+    if (!objJson.contains("children") || !objJson["children"].is_array()) {
+        INXLOG_ERROR("Scene object '", name, "' is missing its children array");
+        return fail();
+    }
+    {
         for (const auto &childJson : objJson["children"]) {
             auto child = BuildGameObjectFromJsonImpl(childJson, preserveIds);
-            if (child)
-                obj->AttachChild(std::move(child));
+            if (!child)
+                return fail();
+            obj->AttachChild(std::move(child));
         }
     }
 
@@ -672,15 +805,17 @@ GameObject *Scene::InstantiateGameObject(GameObject *source, GameObject *parent)
 
 GameObject *Scene::InstantiateFromJson(const std::string &jsonStr, GameObject *parent)
 {
-    json j;
     try {
-        j = json::parse(jsonStr);
+        return InstantiateFromDocument(json::parse(jsonStr), parent);
     } catch (const std::exception &e) {
         INXLOG_ERROR("Scene::InstantiateFromJson: JSON parse error: ", e.what());
         return nullptr;
     }
+}
 
-    auto clone = BuildGameObjectFromJsonImpl(j, /*preserveIds=*/false);
+GameObject *Scene::InstantiateFromDocument(const nlohmann::json &document, GameObject *parent)
+{
+    auto clone = BuildGameObjectFromJsonImpl(document, /*preserveIds=*/false);
     if (!clone)
         return nullptr;
 
@@ -703,7 +838,7 @@ GameObject *Scene::InstantiateFromJson(const std::string &jsonStr, GameObject *p
     return ptr;
 }
 
-std::string Scene::Serialize() const
+nlohmann::json Scene::SerializeDocument() const
 {
     json j;
     j["schema_version"] = 1;
@@ -718,46 +853,175 @@ std::string Scene::Serialize() const
     // Serialize all root objects
     json objectsArray = json::array();
     for (const auto &obj : m_rootObjects) {
-        try {
-            json objJson = json::parse(obj->Serialize());
-            objectsArray.push_back(objJson);
-        } catch (const std::exception &e) {
-            INXLOG_ERROR("[Scene] Failed to serialize object '", obj->GetName(), "': ", e.what());
-        }
+        objectsArray.push_back(obj->SerializeDocument());
     }
     j["objects"] = objectsArray;
 
-    return j.dump(2);
+    return j;
 }
 
-bool Scene::Deserialize(const std::string &jsonStr)
+std::string Scene::Serialize() const
+{
+    return SerializeDocument().dump(2);
+}
+
+bool Scene::DeserializeDocument(const nlohmann::json &j)
 {
     try {
-        json j = json::parse(jsonStr);
-
-        if (!j.contains("schema_version")) {
-            INXLOG_ERROR("Scene::Deserialize: missing 'schema_version' field — data predates versioning system");
+        if (!j.is_object() || !j.contains("schema_version") || !j["schema_version"].is_number_integer() ||
+            j["schema_version"].get<int>() != 1) {
+            INXLOG_ERROR("Scene::Deserialize: expected schema_version 1");
             return false;
         }
-
-        // Basic properties
-        if (j.contains("name")) {
-            m_name = j["name"].get<std::string>();
+        if (!j.contains("name") || !j["name"].is_string() || !j.contains("isPlaying") || !j["isPlaying"].is_boolean() ||
+            !j.contains("objects") || !j["objects"].is_array()) {
+            throw std::invalid_argument("scene document is missing required fields");
         }
-        if (j.contains("isPlaying")) {
-            m_isPlaying = j["isPlaying"].get<bool>();
+        static const std::unordered_set<std::string> allowedSceneFields = {
+            "schema_version", "name", "isPlaying", "objects", "mainCameraComponentId",
+        };
+        for (const auto &[key, value] : j.items()) {
+            (void)value;
+            if (allowedSceneFields.find(key) == allowedSceneFields.end())
+                throw std::invalid_argument("scene document contains unknown field: " + key);
         }
 
-        // ── Step 1: drop main camera reference (raw pointer into m_rootObjects). ──
+        // Build the complete graph with temporary IDs in an isolated Scene.
+        // Transform/physics stores can hold both graphs, while temporary component
+        // IDs avoid publishing over live registry entries before validation succeeds.
+        Scene staging(j["name"].get<std::string>());
+        staging.m_isPlaying = j["isPlaying"].get<bool>();
+        staging.m_rootObjects.reserve(j["objects"].size());
+        for (const auto &objJson : j["objects"]) {
+            auto obj = staging.BuildGameObjectFromJsonImpl(objJson, /*preserveIds=*/false);
+            if (!obj)
+                throw std::invalid_argument("scene object graph validation failed");
+            staging.m_rootObjects.push_back(std::move(obj));
+        }
+
+        std::unordered_set<uint64_t> objectIds;
+        std::unordered_set<uint64_t> componentIds;
+        std::unordered_map<uint64_t, Component *> componentsByDocumentId;
+        std::unordered_map<uint64_t, uint64_t> stagedToDocumentObjectId;
+        std::vector<std::pair<Component *, uint64_t>> componentIdAssignments;
+        std::vector<uint64_t> pythonComponentIds;
+        std::function<void(GameObject *, const json &)> collectIds;
+        collectIds = [&](GameObject *obj, const json &objJson) {
+            if (!objJson.contains("id") || !objJson["id"].is_number_unsigned())
+                throw std::invalid_argument("scene GameObject is missing an unsigned id");
+            const uint64_t objectId = objJson["id"].get<uint64_t>();
+            if (objectId == 0 || !objectIds.insert(objectId).second)
+                throw std::invalid_argument("scene contains a zero or duplicate GameObject id");
+            stagedToDocumentObjectId.emplace(obj->m_id, objectId);
+            obj->m_id = objectId;
+
+            const auto collectComponentId = [&](Component *component, const json &componentJson) {
+                if (!componentJson.contains("component_id") || !componentJson["component_id"].is_number_unsigned())
+                    throw std::invalid_argument("scene component is missing an unsigned component_id");
+                const uint64_t componentId = componentJson["component_id"].get<uint64_t>();
+                if (componentId == 0 || !componentIds.insert(componentId).second)
+                    throw std::invalid_argument("scene contains a zero or duplicate component_id");
+                componentIdAssignments.emplace_back(component, componentId);
+                componentsByDocumentId.emplace(componentId, component);
+            };
+
+            collectComponentId(&obj->m_transform, objJson.at("transform"));
+            const auto &componentDocuments = objJson.at("components");
+            if (componentDocuments.size() != obj->m_components.size())
+                throw std::invalid_argument("scene component count changed during staging");
+            for (size_t i = 0; i < obj->m_components.size(); ++i)
+                collectComponentId(obj->m_components[i].get(), componentDocuments[i]);
+
+            for (const auto &pythonComponentDocument : objJson.at("py_components")) {
+                if (!pythonComponentDocument.contains("component_id") ||
+                    !pythonComponentDocument["component_id"].is_number_unsigned()) {
+                    throw std::invalid_argument("scene Python component is missing an unsigned component_id");
+                }
+                const uint64_t componentId = pythonComponentDocument["component_id"].get<uint64_t>();
+                if (componentId == 0 || !componentIds.insert(componentId).second)
+                    throw std::invalid_argument("scene contains a zero or duplicate component_id");
+                pythonComponentIds.push_back(componentId);
+            }
+
+            const auto &childDocuments = objJson.at("children");
+            if (childDocuments.size() != obj->m_children.size())
+                throw std::invalid_argument("scene child count changed during staging");
+            for (size_t i = 0; i < obj->m_children.size(); ++i)
+                collectIds(obj->m_children[i].get(), childDocuments[i]);
+        };
+        for (size_t i = 0; i < staging.m_rootObjects.size(); ++i)
+            collectIds(staging.m_rootObjects[i].get(), j["objects"][i]);
+        staging.m_objectsById.reserve(objectIds.size());
+        for (const auto &root : staging.m_rootObjects)
+            staging.RegisterObjectSubtree(root.get());
+
+        bool requiresFreshComponentIds = false;
+        for (const auto &[component, componentId] : componentIdAssignments) {
+            Component *occupant = Component::FindByComponentId(componentId);
+            if (!occupant || occupant == component)
+                continue;
+            GameObject *owner = occupant->GetGameObject();
+            Scene *ownerScene = owner ? owner->GetScene() : nullptr;
+            if (ownerScene != this && ownerScene != &staging) {
+                requiresFreshComponentIds = true;
+                break;
+            }
+        }
+        for (const uint64_t componentId : pythonComponentIds) {
+            Component *occupant = Component::FindByComponentId(componentId);
+            if (!occupant)
+                continue;
+            GameObject *owner = occupant->GetGameObject();
+            Scene *ownerScene = owner ? owner->GetScene() : nullptr;
+            if (ownerScene != this && ownerScene != &staging) {
+                throw std::invalid_argument(
+                    "scene Python component_id collides with a component owned by another live Scene");
+            }
+        }
+
+        for (auto &pending : staging.m_pendingPyComponents) {
+            const auto it = stagedToDocumentObjectId.find(pending.gameObjectId);
+            if (it == stagedToDocumentObjectId.end())
+                throw std::invalid_argument("pending Python component references an unknown staged object");
+            pending.gameObjectId = it->second;
+        }
+
+        Component *stagedMainCamera = nullptr;
+        if (j.contains("mainCameraComponentId")) {
+            if (!j["mainCameraComponentId"].is_number_unsigned())
+                throw std::invalid_argument("mainCameraComponentId must be unsigned");
+            const uint64_t mainCameraComponentId = j["mainCameraComponentId"].get<uint64_t>();
+            const auto cameraIt = componentsByDocumentId.find(mainCameraComponentId);
+            if (cameraIt == componentsByDocumentId.end() || cameraIt->second->GetTypeName() != "Camera")
+                throw std::invalid_argument("mainCameraComponentId does not reference a Camera");
+            stagedMainCamera = cameraIt->second;
+        }
+
+        // Loading a copy while its source Scene is still alive cannot preserve
+        // globally unique component IDs. Keep every staging ID in that case so
+        // the copied graph is internally consistent and no live registry entry
+        // is overwritten.
+        if (requiresFreshComponentIds) {
+            for (auto &[component, componentId] : componentIdAssignments)
+                componentId = component->GetComponentID();
+        }
+
+        auto &componentRegistry = Component::GetInstanceRegistry();
+        componentRegistry.reserve(componentRegistry.size() + componentIdAssignments.size());
+        using ComponentRegistry = std::remove_reference_t<decltype(componentRegistry)>;
+        std::vector<ComponentRegistry::node_type> stagedRegistryNodes;
+        stagedRegistryNodes.reserve(componentIdAssignments.size());
+        for (const auto &[component, componentId] : componentIdAssignments) {
+            (void)componentId;
+            auto node = componentRegistry.extract(component->m_componentId);
+            if (node.empty())
+                throw std::logic_error("staging component was not present in the instance registry");
+            stagedRegistryNodes.push_back(std::move(node));
+        }
+
+        // Commit starts here. All schema/factory/component validation has completed.
         m_mainCamera = nullptr;
-
-        // ── Step 2: clear physics/renderer registries BEFORE old GameObjects die. ──
-        // See the Scene Rebuild Contract in Scene.h::Deserialize for the full
-        // ordering rationale: the registries hold raw component pointers and must
-        // be empty when destructors fire so no stale pointers leak into the
-        // iteration vectors.
         SceneManager::Instance().ClearComponentRegistries();
-
         m_rootObjects.clear();
         m_objectsById.clear();
         m_pendingDestroy.clear();
@@ -766,20 +1030,22 @@ bool Scene::Deserialize(const std::string &jsonStr)
         m_pendingPyComponents.clear();
         m_hasStarted = false;
 
-        if (j.contains("objects") && j["objects"].is_array()) {
-            int objectCounter = 0;
-            for (const auto &objJson : j["objects"]) {
-                auto obj = BuildGameObjectFromJsonImpl(objJson, /*preserveIds=*/true);
-                if (obj) {
-                    RegisterObjectSubtree(obj.get());
-                    m_rootObjects.push_back(std::move(obj));
-                }
-                // Pump the OS message queue periodically during heavy
-                // deserialization to prevent Windows "Not Responding".
-                if (++objectCounter % 8 == 0) {
-                    SDL_PumpEvents();
-                }
-            }
+        m_name = std::move(staging.m_name);
+        m_isPlaying = staging.m_isPlaying;
+        m_pendingPyComponents = std::move(staging.m_pendingPyComponents);
+        for (size_t i = 0; i < componentIdAssignments.size(); ++i) {
+            auto &[component, componentId] = componentIdAssignments[i];
+            component->m_componentId = componentId;
+            Component::EnsureNextComponentID(componentId);
+            auto &node = stagedRegistryNodes[i];
+            node.key() = componentId;
+            node.mapped() = component;
+            componentRegistry.insert(std::move(node));
+        }
+        m_objectsById = std::move(staging.m_objectsById);
+        for (auto &root : staging.m_rootObjects) {
+            root->SetScene(this);
+            m_rootObjects.push_back(std::move(root));
         }
 
         // ── Step 5: native Awake pass. ──
@@ -793,17 +1059,8 @@ bool Scene::Deserialize(const std::string &jsonStr)
         }
 
         // Restore main camera reference from component ID
-        if (j.contains("mainCameraComponentId")) {
-            uint64_t camCompId = j["mainCameraComponentId"].get<uint64_t>();
-            auto camObjects = FindObjectsWithComponent<Camera>();
-            for (auto *obj : camObjects) {
-                Camera *cam = obj->GetComponent<Camera>();
-                if (cam && cam->GetComponentID() == camCompId) {
-                    m_mainCamera = cam;
-                    break;
-                }
-            }
-        }
+        if (stagedMainCamera)
+            m_mainCamera = static_cast<Camera *>(stagedMainCamera);
 
         ++m_structureVersion; // Scene was fully rebuilt
 
@@ -817,36 +1074,11 @@ bool Scene::Deserialize(const std::string &jsonStr)
 bool Scene::SaveToFile(const std::string &path) const
 {
     try {
-        std::string jsonStr = Serialize();
-        std::ofstream file = OpenOutputFile(path, std::ios::out | std::ios::trunc);
-        if (!file.is_open()) {
-            INXLOG_ERROR("Scene::SaveToFile: cannot open '", path, "' for writing");
-            return false;
-        }
-        file << jsonStr;
-        file.close();
+        const std::string jsonStr = SerializeDocument().dump(2);
+        DocumentStore::Instance().WriteAndWait(path, jsonStr);
         return true;
     } catch (const std::exception &e) {
         INXLOG_ERROR("Scene::SaveToFile failed for '", path, "': ", e.what());
-        return false;
-    }
-}
-
-bool Scene::LoadFromFile(const std::string &path)
-{
-    try {
-        std::ifstream file = OpenInputFile(path);
-        if (!file.is_open()) {
-            INXLOG_ERROR("Scene::LoadFromFile: cannot open '", path, "' for reading");
-            return false;
-        }
-
-        std::string jsonStr((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        file.close();
-
-        return Deserialize(jsonStr);
-    } catch (const std::exception &e) {
-        INXLOG_ERROR("Scene::LoadFromFile failed for '", path, "': ", e.what());
         return false;
     }
 }

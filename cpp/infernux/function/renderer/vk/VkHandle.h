@@ -208,7 +208,7 @@ class VkBufferHandle
      * @return true if creation succeeded
      */
     bool Create(VmaAllocator allocator, VkDevice device, VkDeviceSize size, VkBufferUsageFlags usage,
-                VkMemoryPropertyFlags properties);
+                VkMemoryPropertyFlags properties, const std::vector<uint32_t> &queueFamilies = {});
 
     /**
      * @brief Destroy the buffer and free memory
@@ -508,42 +508,19 @@ class VkTexture
     VkTexture &operator=(VkTexture &&) noexcept = default;
 
     /**
-     * @brief Create a texture from raw pixel data (legacy synchronous path)
+     * @brief Create a texture immediately during renderer bootstrap.
      *
      * Submits all transfer + layout-transition + mipmap-blit work to a
      * single-time command buffer on the supplied graphics queue and blocks
-     * the caller until the GPU signals completion. Allocates and destroys
-     * its own VkFence per upload — for hot-path texture loading prefer the
-     * pooled overload below.
+     * the caller until the GPU signals completion. Runtime uploads must use
+     *
+     * VkResourceManager::BeginTextureUpload instead.
      */
-    bool CreateFromPixels(VmaAllocator allocator, VkDevice device, VkPhysicalDevice physicalDevice,
-                          VkCommandPool cmdPool, VkQueue graphicsQueue, const unsigned char *pixels, uint32_t width,
-                          uint32_t height, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB, bool generateMipmaps = false,
-                          VkFilter filter = VK_FILTER_LINEAR,
-                          VkSamplerAddressMode addressMode = VK_SAMPLER_ADDRESS_MODE_REPEAT, int aniso = -1);
-
-    /**
-     * @brief Create a texture from raw pixel data using an async transfer context.
-     *
-     * Routes the upload through AsyncTransferContext (pooled fences + cmd
-     * buffers, optionally submitted on the dedicated DMA queue when the
-     * GPU exposes one). When async is capable the image is created with
-     * VK_SHARING_MODE_CONCURRENT across [graphicsFamily, transferFamily]
-     * so the renderer can sample it without an explicit queue family
-     * ownership transfer barrier.
-     *
-     * Falls back to the legacy graphics-queue path below the layer when
-     * @p transfer.IsAsyncCapable() is false (single-queue-family GPUs).
-     *
-     * Currently still blocks the caller until the upload completes — full
-     * deferred / streaming loading is the next step on top of this API.
-     */
-    bool CreateFromPixelsAsync(VmaAllocator allocator, VkDevice device, VkPhysicalDevice physicalDevice,
-                               class AsyncTransferContext &transfer, uint32_t graphicsQueueFamily,
-                               const unsigned char *pixels, uint32_t width, uint32_t height,
-                               VkFormat format = VK_FORMAT_R8G8B8A8_SRGB, bool generateMipmaps = false,
-                               VkFilter filter = VK_FILTER_LINEAR,
-                               VkSamplerAddressMode addressMode = VK_SAMPLER_ADDRESS_MODE_REPEAT, int aniso = -1);
+    bool CreateFromPixelsImmediate(VmaAllocator allocator, VkDevice device, VkPhysicalDevice physicalDevice,
+                                   VkCommandPool cmdPool, VkQueue graphicsQueue, const unsigned char *pixels,
+                                   uint32_t width, uint32_t height, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB,
+                                   bool generateMipmaps = false, VkFilter filter = VK_FILTER_LINEAR,
+                                   VkSamplerAddressMode addressMode = VK_SAMPLER_ADDRESS_MODE_REPEAT, int aniso = -1);
 
     /**
      * @brief Create a solid color texture
@@ -577,6 +554,10 @@ class VkTexture
     {
         return m_image.IsValid() && m_sampler.IsValid();
     }
+    [[nodiscard]] VkDeviceSize GetResidentBytes() const noexcept
+    {
+        return m_residentBytes;
+    }
 
     explicit operator bool() const noexcept
     {
@@ -584,9 +565,11 @@ class VkTexture
     }
 
   private:
+    friend class VkResourceManager;
     VkImageHandle m_image;
     VkSamplerHandle m_sampler;
     std::string m_name;
+    VkDeviceSize m_residentBytes = 0;
 };
 
 // ============================================================================

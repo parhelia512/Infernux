@@ -3,8 +3,26 @@ Window Manager for Infernux Editor.
 Manages window visibility, registration, and provides Window menu functionality.
 """
 from collections import deque
+from enum import Enum, auto
 from typing import Deque, Dict, Type, Callable, Optional, Any
 from Infernux.lib import InxGUIRenderable
+
+
+class WindowState(Enum):
+    CLOSED = auto()
+    OPENING = auto()
+    OPEN = auto()
+    FOCUS_REQUESTED = auto()
+    FOCUSED = auto()
+    CLOSING = auto()
+
+
+_VISIBLE_STATES = frozenset({
+    WindowState.OPENING,
+    WindowState.OPEN,
+    WindowState.FOCUS_REQUESTED,
+    WindowState.FOCUSED,
+})
 
 
 class WindowInfo:
@@ -61,8 +79,10 @@ class WindowManager:
     def __init__(self, engine):
         self._engine = engine
         self._registered_types: Dict[str, WindowInfo] = {}  # type_id -> WindowInfo
-        self._open_windows: Dict[str, bool] = {}  # window_id -> is_open
+        self._window_states: Dict[str, WindowState] = {}
         self._window_instances: Dict[str, InxGUIRenderable] = {}  # window_id -> instance
+        self._registered_instance_ids: set[str] = set()
+        self._window_type_ids: Dict[str, str] = {}
         self._default_instances: Dict[str, InxGUIRenderable] = {}  # window_id -> original instance
         self._builtin_defaults: set = set()  # window_ids that should reopen on reset
         self._project_console_front_id = "project"
@@ -85,53 +105,60 @@ class WindowManager:
         """Return the panel's real open state when available, else None."""
         if instance is None:
             return None
-        try:
-            probe = getattr(instance, "is_open", None)
-            if callable(probe):
-                return bool(probe())
-            if probe is not None:
-                return bool(probe)
-        except Exception:
-            return None
+        probe = getattr(instance, "is_open", None)
+        if callable(probe):
+            return bool(probe())
+        if probe is not None:
+            return bool(probe)
         return None
 
     @staticmethod
     def _set_instance_open(instance: InxGUIRenderable, is_open: bool) -> None:
         """Set open state for both Python and native panels."""
         if instance is None:
+            raise ValueError("cannot set visibility on a missing window instance")
+        setter = getattr(instance, "set_open", None)
+        if callable(setter):
+            setter(bool(is_open))
             return
-        try:
-            setter = getattr(instance, "set_open", None)
-            if callable(setter):
-                setter(bool(is_open))
-                return
-        except Exception:
-            pass
         if hasattr(instance, "_is_open"):
-            try:
-                instance._is_open = bool(is_open)
-            except Exception:
-                pass
+            instance._is_open = bool(is_open)
+            return
+        raise TypeError(f"window instance {type(instance).__name__} has no visibility API")
 
     def _sync_instance_open_state(self, window_id: str) -> bool:
-        """Refresh cached open flag from instance state and return it."""
+        """Refresh the lifecycle state from the panel's authoritative visibility."""
         inst = self._window_instances.get(window_id)
         reported = self._instance_reports_open(inst)
-        if reported is not None:
-            self._open_windows[window_id] = reported
-            if not reported:
-                # Keep instance for fast reopen; it is no longer considered active/open.
-                return False
-        return bool(self._open_windows.get(window_id, False))
+        if reported is False and self._window_states.get(window_id) in _VISIBLE_STATES:
+            self._window_states[window_id] = WindowState.CLOSED
+        return self._window_states.get(window_id, WindowState.CLOSED) in _VISIBLE_STATES
 
     def _notify_state_changed(self):
         if self._on_state_changed is not None:
             self._on_state_changed()
 
     def note_panel_focus(self, panel_id: str):
+        if panel_id not in self._window_states:
+            raise KeyError(f"Unknown window id: {panel_id}")
+        for window_id, state in list(self._window_states.items()):
+            if state is WindowState.FOCUSED and window_id != panel_id:
+                self._window_states[window_id] = WindowState.OPEN
+        self._window_states[panel_id] = WindowState.FOCUSED
         if panel_id in {"project", "console"}:
             self._project_console_front_id = panel_id
         self._notify_state_changed()
+
+    def _request_focus(self, window_id: str) -> None:
+        self._window_states[window_id] = WindowState.FOCUS_REQUESTED
+
+        def focus(target_id=window_id):
+            if self._window_states.get(target_id) is not WindowState.FOCUS_REQUESTED:
+                return
+            self._engine.select_docked_window(target_id)
+            self._window_states[target_id] = WindowState.FOCUSED
+
+        self._enqueue_action(focus)
     
     def register_window_type(self, 
                              type_id: str,
@@ -153,6 +180,10 @@ class WindowManager:
             title_key: Optional i18n key for dynamic title resolution
             menu_path: Slash-separated menu path (e.g. "Window", "Animation/2D Animation")
         """
+        if not type_id:
+            raise ValueError("window type_id cannot be empty")
+        if type_id in self._registered_types:
+            raise ValueError(f"Window type already registered: {type_id}")
         self._registered_types[type_id] = WindowInfo(
             window_class=window_class,
             display_name=display_name,
@@ -171,31 +202,32 @@ class WindowManager:
             instance_id: Optional specific instance ID (for non-singleton windows)
             
         Returns:
-            The window instance, or None if cannot be created
+            The window instance.
         """
         if type_id not in self._registered_types:
-            print(f"[WindowManager] Unknown window type: {type_id}")
-            return None
+            raise KeyError(f"Unknown window type: {type_id}")
         
         info = self._registered_types[type_id]
         window_id = instance_id or type_id
         
-        # Check if already open (for singletons)
-        if info.singleton and window_id in self._open_windows and self._open_windows[window_id]:
-            existing = self._window_instances.get(window_id)
-            if existing is not None:
-                if self._instance_reports_open(existing) is False:
-                    self._open_windows[window_id] = False
-                else:
-                    print(f"[WindowManager] Window already open: {window_id}")
-                    return existing
-            else:
-                # Heal stale state where open-flag says True but instance is missing.
-                self._open_windows[window_id] = False
-        
-        pending_instance = self._window_instances.get(window_id)
-        if pending_instance is not None and self._open_windows.get(window_id, False):
-            return pending_instance
+        state = self._window_states.get(window_id, WindowState.CLOSED)
+        existing = self._window_instances.get(window_id)
+        if state in _VISIBLE_STATES:
+            if existing is None:
+                raise RuntimeError(f"Window '{window_id}' is {state.name} without an instance")
+            self._request_focus(window_id)
+            return existing
+        if (
+            existing is not None
+            and self._default_instances.get(window_id) is existing
+            and window_id in self._builtin_defaults
+            and window_id in self._registered_instance_ids
+        ):
+            self._set_instance_open(existing, True)
+            self._window_states[window_id] = WindowState.OPEN
+            self._request_focus(window_id)
+            self._notify_state_changed()
+            return existing
 
         # Reuse the original default instance when reopening a closed built-in
         # singleton so panel state survives hide/show and restart restore.
@@ -212,7 +244,8 @@ class WindowManager:
         else:
             self._set_instance_open(instance, True)
         self._window_instances[window_id] = instance
-        self._open_windows[window_id] = True
+        self._window_type_ids[window_id] = type_id
+        self._window_states[window_id] = WindowState.OPENING
         # Ensure singleton panels participate in save/load persistence
         # so their open state survives engine restarts.
         if info.singleton and window_id not in self._default_instances:
@@ -220,46 +253,66 @@ class WindowManager:
         self._notify_state_changed()
 
         def _register_instance(target_id=window_id, target_instance=instance):
-            if not self._open_windows.get(target_id, False):
+            if self._window_states.get(target_id) is not WindowState.OPENING:
                 return
             if self._window_instances.get(target_id) is not target_instance:
                 return
             self._engine.register_gui(target_id, target_instance)
+            self._registered_instance_ids.add(target_id)
+            self._window_states[target_id] = WindowState.OPEN
 
         self._enqueue_action(_register_instance)
         return instance
     
     def close_window(self, window_id: str):
         """Close a window by its ID."""
-        if window_id in self._open_windows:
-            self._open_windows[window_id] = False
-            self._notify_state_changed()
-            if window_id in self._window_instances:
-                instance = self._window_instances[window_id]
-                self._set_instance_open(instance, False)
+        if window_id not in self._window_states:
+            raise KeyError(f"Unknown window id: {window_id}")
+        state = self._window_states[window_id]
+        if state in {WindowState.CLOSED, WindowState.CLOSING}:
+            return
+        instance = self._window_instances.get(window_id)
+        if instance is None:
+            raise RuntimeError(f"Window '{window_id}' has no instance to close")
+        self._set_instance_open(instance, False)
+        self._notify_state_changed()
 
-                def _unregister_instance(target_id=window_id, target_instance=instance):
-                    if self._open_windows.get(target_id, False):
-                        return
-                    if self._window_instances.get(target_id) is not target_instance:
-                        return
-                    self._engine.unregister_gui(target_id)
-                    self._window_instances.pop(target_id, None)
+        if state is WindowState.OPENING and window_id not in self._registered_instance_ids:
+            self._window_states[window_id] = WindowState.CLOSED
+            if window_id not in self._builtin_defaults:
+                self._window_instances.pop(window_id)
+            return
 
-                self._enqueue_action(_unregister_instance)
+        if window_id in self._builtin_defaults:
+            self._window_states[window_id] = WindowState.CLOSED
+            return
+
+        self._window_states[window_id] = WindowState.CLOSING
+
+        def _unregister_instance(target_id=window_id, target_instance=instance):
+            if self._window_states.get(target_id) is not WindowState.CLOSING:
+                return
+            if self._window_instances.get(target_id) is not target_instance:
+                raise RuntimeError(f"Window '{target_id}' instance changed while closing")
+            self._engine.unregister_gui(target_id)
+            self._registered_instance_ids.remove(target_id)
+            self._window_instances.pop(target_id)
+            self._window_states[target_id] = WindowState.CLOSED
+
+        self._enqueue_action(_unregister_instance)
     
     def is_window_open(self, window_id: str) -> bool:
         """Check if a window is currently open."""
         if window_id in self._window_instances:
             return self._sync_instance_open_state(window_id)
-        return self._open_windows.get(window_id, False)
+        return self._window_states.get(window_id, WindowState.CLOSED) in _VISIBLE_STATES
     
     def set_window_open(self, window_id: str, is_open: bool):
         """Set window open state (called by window when close button is clicked)."""
-        if window_id not in self._open_windows:
-            return
+        if window_id not in self._window_states:
+            raise KeyError(f"Unknown window id: {window_id}")
         if is_open:
-            type_id = getattr(self._window_instances.get(window_id), "_window_type_id", None) or window_id
+            type_id = self._window_type_ids.get(window_id, window_id)
             self.open_window(type_id, instance_id=window_id)
             return
         self.close_window(window_id)
@@ -272,15 +325,24 @@ class WindowManager:
         """Get all window open states."""
         for window_id in list(self._window_instances.keys()):
             self._sync_instance_open_state(window_id)
-        return self._open_windows.copy()
+        return {
+            window_id: state in _VISIBLE_STATES
+            for window_id, state in self._window_states.items()
+        }
+
+    def get_window_state(self, window_id: str) -> WindowState:
+        """Return the explicit lifecycle state for a known window."""
+        if window_id not in self._window_states:
+            raise KeyError(f"Unknown window id: {window_id}")
+        return self._window_states[window_id]
 
     def save_state(self) -> Dict[str, Any]:
         from .closable_panel import ClosablePanel
 
-        all_ids = set(self._default_instances.keys()) | set(self._open_windows.keys())
+        all_ids = set(self._default_instances.keys()) | set(self._window_states.keys())
         return {
             "open_windows": {
-                window_id: bool(self._open_windows.get(window_id, False))
+                window_id: self._window_states.get(window_id, WindowState.CLOSED) in _VISIBLE_STATES
                 for window_id in all_ids
             },
             "active_panel_id": ClosablePanel.get_active_panel_id() or "",
@@ -296,9 +358,11 @@ class WindowManager:
             # Lazily create registered-type windows not yet in _default_instances.
             # If the user opened this panel in a prior session and it was saved
             # as open, restore it now.
-            if window_id not in self._default_instances:
+            if window_id not in self._builtin_defaults:
                 if is_open and window_id in self._registered_types:
                     self.open_window(window_id)
+                else:
+                    self._window_states[window_id] = WindowState.CLOSED
                 continue
 
             instance = self._default_instances[window_id]
@@ -306,16 +370,13 @@ class WindowManager:
                 instance.set_window_manager(self)
 
             if is_open:
-                self._open_windows[window_id] = True
+                self._window_states[window_id] = WindowState.OPEN
                 self._set_instance_open(instance, True)
                 if self._window_instances.get(window_id) is None:
                     self._window_instances[window_id] = instance
             else:
-                self._open_windows[window_id] = False
+                self._window_states[window_id] = WindowState.CLOSED
                 self._set_instance_open(instance, False)
-                if self._window_instances.get(window_id) is instance:
-                    self._engine.unregister_gui(window_id)
-                    self._window_instances.pop(window_id, None)
 
         active_panel_id = str(data.get('active_panel_id', '') or '')
         project_console_front_id = str(data.get('project_console_front_id', '') or '')
@@ -323,9 +384,9 @@ class WindowManager:
             self._project_console_front_id = project_console_front_id
 
         focus_panel_id = ""
-        if self._project_console_front_id and self._open_windows.get(self._project_console_front_id, False):
+        if self.is_window_open(self._project_console_front_id):
             focus_panel_id = self._project_console_front_id
-        elif active_panel_id and self._open_windows.get(active_panel_id, False):
+        elif active_panel_id and self.is_window_open(active_panel_id):
             focus_panel_id = active_panel_id
 
         if focus_panel_id:
@@ -336,16 +397,25 @@ class WindowManager:
         Register an already-created window instance.
         Used when windows are created directly (e.g., at startup).
         """
+        if not window_id:
+            raise ValueError("window_id cannot be empty")
+        if instance is None:
+            raise ValueError("window instance cannot be None")
+        if window_id in self._window_states:
+            raise ValueError(f"Window already registered: {window_id}")
         self._window_instances[window_id] = instance
-        self._open_windows[window_id] = True
+        self._window_states[window_id] = WindowState.OPEN
         self._default_instances[window_id] = instance
+        self._registered_instance_ids.add(window_id)
         self._builtin_defaults.add(window_id)
         if window_id in {"project", "console"} and self._project_console_front_id not in {"project", "console"}:
             self._project_console_front_id = window_id
         
         # Store type_id association if provided
         if type_id:
-            instance._window_type_id = type_id
+            self._window_type_ids[window_id] = type_id
+        else:
+            self._window_type_ids[window_id] = window_id
 
     def set_imgui_ini_path(self, path: str):
         """Set the imgui.ini path used for docking layout persistence."""
@@ -383,26 +453,19 @@ class WindowManager:
             if wid in self._registered_types:
                 self._builtin_defaults.add(wid)
             if wid not in self._default_instances and wid in self._registered_types:
-                try:
-                    inst = self._registered_types[wid].factory()
-                    try:
-                        inst._window_type_id = wid
-                    except Exception:
-                        pass
-                    self._default_instances[wid] = inst
-                except Exception:
-                    pass
+                self._default_instances[wid] = self._registered_types[wid].factory()
 
         # 1. Close any dynamically-opened windows (not part of builtin default set)
         dynamic_ids = [
-            wid for wid, is_open in self._open_windows.items()
-            if is_open and wid not in self._builtin_defaults
+            wid for wid, state in self._window_states.items()
+            if state in _VISIBLE_STATES and wid not in self._builtin_defaults
         ]
         for wid in dynamic_ids:
-            self._open_windows[wid] = False
+            self._window_states[wid] = WindowState.CLOSED
             # Only unregister windows that are currently tracked as active instances.
             if wid in self._window_instances:
                 self._engine.unregister_gui(wid)
+                self._registered_instance_ids.remove(wid)
             self._window_instances.pop(wid, None)
 
         # 2. Force ALL builtin default panels to be open and registered
@@ -410,12 +473,8 @@ class WindowManager:
             instance = self._default_instances.get(window_id)
             if instance is None:
                 continue
-            if hasattr(instance, '_is_open'):
-                instance._is_open = True
-            else:
-                self._set_instance_open(instance, True)
-            if hasattr(instance, 'open'):
-                instance.open()
+            was_registered = window_id in self._registered_instance_ids
+            self._set_instance_open(instance, True)
 
             if hasattr(instance, 'set_window_manager'):
                 instance.set_window_manager(self)
@@ -423,12 +482,11 @@ class WindowManager:
             if self._window_instances.get(window_id) is not instance:
                 self._window_instances[window_id] = instance
 
-            self._open_windows[window_id] = True
-            try:
+            self._window_states[window_id] = WindowState.OPEN
+            if was_registered:
                 self._engine.unregister_gui(window_id)
-            except Exception:
-                pass
             self._engine.register_gui(window_id, instance)
+            self._registered_instance_ids.add(window_id)
 
         self._project_console_front_id = "project"
         self._notify_state_changed()

@@ -15,6 +15,7 @@ namespace infernux
 class InxGUI;
 class AssetDatabase;
 class InxRenderer;
+class InxMaterial;
 
 /// Display mode for preview visualization
 enum class PreviewDisplayMode : int
@@ -157,7 +158,7 @@ class ImagePreviewer : public IResourcePreviewer
     void Unload() override;
     bool IsLoaded() const override
     {
-        return m_textureId != 0;
+        return !m_loadedPath.empty();
     }
     std::string GetLoadedPath() const override
     {
@@ -171,6 +172,7 @@ class ImagePreviewer : public IResourcePreviewer
 
     InxGUI *m_gui = nullptr;
     std::string m_loadedPath;
+    std::string m_textureName;
     uint64_t m_textureId = 0;
     int m_width = 0;
     int m_height = 0;
@@ -276,7 +278,7 @@ class MaterialPreviewer : public IResourcePreviewer
     void Unload() override;
     bool IsLoaded() const override
     {
-        return m_textureId != 0;
+        return !m_loadedPath.empty();
     }
     std::string GetLoadedPath() const override
     {
@@ -284,29 +286,19 @@ class MaterialPreviewer : public IResourcePreviewer
     }
     std::vector<std::pair<std::string, std::string>> GetMetadata() const override;
 
-    /// @brief Render a material file to RGBA pixels (for thumbnail generation).
-    /// @param matFilePath Path to the .mat file
-    /// @param size        Output image width and height (square)
-    /// @param outPixels   Receives RGBA8 pixel data
-    /// @param adb         Optional AssetDatabase for resolving texture GUIDs
-    /// @param renderer    Optional renderer for GPU-based preview (falls back to CPU)
-    /// @return true if successful
-    static bool RenderToPixels(const std::string &matFilePath, int size, std::vector<unsigned char> &outPixels,
-                               AssetDatabase *adb = nullptr, InxRenderer *renderer = nullptr);
-
-    /// @brief Render from a JSON string instead of reading from disk.
-    static bool RenderFromJson(const std::string &materialJson, int size, std::vector<unsigned char> &outPixels,
-                               AssetDatabase *adb = nullptr, InxRenderer *renderer = nullptr);
-
-    /// @brief Preview material extracted from an imported model slot (FBX inline materials).
-    static bool RenderModelEmbeddedMaterialToPixels(const std::string &modelPath, uint32_t slotIndex, int size,
-                                                    std::vector<unsigned char> &outPixels, AssetDatabase *adb = nullptr,
-                                                    InxRenderer *renderer = nullptr);
+    static std::shared_ptr<InxMaterial> BuildPreviewMaterialFromFile(const std::string &matFilePath,
+                                                                     AssetDatabase *adb = nullptr);
+    static std::shared_ptr<InxMaterial> BuildPreviewMaterialFromJson(const std::string &materialJson,
+                                                                     AssetDatabase *adb = nullptr);
+    static std::shared_ptr<InxMaterial> BuildEmbeddedPreviewMaterial(const std::string &modelPath, uint32_t slotIndex);
+    static void RenderCpuPreview(const std::shared_ptr<InxMaterial> &material, int size,
+                                 std::vector<unsigned char> &outPixels, AssetDatabase *adb = nullptr);
 
   private:
     InxGUI *m_gui = nullptr;
     int m_previewSize;
     std::string m_loadedPath;
+    std::string m_textureName;
     uint64_t m_textureId = 0;
     std::string m_materialName;
     std::string m_shaderName;

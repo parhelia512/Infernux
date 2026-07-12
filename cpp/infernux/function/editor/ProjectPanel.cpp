@@ -249,6 +249,7 @@ const std::unordered_map<std::string, std::string> &ProjectPanel::GetIconMap()
         {".txt", "text"},
         {".md", "readme"},
         {".mat", "file"},
+        {".physicmaterial", "file"},
         {".scene", "scene"},
         // .prefab intentionally omitted — scene prefabs use the mesh-preview pipeline
         // (same as models); UI-only prefabs fall back to model_3d.png via explicit logic.
@@ -268,6 +269,7 @@ const std::unordered_map<std::string, ProjectPanel::DragDropInfo> &ProjectPanel:
     static const std::unordered_map<std::string, DragDropInfo> map = {
         {".py", {"SCRIPT_FILE", "Script"}},
         {".mat", {"MATERIAL_FILE", "Material"}},
+        {".physicmaterial", {"PHYSIC_MATERIAL_FILE", "PhysicMaterial"}},
         {".vert", {"SHADER_FILE", "Shader"}},
         {".frag", {"SHADER_FILE", "Shader"}},
         {".glsl", {"SHADER_FILE", "Shader"}},
@@ -348,6 +350,8 @@ const char *ProjectPanel::GetFileTypeTag(const std::string &filename)
         return "[PY]";
     if (ext == ".mat")
         return "[MAT]";
+    if (ext == ".physicmaterial")
+        return "[PMAT]";
     if (ext == ".vert" || ext == ".frag" || ext == ".glsl" || ext == ".hlsl")
         return "[SHDR]";
     if (IsImageExt(ext))
@@ -589,18 +593,33 @@ void ProjectPanel::SetRenderer(InxRenderer *renderer)
 {
     if (m_renderer == renderer)
         return;
+    if (m_renderer) {
+        for (const auto &[iconKey, textureId] : m_typeIconCache) {
+            (void)textureId;
+            m_renderer->RemoveImGuiTexture("__typeicon__" + iconKey);
+        }
+    }
     m_renderer = renderer;
     m_typeIconCache.clear();
     m_typeIconsLoaded = false;
 }
 void ProjectPanel::SetAssetDatabase(AssetDatabase *adb)
 {
+    if (m_assetDatabase == adb)
+        return;
     m_assetDatabase = adb;
+    InvalidateDirCache();
 }
 void ProjectPanel::SetIconsDirectory(const std::string &dir)
 {
     if (m_iconsDir == dir && m_typeIconsLoaded)
         return;
+    if (m_renderer) {
+        for (const auto &[iconKey, textureId] : m_typeIconCache) {
+            (void)textureId;
+            m_renderer->RemoveImGuiTexture("__typeicon__" + iconKey);
+        }
+    }
     m_iconsDir = dir;
     m_typeIconCache.clear();
     m_typeIconsLoaded = false;
@@ -743,14 +762,18 @@ ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot(const std::string &path)
     if (path.empty())
         return nullptr;
 
-    // Fast path: return cached snapshot if TTL hasn't expired (avoids syscalls)
+    const auto catalog = m_assetDatabase ? m_assetDatabase->GetCatalogSnapshot() : nullptr;
+    const uint64_t assetGeneration = catalog ? catalog->GetGeneration() : 0;
+
+    // File changes are generation-driven. TTL validation is only for directory nodes.
     auto it = m_dirCache.find(path);
     if (it != m_dirCache.end()) {
-        if ((m_frameTimeNow - it->second.lastValidatedAt) < DIR_CACHE_TTL)
+        if (it->second.assetGeneration == assetGeneration &&
+            (m_frameTimeNow - it->second.lastValidatedAt) < DIR_CACHE_TTL)
             return &it->second;
         uint64_t mtimeNs = GetMtimeNs(path);
         it->second.lastValidatedAt = m_frameTimeNow;
-        if (it->second.mtimeNs == mtimeNs)
+        if (it->second.assetGeneration == assetGeneration && it->second.mtimeNs == mtimeNs)
             return &it->second;
     }
 
@@ -762,6 +785,7 @@ ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot(const std::string &path)
 
     DirSnapshot snap;
     snap.mtimeNs = mtimeNs;
+    snap.assetGeneration = assetGeneration;
     snap.lastValidatedAt = m_frameTimeNow;
 
     for (auto &entry : fs::directory_iterator(fs::u8path(path), ec)) {
@@ -784,7 +808,7 @@ ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot(const std::string &path)
         if (isDir) {
             item.type = FileItem::Dir;
             snap.dirs.push_back(std::move(item));
-        } else {
+        } else if (!catalog) {
             item.type = FileItem::File;
             auto ext = infernux::FromFsPath(entry.path().extension());
             for (auto &c : ext)
@@ -799,6 +823,25 @@ ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot(const std::string &path)
                     std::memcpy(&item.mtimeNs, &rawNs, sizeof(item.mtimeNs));
                 }
             }
+            snap.files.push_back(std::move(item));
+        }
+    }
+
+    if (catalog) {
+        const auto &assets = catalog->GetDirectory(NormalizePath(path));
+        snap.files.reserve(assets.size());
+        for (const auto &asset : assets) {
+            if (!ShouldShow(asset.name))
+                continue;
+            FileItem item;
+            item.type = FileItem::File;
+            item.name = asset.name;
+            item.path = asset.path;
+            item.resourceType = asset.resourceType;
+            item.ext = infernux::FromFsPath(fs::u8path(asset.path).extension());
+            for (char &character : item.ext)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            std::memcpy(&item.mtimeNs, &asset.source.modifiedNs, sizeof(item.mtimeNs));
             snap.files.push_back(std::move(item));
         }
     }
@@ -904,15 +947,15 @@ int TryGetMetaInt(const infernux::InxResourceMeta *meta, const std::string &key,
 void ProjectPanel::AppendModelSubAssets(std::vector<FileItem> &out, AssetDatabase *adb, const FileItem &modelItem)
 {
     const std::string &modelPath = modelItem.path;
-    const infernux::InxResourceMeta *meta = nullptr;
+    std::shared_ptr<const infernux::InxResourceMeta> meta;
     if (adb)
         meta = adb->GetMetaByPath(modelPath);
 
     const uint64_t childMtime = modelItem.mtimeNs;
 
     // ── Materials (material slots) ────────────────────────────────────
-    std::vector<std::string> matNames = SplitCommaList(TryGetMetaString(meta, "material_slots"));
-    int matCount = TryGetMetaInt(meta, "material_slot_count", -1);
+    std::vector<std::string> matNames = SplitCommaList(TryGetMetaString(meta.get(), "material_slots"));
+    int matCount = TryGetMetaInt(meta.get(), "material_slot_count", -1);
     if (matNames.empty() && matCount > 0) {
         matNames.reserve(static_cast<size_t>(matCount));
         for (int i = 0; i < matCount; ++i)
@@ -950,8 +993,8 @@ void ProjectPanel::AppendModelSubAssets(std::vector<FileItem> &out, AssetDatabas
         if (!g.empty())
             animVirtualBase = std::move(g);
     }
-    std::vector<std::string> animNames = SplitCommaList(TryGetMetaString(meta, "animation_names_csv"));
-    int animCount = TryGetMetaInt(meta, "animation_count", -1);
+    std::vector<std::string> animNames = SplitCommaList(TryGetMetaString(meta.get(), "animation_names_csv"));
+    int animCount = TryGetMetaInt(meta.get(), "animation_count", -1);
     if (!animNames.empty()) {
         const int maxShow = 24;
         const int total = static_cast<int>(animNames.size());
@@ -1105,7 +1148,7 @@ uint64_t ProjectPanel::GetThumbnail(const std::string &filePath, uint64_t cached
     bool nearest = false;
     bool srgb = false;
     if (m_assetDatabase) {
-        const InxResourceMeta *meta = m_assetDatabase->GetMetaByPath(filePath);
+        const auto meta = m_assetDatabase->GetMetaByPath(filePath);
         if (meta) {
             if (meta->HasKey("filter_mode")) {
                 std::string fm = meta->GetDataAs<std::string>("filter_mode");
@@ -1263,8 +1306,14 @@ void ProjectPanel::ProcessPendingThumbnails()
 
 void ProjectPanel::EnsureTypeIconsLoaded()
 {
-    if (m_typeIconsLoaded || !m_renderer || m_iconsDir.empty())
+    if (!m_renderer || m_iconsDir.empty())
         return;
+
+    if (m_typeIconsLoaded) {
+        for (auto &[iconKey, textureId] : m_typeIconCache)
+            textureId = m_renderer->GetImGuiTextureId("__typeicon__" + iconKey);
+        return;
+    }
 
     std::unordered_set<std::string> needed;
     for (auto &[_, iconName] : GetIconMap())
@@ -1289,9 +1338,9 @@ void ProjectPanel::EnsureTypeIconsLoaded()
         if (!texData.IsValid())
             continue;
 
-        auto tid = m_renderer->UploadTextureForImGui(texName, texData.pixels.data(), texData.width, texData.height);
-        if (tid != 0)
-            m_typeIconCache[iconKey] = tid;
+        (void)m_renderer->SubmitTextureForImGui(texName, texData.pixels.data(), texData.pixels.size(), texData.width,
+                                                texData.height, VK_FILTER_LINEAR, true);
+        m_typeIconCache[iconKey] = m_renderer->GetImGuiTextureId(texName);
     }
 
     m_typeIconsLoaded = true;
@@ -2609,6 +2658,13 @@ void ProjectPanel::RenderContextMenu(InxGUIContext *ctx)
             CreateAndRename("NewMaterial", ".mat", [this](const std::string &name) {
                 if (createMaterial)
                     return createMaterial(m_currentPath, name);
+                return std::make_pair(false, std::string("No callback"));
+            });
+        }
+        if (ctx->Selectable(Tr("project.create_physic_material"), false)) {
+            CreateAndRename("NewPhysicMaterial", ".physicMaterial", [this](const std::string &name) {
+                if (createPhysicMaterial)
+                    return createPhysicMaterial(m_currentPath, name);
                 return std::make_pair(false, std::string("No callback"));
             });
         }

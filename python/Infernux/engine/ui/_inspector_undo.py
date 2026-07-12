@@ -48,16 +48,17 @@ def _record_material_slot(renderer, slot: int, old_guid: str, new_guid: str,
     _notify_scene_modified()
 
 
-def _record_generic_component(comp, old_json: str, new_json: str):
-    """Record a generic C++ component JSON edit through the undo system."""
+def _record_generic_component(comp, old_document: dict, new_document: dict):
+    """Record a generic native-component document edit."""
     from Infernux.engine.undo import UndoManager, GenericComponentCommand
     mgr = UndoManager.instance()
     if mgr:
         mgr.execute(GenericComponentCommand(
-            comp, old_json, new_json, f"Edit {comp.type_name}"))
+            comp, old_document, new_document, f"Edit {comp.type_name}"))
         return
     # Fallback
-    comp.deserialize(new_json)
+    if not comp.deserialize_document(new_document):
+        raise RuntimeError(f"Failed to restore {comp.type_name} document")
     _notify_scene_modified()
 
 

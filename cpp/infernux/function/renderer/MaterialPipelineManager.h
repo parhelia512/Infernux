@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FrameDeletionQueue.h"
+#include "GpuResidency.h"
 #include "MaterialDescriptor.h"
 #include "shader/ShaderProgram.h"
 #include <function/resources/InxMaterial/InxMaterial.h>
@@ -200,6 +201,8 @@ class MaterialPipelineManager
      * @brief Remove render data for a specific material (force recreation)
      */
     void RemoveRenderData(const std::string &materialName);
+    [[nodiscard]] size_t CollectUnusedRenderData();
+    [[nodiscard]] MaterialGpuResidencySnapshot GetResidencySnapshot() const;
 
     // ---- MRT (Multiple Render Targets) support ----
 
@@ -233,6 +236,7 @@ class MaterialPipelineManager
 
   private:
     VkDevice m_device = VK_NULL_HANDLE;
+    VmaAllocator m_allocator = VK_NULL_HANDLE;
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkRenderPass m_internalRenderPass = VK_NULL_HANDLE; // Internally created compatible render pass
     VkFormat m_colorFormat = VK_FORMAT_UNDEFINED;
@@ -270,6 +274,9 @@ class MaterialPipelineManager
 
     // Material descriptor manager for per-material descriptor sets
     MaterialDescriptorManager m_descriptorManager;
+    FrameDeletionQueue *m_deletionQueue = nullptr;
+
+    void RetireMaterialUBO(InxMaterial::DetachedUBO resource);
 
     /**
      * @brief Create a shader module from SPIR-V code
@@ -311,7 +318,7 @@ class MaterialPipelineManager
     /**
      * @brief Destroy non-forward pass pipelines stored on a material and clear handles.
      */
-    void DestroyNonForwardPipelines(InxMaterial *material);
+    void DestroyNonForwardPipelines(InxMaterial *material, bool deferred = false);
 };
 
 } // namespace infernux

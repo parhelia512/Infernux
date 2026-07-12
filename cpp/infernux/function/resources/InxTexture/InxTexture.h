@@ -1,10 +1,40 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace infernux
 {
+
+class InxResourceMeta;
+
+enum class TexturePixelStorage : uint32_t
+{
+    Rgba8 = 1,
+    Rgba32Float = 2,
+};
+
+struct TextureMipLevel
+{
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint64_t byteOffset = 0;
+    uint64_t byteSize = 0;
+};
+
+struct TextureCpuData
+{
+    TexturePixelStorage storage = TexturePixelStorage::Rgba8;
+    std::vector<TextureMipLevel> mipLevels;
+    std::vector<uint8_t> bytes;
+
+    [[nodiscard]] bool IsValid() const noexcept
+    {
+        return !mipLevels.empty() && !bytes.empty();
+    }
+};
 
 /**
  * @brief Lightweight C++ asset representing a texture's import settings.
@@ -131,9 +161,16 @@ class InxTexture
         return !m_srgb;
     }
 
-    /// Load (or refresh) import settings from the .meta file.
-    /// @return true if .meta was found and parsed.
-    bool LoadImportSettings(const std::string &filePath);
+    void ApplyImportSettings(const InxResourceMeta &metadata);
+
+    [[nodiscard]] const std::shared_ptr<const TextureCpuData> &GetCpuData() const noexcept
+    {
+        return m_cpuData;
+    }
+    void SetCpuData(std::shared_ptr<const TextureCpuData> cpuData)
+    {
+        m_cpuData = std::move(cpuData);
+    }
 
     // ── Clone (Unity-style Object.Instantiate) ─────────────────────────────
 
@@ -142,6 +179,7 @@ class InxTexture
     /// underlying image file.  Matches Unity behavior where Instantiate
     /// on a Texture2D copies the CPU-side metadata.
     [[nodiscard]] std::shared_ptr<InxTexture> Clone() const;
+    [[nodiscard]] size_t GetRuntimeMemoryBytes() const noexcept;
 
   private:
     std::string m_guid;
@@ -156,6 +194,7 @@ class InxTexture
     std::string m_filterMode = "bilinear"; // "point", "bilinear", "trilinear"
     std::string m_wrapMode = "repeat";     // "repeat", "clamp", "mirror"
     int m_anisoLevel = -1;                 // -1 = device max, 0 = off, 1-16 = explicit
+    std::shared_ptr<const TextureCpuData> m_cpuData;
 };
 
 } // namespace infernux

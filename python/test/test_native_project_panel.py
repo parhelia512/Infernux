@@ -1,8 +1,10 @@
 """Tests for native ProjectPanel."""
 import os
+import json
 import tempfile
 import pytest
 from Infernux.lib import ProjectPanel
+from Infernux.engine.ui.project_file_ops import create_physic_material
 
 
 class TestProjectPanelCreation:
@@ -23,6 +25,29 @@ class TestProjectPanelCreation:
     def test_default_open(self):
         pp = ProjectPanel()
         assert pp.is_open()
+
+    def test_create_physic_material_writes_strict_document_and_imports(self, tmp_path):
+        class RecordingAssetDatabase:
+            def __init__(self):
+                self.paths = []
+
+            def import_asset(self, path):
+                self.paths.append(path)
+                return "physic-material-guid"
+
+        database = RecordingAssetDatabase()
+        ok, error = create_physic_material(str(tmp_path), "Ice", database)
+
+        assert ok is True, error
+        path = tmp_path / "Ice.physicMaterial"
+        assert database.paths == [str(path)]
+        assert json.loads(path.read_text(encoding="utf-8")) == {
+            "schema_version": 1,
+            "friction": 0.4,
+            "bounciness": 0.0,
+            "friction_combine": 0,
+            "bounce_combine": 0,
+        }
 
 
 class TestProjectPanelPaths:
@@ -102,6 +127,12 @@ class TestProjectPanelCallbacks:
         pp = ProjectPanel()
         pp.create_material = lambda cur, name: (True, "")
         ok, err = pp.create_material("/path", "MyMat")
+        assert ok is True
+
+    def test_create_physic_material_callback(self):
+        pp = ProjectPanel()
+        pp.create_physic_material = lambda cur, name: (True, "")
+        ok, err = pp.create_physic_material("/path", "Ice")
         assert ok is True
 
     def test_create_scene_callback(self):

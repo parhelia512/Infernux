@@ -370,6 +370,10 @@ void RegisterGUIBindings(py::module_ &m)
                 return currentItem;
             },
             py::arg("label"), py::arg("current_item"), py::arg("items"), py::arg("popup_max_height_in_items") = -1)
+        .def("searchable_combo", &InxGUIContext::SearchableCombo, py::arg("id"), py::arg("current_item"),
+             py::arg("items"), py::arg("width") = 0.0f, py::arg("max_visible_items") = 8,
+             py::arg("search_hint") = "Filter...", py::arg("empty_text") = "No results",
+             "Render the shared keyboard-navigable searchable dropdown")
         .def(
             "list_box",
             [](InxGUIContext &ctx, const std::string &label, int currentItem, const std::vector<std::string> &items,
@@ -490,6 +494,7 @@ void RegisterGUIBindings(py::module_ &m)
         .def("is_item_active", &InxGUIContext::IsItemActive)
         .def("is_any_item_active", &InxGUIContext::IsAnyItemActive)
         .def("is_item_hovered", &InxGUIContext::IsItemHovered)
+        .def("is_item_focused", &InxGUIContext::IsItemFocused)
         .def("set_keyboard_focus_here", &InxGUIContext::SetKeyboardFocusHere, py::arg("offset") = 0,
              "Set keyboard focus to the next item (or previous with negative offset)")
         .def("is_item_deactivated", &InxGUIContext::IsItemDeactivated,
@@ -1028,6 +1033,7 @@ void RegisterGUIBindings(py::module_ &m)
         .def_readwrite("create_script", &ProjectPanel::createScript)
         .def_readwrite("create_shader", &ProjectPanel::createShader)
         .def_readwrite("create_material", &ProjectPanel::createMaterial)
+        .def_readwrite("create_physic_material", &ProjectPanel::createPhysicMaterial)
         .def_readwrite("create_scene", &ProjectPanel::createScene)
         .def_readwrite("create_animclip", &ProjectPanel::createAnimClip)
         .def_readwrite("create_animclip3d", &ProjectPanel::createAnimClip3D)

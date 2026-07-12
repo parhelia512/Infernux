@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+from enum import IntEnum
 from typing import Any
 
 from Infernux.components.builtin_component import BuiltinComponent
+from Infernux.core.asset_ref import PhysicMaterialRef
+
+class PhysicsMaterialCombine(IntEnum):
+    Average = 0
+    Minimum = 1
+    Multiply = 2
+    Maximum = 3
 
 class Collider(BuiltinComponent):
     """Base class for all collider components."""
@@ -27,16 +35,4 @@ class Collider(BuiltinComponent):
     @is_trigger.setter
     def is_trigger(self, value: bool) -> None: ...
 
-    @property
-    def friction(self) -> float:
-        """The friction coefficient of the collider surface."""
-        ...
-    @friction.setter
-    def friction(self, value: float) -> None: ...
-
-    @property
-    def bounciness(self) -> float:
-        """The bounciness of the collider surface."""
-        ...
-    @bounciness.setter
-    def bounciness(self, value: float) -> None: ...
+    physic_material: PhysicMaterialRef

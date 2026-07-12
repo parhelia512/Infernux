@@ -9,10 +9,12 @@
 
 #pragma once
 
+#include "GpuResidency.h"
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include <vulkan/vulkan.h>
 
 namespace infernux
@@ -50,15 +52,30 @@ class VkTextureCache
 
     // ── Cache Operations ───────────────────────────────────────────────────
 
-    /// Insert a pre-loaded texture into the cache (thread-safe, moves ownership).
-    void Insert(const std::string &key, std::unique_ptr<vk::VkTexture> texture);
+    /// Insert a pre-loaded texture into the cache (thread-safe, shares ownership).
+    [[nodiscard]] std::shared_ptr<vk::VkTexture> Insert(const std::string &key, std::shared_ptr<vk::VkTexture> texture,
+                                                        uint64_t lastUsedFrame, bool permanentlyPinned,
+                                                        std::string assetGuid, uint64_t runtimeVersion);
 
-    /// Look up a cached texture; returns nullptr if not found (thread-safe).
-    [[nodiscard]] vk::VkTexture *Find(const std::string &key) const;
+    /// Look up and lease a cached texture; returns nullptr if not found.
+    [[nodiscard]] std::shared_ptr<vk::VkTexture> Find(const std::string &key, uint64_t frame = 0);
+    [[nodiscard]] std::shared_ptr<vk::VkTexture> FindAsset(const std::string &key, const std::string &assetGuid,
+                                                           uint64_t runtimeVersion, uint64_t frame);
 
     /// Remove all cache entries whose key starts with @p prefix (thread-safe).
     /// Returns the number of entries removed.
     size_t EvictByPrefix(const std::string &prefix);
+    void SetBudgetBytes(uint64_t bytes);
+    [[nodiscard]] size_t TrimToBudget();
+    [[nodiscard]] uint64_t GetBudgetBytes() const;
+    [[nodiscard]] uint64_t GetResidentBytes() const;
+    [[nodiscard]] size_t GetEntryCount() const;
+    [[nodiscard]] size_t GetRetiredLeaseCount() const;
+    [[nodiscard]] uint64_t GetEvictionCount() const;
+    [[nodiscard]] uint64_t GetRetiredLeaseBytes() const;
+    [[nodiscard]] GpuEvictionCandidate PeekOldestEvictable() const;
+    [[nodiscard]] uint64_t EvictOldest();
+    [[nodiscard]] std::vector<GpuAssetResidencyRecord> GetAssetResidency() const;
 
     /// Clear all entries (not thread-safe — call only when renderer is idle).
     void Clear();
@@ -70,7 +87,30 @@ class VkTextureCache
     }
 
   private:
-    std::unordered_map<std::string, std::unique_ptr<vk::VkTexture>> m_textures;
+    struct Entry
+    {
+        std::shared_ptr<vk::VkTexture> texture;
+        uint64_t residentBytes = 0;
+        uint64_t lastUsedFrame = 0;
+        bool permanentlyPinned = false;
+        std::string assetGuid;
+        uint64_t runtimeVersion = 0;
+    };
+
+    struct RetiredLease
+    {
+        std::weak_ptr<vk::VkTexture> texture;
+        uint64_t residentBytes = 0;
+    };
+
+    void RetireEntryLocked(Entry entry);
+    void SweepRetiredLeasesLocked() const;
+
+    std::unordered_map<std::string, Entry> m_textures;
+    mutable std::vector<RetiredLease> m_retiredLeases;
+    uint64_t m_budgetBytes = 512ULL * 1024ULL * 1024ULL;
+    mutable uint64_t m_residentBytes = 0;
+    uint64_t m_evictionCount = 0;
     mutable std::mutex m_mutex;
 };
 

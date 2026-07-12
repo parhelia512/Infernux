@@ -10,6 +10,12 @@
 namespace infernux
 {
 
+namespace vk
+{
+class GraphicsSubmissionTicket;
+class ImageReadbackTicket;
+} // namespace vk
+
 class InxVkCoreModular;
 class AssetDatabase;
 
@@ -30,26 +36,14 @@ class GPUMeshPreview
     GPUMeshPreview(const GPUMeshPreview &) = delete;
     GPUMeshPreview &operator=(const GPUMeshPreview &) = delete;
 
-    /// @brief Render a mesh with its materials and return RGBA8 pixels.
-    /// @param mesh       The mesh to render (must have valid vertices/indices).
-    /// @param materials  Per-submesh materials. Index matches SubMesh::materialSlot.
-    ///                   Use nullptr entries for missing materials (will use default).
-    /// @param size       Output image width and height (square).
-    /// @param outPixels  Receives size*size*4 bytes of RGBA8 pixel data.
-    /// @return true on success.
-    bool RenderToPixels(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
-                        std::vector<unsigned char> &outPixels);
-
-    /// @brief Same as RenderToPixels but with an explicit camera (no auto-fit), used
-    ///        for the interactive Timeline preview viewport (orbit / zoom).
-    /// @param cloneMaterials  When true (default) each material is cloned per render
-    ///        for isolation (thumbnails). When false the caller's materials are used
-    ///        directly — they MUST be dedicated, persistent preview clones so their
-    ///        cached pipeline is reused every frame (live previews; avoids rebuilding
-    ///        a pipeline on every frame, which tanks playback FPS).
-    bool RenderToPixelsCamera(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
+    [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket>
+    BeginRenderToPixels(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size);
+    [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket>
+    BeginRenderToPixelsCamera(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
                               const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
-                              std::vector<unsigned char> &outPixels, bool cloneMaterials = true);
+                              bool cloneMaterials = true);
+    bool TryCompleteRenderToPixels(const std::shared_ptr<vk::ImageReadbackTicket> &ticket, int outputSize,
+                                   std::vector<unsigned char> &outPixels);
 
     /// @brief Live editor preview: render directly into a GPU image and return an
     ///        ImGui texture id.  Avoids CPU readback + re-upload every frame
@@ -60,6 +54,8 @@ class GPUMeshPreview
 
   private:
     bool EnsureResources(int size);
+    bool EnsureViewResources();
+    void DestroyViewResources();
     void EnsureImGuiDisplayDescriptor();
     void DestroyImGuiDisplayDescriptor();
     void CreateRenderPass();
@@ -76,9 +72,19 @@ class GPUMeshPreview
     vk::VkImageHandle m_depth;
 
     VkFramebuffer m_framebuffer = VK_NULL_HANDLE;
-    vk::VkBufferHandle m_staging;
 
     VkDescriptorSet m_fallbackShadowDescSet = VK_NULL_HANDLE;
+
+    std::unique_ptr<vk::VkBufferHandle> m_previewSceneUbo;
+    std::unique_ptr<vk::VkBufferHandle> m_previewLightingUbo;
+    std::unique_ptr<vk::VkBufferHandle> m_previewGlobalsUbo;
+    std::unique_ptr<vk::VkBufferHandle> m_previewInstanceBuffer;
+    std::unique_ptr<vk::VkBufferHandle> m_previewSkinInstanceBuffer;
+    std::unique_ptr<vk::VkBufferHandle> m_previewSkinPaletteBuffer;
+    VkDescriptorPool m_previewGlobalsPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_previewGlobalsSet = VK_NULL_HANDLE;
+    std::shared_ptr<vk::GraphicsSubmissionTicket> m_activeSubmission;
+    std::shared_ptr<vk::ImageReadbackTicket> m_activeReadback;
 
     VkSampler m_displaySampler = VK_NULL_HANDLE;
     VkDescriptorSet m_displayDescriptorSet = VK_NULL_HANDLE;

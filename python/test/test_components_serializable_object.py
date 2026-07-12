@@ -4,8 +4,11 @@ from Infernux.components.serializable_object import (
     SerializableObject,
     _SERIALIZABLE_REGISTRY,
     get_serializable_class,
+    get_serializable_type_id,
 )
 from Infernux.components.serialized_field import serialized_field, FieldType
+from Infernux.components.value_document import make_serializable_object
+import pytest
 
 
 # ── Test data classes ──
@@ -26,10 +29,10 @@ class Nested(SerializableObject):
 
 class TestRegistration:
     def test_subclass_auto_registered(self):
-        assert Stats.__qualname__ in _SERIALIZABLE_REGISTRY
+        assert get_serializable_type_id(Stats) in _SERIALIZABLE_REGISTRY
 
     def test_get_serializable_class(self):
-        cls = get_serializable_class(Stats.__qualname__)
+        cls = get_serializable_class(get_serializable_type_id(Stats))
         assert cls is Stats
 
     def test_unknown_returns_none(self):
@@ -85,8 +88,10 @@ class TestSerialization:
     def test_serialize_produces_dict_with_type_tag(self):
         s = Stats()
         data = s._serialize()
-        assert "__serializable_type__" in data
-        assert data["hp"] == 100
+        assert data["$type"] == "serializable_object"
+        assert data["$version"] == 1
+        assert data["type_id"] == get_serializable_type_id(Stats)
+        assert data["fields"]["hp"] == 100
 
     def test_deserialize_restores_values(self):
         s = Stats(hp=42, mp=7.5, name="test")
@@ -103,6 +108,50 @@ class TestSerialization:
         restored = SerializableObject._deserialize(data)
         assert type(restored) is Stats
         assert restored.hp == 1
+
+    def test_validate_document_does_not_construct_instance(self):
+        class ValidateOnly(SerializableObject):
+            value: int = serialized_field(default=0)
+
+            def __new__(cls, *args, **kwargs):
+                raise AssertionError("validation must not construct SerializableObject")
+
+        data = make_serializable_object(
+            get_serializable_type_id(ValidateOnly),
+            {"value": 7},
+        )
+
+        actual_cls, fields = SerializableObject._validate_document(data, "Root.stats")
+
+        assert actual_cls is ValidateOnly
+        assert set(fields) == {"value"}
+
+        data["fields"]["value"] = "invalid"
+        with pytest.raises(TypeError, match="INT field requires an integer"):
+            SerializableObject._deserialize(data)
+
+    def test_unsupported_nested_value_is_rejected(self):
+        class Unsupported(SerializableObject):
+            payload = serialized_field(default=None, field_type=FieldType.UNKNOWN)
+
+        value = Unsupported(payload=object())
+        with pytest.raises(TypeError, match=r"Unsupported\.payload.*unsupported serialized value"):
+            value._serialize()
+
+    @pytest.mark.parametrize(
+        "mutate, error",
+        [
+            (lambda data: data.pop("$version"), "invalid"),
+            (lambda data: data.__setitem__("type_id", "removed:Type"), "unknown"),
+            (lambda data: data["fields"].pop("hp"), "missing"),
+            (lambda data: data["fields"].__setitem__("legacy", True), "unknown"),
+        ],
+    )
+    def test_document_identity_and_fields_are_strict(self, mutate, error):
+        data = Stats()._serialize()
+        mutate(data)
+        with pytest.raises(ValueError, match=error):
+            SerializableObject._deserialize(data)
 
 
 # ══════════════════════════════════════════════════════════════════════

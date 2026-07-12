@@ -19,11 +19,13 @@
 #include <function/scene/PrimitiveMeshes.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <core/log/InxLog.h>
 #include <cstring>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <stdexcept>
 
 namespace infernux
 {
@@ -133,7 +135,6 @@ GPUMaterialPreview::~GPUMaterialPreview()
     if (device == VK_NULL_HANDLE)
         return;
 
-    vkDeviceWaitIdle(device);
     DestroyFramebuffer();
 
     if (m_renderPass != VK_NULL_HANDLE)
@@ -141,17 +142,20 @@ GPUMaterialPreview::~GPUMaterialPreview()
 
     m_sphereVBO.reset();
     m_sphereIBO.reset();
-    m_staging.Destroy();
+    DestroyViewResources();
 }
 
 // ============================================================================
 // RenderToPixels — main entry point
 // ============================================================================
 
-bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::vector<unsigned char> &outPixels)
+std::shared_ptr<vk::ImageReadbackTicket> GPUMaterialPreview::BeginRenderToPixels(InxMaterial &material, int size)
 {
     if (!m_vkCore || size <= 0)
-        return false;
+        return nullptr;
+    if (m_activeReadback && !m_activeReadback->IsDone())
+        return nullptr;
+    m_activeReadback.reset();
 
     const int renderSize = std::max(size, size * kPreviewSupersampleFactor);
     const glm::mat4 previewModel = glm::scale(glm::mat4(1.0f), glm::vec3(kPreviewModelScale));
@@ -165,13 +169,16 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
     // material's forward pass handles while the main scene is still drawing.
     auto basePreviewMaterial = material.Clone();
     if (!basePreviewMaterial) {
-        return false;
+        return nullptr;
     }
     basePreviewMaterial->ClearAllPassPipelines();
-    if (!m_vkCore->RefreshMaterialPipeline(basePreviewMaterial, basePreviewMaterial->GetVertShaderName(),
-                                           basePreviewMaterial->GetFragShaderName())) {
+    if (!EnsureResources(renderSize))
+        return nullptr;
+    if (!m_vkCore->RefreshPreviewMaterialPipeline(basePreviewMaterial, basePreviewMaterial->GetVertShaderName(),
+                                                  basePreviewMaterial->GetFragShaderName(),
+                                                  m_previewSceneUbo->GetBuffer(), m_previewLightingUbo->GetBuffer())) {
         INXLOG_WARN("GPUMaterialPreview: preview base pipeline not ready");
-        return false;
+        return nullptr;
     }
     ownedPreviewMaterials.push_back(basePreviewMaterial);
     previewPassMaterials.push_back(basePreviewMaterial.get());
@@ -199,8 +206,9 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
                 passMaterial->MarkOverride(RenderStateOverride::CullMode);
             passMaterial->ClearAllPassPipelines();
 
-            if (!m_vkCore->RefreshMaterialPipeline(passMaterial, passMaterial->GetVertShaderName(),
-                                                   passMaterial->GetFragShaderName())) {
+            if (!m_vkCore->RefreshPreviewMaterialPipeline(
+                    passMaterial, passMaterial->GetVertShaderName(), passMaterial->GetFragShaderName(),
+                    m_previewSceneUbo->GetBuffer(), m_previewLightingUbo->GetBuffer())) {
                 return nullptr;
             }
             return passMaterial;
@@ -249,8 +257,9 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
         MaterialRenderData *rd = m_vkCore->GetMaterialPipelineManager().GetRenderData(passMat->GetMaterialKey());
         if (!rd || !rd->isValid || rd->descriptorSet == VK_NULL_HANDLE) {
             auto matShared = std::shared_ptr<InxMaterial>(passMat, [](InxMaterial *) {});
-            if (!m_vkCore->RefreshMaterialPipeline(matShared, passMat->GetVertShaderName(),
-                                                   passMat->GetFragShaderName())) {
+            if (!m_vkCore->RefreshPreviewMaterialPipeline(matShared, passMat->GetVertShaderName(),
+                                                          passMat->GetFragShaderName(), m_previewSceneUbo->GetBuffer(),
+                                                          m_previewLightingUbo->GetBuffer())) {
                 return false;
             }
             rd = m_vkCore->GetMaterialPipelineManager().GetRenderData(passMat->GetMaterialKey());
@@ -279,13 +288,10 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
         binding.material = passMat;
         if (!refreshPassBinding(binding)) {
             INXLOG_WARN("GPUMaterialPreview: preview pass pipeline not ready");
-            return false;
+            return nullptr;
         }
         passBindings.push_back(binding);
     }
-
-    if (!EnsureResources(renderSize))
-        return false;
 
     // Update material UBO so GPU-side data is current
     for (auto &binding : passBindings)
@@ -338,83 +344,42 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
         glm::vec4(static_cast<float>(renderSize), static_cast<float>(renderSize), 1.0f / renderSize, 1.0f / renderSize);
     globalsUBO.worldSpaceCameraPos = glm::vec4(0.0f, 0.0f, kPreviewCameraDistance, 1.0f);
 
-    // ------------------------------------------------------------------
-    // Buffer / descriptor-set indexing
-    //
-    // Material descriptor sets (set 0) bind the single scene/lighting
-    // UBOs, so the preview writes its data into those shared buffers
-    // (via in-command-buffer updates, which serialize against frame use).
-    //
-    // Set 2 (globals + instance SSBO) IS per-frame: each frame's
-    // descriptor set references m_globalsBuffers[frame] and
-    // m_instanceBuffers[frame], so we still use the current frame index
-    // for those.
-    // ------------------------------------------------------------------
-    const uint32_t frameIndex =
-        m_vkCore->GetSwapchain().GetCurrentFrame() % std::max(1u, m_vkCore->GetMaxFramesInFlight());
-
-    VkBuffer sceneUBOBuf = m_vkCore->GetSceneUbo();
-    VkBuffer lightingUBOBuf = m_vkCore->GetLightingUbo();
-    VkBuffer globalsUBOBuf = m_vkCore->GetGlobalsBuffer(frameIndex);
-    VkBuffer instanceSSBOBuf = m_vkCore->GetInstanceSSBO(frameIndex);
+    const VkBuffer sceneUBOBuf = m_previewSceneUbo->GetBuffer();
+    const VkBuffer lightingUBOBuf = m_previewLightingUbo->GetBuffer();
+    const VkBuffer globalsUBOBuf = m_previewGlobalsUbo->GetBuffer();
+    const VkBuffer instanceSSBOBuf = m_previewInstanceBuffer->GetBuffer();
     VkDescriptorSet shadowDesc = VK_NULL_HANDLE;
     VkDescriptorSet globalsDesc = VK_NULL_HANDLE;
-
-    if (sceneUBOBuf == VK_NULL_HANDLE || lightingUBOBuf == VK_NULL_HANDLE) {
-        INXLOG_WARN("GPUMaterialPreview: UBO buffers not ready");
-        return false;
-    }
-
-    // ------------------------------------------------------------------
-    // Record single-time command buffer
-    // ------------------------------------------------------------------
-    VkCommandBuffer cmd = m_vkCore->BeginSingleTimeCommands();
-    if (cmd == VK_NULL_HANDLE)
-        return false;
-
-    // Write preview data into the renderer's existing UBOs
-    vkCmdUpdateBuffer(cmd, sceneUBOBuf, 0, sizeof(sceneUBO), &sceneUBO);
-    vkCmdUpdateBuffer(cmd, lightingUBOBuf, 0, sizeof(lightingUBO), &lightingUBO);
-
-    if (globalsUBOBuf != VK_NULL_HANDLE)
-        vkCmdUpdateBuffer(cmd, globalsUBOBuf, 0, sizeof(globalsUBO), &globalsUBO);
-
-    // Write identity matrix at instance 0 for the sphere. The instance SSBO is
-    // host-visible and intentionally created without TRANSFER_DST usage, so
-    // update it through a mapped CPU pointer rather than vkCmdUpdateBuffer.
-    if (instanceSSBOBuf != VK_NULL_HANDLE) {
-        if (!m_vkCore->WriteInstanceMatrix(frameIndex, 0, previewModel)) {
-            INXLOG_WARN("GPUMaterialPreview: failed to write preview instance matrix");
-            return false;
-        }
-    }
 
     ShaderProgram *primaryProgram = passBindings.front().program;
 
     if (primaryProgram->HasDeclaredDescriptorSet(1)) {
-        shadowDesc = m_vkCore->GetActiveShadowDescriptorSet();
-        if (shadowDesc == VK_NULL_HANDLE) {
-            if (m_fallbackShadowDescSet == VK_NULL_HANDLE)
-                m_fallbackShadowDescSet = m_vkCore->AllocatePerViewDescriptorSet();
-            shadowDesc = m_fallbackShadowDescSet;
-        }
+        if (m_fallbackShadowDescSet == VK_NULL_HANDLE)
+            m_fallbackShadowDescSet = m_vkCore->AllocatePerViewDescriptorSet();
+        shadowDesc = m_fallbackShadowDescSet;
         if (shadowDesc == VK_NULL_HANDLE) {
             INXLOG_WARN("GPUMaterialPreview: shader requires set 1 but no shadow descriptor is available");
-            return false;
+            return nullptr;
         }
     }
 
-    if (primaryProgram->HasDeclaredDescriptorSet(2)) {
-        if (globalsUBOBuf == VK_NULL_HANDLE || instanceSSBOBuf == VK_NULL_HANDLE) {
-            INXLOG_WARN("GPUMaterialPreview: shader requires set 2 but globals or instance buffers are unavailable");
-            return false;
-        }
-        globalsDesc = m_vkCore->GetCurrentGlobalsDescSet();
-        if (globalsDesc == VK_NULL_HANDLE) {
-            INXLOG_WARN("GPUMaterialPreview: shader requires set 2 but no globals descriptor is available");
-            return false;
-        }
-    }
+    if (primaryProgram->HasDeclaredDescriptorSet(2))
+        globalsDesc = m_previewGlobalsSet;
+
+    auto &resourceManager = m_vkCore->GetResourceManager();
+    auto readbackRecorder = resourceManager.BeginGraphicsImageReadback(
+        static_cast<uint32_t>(renderSize), static_cast<uint32_t>(renderSize), m_colorFormat);
+    VkCommandBuffer cmd = readbackRecorder.GetCommandBuffer();
+
+    vkCmdUpdateBuffer(cmd, sceneUBOBuf, 0, sizeof(sceneUBO), &sceneUBO);
+    vkCmdUpdateBuffer(cmd, lightingUBOBuf, 0, sizeof(lightingUBO), &lightingUBO);
+    vkCmdUpdateBuffer(cmd, globalsUBOBuf, 0, sizeof(globalsUBO), &globalsUBO);
+    vkCmdUpdateBuffer(cmd, instanceSSBOBuf, 0, sizeof(previewModel), &previewModel);
+    const std::array<uint32_t, 4> emptySkinInstance{};
+    const glm::mat4 identityBone(1.0f);
+    vkCmdUpdateBuffer(cmd, m_previewSkinInstanceBuffer->GetBuffer(), 0, sizeof(emptySkinInstance),
+                      emptySkinInstance.data());
+    vkCmdUpdateBuffer(cmd, m_previewSkinPaletteBuffer->GetBuffer(), 0, sizeof(identityBone), &identityBone);
 
     // Memory barrier: make UBO writes visible to shaders
     VkMemoryBarrier uboBarrier{};
@@ -475,11 +440,6 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
     pushData.normalMat = previewNormal;
     bool anyDrawn = false;
     for (auto &binding : passBindings) {
-        if (!refreshPassBinding(binding)) {
-            INXLOG_WARN("GPUMaterialPreview: preview pass became invalid before draw");
-            return false;
-        }
-
         const uint64_t descRaw = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(binding.materialDescSet));
         if ((descRaw & 0xffffull) == 0x00dfull || (descRaw & 0xfffffull) == 0x002b6ull) {
             INXLOG_WARN("GPUMaterialPreview: suspicious set0 descriptor=", descRaw, " material='",
@@ -578,16 +538,29 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
     copyRegion.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     copyRegion.imageOffset = {0, 0, 0};
     copyRegion.imageExtent = {static_cast<uint32_t>(renderSize), static_cast<uint32_t>(renderSize), 1};
-    vkCmdCopyImageToBuffer(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_staging.GetBuffer(), 1, &copyRegion);
-
-    // Submit and wait
-    m_vkCore->EndSingleTimeCommands(cmd);
+    vkCmdCopyImageToBuffer(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readbackRecorder.GetStagingBuffer(), 1,
+                           &copyRegion);
 
     // If every pass was skipped (e.g. a descriptor set went dead while the user was
     // editing the material), the sphere wasn't drawn. Report failure so the caller
     // falls back to the CPU renderer instead of returning a blank/transparent image
     // (which made Project-panel and Inspector previews intermittently disappear).
     if (!anyDrawn)
+        return nullptr;
+
+    m_activeReadback = readbackRecorder.Submit(
+        [materialLeases = std::move(ownedPreviewMaterials)]() mutable { materialLeases.clear(); });
+    return m_activeReadback;
+}
+
+bool GPUMaterialPreview::TryCompleteRenderToPixels(const std::shared_ptr<vk::ImageReadbackTicket> &ticket,
+                                                   int outputSize, std::vector<unsigned char> &outPixels)
+{
+    if (!ticket || !ticket->IsDone() || ticket->GetStatus() != vk::ImageReadbackStatus::Completed || outputSize <= 0)
+        return false;
+
+    const int renderSize = static_cast<int>(ticket->GetWidth());
+    if (renderSize <= 0 || ticket->GetHeight() != ticket->GetWidth() || ticket->GetChannelCount() != 4)
         return false;
 
     // ------------------------------------------------------------------
@@ -596,15 +569,11 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
     const int pixelCount = renderSize * renderSize;
     std::vector<unsigned char> renderPixels(static_cast<size_t>(pixelCount) * 4, 0);
 
-    void *mapped = m_staging.Map();
-    if (!mapped) {
-        INXLOG_ERROR("GPUMaterialPreview: failed to map staging buffer");
-        return false;
-    }
+    const auto &raw = ticket->GetData();
 
-    if (m_colorFormat == VK_FORMAT_R16G16B16A16_SFLOAT) {
+    if (ticket->GetElementType() == "float16") {
         // HDR → sRGB RGBA8
-        const uint16_t *src = static_cast<const uint16_t *>(mapped);
+        const uint16_t *src = reinterpret_cast<const uint16_t *>(raw.data());
         auto halfToFloat = [](uint16_t h) -> float {
             uint32_t sign = (h >> 15) & 0x1;
             uint32_t exponent = (h >> 10) & 0x1F;
@@ -669,7 +638,9 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
     } else {
         // Fallback: assume RGBA8 or similar. Convert the exact matte clear back
         // to transparent so Project Panel thumbnails remain visible.
-        const unsigned char *src = static_cast<const unsigned char *>(mapped);
+        if (raw.size() != renderPixels.size())
+            return false;
+        const unsigned char *src = raw.data();
         const unsigned char matteR = static_cast<unsigned char>(kPreviewMatteR * 255.0f + 0.5f);
         const unsigned char matteG = static_cast<unsigned char>(kPreviewMatteG * 255.0f + 0.5f);
         const unsigned char matteB = static_cast<unsigned char>(kPreviewMatteB * 255.0f + 0.5f);
@@ -704,14 +675,91 @@ bool GPUMaterialPreview::RenderToPixels(InxMaterial &material, int size, std::ve
         }
     }
 
-    m_staging.Unmap();
-    DownsampleRGBABox(renderPixels, renderSize, size, outPixels);
+    DownsampleRGBABox(renderPixels, renderSize, outputSize, outPixels);
+    if (m_activeReadback == ticket)
+        m_activeReadback.reset();
     return true;
 }
 
 // ============================================================================
 // Resource management
 // ============================================================================
+
+bool GPUMaterialPreview::EnsureViewResources()
+{
+    if (m_previewGlobalsSet != VK_NULL_HANDLE)
+        return true;
+
+    auto &rm = m_vkCore->GetResourceManager();
+    m_previewSceneUbo = rm.CreateUniformBuffer(sizeof(UniformBufferObject));
+    m_previewLightingUbo = rm.CreateUniformBuffer(sizeof(ShaderLightingUBO));
+    m_previewGlobalsUbo = rm.CreateUniformBuffer(sizeof(EngineGlobalsUBO));
+    m_previewInstanceBuffer = rm.CreateStorageBuffer(sizeof(glm::mat4), false);
+    m_previewSkinInstanceBuffer = rm.CreateStorageBuffer(64, false);
+    m_previewSkinPaletteBuffer = rm.CreateStorageBuffer(sizeof(glm::mat4), false);
+    if (!m_previewSceneUbo || !m_previewLightingUbo || !m_previewGlobalsUbo || !m_previewInstanceBuffer ||
+        !m_previewSkinInstanceBuffer || !m_previewSkinPaletteBuffer)
+        throw std::runtime_error("Failed to allocate isolated material-preview view buffers");
+
+    VkDescriptorPoolSize poolSizes[2]{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[0].descriptorCount = 1;
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSizes[1].descriptorCount = 3;
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.maxSets = 1;
+    poolInfo.poolSizeCount = 2;
+    poolInfo.pPoolSizes = poolSizes;
+    const VkDevice device = m_vkCore->GetDevice();
+    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &m_previewGlobalsPool) != VK_SUCCESS)
+        throw std::runtime_error("Failed to create isolated material-preview globals descriptor pool");
+
+    const VkDescriptorSetLayout layout = m_vkCore->GetGlobalsDescSetLayout();
+    if (layout == VK_NULL_HANDLE)
+        throw std::logic_error("Material preview requires the renderer globals descriptor layout");
+    VkDescriptorSetAllocateInfo allocateInfo{};
+    allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocateInfo.descriptorPool = m_previewGlobalsPool;
+    allocateInfo.descriptorSetCount = 1;
+    allocateInfo.pSetLayouts = &layout;
+    if (vkAllocateDescriptorSets(device, &allocateInfo, &m_previewGlobalsSet) != VK_SUCCESS)
+        throw std::runtime_error("Failed to allocate isolated material-preview globals descriptor set");
+
+    VkDescriptorBufferInfo buffers[4]{};
+    buffers[0] = {m_previewGlobalsUbo->GetBuffer(), 0, sizeof(EngineGlobalsUBO)};
+    buffers[1] = {m_previewInstanceBuffer->GetBuffer(), 0, VK_WHOLE_SIZE};
+    buffers[2] = {m_previewSkinInstanceBuffer->GetBuffer(), 0, VK_WHOLE_SIZE};
+    buffers[3] = {m_previewSkinPaletteBuffer->GetBuffer(), 0, VK_WHOLE_SIZE};
+    VkWriteDescriptorSet writes[4]{};
+    for (uint32_t binding = 0; binding < 4; ++binding) {
+        writes[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[binding].dstSet = m_previewGlobalsSet;
+        writes[binding].dstBinding = binding;
+        writes[binding].descriptorCount = 1;
+        writes[binding].descriptorType =
+            binding == 0 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[binding].pBufferInfo = &buffers[binding];
+    }
+    vkUpdateDescriptorSets(device, 4, writes, 0, nullptr);
+    return true;
+}
+
+void GPUMaterialPreview::DestroyViewResources()
+{
+    m_activeReadback.reset();
+    m_previewGlobalsSet = VK_NULL_HANDLE;
+    if (m_previewGlobalsPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(m_vkCore->GetDevice(), m_previewGlobalsPool, nullptr);
+        m_previewGlobalsPool = VK_NULL_HANDLE;
+    }
+    m_previewSkinPaletteBuffer.reset();
+    m_previewSkinInstanceBuffer.reset();
+    m_previewInstanceBuffer.reset();
+    m_previewGlobalsUbo.reset();
+    m_previewLightingUbo.reset();
+    m_previewSceneUbo.reset();
+}
 
 bool GPUMaterialPreview::EnsureResources(int size)
 {
@@ -753,7 +801,7 @@ bool GPUMaterialPreview::EnsureResources(int size)
         m_currentSize = size;
     }
 
-    return m_framebuffer != VK_NULL_HANDLE;
+    return m_framebuffer != VK_NULL_HANDLE && EnsureViewResources();
 }
 
 void GPUMaterialPreview::CreateRenderPass()
@@ -874,11 +922,6 @@ void GPUMaterialPreview::CreateFramebuffer(int size)
         return;
     }
 
-    // Staging buffer for readback (pixel size depends on format)
-    VkDeviceSize pixelBytes = (m_colorFormat == VK_FORMAT_R16G16B16A16_SFLOAT) ? 8 : 4;
-    VkDeviceSize stagingSize = w * h * pixelBytes;
-    m_staging.Create(allocator, device, stagingSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 }
 
 void GPUMaterialPreview::DestroyFramebuffer()
@@ -891,7 +934,6 @@ void GPUMaterialPreview::DestroyFramebuffer()
     m_msaaColor.Destroy();
     m_resolveColor.Destroy();
     m_depth.Destroy();
-    m_staging.Destroy();
     m_currentSize = 0;
 }
 

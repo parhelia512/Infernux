@@ -37,6 +37,7 @@
 
 #include "EngineGlobals.h"
 #include "FrameDeletionQueue.h"
+#include "GpuResidency.h"
 #include "InxRenderStruct.h"
 #include "MaterialPipelineManager.h"
 #include "ProfileConfig.h"
@@ -58,6 +59,7 @@ struct SDL_Window;
 namespace infernux
 {
 
+class AssetLoadTicket;
 class EditorGizmos;
 class GPUMaterialPreview;
 class GPUMeshPreview;
@@ -314,12 +316,15 @@ class InxVkCoreModular
     /// @brief Ensure per-object GPU buffers exist and match the given mesh data.
     /// Creates new buffers or recreates if vertex/index count changed.
     void EnsureObjectBuffers(uint64_t objectId, const std::vector<Vertex> &vertices,
-                             const std::vector<uint32_t> &indices, bool forceUpdate);
+                             const std::vector<uint32_t> &indices, bool forceUpdate, const std::string &assetGuid,
+                             uint64_t runtimeVersion);
 
     /// @brief Advance the frame counter for EnsureObjectBuffers dedup.
     /// Call once per frame before any Render calls.
     void AdvanceEnsureFrame()
     {
+        PumpPendingTextureLoads();
+        PumpPendingMeshUploads();
         ++m_ensureFrameCounter;
     }
 
@@ -339,6 +344,129 @@ class InxVkCoreModular
     {
         return m_perObjectBuffers.size();
     }
+    [[nodiscard]] size_t GetPendingMeshUploadCount() const noexcept
+    {
+        return m_pendingSharedMeshBuffers.size();
+    }
+    [[nodiscard]] uint64_t GetSubmittedMeshUploadCount() const noexcept
+    {
+        return m_submittedMeshUploadCount;
+    }
+    [[nodiscard]] uint64_t GetCompletedMeshUploadCount() const noexcept
+    {
+        return m_completedMeshUploadCount;
+    }
+    [[nodiscard]] uint64_t GetAsyncMeshUploadCount() const noexcept
+    {
+        return m_asyncMeshUploadCount;
+    }
+    [[nodiscard]] size_t GetPendingTextureCpuLoadCount() const noexcept
+    {
+        return m_pendingTextureCpuLoads.size();
+    }
+    [[nodiscard]] size_t GetPendingTextureUploadCount() const noexcept
+    {
+        return m_pendingTextureGpuUploads.size();
+    }
+    [[nodiscard]] uint64_t GetSubmittedTextureUploadCount() const noexcept
+    {
+        return m_submittedTextureUploadCount;
+    }
+    [[nodiscard]] uint64_t GetCompletedTextureUploadCount() const noexcept
+    {
+        return m_completedTextureUploadCount;
+    }
+    [[nodiscard]] uint64_t GetAsyncTextureUploadCount() const noexcept
+    {
+        return m_asyncTextureUploadCount;
+    }
+    [[nodiscard]] uint64_t GetStagingPoolBytes() const noexcept
+    {
+        return m_resourceManager.GetStagingPoolBytes();
+    }
+    [[nodiscard]] size_t GetStagingPoolBufferCount() const noexcept
+    {
+        return m_resourceManager.GetStagingPoolBufferCount();
+    }
+    [[nodiscard]] uint64_t GetStagingAllocationCount() const noexcept
+    {
+        return m_resourceManager.GetStagingAllocationCount();
+    }
+    [[nodiscard]] uint64_t GetStagingReuseCount() const noexcept
+    {
+        return m_resourceManager.GetStagingReuseCount();
+    }
+    [[nodiscard]] uint64_t GetStagingDiscardCount() const noexcept
+    {
+        return m_resourceManager.GetStagingDiscardCount();
+    }
+    [[nodiscard]] uint64_t GetTextureGpuResidentBytes() const
+    {
+        return m_textureCache.GetResidentBytes();
+    }
+    [[nodiscard]] uint64_t GetTextureGpuBudgetBytes() const
+    {
+        return m_textureCache.GetBudgetBytes();
+    }
+    [[nodiscard]] size_t GetTextureGpuCacheEntryCount() const
+    {
+        return m_textureCache.GetEntryCount();
+    }
+    [[nodiscard]] size_t GetRetiredTextureGpuLeaseCount() const
+    {
+        return m_textureCache.GetRetiredLeaseCount();
+    }
+    [[nodiscard]] uint64_t GetTextureGpuEvictionCount() const
+    {
+        return m_textureCache.GetEvictionCount();
+    }
+    void SetTextureGpuBudgetBytes(uint64_t bytes)
+    {
+        m_textureCache.SetBudgetBytes(bytes);
+    }
+    [[nodiscard]] size_t TrimTextureGpuBudget()
+    {
+        return m_textureCache.TrimToBudget();
+    }
+    [[nodiscard]] uint64_t GetMeshGpuResidentBytes() const;
+    [[nodiscard]] uint64_t GetMeshGpuBudgetBytes() const noexcept
+    {
+        return m_meshGpuBudgetBytes;
+    }
+    [[nodiscard]] size_t GetMeshGpuCacheEntryCount() const noexcept
+    {
+        return m_sharedMeshBuffers.size();
+    }
+    [[nodiscard]] size_t GetRetiredMeshGpuLeaseCount() const;
+    [[nodiscard]] uint64_t GetMeshGpuEvictionCount() const noexcept
+    {
+        return m_meshGpuEvictionCount;
+    }
+    void SetMeshGpuBudgetBytes(uint64_t bytes);
+    [[nodiscard]] size_t TrimMeshGpuBudget();
+    [[nodiscard]] uint64_t GetRetiredMeshGpuLeaseBytes() const;
+    [[nodiscard]] uint64_t GetRetiredTextureGpuLeaseBytes() const
+    {
+        return m_textureCache.GetRetiredLeaseBytes();
+    }
+    [[nodiscard]] GpuEvictionCandidate PeekOldestMeshGpuEvictable() const;
+    [[nodiscard]] GpuEvictionCandidate PeekOldestTextureGpuEvictable() const
+    {
+        return m_textureCache.PeekOldestEvictable();
+    }
+    [[nodiscard]] uint64_t EvictOldestMeshGpu();
+    [[nodiscard]] uint64_t EvictOldestTextureGpu()
+    {
+        return m_textureCache.EvictOldest();
+    }
+    [[nodiscard]] std::vector<GpuAssetResidencyRecord> GetAssetGpuResidency() const;
+    [[nodiscard]] MaterialGpuResidencySnapshot GetMaterialGpuResidency() const
+    {
+        return m_materialPipelineManagerInitialized ? m_materialPipelineManager.GetResidencySnapshot()
+                                                    : MaterialGpuResidencySnapshot{};
+    }
+    [[nodiscard]] size_t GetRuntimeMeshGpuEntryCount() const;
+    [[nodiscard]] uint64_t GetRuntimeMeshGpuResidentBytes() const;
 
     /// @brief Remove per-object buffers for objects that are no longer active.
     /// Call once per frame after SetDrawCalls with the current active draw calls.
@@ -358,6 +486,11 @@ class InxVkCoreModular
 
     VkCommandBuffer BeginSingleTimeCommands();
     void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
+    [[nodiscard]] std::shared_ptr<vk::GraphicsSubmissionTicket>
+    EndSingleTimeCommandsAsync(VkCommandBuffer commandBuffer, std::function<void()> releaseResources = {})
+    {
+        return m_resourceManager.EndSingleTimeCommandsAsync(commandBuffer, std::move(releaseResources));
+    }
 
     // ========================================================================
     // Render Callbacks (RenderGraph-based)
@@ -449,6 +582,11 @@ class InxVkCoreModular
     {
         return m_textureCache;
     }
+
+    [[nodiscard]] uint64_t GetShaderHotReloadRetirementCount() const noexcept
+    {
+        return m_shaderHotReloadRetirementCount;
+    }
     [[nodiscard]] const VkTextureCache &GetTextureCache() const
     {
         return m_textureCache;
@@ -515,34 +653,27 @@ class InxVkCoreModular
     /// @brief Refresh a material's pipeline using its vertex and fragment shader names.
     bool RefreshMaterialPipeline(std::shared_ptr<InxMaterial> material, const std::string &vertShaderName,
                                  const std::string &fragShaderName);
+    bool RefreshPreviewMaterialPipeline(std::shared_ptr<InxMaterial> material, const std::string &vertShaderName,
+                                        const std::string &fragShaderName, VkBuffer sceneUbo, VkBuffer lightingUbo);
 
-    /// @brief Render a material preview sphere using real GPU shaders.
-    /// @param material  Loaded material with shader IDs set.
-    /// @param size      Output image width and height (square).
-    /// @param outPixels Receives RGBA8 pixel data (size*size*4 bytes).
-    /// @return true if GPU rendering succeeded.
-    bool RenderMaterialPreviewGPU(std::shared_ptr<InxMaterial> material, int size,
-                                  std::vector<unsigned char> &outPixels);
+    [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket>
+    BeginMaterialPreviewGPU(const std::shared_ptr<InxMaterial> &material, int size);
+    bool TryCompleteMaterialPreviewGPU(const std::shared_ptr<vk::ImageReadbackTicket> &ticket, int outputSize,
+                                       std::vector<unsigned char> &outPixels);
 
-    /// @brief Render a mesh preview using real GPU shaders.
-    /// @param mesh      Loaded mesh asset with vertices/indices.
-    /// @param materials Per-submesh materials (matched by SubMesh::materialSlot).
-    /// @param size      Output image width and height (square).
-    /// @param outPixels Receives RGBA8 pixel data (size*size*4 bytes).
-    /// @return true if GPU rendering succeeded.
-    bool RenderMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
-                              std::vector<unsigned char> &outPixels);
-
-    /// @brief Mesh preview with an explicit camera (no auto-fit) — interactive Timeline viewport.
-    bool RenderMeshPreviewGPUCamera(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials,
-                                    int size, const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
-                                    std::vector<unsigned char> &outPixels, bool cloneMaterials = true);
+    [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket>
+    BeginMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size);
+    bool TryCompleteMeshPreviewGPU(const std::shared_ptr<vk::ImageReadbackTicket> &ticket, int outputSize,
+                                   std::vector<unsigned char> &outPixels);
 
     /// @brief Live mesh preview — GPU render target displayed directly in ImGui (no CPU readback).
     uint64_t RenderMeshPreviewGPUImGuiCamera(const InxMesh &mesh,
                                              const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
                                              const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
                                              bool cloneMaterials = false);
+
+    /// @brief Release GPU preview resources while the ImGui Vulkan backend is still alive.
+    void ReleaseGpuPreviews();
 
     /// @brief Create a per-material shadow pipeline using the material's shadow
     ///        vertex and fragment variants.
@@ -708,6 +839,11 @@ class InxVkCoreModular
         return m_asyncTransferContext;
     }
 
+    [[nodiscard]] vk::AsyncTransferContext &GetAsyncReadbackContext()
+    {
+        return m_asyncReadbackContext;
+    }
+
     /// @brief Inline-update the lighting UBO in a command buffer.
     ///
     /// Uses vkCmdUpdateBuffer with proper pipeline barriers so that all
@@ -777,6 +913,7 @@ class InxVkCoreModular
     vk::VkPipelineManager m_pipelineManager;
     vk::VkResourceManager m_resourceManager;
     vk::AsyncTransferContext m_asyncTransferContext;
+    vk::AsyncTransferContext m_asyncReadbackContext;
     vk::RenderGraph m_renderGraph;
 
     // ========================================================================
@@ -908,6 +1045,17 @@ class InxVkCoreModular
 
     // Texture cache (GPU textures keyed by name/GUID, thread-safe)
     VkTextureCache m_textureCache;
+    struct PendingTextureGpuUpload
+    {
+        std::string guid;
+        uint64_t runtimeVersion = 0;
+        std::shared_ptr<vk::TextureUploadTicket> ticket;
+    };
+    std::unordered_map<std::string, std::shared_ptr<AssetLoadTicket>> m_pendingTextureCpuLoads;
+    std::unordered_map<std::string, PendingTextureGpuUpload> m_pendingTextureGpuUploads;
+    uint64_t m_submittedTextureUploadCount = 0;
+    uint64_t m_completedTextureUploadCount = 0;
+    uint64_t m_asyncTextureUploadCount = 0;
 
     // GPU material preview (lazy-initialized)
     std::unique_ptr<GPUMaterialPreview> m_gpuMaterialPreview;
@@ -915,9 +1063,9 @@ class InxVkCoreModular
     std::unique_ptr<GPUMeshPreview> m_gpuMeshPreview;
 
     /// @brief Shared texture resolution logic (used by TextureResolver lambda).
-    /// Resolves textureRef (GUID or path) → GPU image, using GUID-based cache keys.
-    std::pair<VkImageView, VkSampler> ResolveTextureForMaterial(const std::string &textureRef,
-                                                                const std::string &bindingName);
+    /// Resolves an asset GUID to a GPU image using GUID-based cache keys.
+    MaterialDescriptorSet::TextureBinding ResolveTextureForMaterial(const std::string &textureRef,
+                                                                    const std::string &bindingName);
 
     // ========================================================================
     // Per-object GPU buffers
@@ -925,13 +1073,16 @@ class InxVkCoreModular
 
     struct SharedMeshKey
     {
+        std::string assetGuid;
+        uint64_t runtimeVersion = 0;
         size_t contentHash = 0;
         size_t vertexCount = 0;
         size_t indexCount = 0;
 
         bool operator==(const SharedMeshKey &other) const noexcept
         {
-            return contentHash == other.contentHash && vertexCount == other.vertexCount &&
+            return assetGuid == other.assetGuid && runtimeVersion == other.runtimeVersion &&
+                   contentHash == other.contentHash && vertexCount == other.vertexCount &&
                    indexCount == other.indexCount;
         }
     };
@@ -940,7 +1091,9 @@ class InxVkCoreModular
     {
         size_t operator()(const SharedMeshKey &key) const noexcept
         {
-            size_t h = key.contentHash;
+            size_t h = std::hash<std::string>{}(key.assetGuid);
+            h ^= std::hash<uint64_t>{}(key.runtimeVersion) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= key.contentHash + 0x9e3779b9 + (h << 6) + (h >> 2);
             h ^= std::hash<size_t>{}(key.vertexCount) + 0x9e3779b9 + (h << 6) + (h >> 2);
             h ^= std::hash<size_t>{}(key.indexCount) + 0x9e3779b9 + (h << 6) + (h >> 2);
             return h;
@@ -967,11 +1120,35 @@ class InxVkCoreModular
         return hash;
     }
 
+    void PumpPendingMeshUploads();
+    void PumpPendingTextureLoads();
+    [[nodiscard]] std::vector<GpuAssetResidencyRecord> GetAssetTextureGpuResidency() const
+    {
+        return m_textureCache.GetAssetResidency();
+    }
+
     /// @brief Shared vertex/index buffer pair keyed by mesh storage identity.
     struct SharedMeshBuffers
     {
         std::shared_ptr<vk::VkBufferHandle> vertexBuffer;
         std::shared_ptr<vk::VkBufferHandle> indexBuffer;
+        size_t vertexCount = 0;
+        size_t indexCount = 0;
+        uint64_t residentBytes = 0;
+        uint64_t lastUsedFrame = 0;
+    };
+
+    struct RetiredMeshLease
+    {
+        std::weak_ptr<vk::VkBufferHandle> vertexBuffer;
+        std::weak_ptr<vk::VkBufferHandle> indexBuffer;
+        uint64_t residentBytes = 0;
+    };
+
+    struct PendingSharedMeshBuffers
+    {
+        std::shared_ptr<vk::BufferUploadTicket> vertexUpload;
+        std::shared_ptr<vk::BufferUploadTicket> indexUpload;
         size_t vertexCount = 0;
         size_t indexCount = 0;
     };
@@ -986,16 +1163,29 @@ class InxVkCoreModular
         SharedMeshKey sharedKey;
         const void *lastVertexPtr = nullptr; // fast-path: skip hash if pointer unchanged
         const void *lastIndexPtr = nullptr;
-        uint32_t ensuredOnFrame = 0; // frame-stamp: skip duplicate EnsureObjectBuffers per frame
+        uint64_t ensuredOnFrame = 0; // frame-stamp: skip duplicate EnsureObjectBuffers per frame
     };
 
     /// @brief Map from objectId → persistent GPU buffers.
     /// Objects with identical mesh storage share the same GPU buffers.
     std::unordered_map<uint64_t, PerObjectBuffers> m_perObjectBuffers;
-    uint32_t m_ensureFrameCounter = 0; // incremented once per frame
+    uint64_t m_ensureFrameCounter = 0; // incremented once per frame
 
     /// @brief Shared mesh GPU buffer cache keyed by vertex/index storage pointers.
     std::unordered_map<SharedMeshKey, SharedMeshBuffers, SharedMeshKeyHash> m_sharedMeshBuffers;
+    std::unordered_map<SharedMeshKey, PendingSharedMeshBuffers, SharedMeshKeyHash> m_pendingSharedMeshBuffers;
+    mutable std::vector<RetiredMeshLease> m_retiredMeshLeases;
+    uint64_t m_meshGpuBudgetBytes = 512ULL * 1024ULL * 1024ULL;
+    mutable uint64_t m_meshGpuResidentBytes = 0;
+    uint64_t m_meshGpuEvictionCount = 0;
+    uint64_t m_submittedMeshUploadCount = 0;
+    uint64_t m_completedMeshUploadCount = 0;
+    uint64_t m_asyncMeshUploadCount = 0;
+
+    void PublishSharedMeshBuffers(const SharedMeshKey &key, SharedMeshBuffers buffers);
+    void RetireSharedMeshBuffers(SharedMeshBuffers buffers, bool eviction);
+    void SweepRetiredMeshLeases() const;
+    [[nodiscard]] std::vector<GpuAssetResidencyRecord> GetAssetMeshGpuResidency() const;
 
     // Render callbacks (RenderGraph-based)
     std::function<void(VkCommandBuffer cmdBuf)> m_renderGraphExecutor;
@@ -1063,6 +1253,7 @@ class InxVkCoreModular
     /// Cache of shadow pipelines keyed by shader ID (vert|frag).
     /// Materials sharing the same shader share the same shadow VkPipeline.
     std::unordered_map<std::string, VkPipeline> m_shadowPipelineCache;
+    uint64_t m_shaderHotReloadRetirementCount = 0;
 
     /// @brief Lazily create/recreate shadow pipeline resources.
     bool EnsureShadowPipeline(VkRenderPass compatibleRenderPass);

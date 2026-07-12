@@ -122,6 +122,25 @@ struct EngineConfig
     /// thin colliders.  Cost is ~1.5× one step (broadphase is shared).
     int physicsCollisionSteps = 2;
 
+    /// Jolt solver and contact-generation tuning.
+    int physicsVelocitySteps = 10;
+    int physicsPositionSteps = 3;
+    float physicsPenetrationSlop = 0.002f;
+    float physicsSpeculativeContactDistance = 0.01f;
+    float physicsLinearCastMaxPenetration = 0.1f;
+    float physicsBaumgarte = 0.15f;
+    float physicsMaxPenetrationDistance = 0.05f;
+    float physicsLinearCastThreshold = 0.5f;
+
+    /// Relative normal speed below which restitution is suppressed (m/s).
+    float physicsMinVelocityForRestitution = 1.0f;
+
+    /// Minimum quiet time before a dynamic body may enter sleep (seconds).
+    float physicsTimeBeforeSleep = 0.5f;
+
+    /// Maximum tracked point velocity for sleep eligibility (m/s).
+    float physicsPointVelocitySleepThreshold = 0.03f;
+
     /// Default gravity vector.
     glm::vec3 physicsGravity{0.0f, -9.81f, 0.0f};
 
@@ -147,7 +166,6 @@ struct EngineConfig
     float defaultRigidbodyAngularDrag = 0.05f;
     float defaultMaxAngularVelocity = 7.0f;  // rad/s
     float defaultMaxLinearVelocity = 500.0f; // m/s
-    float defaultMaxDepenetrationVelocity = 1e10f;
 
     // ========================================================================
     // Physics — Layers

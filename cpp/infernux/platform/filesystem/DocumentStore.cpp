@@ -1,0 +1,272 @@
+#include "DocumentStore.h"
+
+#include "AtomicFile.h"
+
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
+#include <limits>
+#include <utility>
+
+namespace infernux
+{
+namespace
+{
+size_t DefaultDocumentWorkerCount()
+{
+    const size_t hardwareThreads = std::thread::hardware_concurrency();
+    if (hardwareThreads == 0)
+        return 4;
+    return std::clamp(hardwareThreads / 2, size_t{2}, size_t{8});
+}
+} // namespace
+
+void DocumentWriteTicket::Wait() const
+{
+    {
+        std::unique_lock lock(m_mutex);
+        m_condition.wait(lock, [this] { return m_status != Status::Pending; });
+    }
+    ThrowIfFailed();
+}
+
+bool DocumentWriteTicket::WaitFor(std::chrono::milliseconds timeout) const
+{
+    {
+        std::unique_lock lock(m_mutex);
+        if (!m_condition.wait_for(lock, timeout, [this] { return m_status != Status::Pending; }))
+            return false;
+    }
+    ThrowIfFailed();
+    return true;
+}
+
+std::optional<DocumentFileState> DocumentWriteTicket::GetCommittedFileState() const
+{
+    std::lock_guard lock(m_mutex);
+    if (m_status != Status::Succeeded)
+        return std::nullopt;
+    return m_fileState;
+}
+
+void DocumentWriteTicket::Complete(Status status, std::string error, std::optional<DocumentFileState> fileState)
+{
+    {
+        std::lock_guard lock(m_mutex);
+        if (m_status != Status::Pending)
+            throw std::logic_error("document write ticket completed more than once");
+        m_status = status;
+        m_error = std::move(error);
+        m_fileState = fileState;
+    }
+    m_condition.notify_all();
+}
+
+void DocumentWriteTicket::ThrowIfFailed() const
+{
+    std::lock_guard lock(m_mutex);
+    if (m_status == Status::Superseded)
+        throw DocumentWriteSuperseded(m_error);
+    if (m_status == Status::Failed)
+        throw std::runtime_error(m_error);
+}
+
+DocumentStore::DocumentStore(Writer writer, size_t workerCount)
+    : m_writer(std::move(writer)), m_workerCount(workerCount)
+{
+    if (m_workerCount == 0)
+        throw std::invalid_argument("DocumentStore requires at least one worker");
+    if (!m_writer) {
+        m_writer = [](const std::string &path, const std::string &content) {
+            std::string error;
+            if (!WriteTextFileAtomically(path, content, error))
+                throw std::runtime_error("atomic write failed for '" + path + "': " + error);
+        };
+    }
+}
+
+DocumentStore::~DocumentStore()
+{
+    Shutdown();
+}
+
+DocumentStore &DocumentStore::Instance()
+{
+    static auto *instance = new DocumentStore({}, DefaultDocumentWorkerCount());
+    return *instance;
+}
+
+std::shared_ptr<DocumentWriteTicket> DocumentStore::Submit(const std::string &path, std::string content)
+{
+    const std::string normalizedPath = NormalizePath(path);
+    std::shared_ptr<DocumentWriteTicket> superseded;
+    std::shared_ptr<DocumentWriteTicket> ticket;
+
+    {
+        std::lock_guard lock(m_mutex);
+        if (m_state == State::Closing)
+            throw std::runtime_error("DocumentStore is shutting down");
+        if (m_state == State::Stopped)
+            StartWorkerLocked();
+
+        const uint64_t generation = ++m_generations[normalizedPath];
+        ticket = std::shared_ptr<DocumentWriteTicket>(new DocumentWriteTicket(normalizedPath, generation));
+        if (const auto existing = m_pending.find(normalizedPath); existing != m_pending.end())
+            superseded = existing->second.ticket;
+
+        m_pending.insert_or_assign(normalizedPath, Request{normalizedPath, normalizedPath, std::move(content), ticket});
+        if (m_activePaths.find(normalizedPath) == m_activePaths.end() &&
+            m_queuedPaths.find(normalizedPath) == m_queuedPaths.end()) {
+            m_readyPaths.push_back(normalizedPath);
+            m_queuedPaths.insert(normalizedPath);
+        }
+    }
+
+    if (superseded) {
+        superseded->Complete(DocumentWriteTicket::Status::Superseded,
+                             "document generation " + std::to_string(superseded->GetGeneration()) + " for '" +
+                                 normalizedPath + "' was superseded by generation " +
+                                 std::to_string(ticket->GetGeneration()));
+    }
+    m_condition.notify_one();
+    return ticket;
+}
+
+uint64_t DocumentStore::WriteAndWait(const std::string &path, std::string content)
+{
+    auto ticket = Submit(path, std::move(content));
+    ticket->Wait();
+    return ticket->GetGeneration();
+}
+
+void DocumentStore::Flush()
+{
+    std::unique_lock lock(m_mutex);
+    m_condition.wait(lock, [this] { return IsIdleLocked(); });
+}
+
+void DocumentStore::Flush(const std::string &path)
+{
+    const std::string key = NormalizePath(path);
+    std::unique_lock lock(m_mutex);
+    m_condition.wait(lock, [this, &key] { return IsIdleLocked(&key); });
+}
+
+void DocumentStore::Shutdown()
+{
+    std::vector<std::thread> workers;
+    {
+        std::unique_lock lock(m_mutex);
+        if (m_state == State::Stopped)
+            return;
+        if (m_state == State::Closing) {
+            m_condition.wait(lock, [this] { return m_state == State::Stopped; });
+            return;
+        }
+        m_state = State::Closing;
+        workers = std::move(m_workers);
+    }
+    m_condition.notify_all();
+    for (auto &worker : workers) {
+        if (worker.joinable())
+            worker.join();
+    }
+
+    {
+        std::lock_guard lock(m_mutex);
+        m_state = State::Stopped;
+    }
+    m_condition.notify_all();
+}
+
+std::string DocumentStore::NormalizePath(const std::string &path)
+{
+    if (path.empty())
+        throw std::invalid_argument("document path must not be empty");
+    std::error_code error;
+    auto absolute = std::filesystem::absolute(std::filesystem::u8path(path), error);
+    if (error)
+        throw std::invalid_argument("failed to normalize document path '" + path + "': " + error.message());
+    std::string normalized = absolute.lexically_normal().generic_u8string();
+#ifdef _WIN32
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                   [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+#endif
+    return normalized;
+}
+
+void DocumentStore::StartWorkerLocked()
+{
+    if (!m_workers.empty())
+        throw std::logic_error("stopped DocumentStore still owns worker threads");
+    m_state = State::Running;
+    m_workers.reserve(m_workerCount);
+    for (size_t index = 0; index < m_workerCount; ++index)
+        m_workers.emplace_back(&DocumentStore::WorkerMain, this);
+}
+
+void DocumentStore::WorkerMain()
+{
+    while (true) {
+        Request request;
+        {
+            std::unique_lock lock(m_mutex);
+            m_condition.wait(lock, [this] { return !m_readyPaths.empty() || m_state == State::Closing; });
+            if (m_readyPaths.empty())
+                return;
+
+            const std::string key = std::move(m_readyPaths.front());
+            m_readyPaths.pop_front();
+            m_queuedPaths.erase(key);
+            auto pending = m_pending.find(key);
+            if (pending == m_pending.end())
+                throw std::logic_error("DocumentStore ready path has no pending request");
+            request = std::move(pending->second);
+            m_pending.erase(pending);
+            m_activePaths.insert(key);
+        }
+
+        std::string error;
+        std::optional<DocumentFileState> fileState;
+        try {
+            m_writer(request.path, request.content);
+            std::error_code stateError;
+            const uintmax_t size = std::filesystem::file_size(std::filesystem::u8path(request.path), stateError);
+            if (!stateError && size <= std::numeric_limits<uint64_t>::max()) {
+                const auto modified =
+                    std::filesystem::last_write_time(std::filesystem::u8path(request.path), stateError);
+                if (!stateError)
+                    fileState = DocumentFileState{static_cast<uint64_t>(size),
+                                                  static_cast<int64_t>(modified.time_since_epoch().count())};
+            }
+        } catch (const std::exception &exception) {
+            error = exception.what();
+        }
+
+        {
+            std::lock_guard lock(m_mutex);
+            m_activePaths.erase(request.key);
+            if (m_pending.find(request.key) != m_pending.end() &&
+                m_queuedPaths.find(request.key) == m_queuedPaths.end()) {
+                m_readyPaths.push_back(request.key);
+                m_queuedPaths.insert(request.key);
+            }
+        }
+        m_condition.notify_all();
+
+        if (error.empty())
+            request.ticket->Complete(DocumentWriteTicket::Status::Succeeded, {}, fileState);
+        else
+            request.ticket->Complete(DocumentWriteTicket::Status::Failed, std::move(error));
+    }
+}
+
+bool DocumentStore::IsIdleLocked(const std::string *key) const
+{
+    if (!key)
+        return m_pending.empty() && m_activePaths.empty() && m_readyPaths.empty();
+    return m_pending.find(*key) == m_pending.end() && m_activePaths.find(*key) == m_activePaths.end() &&
+           m_queuedPaths.find(*key) == m_queuedPaths.end();
+}
+
+} // namespace infernux

@@ -23,6 +23,8 @@ set(PYTHON_TARGET_DIR "${CMAKE_SOURCE_DIR}/python/Infernux/lib")
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS cpp/*.cpp cpp/*.h)
 # Exclude standalone launcher source from the pybind11 module
 list(FILTER ENGINE_SOURCES EXCLUDE REGEX "tools/launcher/")
+# Tests are separate executables and must never be linked into the Python module.
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX "cpp/tests/")
 file(GLOB_RECURSE BINDING_SOURCES CONFIGURE_DEPENDS cpp/infernux/tools/pybinding/*.cpp)
 
 # ------------------------------------------------------------------------------
@@ -79,6 +81,7 @@ target_include_directories(_Infernux PRIVATE
 if(MSVC)
     target_compile_options(_Infernux PRIVATE
         /utf-8
+        /FS       # Serialize writes to the shared compiler PDB under parallel MSBuild.
         /bigobj   # pybind11 binding TUs exceed the default COFF section limit
     )
 
@@ -187,6 +190,227 @@ target_link_libraries(_Infernux PRIVATE
 # External Dependencies
 # ------------------------------------------------------------------------------
 add_subdirectory(external)
+
+if(TARGET zlibstatic)
+    set(INFERNUX_ZLIB_TARGET zlibstatic)
+    set(INFERNUX_ZLIB_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/external/assimp/contrib/zlib
+        ${CMAKE_BINARY_DIR}/external/assimp/contrib/zlib
+    )
+elseif(TARGET ZLIB::zlib)
+    set(INFERNUX_ZLIB_TARGET ZLIB::zlib)
+elseif(TARGET ZLIB::ZLIB)
+    set(INFERNUX_ZLIB_TARGET ZLIB::ZLIB)
+else()
+    message(FATAL_ERROR "Infernux requires a zlib target for document transaction journals")
+endif()
+target_link_libraries(_Infernux PRIVATE ${INFERNUX_ZLIB_TARGET})
+if(INFERNUX_ZLIB_INCLUDE_DIRS)
+    target_include_directories(_Infernux PRIVATE ${INFERNUX_ZLIB_INCLUDE_DIRS})
+endif()
+
+# ------------------------------------------------------------------------------
+# Native regression tests
+# ------------------------------------------------------------------------------
+option(INFERNUX_BUILD_TESTS "Build Infernux native regression tests" ON)
+if(INFERNUX_BUILD_TESTS)
+    enable_testing()
+    find_package(Threads REQUIRED)
+
+    add_executable(infernux_job_system_tests
+        cpp/tests/JobSystemTests.cpp
+        cpp/infernux/core/threading/JobSystem.cpp
+    )
+    target_include_directories(infernux_job_system_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    target_link_libraries(infernux_job_system_tests PRIVATE Threads::Threads)
+    if(MSVC)
+        target_compile_options(infernux_job_system_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.job_system COMMAND infernux_job_system_tests)
+
+    add_executable(infernux_atomic_file_tests
+        cpp/tests/AtomicFileTests.cpp
+        cpp/infernux/platform/filesystem/AtomicFile.cpp
+    )
+    target_include_directories(infernux_atomic_file_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    if(MSVC)
+        target_compile_options(infernux_atomic_file_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.atomic_file COMMAND infernux_atomic_file_tests)
+
+    add_executable(infernux_document_store_tests
+        cpp/tests/DocumentStoreTests.cpp
+        cpp/infernux/platform/filesystem/DocumentStore.cpp
+        cpp/infernux/platform/filesystem/AtomicFile.cpp
+    )
+    target_include_directories(infernux_document_store_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    if(MSVC)
+        target_compile_options(infernux_document_store_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.document_store COMMAND infernux_document_store_tests)
+
+    add_executable(infernux_document_transaction_tests
+        cpp/tests/DocumentTransactionTests.cpp
+        cpp/infernux/platform/filesystem/DocumentTransaction.cpp
+        cpp/infernux/platform/filesystem/DocumentStore.cpp
+        cpp/infernux/platform/filesystem/AtomicFile.cpp
+    )
+    target_include_directories(infernux_document_transaction_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    target_link_libraries(infernux_document_transaction_tests PRIVATE Threads::Threads)
+    target_link_libraries(infernux_document_transaction_tests PRIVATE ${INFERNUX_ZLIB_TARGET})
+    if(INFERNUX_ZLIB_INCLUDE_DIRS)
+        target_include_directories(infernux_document_transaction_tests PRIVATE ${INFERNUX_ZLIB_INCLUDE_DIRS})
+    endif()
+    if(MSVC)
+        target_compile_options(infernux_document_transaction_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.document_transaction COMMAND infernux_document_transaction_tests)
+
+    add_executable(infernux_component_data_store_tests
+        cpp/tests/ComponentDataStoreTests.cpp
+        cpp/infernux/function/scene/ComponentDataStore.cpp
+    )
+    target_include_directories(infernux_component_data_store_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    if(MSVC)
+        target_compile_options(infernux_component_data_store_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.component_data_store COMMAND infernux_component_data_store_tests)
+
+    add_executable(infernux_asset_index_tests
+        cpp/tests/AssetIndexTests.cpp
+        cpp/infernux/function/resources/AssetDatabase/AssetIndex.cpp
+        cpp/infernux/function/resources/InxResource/InxResourceMeta.cpp
+        cpp/infernux/core/reflection/InxTypeRegistry.cpp
+        cpp/infernux/platform/filesystem/DocumentStore.cpp
+        cpp/infernux/platform/filesystem/AtomicFile.cpp
+    )
+    target_include_directories(infernux_asset_index_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+        ${CMAKE_SOURCE_DIR}/external
+    )
+    target_link_libraries(infernux_asset_index_tests PRIVATE Threads::Threads)
+    if(MSVC)
+        target_compile_options(infernux_asset_index_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.asset_index COMMAND infernux_asset_index_tests)
+
+    add_executable(infernux_asset_dependency_graph_tests
+        cpp/tests/AssetDependencyGraphTests.cpp
+        cpp/infernux/function/resources/AssetDependencyGraph.cpp
+    )
+    target_include_directories(infernux_asset_dependency_graph_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    if(MSVC)
+        target_compile_options(infernux_asset_dependency_graph_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.asset_dependency_graph COMMAND infernux_asset_dependency_graph_tests)
+
+    add_executable(infernux_mesh_artifact_tests
+        cpp/tests/MeshArtifactTests.cpp
+        cpp/infernux/function/resources/InxMesh/MeshArtifact.cpp
+        cpp/infernux/function/resources/InxMesh/InxMesh.cpp
+        cpp/infernux/function/resources/InxSkinnedMesh/InxSkinnedMesh.cpp
+    )
+    target_include_directories(infernux_mesh_artifact_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+        ${CMAKE_SOURCE_DIR}/external
+    )
+    target_link_libraries(infernux_mesh_artifact_tests PRIVATE Vulkan::Vulkan glm::glm)
+    if(MSVC)
+        target_compile_options(infernux_mesh_artifact_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.mesh_artifact COMMAND infernux_mesh_artifact_tests)
+
+    add_executable(infernux_skinned_mesh_artifact_tests
+        cpp/tests/SkinnedMeshArtifactTests.cpp
+        cpp/infernux/function/resources/InxSkinnedMesh/SkinnedMeshArtifact.cpp
+        cpp/infernux/function/resources/InxSkinnedMesh/InxSkinnedMesh.cpp
+    )
+    target_include_directories(infernux_skinned_mesh_artifact_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+        ${CMAKE_SOURCE_DIR}/external
+    )
+    target_link_libraries(infernux_skinned_mesh_artifact_tests PRIVATE Vulkan::Vulkan glm::glm)
+    if(MSVC)
+        target_compile_options(infernux_skinned_mesh_artifact_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.skinned_mesh_artifact COMMAND infernux_skinned_mesh_artifact_tests)
+
+    add_executable(infernux_texture_artifact_tests
+        cpp/tests/TextureArtifactTests.cpp
+        cpp/infernux/function/resources/InxTexture/TextureArtifact.cpp
+    )
+    target_include_directories(infernux_texture_artifact_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    if(MSVC)
+        target_compile_options(infernux_texture_artifact_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.texture_artifact COMMAND infernux_texture_artifact_tests)
+
+    add_test(
+        NAME infernux.headless
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/headless_smoke_test.py
+    )
+    set_tests_properties(infernux.headless PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 30
+        RUN_SERIAL TRUE
+    )
+
+    add_test(
+        NAME infernux.gpu_upload
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/gpu_upload_smoke_test.py
+    )
+    set_tests_properties(infernux.gpu_upload PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 30
+        RUN_SERIAL TRUE
+        SKIP_RETURN_CODE 77
+    )
+
+    add_test(
+        NAME infernux.scene_residency_soak
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/scene_residency_soak_test.py
+    )
+    set_tests_properties(infernux.scene_residency_soak PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 90
+        RUN_SERIAL TRUE
+        SKIP_RETURN_CODE 77
+    )
+
+    add_test(
+        NAME infernux.physics_profile
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/physics_profile_gate.py
+    )
+    set_tests_properties(infernux.physics_profile PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 30
+        RUN_SERIAL TRUE
+    )
+
+    add_test(
+        NAME infernux.asset_scan_profile
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/asset_scan_profile_gate.py
+    )
+    set_tests_properties(infernux.asset_scan_profile PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 120
+        RUN_SERIAL TRUE
+    )
+endif()
 
 # ------------------------------------------------------------------------------
 # Pre-Build Cleanup: remove python __pycache__ directories recursively

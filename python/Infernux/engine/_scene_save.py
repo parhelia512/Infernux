@@ -1,8 +1,5 @@
-"""SceneSaveMixin — extracted from SceneFileManager."""
-from __future__ import annotations
-
 """
-Scene file management for Infernux.
+SceneSaveMixin for strict, durable scene persistence.
 
 Handles:
 - Tracking the current scene file path (.scene)
@@ -17,10 +14,9 @@ The C++ layer already provides ``Scene.serialize / deserialize / save_to_file /
 load_from_file`` and ``PendingPyComponent`` for Python component recreation.
 This module orchestrates those primitives into a complete workflow.
 """
+from __future__ import annotations
 
 import os
-import json
-import threading
 from typing import Optional, Callable
 
 from Infernux.debug import Debug
@@ -68,7 +64,7 @@ class SceneSaveMixin:
             return False
 
         from Infernux.lib import SceneManager
-        from Infernux.engine.prefab_manager import _strip_prefab_fields, _strip_prefab_runtime_fields
+        from Infernux.engine.prefab_manager import save_prefab
 
         scene = SceneManager.instance().get_active_scene()
         roots = _get_scene_root_objects(scene)
@@ -76,24 +72,15 @@ class SceneSaveMixin:
             Debug.log_warning("No root objects in Prefab Mode scene.")
             return False
 
-        prefab_root = roots[0]
-        try:
-            root_data = json.loads(prefab_root.serialize())
-        except Exception as exc:
-            Debug.log_error(f"Failed to serialize prefab root: {exc}")
-            return False
-
-        _strip_prefab_fields(root_data)
-        _strip_prefab_runtime_fields(root_data)
-
-        envelope = dict(self.prefab_envelope) if isinstance(self.prefab_envelope, dict) else {}
-        envelope["root_object"] = root_data
-
-        try:
-            with open(self.prefab_mode_path, 'w', encoding='utf-8') as f:
-                json.dump(envelope, f, indent=2, ensure_ascii=False)
-        except OSError as exc:
-            Debug.log_error(f"Failed to save prefab: {exc}")
+        source_canvas_name = ""
+        if isinstance(self.prefab_envelope, dict):
+            source_canvas_name = self.prefab_envelope.get("source_canvas_name", "")
+        if not save_prefab(
+            roots[0],
+            self.prefab_mode_path,
+            asset_database=self._asset_database,
+            source_canvas_name=source_canvas_name,
+        ):
             return False
 
         self._dirty = False
@@ -120,9 +107,9 @@ class SceneSaveMixin:
     def _do_save_inner(self, path: str) -> bool:
         """Internal save implementation.
 
-        Serializes the scene on the main thread (fast, touches C++ scene graph),
-        then writes the JSON to disk on a background thread so the editor stays
-        responsive for large scenes.
+        Serializes the scene on the main thread, then durably replaces the file
+        synchronously. The future DocumentStore will own background writes,
+        generation ordering, coalescing, and shutdown drain as one contract.
         """
         if not self._is_under_assets(path):
             Debug.log_warning("Cannot save scene outside of Assets/ directory.")
@@ -150,30 +137,15 @@ class SceneSaveMixin:
             Debug.log_error("Scene serialization returned empty data.")
             return False
 
-        # Step 2 (background thread): write JSON to file
-        import threading
-
+        # Step 2: durably replace the scene file. The old daemon+immediate-join
+        # path was synchronous in practice and could outlive a timeout.
         abs_path = os.path.abspath(path)
-        write_error: list = []  # mutable container for thread result
-
-        def _write():
-            try:
-                os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-                with open(abs_path, "w", encoding="utf-8") as f:
-                    f.write(json_str)
-            except Exception as exc:
-                write_error.append(exc)
-
-        t = threading.Thread(target=_write, daemon=True)
-        t.start()
-        t.join(timeout=10.0)  # generous timeout for large files
-
-        if t.is_alive():
-            Debug.log_error(f"Scene file write timed out: {abs_path}")
-            return False
-
-        if write_error:
-            Debug.log_error(f"Failed to write scene file: {write_error[0]}")
+        try:
+            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+            from Infernux.core.document_store import DocumentStore
+            DocumentStore.instance().write_and_wait(abs_path, json_str)
+        except (OSError, RuntimeError) as exc:
+            Debug.log_error(f"Failed to write scene file: {exc}")
             return False
 
         self._current_scene_path = abs_path

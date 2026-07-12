@@ -7,6 +7,9 @@
 
 #include "Collider.h"
 
+#include <cstdint>
+#include <utility>
+
 namespace infernux
 {
 
@@ -27,10 +30,33 @@ class MeshCollider : public Collider
     }
     void SetConvex(bool convex);
 
+    [[nodiscard]] const std::string &GetShapeError() const
+    {
+        return m_shapeError;
+    }
+
+    [[nodiscard]] bool IsCooking() const
+    {
+        return m_cookingPending;
+    }
+
     [[nodiscard]] void *CreateJoltShapeRaw() const override;
 
-    [[nodiscard]] std::string Serialize() const override;
-    bool Deserialize(const std::string &jsonStr) override;
+    static void ClearCookingCache();
+    [[nodiscard]] static std::pair<size_t, size_t> GetCookingCacheStats();
+    [[nodiscard]] static size_t GetPendingCookingCount();
+    [[nodiscard]] static size_t GetAsyncCookingSubmissionCount();
+
+    /// Commit completed worker payloads at a main-thread physics safe point.
+    /// An explicit physics sync passes waitForAll=true and acts as a barrier.
+    static void FlushCompletedCooking(bool waitForAll = false);
+
+    /// Called when the sibling MeshRenderer changes collision geometry.
+    void OnMeshGeometryChanged();
+
+    [[nodiscard]] nlohmann::json SerializeDocument() const override;
+    static void ValidateSerializedDocument(const nlohmann::json &document);
+    bool DeserializeDocument(const nlohmann::json &document) override;
     [[nodiscard]] std::unique_ptr<Component> Clone() const override;
 
     void AutoFitToMesh() override;
@@ -48,10 +74,21 @@ class MeshCollider : public Collider
 
   private:
     bool CollectMeshGeometry(std::vector<glm::vec3> &outVertices, std::vector<uint32_t> &outIndices) const;
+    void CompleteCooking(uint64_t hashA, uint64_t hashB, size_t vertexCount, size_t indexCount, bool convex,
+                         uint64_t revision, const std::string &error);
+    void InvalidatePendingCooking() const;
 
     bool m_convex = false;
     mutable std::vector<glm::vec3> m_convexHullPositions;
     mutable std::vector<uint32_t> m_convexHullEdges;
+    mutable std::string m_shapeError;
+    mutable uint64_t m_cookingRevision = 0;
+    mutable uint64_t m_pendingHashA = 0;
+    mutable uint64_t m_pendingHashB = 0;
+    mutable size_t m_pendingVertexCount = 0;
+    mutable size_t m_pendingIndexCount = 0;
+    mutable bool m_pendingConvex = false;
+    mutable bool m_cookingPending = false;
 };
 
 } // namespace infernux

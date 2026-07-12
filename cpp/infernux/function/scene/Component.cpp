@@ -209,44 +209,71 @@ Transform *Component::GetTransform() const
     return nullptr;
 }
 
-std::string Component::Serialize() const
+nlohmann::json Component::SerializeDocument() const
 {
     json j;
-    j["schema_version"] = 1;
+    j["schema_version"] = GetSerializationSchemaVersion();
     j["type"] = GetTypeName();
     j["enabled"] = m_enabled;
     j["execution_order"] = m_executionOrder;
     j["component_id"] = m_componentId;
-    j["instance_guid"] = m_componentId;
-    return j.dump(2);
+    return j;
+}
+
+std::string Component::Serialize() const
+{
+    return SerializeDocument().dump(2);
 }
 
 bool Component::Deserialize(const std::string &jsonStr)
 {
     try {
-        json j = json::parse(jsonStr);
-        // C++ components store schema_version = 1 (see Serialize()).
-        //
-        // NOTE: Python components have a *separate* schema migration path
-        // using __schema_version__ / __migrate__() on the Python class —
-        // see Infernux.components.component._deserialize_fields().
-        // The two systems are independent: C++ versions track the base
-        // Component wire format; Python versions track per-script field
-        // layout changes.  Keep both in sync when adding new base fields.
-        if (!j.contains("schema_version")) {
-            INXLOG_ERROR("Component::Deserialize: missing 'schema_version' field — data predates versioning system");
+        return DeserializeDocument(json::parse(jsonStr));
+    } catch (const std::exception &e) {
+        INXLOG_ERROR("Component::Deserialize failed to parse JSON for '", GetTypeName(), "': ", e.what());
+        return false;
+    }
+}
+
+bool Component::DeserializeDocument(const nlohmann::json &j)
+{
+    try {
+        if (!j.is_object()) {
+            INXLOG_ERROR("Component::Deserialize for '", GetTypeName(), "': expected an object document");
             return false;
         }
-        if (j.contains("enabled")) {
-            m_enabled = j["enabled"].get<bool>();
+
+        const int expectedVersion = GetSerializationSchemaVersion();
+        if (!j.contains("schema_version") || !j["schema_version"].is_number_integer() ||
+            j["schema_version"].get<int>() != expectedVersion) {
+            INXLOG_ERROR("Component::Deserialize for '", GetTypeName(), "': expected schema_version ", expectedVersion);
+            return false;
         }
-        if (j.contains("execution_order")) {
-            m_executionOrder = j["execution_order"].get<int>();
+
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != GetTypeName()) {
+            INXLOG_ERROR("Component::Deserialize for '", GetTypeName(), "': document type does not match");
+            return false;
         }
+        if (!j.contains("enabled") || !j["enabled"].is_boolean() || !j.contains("execution_order") ||
+            !j["execution_order"].is_number_integer()) {
+            INXLOG_ERROR("Component::Deserialize for '", GetTypeName(), "': missing or invalid base fields");
+            return false;
+        }
+        if (j.contains("instance_guid")) {
+            INXLOG_ERROR("Component::Deserialize for '", GetTypeName(),
+                         "': instance_guid was removed; use component_id");
+            return false;
+        }
+
+        m_enabled = j["enabled"].get<bool>();
+        m_executionOrder = j["execution_order"].get<int>();
         if (j.contains("component_id")) {
+            if (!j["component_id"].is_number_unsigned()) {
+                INXLOG_ERROR("Component::Deserialize for '", GetTypeName(), "': component_id must be unsigned");
+                return false;
+            }
             SetComponentID(j["component_id"].get<uint64_t>());
         }
-        // instance_guid is now derived from component_id; ignore legacy string values
         return true;
     } catch (const std::exception &e) {
         INXLOG_ERROR("Component::Deserialize failed for '", GetTypeName(), "' (id=", m_componentId, "): ", e.what());

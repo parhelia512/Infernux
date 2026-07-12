@@ -295,6 +295,14 @@ def _ensure_categories():
         autosave_debounce=0.35,
     )
 
+    _categories["physic_material"] = AssetCategoryDef(
+        display_name="asset.display_physic_material",
+        access_mode=AssetAccessMode.READ_WRITE_RESOURCE,
+        load_fn=_load_physic_material,
+        custom_body_fn=_render_physic_material_body,
+        autosave_debounce=0.2,
+    )
+
     # ── Prefab ─────────────────────────────────────────────────────────
     _categories["prefab"] = AssetCategoryDef(
         display_name="asset.display_prefab",
@@ -378,8 +386,8 @@ def _load_material(path: str):
         return None
     native = mat.native
     try:
-        cached = json.loads(native.serialize())
-    except (RuntimeError, ValueError, json.JSONDecodeError):
+        cached = native.serialize_document()
+    except (RuntimeError, ValueError, TypeError):
         cached = {"name": mat.name, "properties": {}}
     old_prop_names = set(cached.get("properties", {}).keys())
     _sync_material_shader_metadata(cached)
@@ -388,7 +396,7 @@ def _load_material(path: str):
         # Vertex/fragment shader sync added new properties — push them to the
         # native C++ material so the UBO picks up the correct default values.
         try:
-            native.deserialize(json.dumps(cached))
+            native.deserialize_document(cached)
         except (RuntimeError, ValueError) as _exc:
             Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
             pass
@@ -400,6 +408,61 @@ def _load_material(path: str):
         "shader_sync_key": "",
         "_applied_version": native.get_version(),
     }
+
+
+def _load_physic_material(path: str):
+    from Infernux.core.physic_material import PhysicMaterial
+    material = PhysicMaterial.load(path)
+    return (material, {}) if material is not None else None
+
+
+def _render_physic_material_body(ctx: InxGUIContext, panel, state: _State):
+    del panel
+    from .inspector_utils import render_compact_section_header
+
+    material = state.settings
+    if material is None:
+        return
+    if not render_compact_section_header(ctx, t("asset.physic_material_properties"), level="secondary"):
+        return
+
+    labels = [
+        t("asset.friction"), t("asset.bounciness"),
+        t("asset.friction_combine"), t("asset.bounce_combine"),
+    ]
+    label_width = max_label_w(ctx, labels)
+    changed = False
+
+    field_label(ctx, labels[0], label_width)
+    friction = ctx.drag_float("##physic_friction", float(material.friction), 0.01, 0.0, 1.0)
+    if friction != material.friction:
+        material.friction = friction
+        changed = True
+
+    field_label(ctx, labels[1], label_width)
+    bounciness = ctx.drag_float("##physic_bounciness", float(material.bounciness), 0.01, 0.0, 1.0)
+    if bounciness != material.bounciness:
+        material.bounciness = bounciness
+        changed = True
+
+    combine_labels = [
+        t("asset.combine_average"), t("asset.combine_minimum"),
+        t("asset.combine_multiply"), t("asset.combine_maximum"),
+    ]
+    field_label(ctx, labels[2], label_width)
+    friction_combine = ctx.combo("##physic_friction_combine", int(material.friction_combine), combine_labels)
+    if friction_combine != material.friction_combine:
+        material.friction_combine = friction_combine
+        changed = True
+
+    field_label(ctx, labels[3], label_width)
+    bounce_combine = ctx.combo("##physic_bounce_combine", int(material.bounce_combine), combine_labels)
+    if bounce_combine != material.bounce_combine:
+        material.bounce_combine = bounce_combine
+        changed = True
+
+    if changed and state.exec_layer:
+        state.exec_layer.schedule_rw_save(material)
 
 
 def _load_prefab(path: str):
@@ -1187,18 +1250,18 @@ def _refresh_material(state: _State):
     # Fast-path: when the only mutations since the last refresh came from
     # the Python-side property editor (sliders, combos, etc.), cached_data
     # is already in sync with the native material.  Skip the expensive
-    # serialize -> parse -> merge -> re-serialize round-trip (~1-7 ms).
+    # native document -> merge -> preview-cache encoding round-trip (~1-7 ms).
     applied_version = state.extra.get("_applied_version", -2)
     if current_version != -1 and current_version == applied_version:
         return
     state.extra["_applied_version"] = current_version
     try:
-        fresh = json.loads(native.serialize())
+        fresh = native.serialize_document()
         merged = _merge_material_cached_data(state.extra.get("cached_data"), fresh)
         _sync_material_shader_metadata(merged)
         state.extra["cached_data"] = merged
         state.extra["cached_json"] = json.dumps(merged)
-    except (RuntimeError, ValueError, json.JSONDecodeError) as _exc:
+    except (RuntimeError, ValueError, TypeError) as _exc:
         Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
 
 
@@ -2173,7 +2236,7 @@ def _render_shader_body(ctx: InxGUIContext, panel, state: _State):
 
         if new_path != info.source_path:
             ext = os.path.splitext(new_path)[1].lower()
-            valid = {".vert", ".frag", ".geom", ".tesc", ".tese"}
+            valid = {".vert", ".frag"}
             if ext not in valid:
                 ctx.push_style_color(ImGuiCol.Text, *Theme.ERROR_TEXT)
                 ctx.label(t("asset.shader_invalid_ext").format(ext=ext))

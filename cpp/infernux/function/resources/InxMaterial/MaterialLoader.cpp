@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <unordered_set>
 
 namespace infernux
 {
@@ -17,7 +18,7 @@ namespace infernux
 // Load — create a brand-new InxMaterial from a .mat file
 // =============================================================================
 
-std::shared_ptr<void> MaterialLoader::Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb)
+RuntimeAssetPayload MaterialLoader::Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb)
 {
     if (filePath.empty() || guid.empty()) {
         INXLOG_WARN("MaterialLoader::Load: empty filePath or guid");
@@ -56,10 +57,10 @@ std::shared_ptr<void> MaterialLoader::Load(const std::string &filePath, const st
 // Reload — hot-refresh into an existing instance (pointer identity preserved)
 // =============================================================================
 
-bool MaterialLoader::Reload(std::shared_ptr<void> existing, const std::string &filePath, const std::string &guid,
+bool MaterialLoader::Reload(const RuntimeAssetPayload &existing, const std::string &filePath, const std::string &guid,
                             AssetDatabase *adb)
 {
-    auto mat = std::static_pointer_cast<InxMaterial>(existing);
+    auto mat = existing.Get<InxMaterial>();
     if (!mat) {
         INXLOG_WARN("MaterialLoader::Reload: null existing instance");
         return false;
@@ -98,6 +99,14 @@ bool MaterialLoader::Reload(std::shared_ptr<void> existing, const std::string &f
 // =============================================================================
 // ScanDependencies — enumerate outgoing GUIDs for the dependency graph
 // =============================================================================
+
+size_t MaterialLoader::EstimateRuntimeBytes(const RuntimeAssetPayload &payload) const
+{
+    const auto material = payload.Get<InxMaterial>();
+    if (!material)
+        throw std::invalid_argument("MaterialLoader cannot estimate an empty runtime payload");
+    return material->GetRuntimeMemoryBytes();
+}
 
 std::set<std::string> MaterialLoader::ScanDependencies(const std::string &filePath, AssetDatabase *adb)
 {
@@ -147,7 +156,7 @@ std::set<std::string> MaterialLoader::ScanDependencies(const std::string &filePa
 // =============================================================================
 
 void MaterialLoader::CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
-                                InxResourceMeta &metaData)
+                                InxResourceMeta &metaData) const
 {
     if (!content) {
         INXLOG_ERROR("Invalid material content for metadata creation");
@@ -169,10 +178,7 @@ void MaterialLoader::RegisterDependencies(const std::string &materialGuid, const
     if (materialGuid.empty())
         return;
 
-    auto &graph = AssetDependencyGraph::Instance();
-
-    // Clear stale edges before re-registering
-    graph.ClearDependenciesOf(materialGuid);
+    std::unordered_set<std::string> dependencies;
 
     // Texture property GUIDs
     for (const auto &[propName, prop] : mat.GetAllProperties()) {
@@ -180,7 +186,7 @@ void MaterialLoader::RegisterDependencies(const std::string &materialGuid, const
             continue;
         const auto *val = std::get_if<std::string>(&prop.value);
         if (val && !val->empty())
-            graph.AddDependency(materialGuid, *val);
+            dependencies.insert(*val);
     }
 
     // Shader GUIDs (shader files have .meta with GUID)
@@ -190,11 +196,12 @@ void MaterialLoader::RegisterDependencies(const std::string &materialGuid, const
                 return;
             std::string depGuid = adb->GetGuidFromPath(shaderPath);
             if (!depGuid.empty())
-                graph.AddDependency(materialGuid, depGuid);
+                dependencies.insert(std::move(depGuid));
         };
         addShaderDep(mat.GetVertShaderName());
         addShaderDep(mat.GetFragShaderName());
     }
+    AssetDependencyGraph::Instance().SetAssetDependencies(materialGuid, dependencies);
 }
 
 } // namespace infernux

@@ -237,8 +237,11 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
         # Persist canvas panel positions
         for go_id, pos in self._canvas_panel_positions.items():
             cp["UIEditor"][f"canvas_pos_{go_id}"] = f"{pos[0]:.1f},{pos[1]:.1f}"
-        with open(path, "w", encoding="utf-8") as f:
-            cp.write(f)
+        from io import StringIO
+        from Infernux.core.document_store import write_document_text
+        output = StringIO()
+        cp.write(output)
+        write_document_text(path, output.getvalue())
 
     # ------------------------------------------------------------------
     # Helpers — canvas / element discovery

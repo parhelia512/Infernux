@@ -29,7 +29,6 @@ class _FakeClip:
         self.take_name = take_name
         self.duration_hint = duration_hint
         self.source_model_guid = ""
-        self.source_model_path = ""
 
 
 class TestTriggerConsumption:

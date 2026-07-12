@@ -230,15 +230,15 @@ def _mesh_picker_items(filter_text: str):
     return items
 
 
-def _record_mesh_renderer_change(comp, old_json: str, description: str) -> None:
+def _record_mesh_renderer_change(comp, old_document: dict, description: str) -> None:
     try:
-        new_json = comp.serialize()
+        new_document = comp.serialize_document()
     except Exception as exc:
         Debug.log_warning(f"Mesh assignment could not be serialized: {exc}")
         _notify_scene_modified()
         return
-    if new_json != old_json:
-        _record_generic_component(comp, old_json, new_json)
+    if new_document != old_document:
+        _record_generic_component(comp, old_document, new_document)
 
 
 def _assign_primitive_mesh(comp, primitive_name: str) -> None:
@@ -249,14 +249,14 @@ def _assign_primitive_mesh(comp, primitive_name: str) -> None:
         Debug.log_warning(f"Unknown primitive mesh '{primitive_name}': {exc}")
         return
 
-    old_json = comp.serialize()
+    old_document = comp.serialize_document()
     if getattr(comp, 'type_name', '') == 'SkinnedMeshRenderer':
         if hasattr(comp, 'set_source_model_guid'):
             comp.set_source_model_guid("")
         if hasattr(comp, 'set_source_model_path'):
             comp.set_source_model_path("")
     comp.set_primitive_mesh(primitive_type)
-    _record_mesh_renderer_change(comp, old_json, f"Set Mesh {primitive_name}")
+    _record_mesh_renderer_change(comp, old_document, f"Set Mesh {primitive_name}")
 
 
 def _assign_model_mesh(comp, payload) -> None:
@@ -265,16 +265,16 @@ def _assign_model_mesh(comp, payload) -> None:
         Debug.log_warning(f"Mesh assignment failed: model is not registered ({path or payload})")
         return
 
-    old_json = comp.serialize()
+    old_document = comp.serialize_document()
     if getattr(comp, 'type_name', '') == 'SkinnedMeshRenderer' and hasattr(comp, 'set_source_model_guid'):
         comp.set_source_model_guid(guid)
     elif hasattr(comp, 'set_mesh_asset_guid'):
         comp.set_mesh_asset_guid(guid)
-    _record_mesh_renderer_change(comp, old_json, "Set Mesh")
+    _record_mesh_renderer_change(comp, old_document, "Set Mesh")
 
 
 def _clear_mesh(comp) -> None:
-    old_json = comp.serialize()
+    old_document = comp.serialize_document()
     if getattr(comp, 'type_name', '') == 'SkinnedMeshRenderer':
         if hasattr(comp, 'set_source_model_guid'):
             comp.set_source_model_guid("")
@@ -282,7 +282,7 @@ def _clear_mesh(comp) -> None:
             comp.set_source_model_path("")
     if hasattr(comp, 'clear_mesh_asset'):
         comp.clear_mesh_asset()
-    _record_mesh_renderer_change(comp, old_json, "Clear Mesh")
+    _record_mesh_renderer_change(comp, old_document, "Clear Mesh")
 
 
 def _apply_mesh_pick(comp, picked_value) -> None:

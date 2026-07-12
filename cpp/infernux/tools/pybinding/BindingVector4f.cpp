@@ -79,31 +79,31 @@ inline glm::vec4 Normalize(const glm::vec4 &v)
     return v / mag;
 }
 
-inline float SanitizeFloat(float v)
+inline float RequireFiniteFloat(float value)
 {
-    return std::isfinite(v) ? v : 0.0f;
+    if (!std::isfinite(value))
+        throw std::invalid_argument("Vector4 components must be finite");
+    return value;
 }
 
-inline glm::vec4 SanitizeVec4(const glm::vec4 &v)
+inline void RequireFiniteVec4(const glm::vec4 &value, const char *name)
 {
-    return glm::vec4(SanitizeFloat(v.x), SanitizeFloat(v.y), SanitizeFloat(v.z), SanitizeFloat(v.w));
+    if (!std::isfinite(value.x) || !std::isfinite(value.y) || !std::isfinite(value.z) || !std::isfinite(value.w))
+        throw std::invalid_argument(std::string(name) + " must contain finite values");
 }
 
 inline glm::vec4 SmoothDamp(glm::vec4 current, glm::vec4 target, glm::vec4 &currentVelocity, float smoothTime,
                             float maxSpeed, float deltaTime)
 {
-    current = SanitizeVec4(current);
-    target = SanitizeVec4(target);
-    currentVelocity = SanitizeVec4(currentVelocity);
-
-    if (smoothTime < 1e-4f)
-        smoothTime = 1e-4f;
+    RequireFiniteVec4(current, "current");
+    RequireFiniteVec4(target, "target");
+    RequireFiniteVec4(currentVelocity, "current_velocity");
+    if (!std::isfinite(smoothTime) || smoothTime <= 0.0f)
+        throw std::invalid_argument("smooth_time must be finite and positive");
     if (!std::isfinite(deltaTime) || deltaTime <= 0.0f)
-        return current;
-    if (!std::isfinite(maxSpeed))
-        maxSpeed = std::numeric_limits<float>::infinity();
-    else if (maxSpeed < 0.0f)
-        maxSpeed = 0.0f;
+        throw std::invalid_argument("delta_time must be finite and positive");
+    if (std::isnan(maxSpeed) || maxSpeed < 0.0f)
+        throw std::invalid_argument("max_speed must be non-negative");
 
     glm::vec4 originalTarget = target;
     glm::vec4 diff = current - target;
@@ -128,8 +128,7 @@ inline glm::vec4 SmoothDamp(glm::vec4 current, glm::vec4 target, glm::vec4 &curr
     }
 
     if (!std::isfinite(result.x) || !std::isfinite(result.y) || !std::isfinite(result.z) || !std::isfinite(result.w)) {
-        currentVelocity = glm::vec4(0.0f);
-        return originalTarget;
+        throw std::overflow_error("Vector4.smooth_damp produced a non-finite result");
     }
     return result;
 }
@@ -146,8 +145,8 @@ void RegisterVec4fBindings(py::module_ &m)
         py::class_<Vec>(m, "vec4f")
             .def(py::init<>())
             .def(py::init([](float x, float y, float z, float w) {
-                     return glm::vec4(vec4_util::SanitizeFloat(x), vec4_util::SanitizeFloat(y),
-                                      vec4_util::SanitizeFloat(z), vec4_util::SanitizeFloat(w));
+                     return glm::vec4(vec4_util::RequireFiniteFloat(x), vec4_util::RequireFiniteFloat(y),
+                                      vec4_util::RequireFiniteFloat(z), vec4_util::RequireFiniteFloat(w));
                  }),
                  "Construct vec4f", py::arg("x"), py::arg("y"), py::arg("z"), py::arg("w"))
             .def("__getitem__",
@@ -160,7 +159,7 @@ void RegisterVec4fBindings(py::module_ &m)
                  [](Vec &v, int i, float value) {
                      if (i < 0 || i >= 4)
                          throw std::out_of_range("index out of range");
-                     v[i] = vec4_util::SanitizeFloat(value);
+                     v[i] = vec4_util::RequireFiniteFloat(value);
                  })
             .def("__add__", [](const Vec &a, const Vec &b) { return Vec(a + b); })
             .def("__add__",
@@ -257,21 +256,29 @@ void RegisterVec4fBindings(py::module_ &m)
                             std::fabs(a.z - b.z) > 1e-6f || std::fabs(a.w - b.w) > 1e-6f;
                  })
             .def_property(
-                "x", [](const Vec &v) { return v.x; }, [](Vec &v, float val) { v.x = val; })
+                "x", [](const Vec &v) { return v.x; },
+                [](Vec &v, float val) { v.x = vec4_util::RequireFiniteFloat(val); })
             .def_property(
-                "y", [](const Vec &v) { return v.y; }, [](Vec &v, float val) { v.y = val; })
+                "y", [](const Vec &v) { return v.y; },
+                [](Vec &v, float val) { v.y = vec4_util::RequireFiniteFloat(val); })
             .def_property(
-                "z", [](const Vec &v) { return v.z; }, [](Vec &v, float val) { v.z = val; })
+                "z", [](const Vec &v) { return v.z; },
+                [](Vec &v, float val) { v.z = vec4_util::RequireFiniteFloat(val); })
             .def_property(
-                "w", [](const Vec &v) { return v.w; }, [](Vec &v, float val) { v.w = val; })
+                "w", [](const Vec &v) { return v.w; },
+                [](Vec &v, float val) { v.w = vec4_util::RequireFiniteFloat(val); })
             .def_property(
-                "r", [](const Vec &v) { return v.x; }, [](Vec &v, float val) { v.x = val; })
+                "r", [](const Vec &v) { return v.x; },
+                [](Vec &v, float val) { v.x = vec4_util::RequireFiniteFloat(val); })
             .def_property(
-                "g", [](const Vec &v) { return v.y; }, [](Vec &v, float val) { v.y = val; })
+                "g", [](const Vec &v) { return v.y; },
+                [](Vec &v, float val) { v.y = vec4_util::RequireFiniteFloat(val); })
             .def_property(
-                "b", [](const Vec &v) { return v.z; }, [](Vec &v, float val) { v.z = val; })
+                "b", [](const Vec &v) { return v.z; },
+                [](Vec &v, float val) { v.z = vec4_util::RequireFiniteFloat(val); })
             .def_property(
-                "a", [](const Vec &v) { return v.w; }, [](Vec &v, float val) { v.w = val; })
+                "a", [](const Vec &v) { return v.w; },
+                [](Vec &v, float val) { v.w = vec4_util::RequireFiniteFloat(val); })
             .def("__repr__",
                  [](const Vec &v) {
                      return "Vector4(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ", " + std::to_string(v.z) +

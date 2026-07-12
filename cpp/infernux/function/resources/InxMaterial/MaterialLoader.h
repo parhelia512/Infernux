@@ -8,13 +8,14 @@ namespace infernux
 class MaterialLoader final : public IAssetLoader
 {
   public:
-    std::shared_ptr<void> Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb) override;
-    bool Reload(std::shared_ptr<void> existing, const std::string &filePath, const std::string &guid,
+    RuntimeAssetPayload Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb) override;
+    bool Reload(const RuntimeAssetPayload &existing, const std::string &filePath, const std::string &guid,
                 AssetDatabase *adb) override;
+    [[nodiscard]] size_t EstimateRuntimeBytes(const RuntimeAssetPayload &payload) const override;
     std::set<std::string> ScanDependencies(const std::string &filePath, AssetDatabase *adb) override;
 
     void CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
-                    InxResourceMeta &metaData) override;
+                    InxResourceMeta &metaData) const override;
 
   private:
     static void RegisterDependencies(const std::string &materialGuid, const class InxMaterial &mat, AssetDatabase *adb);

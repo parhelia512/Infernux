@@ -338,7 +338,8 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
                 continue;
             lastEnsuredId = dc.objectId;
             if (dc.meshVertices && dc.meshIndices) {
-                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate);
+                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate,
+                                              dc.meshAssetGuid, dc.meshRuntimeVersion);
             }
         }
 
@@ -349,7 +350,8 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
                 continue;
             lastEnsuredId = dc.objectId;
             if (dc.meshVertices && dc.meshIndices) {
-                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate);
+                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate,
+                                              dc.meshAssetGuid, dc.meshRuntimeVersion);
             }
         }
     }
@@ -364,7 +366,8 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
     if (!shadowSource) {
         for (const DrawCall &dc : forwardDrawCalls) {
             if (dc.meshVertices && dc.meshIndices) {
-                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate);
+                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate,
+                                              dc.meshAssetGuid, dc.meshRuntimeVersion);
             }
         }
     }
@@ -466,8 +469,6 @@ const char *RenderCommandTypeName(RenderCommandType type)
         return "SetGlobalVector";
     case RenderCommandType::SetGlobalMatrix:
         return "SetGlobalMatrix";
-    case RenderCommandType::RequestAsyncReadback:
-        return "RequestAsyncReadback";
     }
     return "Unknown";
 }
@@ -546,7 +547,6 @@ void ScriptableRenderContext::ProcessPendingCommandBuffers()
             case RenderCommandType::SetRenderTarget:
             case RenderCommandType::DrawMesh:
             case RenderCommandType::SetGlobalMatrix:
-            case RenderCommandType::RequestAsyncReadback:
                 WarnUnimplementedCommand(command.type);
                 break;
             }
@@ -568,7 +568,6 @@ bool ScriptableRenderContext::IsCommandImplemented(RenderCommandType type) noexc
     case RenderCommandType::SetRenderTarget:
     case RenderCommandType::DrawMesh:
     case RenderCommandType::SetGlobalMatrix:
-    case RenderCommandType::RequestAsyncReadback:
         return false;
     }
     return false;

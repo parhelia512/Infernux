@@ -15,6 +15,11 @@
 namespace infernux
 {
 
+size_t AudioClip::GetRuntimeMemoryBytes() const noexcept
+{
+    return sizeof(*this) + m_filePath.capacity() + m_name.capacity() + m_guid.capacity() + m_data.capacity();
+}
+
 namespace
 {
 

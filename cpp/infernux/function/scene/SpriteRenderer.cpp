@@ -10,7 +10,7 @@ using json = nlohmann::json;
 namespace infernux
 {
 
-INFERNUX_REGISTER_COMPONENT("SpriteRenderer", SpriteRenderer)
+INFERNUX_REGISTER_VALIDATED_COMPONENT("SpriteRenderer", SpriteRenderer)
 
 SpriteRenderer::SpriteRenderer()
 {
@@ -33,11 +33,9 @@ std::shared_ptr<InxMaterial> SpriteRenderer::GetEffectiveMaterial(uint32_t slot)
     return AssetRegistry::Instance().GetBuiltinMaterial("DefaultUnlit");
 }
 
-std::string SpriteRenderer::Serialize() const
+nlohmann::json SpriteRenderer::SerializeDocument() const
 {
-    // Start with the base MeshRenderer JSON, then append sprite fields.
-    std::string baseJson = MeshRenderer::Serialize();
-    json j = json::parse(baseJson);
+    json j = MeshRenderer::SerializeDocument();
 
     // Override the type tag so we deserialize back as SpriteRenderer.
     j["type"] = "SpriteRenderer";
@@ -50,17 +48,20 @@ std::string SpriteRenderer::Serialize() const
     j["flipX"] = m_flipX;
     j["flipY"] = m_flipY;
 
-    return j.dump(2);
+    return j;
 }
 
-bool SpriteRenderer::Deserialize(const std::string &jsonStr)
+void SpriteRenderer::ValidateSerializedDocument(const nlohmann::json &document)
 {
-    if (!MeshRenderer::Deserialize(jsonStr))
+    ValidateSerializedDocumentForType(document, "SpriteRenderer");
+}
+
+bool SpriteRenderer::DeserializeDocument(const nlohmann::json &j)
+{
+    if (!MeshRenderer::DeserializeDocument(j))
         return false;
 
     try {
-        json j = json::parse(jsonStr);
-
         if (j.contains("spriteGuid") && j["spriteGuid"].is_string())
             m_spriteGuid = j["spriteGuid"].get<std::string>();
 
@@ -98,7 +99,7 @@ std::unique_ptr<Component> SpriteRenderer::Clone() const
     // MeshRenderer::Clone returns a MeshRenderer — we need a SpriteRenderer.
     auto clone = std::make_unique<SpriteRenderer>();
     // Copy base MeshRenderer state by re-deserializing
-    clone->Deserialize(Serialize());
+    clone->DeserializeDocument(SerializeDocument());
     return clone;
 }
 

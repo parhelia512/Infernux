@@ -15,3 +15,13 @@ class MeshCollider(Collider):
         ...
     @convex.setter
     def convex(self, value: bool) -> None: ...
+
+    @property
+    def shape_error(self) -> str:
+        """Last native mesh cooking error, or an empty string after success."""
+        ...
+
+    @property
+    def is_cooking(self) -> bool:
+        """Whether collision geometry is currently cooking on a worker."""
+        ...

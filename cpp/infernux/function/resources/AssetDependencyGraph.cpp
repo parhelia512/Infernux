@@ -2,191 +2,339 @@
 
 #include <core/log/InxLog.h>
 
+#include <algorithm>
+#include <atomic>
+#include <stdexcept>
+
 namespace infernux
 {
 
+namespace
+{
+void RequireEdge(const std::string &userGuid, const std::string &dependencyGuid)
+{
+    if (userGuid.empty() || dependencyGuid.empty())
+        throw std::invalid_argument("Dependency edges require non-empty GUIDs");
+    if (userGuid == dependencyGuid)
+        throw std::invalid_argument("An object cannot depend on itself");
+}
+} // namespace
+
+AssetDependencyGraph::AssetDependencyGraph() : m_assetSnapshot(std::make_shared<const AssetDependencySnapshot>())
+{
+}
+
 AssetDependencyGraph &AssetDependencyGraph::Instance()
 {
-    // Intentionally leaked — asset/material destructors may notify the graph
-    // during explicit Cleanup; static teardown order must not matter.
+    // Explicit engine cleanup owns lifetime state; avoid static teardown order.
     static AssetDependencyGraph *instance = new AssetDependencyGraph();
     return *instance;
 }
 
-// ============================================================================
-// Asset → Asset dependencies
-// ============================================================================
-
-void AssetDependencyGraph::AddDependency(const std::string &userGuid, const std::string &dependencyGuid)
+std::shared_ptr<const AssetDependencySnapshot> AssetDependencyGraph::GetAssetSnapshot() const
 {
-    if (userGuid.empty() || dependencyGuid.empty() || userGuid == dependencyGuid)
-        return;
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_dependencies[userGuid].insert(dependencyGuid);
-    m_dependents[dependencyGuid].insert(userGuid);
+    return std::atomic_load_explicit(&m_assetSnapshot, std::memory_order_acquire);
 }
 
-void AssetDependencyGraph::RemoveDependency(const std::string &userGuid, const std::string &dependencyGuid)
+uint64_t AssetDependencyGraph::GetAssetGeneration() const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    return GetAssetSnapshot()->GetGeneration();
+}
 
-    auto fwdIt = m_dependencies.find(userGuid);
-    if (fwdIt != m_dependencies.end()) {
-        fwdIt->second.erase(dependencyGuid);
-        if (fwdIt->second.empty())
-            m_dependencies.erase(fwdIt);
+void AssetDependencyGraph::AddEdge(AssetDependencySnapshot &snapshot, const std::string &userGuid,
+                                   const std::string &dependencyGuid)
+{
+    RequireEdge(userGuid, dependencyGuid);
+    if (snapshot.m_dependencies[userGuid].insert(dependencyGuid).second)
+        snapshot.m_dependents[dependencyGuid].insert(userGuid);
+}
+
+void AssetDependencyGraph::RemoveEdge(AssetDependencySnapshot &snapshot, const std::string &userGuid,
+                                      const std::string &dependencyGuid)
+{
+    const auto forward = snapshot.m_dependencies.find(userGuid);
+    if (forward != snapshot.m_dependencies.end()) {
+        forward->second.erase(dependencyGuid);
+        if (forward->second.empty())
+            snapshot.m_dependencies.erase(forward);
     }
-
-    auto revIt = m_dependents.find(dependencyGuid);
-    if (revIt != m_dependents.end()) {
-        revIt->second.erase(userGuid);
-        if (revIt->second.empty())
-            m_dependents.erase(revIt);
+    const auto reverse = snapshot.m_dependents.find(dependencyGuid);
+    if (reverse != snapshot.m_dependents.end()) {
+        reverse->second.erase(userGuid);
+        if (reverse->second.empty())
+            snapshot.m_dependents.erase(reverse);
     }
 }
 
-void AssetDependencyGraph::ClearDependenciesOf(const std::string &userGuid)
+void AssetDependencyGraph::ClearEdgesOf(AssetDependencySnapshot &snapshot, const std::string &userGuid)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    auto fwdIt = m_dependencies.find(userGuid);
-    if (fwdIt == m_dependencies.end())
+    const auto forward = snapshot.m_dependencies.find(userGuid);
+    if (forward == snapshot.m_dependencies.end())
         return;
-
-    // Remove this user from each dependency's reverse set
-    for (const auto &depGuid : fwdIt->second) {
-        auto revIt = m_dependents.find(depGuid);
-        if (revIt != m_dependents.end()) {
-            revIt->second.erase(userGuid);
-            if (revIt->second.empty())
-                m_dependents.erase(revIt);
-        }
+    for (const auto &dependencyGuid : forward->second) {
+        const auto reverse = snapshot.m_dependents.find(dependencyGuid);
+        if (reverse == snapshot.m_dependents.end())
+            continue;
+        reverse->second.erase(userGuid);
+        if (reverse->second.empty())
+            snapshot.m_dependents.erase(reverse);
     }
+    snapshot.m_dependencies.erase(forward);
+}
 
-    m_dependencies.erase(fwdIt);
+void AssetDependencyGraph::RemoveNode(AssetDependencySnapshot &snapshot, const std::string &guid)
+{
+    ClearEdgesOf(snapshot, guid);
+    const auto reverse = snapshot.m_dependents.find(guid);
+    if (reverse == snapshot.m_dependents.end())
+        return;
+    const auto users = reverse->second;
+    for (const auto &userGuid : users)
+        RemoveEdge(snapshot, userGuid, guid);
+}
+
+void AssetDependencyGraph::RebuildStatistics(AssetDependencySnapshot &snapshot)
+{
+    snapshot.m_edgeCount = 0;
+    snapshot.m_nodes.clear();
+    for (const auto &[userGuid, dependencies] : snapshot.m_dependencies) {
+        snapshot.m_nodes.insert(userGuid);
+        snapshot.m_edgeCount += dependencies.size();
+        snapshot.m_nodes.insert(dependencies.begin(), dependencies.end());
+    }
+}
+
+void AssetDependencyGraph::PublishAssetMutation(const std::function<void(AssetDependencySnapshot &)> &mutation)
+{
+    std::lock_guard<std::mutex> lock(m_assetWriteMutex);
+    const auto current = GetAssetSnapshot();
+    auto next = std::make_shared<AssetDependencySnapshot>(*current);
+    mutation(*next);
+    next->m_generation = current->m_generation + 1;
+    RebuildStatistics(*next);
+    std::atomic_store_explicit(&m_assetSnapshot, std::shared_ptr<const AssetDependencySnapshot>(std::move(next)),
+                               std::memory_order_release);
+}
+
+void AssetDependencyGraph::AddAssetDependency(const std::string &assetGuid, const std::string &dependencyGuid)
+{
+    PublishAssetMutation([&](AssetDependencySnapshot &snapshot) { AddEdge(snapshot, assetGuid, dependencyGuid); });
+}
+
+void AssetDependencyGraph::RemoveAssetDependency(const std::string &assetGuid, const std::string &dependencyGuid)
+{
+    PublishAssetMutation([&](AssetDependencySnapshot &snapshot) { RemoveEdge(snapshot, assetGuid, dependencyGuid); });
+}
+
+void AssetDependencyGraph::ClearAssetDependenciesOf(const std::string &assetGuid)
+{
+    if (assetGuid.empty())
+        throw std::invalid_argument("Asset GUID cannot be empty");
+    PublishAssetMutation([&](AssetDependencySnapshot &snapshot) { ClearEdgesOf(snapshot, assetGuid); });
+}
+
+void AssetDependencyGraph::SetAssetDependencies(const std::string &assetGuid,
+                                                const std::unordered_set<std::string> &dependencyGuids)
+{
+    if (assetGuid.empty())
+        throw std::invalid_argument("Asset GUID cannot be empty");
+    PublishAssetMutation([&](AssetDependencySnapshot &snapshot) {
+        ClearEdgesOf(snapshot, assetGuid);
+        for (const auto &dependencyGuid : dependencyGuids)
+            AddEdge(snapshot, assetGuid, dependencyGuid);
+    });
+}
+
+std::shared_ptr<const AssetDependencySnapshot> AssetDependencyGraph::BuildAssetSnapshot(
+    const std::unordered_map<std::string, std::vector<std::string>> &dependenciesByAsset, uint64_t generation)
+{
+    if (generation == 0)
+        throw std::invalid_argument("Asset dependency snapshot generation must be positive");
+    auto snapshot = std::make_shared<AssetDependencySnapshot>();
+    snapshot->m_generation = generation;
+    snapshot->m_dependencies.reserve(dependenciesByAsset.size());
+    for (const auto &[assetGuid, dependencies] : dependenciesByAsset) {
+        if (assetGuid.empty())
+            throw std::invalid_argument("Asset dependency snapshot contains an empty asset GUID");
+        for (const auto &dependencyGuid : dependencies)
+            AddEdge(*snapshot, assetGuid, dependencyGuid);
+    }
+    RebuildStatistics(*snapshot);
+    return snapshot;
+}
+
+void AssetDependencyGraph::InstallAssetSnapshot(std::shared_ptr<const AssetDependencySnapshot> snapshot)
+{
+    if (!snapshot)
+        throw std::invalid_argument("Asset dependency snapshot cannot be null");
+    std::lock_guard<std::mutex> lock(m_assetWriteMutex);
+    const auto current = GetAssetSnapshot();
+    if (snapshot->GetGeneration() != current->GetGeneration() + 1)
+        throw std::logic_error("Asset dependency snapshot generation is stale");
+    std::atomic_store_explicit(&m_assetSnapshot, std::move(snapshot), std::memory_order_release);
+}
+
+void AssetDependencyGraph::AddRuntimeDependency(const std::string &objectGuid, const std::string &assetGuid)
+{
+    RequireEdge(objectGuid, assetGuid);
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
+    if (m_runtimeDependencies[objectGuid].insert(assetGuid).second)
+        m_runtimeDependents[assetGuid].insert(objectGuid);
+}
+
+void AssetDependencyGraph::RemoveRuntimeDependency(const std::string &objectGuid, const std::string &assetGuid)
+{
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
+    const auto forward = m_runtimeDependencies.find(objectGuid);
+    if (forward != m_runtimeDependencies.end()) {
+        forward->second.erase(assetGuid);
+        if (forward->second.empty())
+            m_runtimeDependencies.erase(forward);
+    }
+    const auto reverse = m_runtimeDependents.find(assetGuid);
+    if (reverse != m_runtimeDependents.end()) {
+        reverse->second.erase(objectGuid);
+        if (reverse->second.empty())
+            m_runtimeDependents.erase(reverse);
+    }
+}
+
+void AssetDependencyGraph::ClearRuntimeDependenciesOf(const std::string &objectGuid)
+{
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
+    const auto forward = m_runtimeDependencies.find(objectGuid);
+    if (forward == m_runtimeDependencies.end())
+        return;
+    for (const auto &assetGuid : forward->second) {
+        const auto reverse = m_runtimeDependents.find(assetGuid);
+        if (reverse == m_runtimeDependents.end())
+            continue;
+        reverse->second.erase(objectGuid);
+        if (reverse->second.empty())
+            m_runtimeDependents.erase(reverse);
+    }
+    m_runtimeDependencies.erase(forward);
 }
 
 void AssetDependencyGraph::RemoveAsset(const std::string &guid)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    if (guid.empty())
+        throw std::invalid_argument("Asset GUID cannot be empty");
+    PublishAssetMutation([&](AssetDependencySnapshot &snapshot) { RemoveNode(snapshot, guid); });
 
-    // Remove as a user (forward edges)
-    auto fwdIt = m_dependencies.find(guid);
-    if (fwdIt != m_dependencies.end()) {
-        for (const auto &depGuid : fwdIt->second) {
-            auto revIt = m_dependents.find(depGuid);
-            if (revIt != m_dependents.end()) {
-                revIt->second.erase(guid);
-                if (revIt->second.empty())
-                    m_dependents.erase(revIt);
-            }
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
+    const auto outgoing = m_runtimeDependencies.find(guid);
+    if (outgoing != m_runtimeDependencies.end()) {
+        for (const auto &assetGuid : outgoing->second) {
+            const auto reverse = m_runtimeDependents.find(assetGuid);
+            if (reverse == m_runtimeDependents.end())
+                continue;
+            reverse->second.erase(guid);
+            if (reverse->second.empty())
+                m_runtimeDependents.erase(reverse);
         }
-        m_dependencies.erase(fwdIt);
+        m_runtimeDependencies.erase(outgoing);
     }
-
-    // Remove as a dependency (reverse edges)
-    auto revIt = m_dependents.find(guid);
-    if (revIt != m_dependents.end()) {
-        for (const auto &userGuid : revIt->second) {
-            auto fwdIt2 = m_dependencies.find(userGuid);
-            if (fwdIt2 != m_dependencies.end()) {
-                fwdIt2->second.erase(guid);
-                if (fwdIt2->second.empty())
-                    m_dependencies.erase(fwdIt2);
-            }
+    const auto users = m_runtimeDependents.find(guid);
+    if (users != m_runtimeDependents.end()) {
+        const auto objectGuids = users->second;
+        for (const auto &objectGuid : objectGuids) {
+            const auto forward = m_runtimeDependencies.find(objectGuid);
+            if (forward == m_runtimeDependencies.end())
+                continue;
+            forward->second.erase(guid);
+            if (forward->second.empty())
+                m_runtimeDependencies.erase(forward);
         }
-        m_dependents.erase(revIt);
+        m_runtimeDependents.erase(users);
     }
-}
-
-void AssetDependencyGraph::SetDependencies(const std::string &userGuid,
-                                           const std::unordered_set<std::string> &dependencyGuids)
-{
-    // No lock — ClearDependenciesOf and AddDependency each lock individually.
-    // For atomicity we lock here instead.
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    // Clear old forward edges (inline to avoid double-lock)
-    auto fwdIt = m_dependencies.find(userGuid);
-    if (fwdIt != m_dependencies.end()) {
-        for (const auto &depGuid : fwdIt->second) {
-            auto revIt = m_dependents.find(depGuid);
-            if (revIt != m_dependents.end()) {
-                revIt->second.erase(userGuid);
-                if (revIt->second.empty())
-                    m_dependents.erase(revIt);
-            }
-        }
-        fwdIt->second.clear();
-    }
-
-    // Add new edges
-    for (const auto &depGuid : dependencyGuids) {
-        if (depGuid.empty() || depGuid == userGuid)
-            continue;
-        m_dependencies[userGuid].insert(depGuid);
-        m_dependents[depGuid].insert(userGuid);
-    }
-
-    // Clean up if no deps remain
-    auto it = m_dependencies.find(userGuid);
-    if (it != m_dependencies.end() && it->second.empty())
-        m_dependencies.erase(it);
 }
 
 std::unordered_set<std::string> AssetDependencyGraph::GetDependencies(const std::string &guid) const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_dependencies.find(guid);
-    if (it != m_dependencies.end())
-        return it->second;
-    return {};
+    std::unordered_set<std::string> result;
+    const auto snapshot = GetAssetSnapshot();
+    const auto asset = snapshot->m_dependencies.find(guid);
+    if (asset != snapshot->m_dependencies.end())
+        result = asset->second;
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
+    const auto runtime = m_runtimeDependencies.find(guid);
+    if (runtime != m_runtimeDependencies.end())
+        result.insert(runtime->second.begin(), runtime->second.end());
+    return result;
+}
+
+std::unordered_map<std::string, std::unordered_set<std::string>>
+AssetDependencyGraph::GetDependenciesBatch(const std::vector<std::string> &guids) const
+{
+    std::unordered_map<std::string, std::unordered_set<std::string>> result;
+    result.reserve(guids.size());
+    const auto snapshot = GetAssetSnapshot();
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
+    for (const auto &guid : guids) {
+        auto &dependencies = result[guid];
+        const auto asset = snapshot->m_dependencies.find(guid);
+        if (asset != snapshot->m_dependencies.end())
+            dependencies.insert(asset->second.begin(), asset->second.end());
+        const auto runtime = m_runtimeDependencies.find(guid);
+        if (runtime != m_runtimeDependencies.end())
+            dependencies.insert(runtime->second.begin(), runtime->second.end());
+        if (dependencies.empty())
+            result.erase(guid);
+    }
+    return result;
 }
 
 std::unordered_set<std::string> AssetDependencyGraph::GetDependents(const std::string &guid) const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_dependents.find(guid);
-    if (it != m_dependents.end())
-        return it->second;
-    return {};
+    std::unordered_set<std::string> result;
+    const auto snapshot = GetAssetSnapshot();
+    const auto asset = snapshot->m_dependents.find(guid);
+    if (asset != snapshot->m_dependents.end())
+        result = asset->second;
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
+    const auto runtime = m_runtimeDependents.find(guid);
+    if (runtime != m_runtimeDependents.end())
+        result.insert(runtime->second.begin(), runtime->second.end());
+    return result;
 }
 
 bool AssetDependencyGraph::HasDependency(const std::string &userGuid, const std::string &dependencyGuid) const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_dependencies.find(userGuid);
-    if (it == m_dependencies.end())
-        return false;
-    return it->second.count(dependencyGuid) > 0;
+    const auto snapshot = GetAssetSnapshot();
+    const auto asset = snapshot->m_dependencies.find(userGuid);
+    if (asset != snapshot->m_dependencies.end() && asset->second.count(dependencyGuid) != 0)
+        return true;
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
+    const auto runtime = m_runtimeDependencies.find(userGuid);
+    return runtime != m_runtimeDependencies.end() && runtime->second.count(dependencyGuid) != 0;
 }
-
-// ============================================================================
-// Event dispatch
-// ============================================================================
 
 void AssetDependencyGraph::RegisterCallback(ResourceType type, AssetEventCallback callback)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!callback)
+        throw std::invalid_argument("Asset dependency callback cannot be empty");
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
     m_callbacks[type].push_back(std::move(callback));
 }
 
 void AssetDependencyGraph::NotifyEvent(const std::string &guid, ResourceType type, AssetEvent event)
 {
-    // Copy dependents list to avoid holding lock during callbacks
     std::unordered_set<std::string> dependents;
+    const auto snapshot = GetAssetSnapshot();
+    const auto asset = snapshot->m_dependents.find(guid);
+    if (asset != snapshot->m_dependents.end())
+        dependents = asset->second;
+
     std::vector<AssetEventCallback> callbacks;
-
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        auto depIt = m_dependents.find(guid);
-        if (depIt != m_dependents.end())
-            dependents = depIt->second;
-
-        auto cbIt = m_callbacks.find(type);
-        if (cbIt != m_callbacks.end())
-            callbacks = cbIt->second;
+        std::lock_guard<std::mutex> lock(m_runtimeMutex);
+        const auto runtime = m_runtimeDependents.find(guid);
+        if (runtime != m_runtimeDependents.end())
+            dependents.insert(runtime->second.begin(), runtime->second.end());
+        const auto registered = m_callbacks.find(type);
+        if (registered != m_callbacks.end())
+            callbacks = registered->second;
     }
 
     if (dependents.empty() || callbacks.empty()) {
@@ -195,45 +343,44 @@ void AssetDependencyGraph::NotifyEvent(const std::string &guid, ResourceType typ
                      " callbacks=", callbacks.size());
         return;
     }
-
-    for (const auto &depGuid : dependents) {
-        for (const auto &cb : callbacks) {
-            cb(depGuid, guid, event);
-        }
-    }
+    for (const auto &dependentGuid : dependents)
+        for (const auto &callback : callbacks)
+            callback(dependentGuid, guid, event);
 }
-
-// ============================================================================
-// Diagnostics
-// ============================================================================
 
 size_t AssetDependencyGraph::GetEdgeCount() const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    size_t count = 0;
-    for (const auto &[_, deps] : m_dependencies)
-        count += deps.size();
+    size_t count = GetAssetSnapshot()->GetEdgeCount();
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
+    for (const auto &[objectGuid, dependencies] : m_runtimeDependencies) {
+        (void)objectGuid;
+        count += dependencies.size();
+    }
     return count;
 }
 
 size_t AssetDependencyGraph::GetNodeCount() const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    std::unordered_set<std::string> nodes;
-    for (const auto &[user, deps] : m_dependencies) {
-        nodes.insert(user);
-        for (const auto &dep : deps)
-            nodes.insert(dep);
+    auto nodes = GetAssetSnapshot()->m_nodes;
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
+    for (const auto &[objectGuid, dependencies] : m_runtimeDependencies) {
+        nodes.insert(objectGuid);
+        nodes.insert(dependencies.begin(), dependencies.end());
     }
     return nodes.size();
 }
 
 void AssetDependencyGraph::Clear()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_dependencies.clear();
-    m_dependents.clear();
-    // Keep callbacks — they are structural, not data
+    {
+        std::lock_guard<std::mutex> lock(m_assetWriteMutex);
+        std::atomic_store_explicit(&m_assetSnapshot, std::make_shared<const AssetDependencySnapshot>(),
+                                   std::memory_order_release);
+    }
+    std::lock_guard<std::mutex> lock(m_runtimeMutex);
+    m_runtimeDependencies.clear();
+    m_runtimeDependents.clear();
+    m_callbacks.clear();
 }
 
 } // namespace infernux

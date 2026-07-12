@@ -53,9 +53,10 @@ class VkDeviceContext;
  * back through AsyncTransferContext::IsComplete / Wait so the context can
  * recycle the underlying fence + command buffer once the GPU signals.
  */
-struct AsyncUploadHandle
+struct AsyncSubmissionHandle
 {
     uint64_t id = 0; ///< Monotonic id, 0 == invalid
+    uint64_t timelineValue = 0;
 
     [[nodiscard]] bool IsValid() const noexcept
     {
@@ -86,7 +87,7 @@ class AsyncTransferContext
      * family (legacy fallback path).
      */
     bool Initialize(VkDevice device, uint32_t transferQueueFamily, VkQueue transferQueue,
-                    bool hasDedicatedTransferQueue);
+                    bool hasDedicatedTransferQueue, bool enableTimelineSemaphore = false);
 
     /**
      * @brief Tear down all pooled fences / command buffers.
@@ -128,20 +129,20 @@ class AsyncTransferContext
      *        responsible for keeping any source CPU staging memory alive
      *        until completion.
      */
-    [[nodiscard]] AsyncUploadHandle EndAsync(VkCommandBuffer cmd);
+    [[nodiscard]] AsyncSubmissionHandle EndAsync(VkCommandBuffer cmd);
 
     /**
      * @brief Non-blocking completion poll. Returns true once the GPU has
      *        signalled the upload's fence (also recycles the fence + cmd
      *        buffer back into the free list as a side effect).
      */
-    [[nodiscard]] bool IsComplete(AsyncUploadHandle handle);
+    [[nodiscard]] bool IsComplete(AsyncSubmissionHandle handle);
 
     /**
      * @brief Block until the upload completes. Returns immediately if the
      *        handle is invalid or already retired.
      */
-    void Wait(AsyncUploadHandle handle);
+    void Wait(AsyncSubmissionHandle handle);
 
     /**
      * @brief True iff the underlying queue is on a different family than
@@ -161,6 +162,11 @@ class AsyncTransferContext
     [[nodiscard]] uint32_t GetQueueFamily() const noexcept
     {
         return m_queueFamily;
+    }
+
+    [[nodiscard]] VkSemaphore GetTimelineSemaphore() const noexcept
+    {
+        return m_timelineSemaphore;
     }
 
   private:
@@ -190,6 +196,8 @@ class AsyncTransferContext
     VkQueue m_queue = VK_NULL_HANDLE;
     uint32_t m_queueFamily = 0;
     bool m_hasDedicatedQueue = false;
+    VkSemaphore m_timelineSemaphore = VK_NULL_HANDLE;
+    std::atomic<uint64_t> m_nextTimelineValue{1};
 
     std::mutex m_mutex;
     std::vector<VkFence> m_freeFences;

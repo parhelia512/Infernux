@@ -80,6 +80,9 @@ class Scene
     /// @return The root GameObject, or nullptr on failure
     GameObject *InstantiateFromJson(const std::string &jsonStr, GameObject *parent = nullptr);
 
+    /// @brief Instantiate directly from a parsed document. Fresh IDs are assigned.
+    GameObject *InstantiateFromDocument(const nlohmann::json &document, GameObject *parent = nullptr);
+
     /// @brief Internal: Unregister object ID from lookup (called from GameObject dtor)
     void UnregisterGameObject(uint64_t id);
 
@@ -229,42 +232,30 @@ class Scene
     /// @return JSON string representation of the scene
     [[nodiscard]] std::string Serialize() const;
 
-    /// @brief Deserialize scene from JSON string and rebuild the entire scene graph.
-    ///
-    /// **Scene Rebuild Contract** (canonical reference for all deserialize paths):
-    ///
-    ///   1. Caller MUST clear any Python/RenderStack singleton state that holds
-    ///      raw pointers into the old scene BEFORE calling Deserialize() — see
-    ///      `Infernux.engine.play_mode._rebuild_active_scene` for the editor
-    ///      precedent (it nils `RenderStack._active_instance`).
-    ///   2. Deserialize() then invokes `SceneManager::ClearComponentRegistries()`
-    ///      so MeshRenderer/Light/PhysicsECS pending queues do not retain stale
-    ///      pointers into the about-to-be-destroyed GameObjects.
-    ///   3. Old root objects are dropped (their destructors run with empty
-    ///      registries — safe no-op unregisters).
-    ///   4. New GameObjects are built from JSON with `preserveIds=true`, then
-    ///      registered via `RegisterObjectSubtree`.
-    ///   5. `AwakeObject()` runs over every new root: this is a NATIVE-only pass
-    ///      and never touches Python lifecycle methods. PyComponentProxy
-    ///      instances are NOT in `m_rootObjects` yet — they live in
-    ///      `m_pendingPyComponents` and are restored by Python via
-    ///      `restore_pending_py_components()` AFTER this call returns.
-    ///   6. `m_structureVersion` is bumped, invalidating any caches keyed on it.
-    ///
-    /// @param jsonStr JSON string to deserialize from
-    /// @return true if successful, false on JSON parse / schema errors
-    ///         (errors are logged via INXLOG_ERROR; check the log when this
-    ///         returns false).
-    bool Deserialize(const std::string &jsonStr);
+    /// @brief Build the structured current-schema document without text conversion.
+    [[nodiscard]] nlohmann::json SerializeDocument() const;
 
-    /// @brief Save scene to file (writes Serialize() output to *path*).
+    /// @brief Commit an already parsed and cross-language-preflighted scene document.
+    ///
+    /// **Transactional Scene Rebuild Contract**:
+    ///
+    ///   1. The complete native graph is built in an isolated staging Scene with
+    ///      temporary object/component IDs. Schema, factory, hierarchy, ID and
+    ///      main-camera validation complete while the active graph remains live.
+    ///   2. A validation failure destroys only staging allocations and leaves the
+    ///      active scene, registries, pending queues and lifecycle state unchanged.
+    ///   3. Commit clears renderer/physics registries, destroys the old graph,
+    ///      adopts staging roots, restores document IDs and registers the new graph.
+    ///   4. `AwakeObject()` is a native-only pass. Python component descriptors
+    ///      remain pending for Python-side reconstruction after this call returns.
+    ///   5. `m_structureVersion` is bumped only after a successful commit.
+    ///
+    /// @brief Rebuild the scene from an already parsed current-schema document.
+    bool DeserializeDocument(const nlohmann::json &document);
+
+    /// @brief Atomically save the scene to *path* through a same-directory temporary file.
     /// @return true on success; logs INXLOG_ERROR on failure.
     bool SaveToFile(const std::string &path) const;
-
-    /// @brief Load scene from file by reading *path* and calling Deserialize().
-    /// See Deserialize() for the rebuild contract that runs after the read.
-    /// @return true on success; logs INXLOG_ERROR on failure.
-    bool LoadFromFile(const std::string &path);
 
     // ========================================================================
     // Pending Python Components (for deserialization)
@@ -280,7 +271,8 @@ class Scene
         uint64_t gameObjectId = 0; // Which GameObject this belongs to
         std::string typeName;      // Python class name
         std::string scriptGuid;    // GUID for the script asset
-        std::string fieldsJson;    // Serialized field values as JSON
+        std::string typeGuid;      // GUID for the concrete class within the script
+        nlohmann::json fieldsDocument = nlohmann::json::object();
         bool enabled = true;
     };
 
@@ -290,6 +282,12 @@ class Scene
         std::vector<PendingPyComponent> result;
         result.swap(m_pendingPyComponents);
         return result;
+    }
+
+    /// @brief Read pending Python component descriptors without consuming them.
+    [[nodiscard]] const std::vector<PendingPyComponent> &GetPendingPyComponents() const
+    {
+        return m_pendingPyComponents;
     }
 
     /// @brief Check if there are pending Python components
@@ -310,6 +308,8 @@ class Scene
     void AwakeObject(GameObject *obj);
 
   private:
+    friend class GameObject;
+
     void CollectAllObjects(GameObject *obj, std::vector<GameObject *> &result) const;
     void QueueStartObject(GameObject *obj);
     void StartObject(GameObject *obj);

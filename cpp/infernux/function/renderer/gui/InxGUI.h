@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../GpuResidency.h"
+
 #include "InxVkCoreModular.h"
 #include "gui/InxGUIContext.h"
 #include "gui/InxGUIRenderable.h"
@@ -15,6 +17,12 @@
 
 namespace infernux
 {
+
+namespace vk
+{
+class TextureUploadTicket;
+class VkTexture;
+} // namespace vk
 
 class InxGUI
 {
@@ -62,15 +70,15 @@ class InxGUI
     void Unregister(const std::string &name);
     void QueueDockTabSelection(const std::string &windowId);
 
-    /// @brief Upload texture data to GPU for use in ImGui
+    /// @brief Submit texture data for asynchronous GPU upload.
     /// @param name Unique identifier for the texture
     /// @param pixels RGBA pixel data
     /// @param width Texture width
     /// @param height Texture height
     /// @param filter VK_FILTER_LINEAR (default) or VK_FILTER_NEAREST for point sampling
-    /// @return Texture ID (VkDescriptorSet as uint64_t) for use in ImGui::Image
-    uint64_t UploadTextureForImGui(const std::string &name, const unsigned char *pixels, int width, int height,
-                                   VkFilter filter = VK_FILTER_LINEAR);
+    /// @return A monotonic submission version. Poll GetImGuiTextureVersion before consuming a replacement.
+    uint64_t SubmitTextureForImGui(const std::string &name, const unsigned char *pixels, size_t byteCount, int width,
+                                   int height, VkFilter filter = VK_FILTER_LINEAR, bool pinned = false);
 
     /// @brief Remove a previously uploaded ImGui texture
     /// @param name Texture identifier
@@ -84,7 +92,51 @@ class InxGUI
     /// @brief Get texture ID for an already uploaded texture
     /// @param name Texture identifier
     /// @return Texture ID or 0 if not found
-    uint64_t GetImGuiTextureId(const std::string &name) const;
+    uint64_t GetImGuiTextureId(const std::string &name);
+    [[nodiscard]] uint64_t GetImGuiTextureVersion(const std::string &name) const;
+    [[nodiscard]] uint64_t GetFailedImGuiTextureVersion(const std::string &name) const;
+
+    void SetImGuiTextureBudgetBytes(uint64_t bytes);
+    [[nodiscard]] size_t TrimImGuiTextureBudget();
+    [[nodiscard]] uint64_t GetImGuiTextureBudgetBytes() const noexcept
+    {
+        return m_textureBudgetBytes;
+    }
+    [[nodiscard]] uint64_t GetImGuiTextureResidentBytes() const noexcept
+    {
+        return m_textureResidentBytes;
+    }
+    [[nodiscard]] size_t GetImGuiTextureEntryCount() const noexcept
+    {
+        return m_textures_umap.size();
+    }
+    [[nodiscard]] size_t GetPendingImGuiTextureUploadCount() const noexcept
+    {
+        return m_pendingTextureUploads.size();
+    }
+    [[nodiscard]] uint64_t GetPendingImGuiTextureUploadBytes() const noexcept
+    {
+        return m_pendingTextureUploadBytes;
+    }
+    [[nodiscard]] uint64_t GetSubmittedImGuiTextureUploadCount() const noexcept
+    {
+        return m_submittedTextureUploadCount;
+    }
+    [[nodiscard]] uint64_t GetCompletedImGuiTextureUploadCount() const noexcept
+    {
+        return m_completedTextureUploadCount;
+    }
+    [[nodiscard]] uint64_t GetAsyncImGuiTextureUploadCount() const noexcept
+    {
+        return m_asyncTextureUploadCount;
+    }
+    [[nodiscard]] uint64_t GetImGuiTextureEvictionCount() const noexcept
+    {
+        return m_textureEvictionCount;
+    }
+    [[nodiscard]] uint64_t GetScheduledTextureReleaseBytes() const noexcept;
+    [[nodiscard]] GpuEvictionCandidate PeekOldestImGuiTextureEvictable() const noexcept;
+    [[nodiscard]] uint64_t EvictOldestImGuiTexture();
 
     /// @brief Get the resource preview manager
     ResourcePreviewManager &GetResourcePreviewManager()
@@ -95,17 +147,26 @@ class InxGUI
   private:
     struct ImGuiTextureResource
     {
-        VkImage image = VK_NULL_HANDLE;
-        VmaAllocation allocation = VK_NULL_HANDLE;
-        VkImageView imageView = VK_NULL_HANDLE;
-        VkSampler sampler = VK_NULL_HANDLE;
+        std::shared_ptr<vk::VkTexture> texture;
         VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+        uint64_t residentBytes = 0;
+        uint64_t lastUsedFrame = 0;
+        uint64_t uploadGeneration = 0;
+        bool pinned = false;
     };
 
     struct DeferredTextureRelease
     {
         ImGuiTextureResource resource;
         uint64_t releaseFrame = 0;
+    };
+
+    struct PendingTextureUpload
+    {
+        std::string name;
+        uint64_t generation = 0;
+        bool pinned = false;
+        std::shared_ptr<vk::TextureUploadTicket> ticket;
     };
 
     InxVkCoreModular *m_vkCore_ptr = nullptr;
@@ -120,15 +181,26 @@ class InxGUI
     std::vector<std::string> m_pendingDockTabSelections;
     std::unordered_map<std::string, double> m_lastPanelTimesMs;
     std::unordered_map<std::string, ImGuiTextureResource> m_textures_umap;
+    std::unordered_map<std::string, uint64_t> m_textureUploadGenerations;
+    std::unordered_map<std::string, uint64_t> m_failedTextureUploadVersions;
+    std::vector<PendingTextureUpload> m_pendingTextureUploads;
     std::vector<std::string> m_pendingTextureRemovals;
-    std::vector<ImGuiTextureResource> m_pendingTextureResourceReleases;
     std::vector<DeferredTextureRelease> m_deferredTextureReleases;
-    std::vector<ImGuiTextureResource> m_retiredTextureResources;
     uint64_t m_guiFrameCounter = 0;
+    uint64_t m_textureBudgetBytes = 128ULL * 1024ULL * 1024ULL;
+    uint64_t m_textureResidentBytes = 0;
+    uint64_t m_pendingTextureUploadBytes = 0;
+    uint64_t m_submittedTextureUploadCount = 0;
+    uint64_t m_completedTextureUploadCount = 0;
+    uint64_t m_asyncTextureUploadCount = 0;
+    uint64_t m_textureEvictionCount = 0;
     ResourcePreviewManager m_resourcePreviewManager;
     bool m_playerMode = false;
 
     void ApplyPendingDockTabSelections();
+    void PumpTextureUploads();
+    void DeferTextureRelease(ImGuiTextureResource resource);
+    void ReleaseTextureResource(ImGuiTextureResource &resource);
 };
 
 } // namespace infernux

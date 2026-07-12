@@ -21,8 +21,6 @@ class TestRigidbodyEnums:
     def test_collision_detection_mode_members(self):
         assert CollisionDetectionMode.Discrete.value == 0
         assert CollisionDetectionMode.Continuous.value == 1
-        assert CollisionDetectionMode.ContinuousDynamic.value == 2
-        assert CollisionDetectionMode.ContinuousSpeculative.value == 3
 
     def test_interpolation_members(self):
         assert RigidbodyInterpolation.None_.value == 0
@@ -53,17 +51,13 @@ class TestCollisionDetectionModeMapping:
         _rb.collision_detection_mode = CollisionDetectionMode.Continuous
         assert cpp_rigidbody.collision_detection_mode == int(CollisionDetectionMode.Continuous)
 
-    def test_continuous_dynamic(self, _rb, cpp_rigidbody):
-        _rb.collision_detection_mode = CollisionDetectionMode.ContinuousDynamic
-        assert cpp_rigidbody.collision_detection_mode == int(CollisionDetectionMode.ContinuousDynamic)
-
-    def test_speculative(self, _rb, cpp_rigidbody):
-        _rb.collision_detection_mode = CollisionDetectionMode.ContinuousSpeculative
-        assert cpp_rigidbody.collision_detection_mode == int(CollisionDetectionMode.ContinuousSpeculative)
-
     def test_read_back_is_enum(self, _rb, cpp_rigidbody):
-        cpp_rigidbody.collision_detection_mode = 3
-        assert _rb.collision_detection_mode is CollisionDetectionMode.ContinuousSpeculative
+        cpp_rigidbody.collision_detection_mode = 1
+        assert _rb.collision_detection_mode is CollisionDetectionMode.Continuous
+
+    def test_unsupported_mode_is_rejected(self, cpp_rigidbody):
+        with pytest.raises(ValueError):
+            cpp_rigidbody.collision_detection_mode = 2
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -87,16 +81,22 @@ class TestPropertyRoundTrip:
         rb = Rigidbody()
         rb._cpp_component = cpp_rigidbody
 
-        rb.collision_detection_mode = CollisionDetectionMode.ContinuousDynamic
+        rb.collision_detection_mode = CollisionDetectionMode.Continuous
         rb.interpolation = RigidbodyInterpolation.None_
 
-        assert cpp_rigidbody.collision_detection_mode == int(CollisionDetectionMode.ContinuousDynamic)
+        assert cpp_rigidbody.collision_detection_mode == int(CollisionDetectionMode.Continuous)
         assert cpp_rigidbody.interpolation == int(RigidbodyInterpolation.None_)
 
-        cpp_rigidbody.collision_detection_mode = 3
+        cpp_rigidbody.collision_detection_mode = 1
         cpp_rigidbody.interpolation = 1
-        assert rb.collision_detection_mode is CollisionDetectionMode.ContinuousSpeculative
+        assert rb.collision_detection_mode is CollisionDetectionMode.Continuous
         assert rb.interpolation is RigidbodyInterpolation.Interpolate
+
+    def test_zero_drag_is_preserved(self, cpp_rigidbody):
+        cpp_rigidbody.drag = 0.0
+        cpp_rigidbody.angular_drag = 0.0
+        assert cpp_rigidbody.drag == pytest.approx(0.0)
+        assert cpp_rigidbody.angular_drag == pytest.approx(0.0)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -152,8 +152,14 @@ class TestVelocityAndForce:
         rb.add_force((1, 2, 3))
         rb.add_torque((4, 5, 6), CppForceMode.Impulse)
         rb.add_force_at_position((7, 8, 9), (1, 1, 1), CppForceMode.Acceleration)
-        rb.move_position((3, 2, 1))
-        rb.move_rotation(quatf(0.0, 0.0, 0.0, 1.0))
+
+    def test_kinematic_moves_reject_dynamic_rigidbody(self, cpp_rigidbody):
+        rb = Rigidbody()
+        rb._cpp_component = cpp_rigidbody
+        with pytest.raises(RuntimeError, match="requires a kinematic Rigidbody"):
+            rb.move_position((3, 2, 1))
+        with pytest.raises(RuntimeError, match="requires a kinematic Rigidbody"):
+            rb.move_rotation(quatf(0.0, 0.0, 0.0, 1.0))
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -171,23 +177,29 @@ class TestSleepAPI:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# No-cpp fallbacks
+# Detached wrapper failures
 # ══════════════════════════════════════════════════════════════════════
 
-class TestNoCppFallbacks:
-    def test_safe_without_binding(self):
+class TestDetachedWrapperFailures:
+    def test_native_state_access_requires_binding(self):
         rb = Rigidbody()
-        assert rb.freeze_rotation is False
-        assert rb.is_sleeping() is True
-        assert rb.rotation == (0.0, 0.0, 0.0, 1.0)
-        # These should not raise
-        rb.add_force((1, 2, 3))
-        rb.add_torque((1, 2, 3))
-        rb.add_force_at_position((1, 2, 3), (0, 0, 0))
-        rb.move_position((1, 2, 3))
-        rb.move_rotation((0.0, 0.0, 0.0, 1.0))
-        rb.wake_up()
-        rb.sleep()
+        operations = (
+            lambda: rb.mass,
+            lambda: setattr(rb, "mass", 2.0),
+            lambda: rb.freeze_rotation,
+            lambda: rb.is_sleeping(),
+            lambda: rb.rotation,
+            lambda: rb.add_force((1, 2, 3)),
+            lambda: rb.add_torque((1, 2, 3)),
+            lambda: rb.add_force_at_position((1, 2, 3), (0, 0, 0)),
+            lambda: rb.move_position((1, 2, 3)),
+            lambda: rb.move_rotation((0.0, 0.0, 0.0, 1.0)),
+            lambda: rb.wake_up(),
+            lambda: rb.sleep(),
+        )
+        for operation in operations:
+            with pytest.raises(ReferenceError):
+                operation()
 
 
 # ══════════════════════════════════════════════════════════════════════

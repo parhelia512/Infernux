@@ -26,7 +26,7 @@ from enum import IntEnum, IntFlag
 
 from Infernux.components.builtin_component import BuiltinComponent, CppProperty
 from Infernux.components.serialized_field import FieldType
-from Infernux.math.coerce import coerce_vec3
+from Infernux.math.coerce import coerce_quat, coerce_vec3
 from Infernux.lib import ForceMode as _ForceMode
 
 
@@ -46,21 +46,16 @@ class RigidbodyConstraints(IntFlag):
 
 
 class CollisionDetectionMode(IntEnum):
-    """Unity-style CCD modes.
+    """Collision algorithms supported by the Jolt backend.
 
     Backend mapping:
-    Dynamic ``Continuous`` and any ``ContinuousDynamic`` use Jolt LinearCast
-    sweep CCD.
-    Kinematic ``Continuous`` defaults to speculative contacts so MovePosition /
-    MoveRotation bodies keep Unity-like expectations without forcing full sweeps.
-    ``ContinuousSpeculative`` uses discrete motion quality plus Jolt's
-    speculative contacts, which is the closest engine-level match.
+    Dynamic ``Continuous`` uses Jolt LinearCast sweep CCD.
+    Kinematic ``Continuous`` uses Jolt's discrete quality because Jolt does not
+    expose Unity's speculative mode as an equivalent per-body setting.
     """
 
     Discrete = 0
     Continuous = 1
-    ContinuousDynamic = 2
-    ContinuousSpeculative = 3
 
 
 class RigidbodyInterpolation(IntEnum):
@@ -91,9 +86,9 @@ class Rigidbody(BuiltinComponent):
     drag = CppProperty(
         "drag",
         FieldType.FLOAT,
-        default=0.001,
+        default=0.0,
         tooltip="Linear drag coefficient",
-        range=(0.001, 100.0),
+        range=(0.0, 100.0),
         slider=False,
     )
 
@@ -102,7 +97,7 @@ class Rigidbody(BuiltinComponent):
         FieldType.FLOAT,
         default=0.05,
         tooltip="Angular drag coefficient",
-        range=(0.001, 100.0),
+        range=(0.0, 100.0),
         slider=False,
     )
 
@@ -125,9 +120,9 @@ class Rigidbody(BuiltinComponent):
         FieldType.ENUM,
         default=CollisionDetectionMode.Discrete,
         enum_type=CollisionDetectionMode,
-        enum_labels=["Discrete", "Continuous", "Continuous Dynamic", "Continuous Speculative"],
-        tooltip="Unity-style CCD mode. Dynamic Continuous uses sweep CCD, Kinematic Continuous defaults to speculative contacts, ContinuousDynamic forces sweep CCD, and ContinuousSpeculative uses speculative contacts.",
-        range=(0, 3),
+        enum_labels=["Discrete", "Continuous"],
+        tooltip="CCD mode. Dynamic Continuous uses Jolt LinearCast sweep CCD.",
+        range=(0, 1),
     )
 
     interpolation = CppProperty(
@@ -213,58 +208,42 @@ class Rigidbody(BuiltinComponent):
     @property
     def freeze_rotation(self) -> bool:
         """Shortcut to freeze all rotation axes."""
-        cpp = self._cpp_component
-        if cpp is None:
-            return False
+        cpp = self._require_cpp_component()
         return cpp.freeze_rotation
 
     @freeze_rotation.setter
     def freeze_rotation(self, value: bool):
-        cpp = self._cpp_component
-        if cpp is not None:
-            cpp.freeze_rotation = value
+        self._require_cpp_component().freeze_rotation = value
 
     @property
     def constraints(self) -> int:
         """Constraints bitmask — use RigidbodyConstraints helpers for readability."""
-        cpp = self._cpp_component
-        if cpp is None:
-            return 0
+        cpp = self._require_cpp_component()
         return cpp.constraints
 
     @constraints.setter
     def constraints(self, value: int):
-        cpp = self._cpp_component
-        if cpp is not None:
-            cpp.constraints = int(value)
+        self._require_cpp_component().constraints = int(value)
 
     @property
     def max_angular_velocity(self) -> float:
         """Maximum angular velocity in rad/s."""
-        cpp = self._cpp_component
-        if cpp is None:
-            return 7.0
+        cpp = self._require_cpp_component()
         return cpp.max_angular_velocity
 
     @max_angular_velocity.setter
     def max_angular_velocity(self, value: float):
-        cpp = self._cpp_component
-        if cpp is not None:
-            cpp.max_angular_velocity = float(value)
+        self._require_cpp_component().max_angular_velocity = float(value)
 
     @property
     def max_linear_velocity(self) -> float:
         """Maximum linear velocity in m/s."""
-        cpp = self._cpp_component
-        if cpp is None:
-            return 500.0
+        cpp = self._require_cpp_component()
         return cpp.max_linear_velocity
 
     @max_linear_velocity.setter
     def max_linear_velocity(self, value: float):
-        cpp = self._cpp_component
-        if cpp is not None:
-            cpp.max_linear_velocity = float(value)
+        self._require_cpp_component().max_linear_velocity = float(value)
 
     @property
     def constraints_flags(self) -> RigidbodyConstraints:
@@ -292,60 +271,50 @@ class Rigidbody(BuiltinComponent):
     @property
     def velocity(self):
         """Linear velocity in world space (Vector3)."""
-        cpp = self._cpp_component
-        if cpp is None:
-            from Infernux.math import Vector3
-            return Vector3(0, 0, 0)
+        cpp = self._require_cpp_component()
         return cpp.velocity
 
     @velocity.setter
     def velocity(self, value):
-        cpp = self._cpp_component
-        if cpp is not None:
-            cpp.velocity = coerce_vec3(value)
+        self._require_cpp_component().velocity = coerce_vec3(value)
 
     @property
     def angular_velocity(self):
         """Angular velocity in world space (Vector3)."""
-        cpp = self._cpp_component
-        if cpp is None:
-            from Infernux.math import Vector3
-            return Vector3(0, 0, 0)
+        cpp = self._require_cpp_component()
         return cpp.angular_velocity
 
     @angular_velocity.setter
     def angular_velocity(self, value):
-        cpp = self._cpp_component
-        if cpp is not None:
-            cpp.angular_velocity = coerce_vec3(value)
+        self._require_cpp_component().angular_velocity = coerce_vec3(value)
 
     # ---- Read-only world info ----
 
     @property
     def world_center_of_mass(self):
         """World-space center of mass (read-only)."""
-        cpp = self._cpp_component
-        if cpp is None:
-            from Infernux.math import Vector3
-            return Vector3(0, 0, 0)
+        cpp = self._require_cpp_component()
         return cpp.world_center_of_mass
 
     @property
     def position(self):
-        """World-space position of the rigidbody (read-only)."""
-        cpp = self._cpp_component
-        if cpp is None:
-            from Infernux.math import Vector3
-            return Vector3(0, 0, 0)
+        """World-space position of the rigidbody."""
+        cpp = self._require_cpp_component()
         return cpp.position
+
+    @position.setter
+    def position(self, value):
+        self._require_cpp_component().position = coerce_vec3(value)
 
     @property
     def rotation(self):
-        """World-space rotation quaternion (x, y, z, w) (read-only)."""
-        cpp = self._cpp_component
-        if cpp is None:
-            return (0.0, 0.0, 0.0, 1.0)
+        """World-space rotation quaternion (x, y, z, w)."""
+        cpp = self._require_cpp_component()
         return cpp.rotation
+
+    @rotation.setter
+    def rotation(self, value):
+        self._require_cpp_component().rotation = coerce_quat(value)
 
     # ---- Force / Torque API ----
 
@@ -356,9 +325,7 @@ class Rigidbody(BuiltinComponent):
             force: Force vector (Vector3 or tuple).
             mode: ForceMode enum value (default: ForceMode.Force).
         """
-        cpp = self._cpp_component
-        if cpp is None:
-            return
+        cpp = self._require_cpp_component()
         if mode is None:
             mode = _ForceMode.Force
         cpp.add_force(coerce_vec3(force), mode)
@@ -370,9 +337,7 @@ class Rigidbody(BuiltinComponent):
             torque: Torque vector (Vector3 or tuple).
             mode: ForceMode enum value (default: ForceMode.Force).
         """
-        cpp = self._cpp_component
-        if cpp is None:
-            return
+        cpp = self._require_cpp_component()
         if mode is None:
             mode = _ForceMode.Force
         cpp.add_torque(coerce_vec3(torque), mode)
@@ -385,9 +350,7 @@ class Rigidbody(BuiltinComponent):
             position: World-space point where force is applied.
             mode: ForceMode enum value (default: ForceMode.Force).
         """
-        cpp = self._cpp_component
-        if cpp is None:
-            return
+        cpp = self._require_cpp_component()
         if mode is None:
             mode = _ForceMode.Force
         cpp.add_force_at_position(coerce_vec3(force), coerce_vec3(position), mode)
@@ -397,42 +360,38 @@ class Rigidbody(BuiltinComponent):
     def move_position(self, position):
         """Move a kinematic body to target position (Unity: Rigidbody.MovePosition).
 
+        Call from fixed_update for smooth interpolation. Raises when the
+        Rigidbody is not kinematic or has no active Collider body.
+
         Args:
             position: Target world-space position (Vector3 or tuple).
         """
-        cpp = self._cpp_component
-        if cpp is None:
-            return
+        cpp = self._require_cpp_component()
         cpp.move_position(coerce_vec3(position))
 
     def move_rotation(self, rotation):
         """Rotate a kinematic body to target rotation (Unity: Rigidbody.MoveRotation).
 
+        Call from fixed_update for smooth interpolation. Raises when the
+        Rigidbody is not kinematic or has no active Collider body.
+
         Args:
             rotation: Target rotation as (x, y, z, w) quaternion tuple.
         """
-        cpp = self._cpp_component
-        if cpp is None:
-            return
+        cpp = self._require_cpp_component()
         cpp.move_rotation(rotation)
 
     # ---- Sleep API ----
 
     def is_sleeping(self) -> bool:
         """Is the rigidbody sleeping?"""
-        cpp = self._cpp_component
-        if cpp is None:
-            return True
+        cpp = self._require_cpp_component()
         return cpp.is_sleeping()
 
     def wake_up(self):
         """Wake the rigidbody up."""
-        cpp = self._cpp_component
-        if cpp is not None:
-            cpp.wake_up()
+        self._require_cpp_component().wake_up()
 
     def sleep(self):
         """Put the rigidbody to sleep."""
-        cpp = self._cpp_component
-        if cpp is not None:
-            cpp.sleep()
+        self._require_cpp_component().sleep()

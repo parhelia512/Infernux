@@ -895,8 +895,8 @@ def update_material_name_in_file(mat_path: str, new_name: str):
     with open(mat_path, 'r', encoding='utf-8') as f:
         mat_data = json.load(f)
     mat_data['name'] = new_name
-    with open(mat_path, 'w', encoding='utf-8') as f:
-        json.dump(mat_data, f, indent=2)
+    from Infernux.core.document_store import write_document_text
+    write_document_text(mat_path, json.dumps(mat_data, indent=2) + '\n')
 
 
 def reveal_in_file_explorer(path: str):

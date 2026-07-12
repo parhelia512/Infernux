@@ -83,6 +83,8 @@ class ProjectPanel : public EditorPanel
         createShader;
     /// Create material: (currentPath, name) → (ok, errorMsg)
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createMaterial;
+    /// Create physics material: (currentPath, name) → (ok, errorMsg)
+    std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createPhysicMaterial;
     /// Create scene: (currentPath, name) → (ok, errorMsg)
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createScene;
     /// Create animation clip: (currentPath, name) → (ok, errorMsg)
@@ -175,12 +177,14 @@ class ProjectPanel : public EditorPanel
         std::string parentPath; // for sub-assets
         uint64_t mtimeNs = 0;
         int slotIndex = -1; // for SubMaterial
+        ResourceType resourceType = ResourceType::DefaultText;
     };
 
     // ── Directory snapshot cache ─────────────────────────────────────
     struct DirSnapshot
     {
         uint64_t mtimeNs = 0;
+        uint64_t assetGeneration = 0;
         double lastValidatedAt = 0.0; // steady-clock seconds
         std::vector<FileItem> dirs;
         std::vector<FileItem> files;

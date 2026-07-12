@@ -7,17 +7,24 @@
 namespace infernux
 {
 
-// =============================================================================
-// LoadImportSettings — read ALL settings from .meta file
-// =============================================================================
-
-bool InxTexture::LoadImportSettings(const std::string &filePath)
+size_t InxTexture::GetRuntimeMemoryBytes() const noexcept
 {
-    std::string metaPath = InxResourceMeta::GetMetaFilePath(filePath);
-    InxResourceMeta meta;
-    if (!meta.LoadFromFile(metaPath))
-        return false;
+    size_t bytes = sizeof(*this) + m_guid.capacity() + m_filePath.capacity() + m_name.capacity() +
+                   m_textureType.capacity() + m_filterMode.capacity() + m_wrapMode.capacity();
+    if (m_cpuData) {
+        bytes += sizeof(TextureCpuData);
+        bytes += m_cpuData->mipLevels.capacity() * sizeof(TextureMipLevel);
+        bytes += m_cpuData->bytes.capacity();
+    }
+    return bytes;
+}
 
+// =============================================================================
+// ApplyImportSettings — consume the immutable AssetDatabase metadata snapshot
+// =============================================================================
+
+void InxTexture::ApplyImportSettings(const InxResourceMeta &meta)
+{
     if (meta.HasKey("texture_type")) {
         m_textureType = meta.GetDataAs<std::string>("texture_type");
     }
@@ -39,7 +46,6 @@ bool InxTexture::LoadImportSettings(const std::string &filePath)
     if (meta.HasKey("aniso_level")) {
         m_anisoLevel = meta.GetDataAs<int>("aniso_level");
     }
-    return true;
 }
 
 // =============================================================================
@@ -63,6 +69,7 @@ std::shared_ptr<InxTexture> InxTexture::Clone() const
     clone->m_filterMode = m_filterMode;
     clone->m_wrapMode = m_wrapMode;
     clone->m_anisoLevel = m_anisoLevel;
+    clone->m_cpuData = m_cpuData;
 
     return clone;
 }

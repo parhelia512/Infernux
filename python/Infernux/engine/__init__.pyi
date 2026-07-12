@@ -4,12 +4,12 @@ from typing import Any, Callable, Optional
 
 from Infernux.lib import InxGUIRenderable, InxGUIContext, TextureLoader, TextureData
 from Infernux.engine.engine import Engine, LogLevel
+from Infernux.engine.headless import run_headless
 from Infernux.engine.resources_manager import ResourcesManager
 from Infernux.engine.play_mode import PlayModeManager, PlayModeState
 from Infernux.engine.scene_manager import SceneFileManager
 from Infernux.engine.ui import (
     MenuBarPanel,
-    FrameSchedulerPanel,
     ToolbarPanel,
     HierarchyPanel,
     InspectorPanel,

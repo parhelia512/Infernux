@@ -29,6 +29,8 @@
 #include <array>
 #include <chrono>
 #include <cstring>
+#include <limits>
+#include <stdexcept>
 #include <unordered_set>
 
 namespace infernux
@@ -97,8 +99,10 @@ void InxVkCoreModular::DrawFrame(const float *viewPos, const float *viewLookAt, 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore waitSemaphores[] = {m_swapchain.GetImageAvailableSemaphore()};
-    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkSemaphore waitSemaphores[] = {m_swapchain.GetImageAvailableSemaphore(), VK_NULL_HANDLE};
+    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
+    uint64_t waitValues[] = {0, 0};
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
@@ -107,8 +111,24 @@ void InxVkCoreModular::DrawFrame(const float *viewPos, const float *viewLookAt, 
     submitInfo.pCommandBuffers = &m_commandBuffers[m_currentFrame];
 
     VkSemaphore signalSemaphores[] = {m_swapchain.GetRenderFinishedSemaphore(imageIndex)};
+    uint64_t signalValues[] = {0};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
+
+    VkTimelineSemaphoreSubmitInfo timelineSubmit{};
+    const VkSemaphore uploadTimeline = m_resourceManager.GetUploadTimelineSemaphore();
+    const uint64_t uploadValue = m_resourceManager.GetRequiredUploadTimelineValue();
+    if (uploadTimeline != VK_NULL_HANDLE && uploadValue != 0) {
+        waitSemaphores[1] = uploadTimeline;
+        waitValues[1] = uploadValue;
+        submitInfo.waitSemaphoreCount = 2;
+        timelineSubmit.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+        timelineSubmit.waitSemaphoreValueCount = 2;
+        timelineSubmit.pWaitSemaphoreValues = waitValues;
+        timelineSubmit.signalSemaphoreValueCount = 1;
+        timelineSubmit.pSignalSemaphoreValues = signalValues;
+        submitInfo.pNext = &timelineSubmit;
+    }
 
     VkResult submitResult =
         vkQueueSubmit(m_deviceContext.GetGraphicsQueue(), 1, &submitInfo, m_swapchain.GetInFlightFence());
@@ -1559,11 +1579,44 @@ void InxVkCoreModular::CleanupShadowPipeline()
 // Per-object buffer management
 // ============================================================================
 
+void InxVkCoreModular::PumpPendingMeshUploads()
+{
+    for (auto pending = m_pendingSharedMeshBuffers.begin(); pending != m_pendingSharedMeshBuffers.end();) {
+        const bool vertexReady = m_resourceManager.TryPublishBufferUpload(pending->second.vertexUpload);
+        const bool indexReady = m_resourceManager.TryPublishBufferUpload(pending->second.indexUpload);
+        if (!vertexReady || !indexReady) {
+            ++pending;
+            continue;
+        }
+
+        if (!pending->first.assetGuid.empty()) {
+            auto &registry = AssetRegistry::Instance();
+            if (!registry.IsLoaded(pending->first.assetGuid) ||
+                registry.GetAssetVersion(pending->first.assetGuid) != pending->first.runtimeVersion) {
+                pending = m_pendingSharedMeshBuffers.erase(pending);
+                continue;
+            }
+        }
+
+        SharedMeshBuffers buffers;
+        buffers.vertexBuffer = pending->second.vertexUpload->GetBuffer();
+        buffers.indexBuffer = pending->second.indexUpload->GetBuffer();
+        buffers.vertexCount = pending->second.vertexCount;
+        buffers.indexCount = pending->second.indexCount;
+        PublishSharedMeshBuffers(pending->first, std::move(buffers));
+        pending = m_pendingSharedMeshBuffers.erase(pending);
+        ++m_completedMeshUploadCount;
+    }
+}
+
 void InxVkCoreModular::EnsureObjectBuffers(uint64_t objectId, const std::vector<Vertex> &vertices,
-                                           const std::vector<uint32_t> &indices, bool forceUpdate)
+                                           const std::vector<uint32_t> &indices, bool forceUpdate,
+                                           const std::string &assetGuid, uint64_t runtimeVersion)
 {
     if (vertices.empty() || indices.empty())
         return;
+    if (assetGuid.empty() != (runtimeVersion == 0))
+        throw std::invalid_argument("Mesh GPU identity requires GUID and runtime version together");
 
     auto objectIt = m_perObjectBuffers.find(objectId);
     if (objectIt != m_perObjectBuffers.end() && !forceUpdate) {
@@ -1583,7 +1636,7 @@ void InxVkCoreModular::EnsureObjectBuffers(uint64_t objectId, const std::vector<
     const size_t vtxBytes = vertices.size() * sizeof(Vertex);
     const size_t idxBytes = indices.size() * sizeof(uint32_t);
     const size_t contentHash = HashMeshContent(vertices.data(), vtxBytes, indices.data(), idxBytes);
-    const SharedMeshKey sharedKey{contentHash, vertices.size(), indices.size()};
+    const SharedMeshKey sharedKey{assetGuid, runtimeVersion, contentHash, vertices.size(), indices.size()};
 
     // Check if object already maps to this exact content (pointer changed but content same)
     if (objectIt != m_perObjectBuffers.end() && !forceUpdate) {
@@ -1608,36 +1661,41 @@ void InxVkCoreModular::EnsureObjectBuffers(uint64_t objectId, const std::vector<
          !sharedIt->second.indexBuffer);
 
     if (needsCreate) {
-        SharedMeshBuffers oldSharedBuffers;
-        const bool replacingExistingSharedBuffers = (sharedIt != m_sharedMeshBuffers.end());
-        if (replacingExistingSharedBuffers) {
-            oldSharedBuffers = sharedIt->second;
-        }
-
         SharedMeshBuffers sharedBuffers;
-        sharedBuffers.vertexBuffer = std::shared_ptr<vk::VkBufferHandle>(
-            m_resourceManager.CreateVertexBuffer(vertices.data(), vertices.size() * sizeof(Vertex)).release());
-        sharedBuffers.indexBuffer = std::shared_ptr<vk::VkBufferHandle>(
-            m_resourceManager.CreateIndexBuffer(indices.data(), indices.size() * sizeof(uint32_t)).release());
-        sharedBuffers.vertexCount = vertices.size();
-        sharedBuffers.indexCount = indices.size();
-
-        if (replacingExistingSharedBuffers) {
-            sharedIt->second = std::move(sharedBuffers);
-
-            // The old shared VB/IB may still be referenced by command buffers
-            // from earlier in-flight frames. Defer the final shared_ptr release
-            // until the frame deletion queue says it is safe.
-            if (oldSharedBuffers.vertexBuffer || oldSharedBuffers.indexBuffer) {
-                auto retiredBuffers = std::make_shared<SharedMeshBuffers>(std::move(oldSharedBuffers));
-                m_deletionQueue.Push([retiredBuffers]() mutable {
-                    retiredBuffers->vertexBuffer.reset();
-                    retiredBuffers->indexBuffer.reset();
-                });
-            }
-        } else {
-            sharedIt = m_sharedMeshBuffers.insert_or_assign(sharedKey, std::move(sharedBuffers)).first;
+        auto pending = m_pendingSharedMeshBuffers.find(sharedKey);
+        if (pending == m_pendingSharedMeshBuffers.end()) {
+            PendingSharedMeshBuffers uploads;
+            uploads.vertexUpload = m_resourceManager.BeginBufferUpload(
+                vertices.data(), vertices.size() * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+            uploads.indexUpload = m_resourceManager.BeginBufferUpload(indices.data(), indices.size() * sizeof(uint32_t),
+                                                                      VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+            uploads.vertexCount = vertices.size();
+            uploads.indexCount = indices.size();
+            ++m_submittedMeshUploadCount;
+            if (uploads.vertexUpload->IsAsync() || uploads.indexUpload->IsAsync())
+                ++m_asyncMeshUploadCount;
+            pending = m_pendingSharedMeshBuffers.emplace(sharedKey, std::move(uploads)).first;
         }
+
+        const bool vertexReady = m_resourceManager.TryPublishBufferUpload(pending->second.vertexUpload);
+        const bool indexReady = m_resourceManager.TryPublishBufferUpload(pending->second.indexUpload);
+        if (!vertexReady || !indexReady) {
+            // The draw call's CPU arrays may already describe different geometry
+            // than the object's old buffers. Hide the object until both uploads
+            // can be published together instead of issuing unsafe mixed-version draws.
+            m_perObjectBuffers.erase(objectId);
+            return;
+        }
+
+        sharedBuffers.vertexBuffer = pending->second.vertexUpload->GetBuffer();
+        sharedBuffers.indexBuffer = pending->second.indexUpload->GetBuffer();
+        sharedBuffers.vertexCount = pending->second.vertexCount;
+        sharedBuffers.indexCount = pending->second.indexCount;
+        m_pendingSharedMeshBuffers.erase(pending);
+        ++m_completedMeshUploadCount;
+
+        PublishSharedMeshBuffers(sharedKey, std::move(sharedBuffers));
+        sharedIt = m_sharedMeshBuffers.find(sharedKey);
     }
 
     PerObjectBuffers objectBuffers;
@@ -1651,6 +1709,8 @@ void InxVkCoreModular::EnsureObjectBuffers(uint64_t objectId, const std::vector<
     objectBuffers.ensuredOnFrame = m_ensureFrameCounter;
 
     m_perObjectBuffers[objectId] = std::move(objectBuffers);
+    sharedIt->second.lastUsedFrame = m_ensureFrameCounter;
+    (void)TrimMeshGpuBudget();
 }
 
 void InxVkCoreModular::CleanupUnusedBuffers(const std::vector<DrawCall> &activeDrawCalls)
@@ -1664,35 +1724,18 @@ void InxVkCoreModular::CleanupUnusedBuffers(const std::vector<DrawCall> &activeD
 }
 
 void InxVkCoreModular::CleanupUnusedBuffersByIds(const std::unordered_set<uint64_t> &activeIds)
-{ // Remove buffers for objects no longer in the scene.
-    // Actual GPU resource destruction is deferred via FrameDeletionQueue
-    // so that in-flight command buffers are never invalidated.
+{
     for (auto it = m_perObjectBuffers.begin(); it != m_perObjectBuffers.end();) {
         if (activeIds.find(it->first) == activeIds.end()) {
+            auto shared = m_sharedMeshBuffers.find(it->second.sharedKey);
+            if (shared != m_sharedMeshBuffers.end())
+                shared->second.lastUsedFrame = m_ensureFrameCounter;
             it = m_perObjectBuffers.erase(it);
         } else {
             ++it;
         }
     }
-
-    // Collect active shared keys from surviving per-object entries
-    std::unordered_set<SharedMeshKey, SharedMeshKeyHash> activeSharedKeysFromObjects;
-    for (const auto &kv : m_perObjectBuffers) {
-        activeSharedKeysFromObjects.insert(kv.second.sharedKey);
-    }
-
-    for (auto it = m_sharedMeshBuffers.begin(); it != m_sharedMeshBuffers.end();) {
-        if (activeSharedKeysFromObjects.find(it->first) == activeSharedKeysFromObjects.end()) {
-            auto buffers = std::make_shared<SharedMeshBuffers>(std::move(it->second));
-            m_deletionQueue.Push([buffers]() mutable {
-                buffers->vertexBuffer.reset();
-                buffers->indexBuffer.reset();
-            });
-            it = m_sharedMeshBuffers.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    (void)TrimMeshGpuBudget();
 }
 
 size_t InxVkCoreModular::CleanupUnusedBuffersByFrameStamp()
@@ -1701,6 +1744,9 @@ size_t InxVkCoreModular::CleanupUnusedBuffersByFrameStamp()
     bool anyRemoved = false;
     for (auto it = m_perObjectBuffers.begin(); it != m_perObjectBuffers.end();) {
         if (it->second.ensuredOnFrame != m_ensureFrameCounter) {
+            auto shared = m_sharedMeshBuffers.find(it->second.sharedKey);
+            if (shared != m_sharedMeshBuffers.end())
+                shared->second.lastUsedFrame = m_ensureFrameCounter;
             it = m_perObjectBuffers.erase(it);
             anyRemoved = true;
         } else {
@@ -1708,31 +1754,201 @@ size_t InxVkCoreModular::CleanupUnusedBuffersByFrameStamp()
         }
     }
 
-    // Only rebuild the active-shared-keys set and prune shared buffers when
-    // at least one per-object entry was removed.  In a stable scene (no adds/removes)
-    // this skips building a 10k-element unordered_set every frame.
-    if (anyRemoved) {
-        std::unordered_set<SharedMeshKey, SharedMeshKeyHash> activeSharedKeysFromObjects;
-        activeSharedKeysFromObjects.reserve(m_perObjectBuffers.size());
-        for (const auto &kv : m_perObjectBuffers) {
-            activeSharedKeysFromObjects.insert(kv.second.sharedKey);
-        }
-
-        for (auto it = m_sharedMeshBuffers.begin(); it != m_sharedMeshBuffers.end();) {
-            if (activeSharedKeysFromObjects.find(it->first) == activeSharedKeysFromObjects.end()) {
-                auto buffers = std::make_shared<SharedMeshBuffers>(std::move(it->second));
-                m_deletionQueue.Push([buffers]() mutable {
-                    buffers->vertexBuffer.reset();
-                    buffers->indexBuffer.reset();
-                });
-                it = m_sharedMeshBuffers.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
+    if (anyRemoved)
+        (void)TrimMeshGpuBudget();
 
     return m_perObjectBuffers.size();
+}
+
+void InxVkCoreModular::PublishSharedMeshBuffers(const SharedMeshKey &key, SharedMeshBuffers buffers)
+{
+    if (!buffers.vertexBuffer || !buffers.indexBuffer || !buffers.vertexBuffer->IsValid() ||
+        !buffers.indexBuffer->IsValid())
+        throw std::invalid_argument("Cannot publish invalid shared mesh buffers");
+    const uint64_t vertexBytes = buffers.vertexBuffer->GetSize();
+    const uint64_t indexBytes = buffers.indexBuffer->GetSize();
+    if (vertexBytes == 0 || indexBytes == 0 || indexBytes > std::numeric_limits<uint64_t>::max() - vertexBytes)
+        throw std::overflow_error("Invalid shared mesh GPU byte size");
+    buffers.residentBytes = vertexBytes + indexBytes;
+    buffers.lastUsedFrame = m_ensureFrameCounter;
+
+    auto existing = m_sharedMeshBuffers.find(key);
+    if (existing != m_sharedMeshBuffers.end()) {
+        SharedMeshBuffers retired = std::move(existing->second);
+        m_sharedMeshBuffers.erase(existing);
+        RetireSharedMeshBuffers(std::move(retired), false);
+    }
+    if (buffers.residentBytes > std::numeric_limits<uint64_t>::max() - m_meshGpuResidentBytes)
+        throw std::overflow_error("Mesh GPU residency byte counter overflow");
+    m_meshGpuResidentBytes += buffers.residentBytes;
+    const auto [inserted, didInsert] = m_sharedMeshBuffers.emplace(key, std::move(buffers));
+    (void)inserted;
+    if (!didInsert)
+        throw std::logic_error("Shared mesh cache rejected a unique key");
+}
+
+void InxVkCoreModular::RetireSharedMeshBuffers(SharedMeshBuffers buffers, bool eviction)
+{
+    if (!buffers.vertexBuffer || !buffers.indexBuffer || buffers.residentBytes == 0)
+        throw std::logic_error("Cannot retire invalid shared mesh residency");
+    m_retiredMeshLeases.push_back({buffers.vertexBuffer, buffers.indexBuffer, buffers.residentBytes});
+    auto retired = std::make_shared<SharedMeshBuffers>(std::move(buffers));
+    m_deletionQueue.Push([retired = std::move(retired)]() mutable {
+        retired->vertexBuffer.reset();
+        retired->indexBuffer.reset();
+    });
+    if (eviction)
+        ++m_meshGpuEvictionCount;
+}
+
+void InxVkCoreModular::SweepRetiredMeshLeases() const
+{
+    size_t writeIndex = 0;
+    for (size_t index = 0; index < m_retiredMeshLeases.size(); ++index) {
+        const auto &lease = m_retiredMeshLeases[index];
+        if (lease.vertexBuffer.expired() && lease.indexBuffer.expired()) {
+            if (lease.residentBytes > m_meshGpuResidentBytes)
+                throw std::logic_error("Mesh GPU residency byte counter underflow");
+            m_meshGpuResidentBytes -= lease.residentBytes;
+            continue;
+        }
+        if (writeIndex != index)
+            m_retiredMeshLeases[writeIndex] = std::move(m_retiredMeshLeases[index]);
+        ++writeIndex;
+    }
+    m_retiredMeshLeases.resize(writeIndex);
+}
+
+uint64_t InxVkCoreModular::GetMeshGpuResidentBytes() const
+{
+    SweepRetiredMeshLeases();
+    return m_meshGpuResidentBytes;
+}
+
+size_t InxVkCoreModular::GetRetiredMeshGpuLeaseCount() const
+{
+    SweepRetiredMeshLeases();
+    return m_retiredMeshLeases.size();
+}
+
+std::vector<GpuAssetResidencyRecord> InxVkCoreModular::GetAssetMeshGpuResidency() const
+{
+    std::vector<GpuAssetResidencyRecord> records;
+    records.reserve(m_sharedMeshBuffers.size() + m_pendingSharedMeshBuffers.size());
+    for (const auto &[key, buffers] : m_sharedMeshBuffers) {
+        if (key.assetGuid.empty())
+            continue;
+        const bool pinned = (buffers.vertexBuffer && buffers.vertexBuffer.use_count() != 1) ||
+                            (buffers.indexBuffer && buffers.indexBuffer.use_count() != 1);
+        records.push_back({key.assetGuid, key.runtimeVersion, GpuAssetDomain::Mesh, buffers.residentBytes,
+                           buffers.lastUsedFrame, false, pinned});
+    }
+    for (const auto &[key, uploads] : m_pendingSharedMeshBuffers) {
+        if (key.assetGuid.empty())
+            continue;
+        const uint64_t bytes = uploads.vertexUpload->GetSize() + uploads.indexUpload->GetSize();
+        records.push_back(
+            {key.assetGuid, key.runtimeVersion, GpuAssetDomain::Mesh, bytes, m_ensureFrameCounter, true, true});
+    }
+    return records;
+}
+
+std::vector<GpuAssetResidencyRecord> InxVkCoreModular::GetAssetGpuResidency() const
+{
+    auto records = GetAssetMeshGpuResidency();
+    auto textures = GetAssetTextureGpuResidency();
+    records.insert(records.end(), textures.begin(), textures.end());
+    return records;
+}
+
+size_t InxVkCoreModular::GetRuntimeMeshGpuEntryCount() const
+{
+    return static_cast<size_t>(std::count_if(m_sharedMeshBuffers.begin(), m_sharedMeshBuffers.end(),
+                                             [](const auto &entry) { return entry.first.assetGuid.empty(); }));
+}
+
+uint64_t InxVkCoreModular::GetRuntimeMeshGpuResidentBytes() const
+{
+    uint64_t bytes = 0;
+    for (const auto &[key, buffers] : m_sharedMeshBuffers) {
+        if (key.assetGuid.empty())
+            bytes += buffers.residentBytes;
+    }
+    return bytes;
+}
+
+uint64_t InxVkCoreModular::GetRetiredMeshGpuLeaseBytes() const
+{
+    SweepRetiredMeshLeases();
+    uint64_t bytes = 0;
+    for (const auto &lease : m_retiredMeshLeases)
+        bytes += lease.residentBytes;
+    return bytes;
+}
+
+GpuEvictionCandidate InxVkCoreModular::PeekOldestMeshGpuEvictable() const
+{
+    auto candidate = m_sharedMeshBuffers.end();
+    for (auto entry = m_sharedMeshBuffers.begin(); entry != m_sharedMeshBuffers.end(); ++entry) {
+        if (!entry->second.vertexBuffer || !entry->second.indexBuffer || entry->second.vertexBuffer.use_count() != 1 ||
+            entry->second.indexBuffer.use_count() != 1)
+            continue;
+        if (candidate == m_sharedMeshBuffers.end() || entry->second.lastUsedFrame < candidate->second.lastUsedFrame)
+            candidate = entry;
+    }
+    if (candidate == m_sharedMeshBuffers.end())
+        return {};
+    return {candidate->second.lastUsedFrame, candidate->second.residentBytes, true};
+}
+
+uint64_t InxVkCoreModular::EvictOldestMeshGpu()
+{
+    auto candidate = m_sharedMeshBuffers.end();
+    for (auto entry = m_sharedMeshBuffers.begin(); entry != m_sharedMeshBuffers.end(); ++entry) {
+        if (!entry->second.vertexBuffer || !entry->second.indexBuffer || entry->second.vertexBuffer.use_count() != 1 ||
+            entry->second.indexBuffer.use_count() != 1)
+            continue;
+        if (candidate == m_sharedMeshBuffers.end() || entry->second.lastUsedFrame < candidate->second.lastUsedFrame)
+            candidate = entry;
+    }
+    if (candidate == m_sharedMeshBuffers.end())
+        return 0;
+    SharedMeshBuffers retired = std::move(candidate->second);
+    const uint64_t bytes = retired.residentBytes;
+    m_sharedMeshBuffers.erase(candidate);
+    RetireSharedMeshBuffers(std::move(retired), true);
+    return bytes;
+}
+
+void InxVkCoreModular::SetMeshGpuBudgetBytes(uint64_t bytes)
+{
+    if (bytes == 0)
+        throw std::invalid_argument("GPU mesh budget must be greater than zero");
+    m_meshGpuBudgetBytes = bytes;
+    (void)TrimMeshGpuBudget();
+}
+
+size_t InxVkCoreModular::TrimMeshGpuBudget()
+{
+    SweepRetiredMeshLeases();
+    size_t evicted = 0;
+    while (m_meshGpuResidentBytes > m_meshGpuBudgetBytes) {
+        auto candidate = m_sharedMeshBuffers.end();
+        for (auto entry = m_sharedMeshBuffers.begin(); entry != m_sharedMeshBuffers.end(); ++entry) {
+            if (!entry->second.vertexBuffer || !entry->second.indexBuffer ||
+                entry->second.vertexBuffer.use_count() != 1 || entry->second.indexBuffer.use_count() != 1)
+                continue;
+            if (candidate == m_sharedMeshBuffers.end() || entry->second.lastUsedFrame < candidate->second.lastUsedFrame)
+                candidate = entry;
+        }
+        if (candidate == m_sharedMeshBuffers.end())
+            break;
+        SharedMeshBuffers retired = std::move(candidate->second);
+        m_sharedMeshBuffers.erase(candidate);
+        RetireSharedMeshBuffers(std::move(retired), true);
+        ++evicted;
+    }
+    return evicted;
 }
 
 // ============================================================================

@@ -42,6 +42,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -63,10 +64,6 @@ class JobHandle
 {
   public:
     JobHandle() = default;
-    explicit JobHandle(std::shared_ptr<std::atomic<int>> counter) : m_counter(std::move(counter))
-    {
-    }
-
     JobHandle(const JobHandle &) = default;
     JobHandle &operator=(const JobHandle &) = default;
     JobHandle(JobHandle &&) noexcept = default;
@@ -74,18 +71,35 @@ class JobHandle
 
     [[nodiscard]] bool IsValid() const noexcept
     {
-        return static_cast<bool>(m_counter);
+        return static_cast<bool>(m_state);
     }
 
     /// @brief Non-blocking poll. Returns true once all referenced jobs have completed.
     [[nodiscard]] bool IsComplete() const noexcept
     {
-        return m_counter && m_counter->load(std::memory_order_acquire) == 0;
+        return !m_state || m_state->remaining.load(std::memory_order_acquire) == 0;
     }
 
   private:
     friend class JobSystem;
-    std::shared_ptr<std::atomic<int>> m_counter;
+
+    struct State
+    {
+        explicit State(uint32_t count) : remaining(count)
+        {
+        }
+
+        std::atomic<uint32_t> remaining;
+        std::mutex completionMutex;
+        std::condition_variable completionCv;
+        std::exception_ptr failure;
+    };
+
+    explicit JobHandle(std::shared_ptr<State> state) : m_state(std::move(state))
+    {
+    }
+
+    std::shared_ptr<State> m_state;
 };
 
 /**
@@ -145,6 +159,10 @@ class JobSystem
     /// scheduled by helper code.
     void Wait(const JobHandle &handle);
 
+    /// @brief Wait without executing queued work on the calling thread.
+    /// Use when the caller owns thread-affine state and jobs must stay on workers.
+    void WaitPassive(const JobHandle &handle);
+
     /// @brief How many worker threads are running. 0 if Shutdown.
     [[nodiscard]] uint32_t GetWorkerCount() const noexcept
     {
@@ -158,17 +176,20 @@ class JobSystem
     struct Task
     {
         JobFn fn;
-        std::shared_ptr<std::atomic<int>> counter;
+        std::shared_ptr<JobHandle::State> state;
     };
 
     void WorkerLoop();
     bool TryRunOne(); // Returns true if a task was executed.
+    void Execute(Task task) noexcept;
+    void StopAndJoin() noexcept;
 
     std::vector<std::thread> m_workers;
     std::queue<Task> m_queue;
     std::mutex m_queueMutex;
     std::condition_variable m_queueCv;
-    std::atomic<bool> m_running{false};
+    bool m_accepting = true;
+    bool m_stopRequested = false;
 };
 
 } // namespace infernux

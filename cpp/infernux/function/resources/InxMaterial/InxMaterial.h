@@ -2,8 +2,10 @@
 
 #include <core/types/InxFwdType.h>
 #include <core/types/ShaderTypes.h>
+#include <cstdint>
 #include <glm/glm.hpp>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -146,16 +148,20 @@ struct MaterialProperty
 class InxMaterial
 {
   public:
+    struct DetachedUBO
+    {
+        VmaAllocator allocator = VK_NULL_HANDLE;
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VmaAllocation allocation = VK_NULL_HANDLE;
+    };
     InxMaterial() = default;
     InxMaterial(const std::string &name);
     InxMaterial(const std::string &name, const std::string &shaderName);
     ~InxMaterial() = default;
 
-    // Copy/Move
+    // Copying creates a distinct runtime material identity.
     InxMaterial(const InxMaterial &other);
     InxMaterial &operator=(const InxMaterial &other);
-    InxMaterial(InxMaterial &&) = default;
-    InxMaterial &operator=(InxMaterial &&) = default;
 
     // ========================================================================
     // Identity
@@ -353,16 +359,9 @@ class InxMaterial
     void SetMatrix(const std::string &name, const glm::mat4 &matrix);
     void SetTextureGuid(const std::string &name, const std::string &textureGuid);
 
-    /**
-     * @brief Normalize an arbitrary texture reference to an asset GUID.
-     *
-     * Single choke point for the engine-wide GUID-only texture contract.
-     * Accepts: a GUID (returned as-is), an absolute/relative file path
-     * (registered with the AssetDatabase if needed), or a builtin-resource
-     * relative path resolved against the shader search roots.
-     * Returns an empty string when the reference cannot be resolved.
-     */
-    static std::string ResolveToTextureGuid(const std::string &textureRef);
+    /// Validate a Texture asset GUID or builtin white/black/normal token.
+    /// Empty input explicitly clears the property; paths and missing assets fail.
+    static std::string RequireTextureGuid(const std::string &textureGuid);
     void ClearTexture(const std::string &name);
 
     [[nodiscard]] bool HasProperty(const std::string &name) const;
@@ -409,7 +408,7 @@ class InxMaterial
             return m_guid;
         if (!m_filePath.empty())
             return m_filePath;
-        return m_name;
+        return "runtime-material:" + std::to_string(m_runtimeId);
     }
 
     // ========================================================================
@@ -491,6 +490,8 @@ class InxMaterial
 
     [[nodiscard]] std::string Serialize() const;
     bool Deserialize(const std::string &jsonStr);
+    [[nodiscard]] nlohmann::json SerializeDocument() const;
+    bool DeserializeDocument(const nlohmann::json &document);
 
     /// @brief Create a default lit opaque material (engine built-in)
     static std::shared_ptr<InxMaterial> CreateDefaultLit();
@@ -534,6 +535,7 @@ class InxMaterial
     /// GPU-transient state (pipelines, UBO) is NOT copied — lazily recreated.
     /// The clone has no GUID and no file path (runtime-only instance).
     [[nodiscard]] std::shared_ptr<InxMaterial> Clone() const;
+    [[nodiscard]] size_t GetRuntimeMemoryBytes() const noexcept;
 
     void SetGuid(const std::string &guid)
     {
@@ -541,9 +543,13 @@ class InxMaterial
     }
 
   private:
+    static uint64_t AllocateRuntimeId() noexcept;
+    bool ApplyDocument(const nlohmann::json &document);
+
     friend class MaterialLoader;
 
     std::string m_name;
+    uint64_t m_runtimeId = AllocateRuntimeId();
     std::string m_guid;
     std::string m_filePath; // File path for saving
     bool m_builtin = false; // Built-in materials cannot have shader changed
@@ -622,6 +628,16 @@ class InxMaterial
             m_uboBuffer = VK_NULL_HANDLE;
             m_uboAllocation = VK_NULL_HANDLE;
         }
+    }
+
+    [[nodiscard]] DetachedUBO DetachUBO() noexcept
+    {
+        DetachedUBO resource{m_uboAllocator, m_uboBuffer, m_uboAllocation};
+        m_uboAllocator = VK_NULL_HANDLE;
+        m_uboBuffer = VK_NULL_HANDLE;
+        m_uboAllocation = VK_NULL_HANDLE;
+        m_uboMappedData = nullptr;
+        return resource;
     }
 
     [[nodiscard]] VkBuffer GetUBOBuffer() const

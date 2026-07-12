@@ -2,8 +2,8 @@
 Infernux.physics — Physics query API (Unity: UnityEngine.Physics).
 
 Provides ``Physics.raycast()``, ``Physics.raycast_all()``,
-``Physics.overlap_sphere()``, ``Physics.overlap_box()``,
-``Physics.sphere_cast()``, ``Physics.box_cast()``,
+``Physics.overlap_sphere()``, ``Physics.overlap_box()``, ``Physics.overlap_capsule()``,
+``Physics.sphere_cast()``, ``Physics.box_cast()``, ``Physics.capsule_cast()``,
 and gravity / layer-collision control.
 
 Example::
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Optional, List
 
-from Infernux.math.coerce import coerce_vec3
+from Infernux.math.coerce import coerce_quat, coerce_vec3
 from Infernux.lib import Physics as _CppPhysics
 
 
@@ -98,9 +98,9 @@ class Physics(metaclass=_PhysicsMeta):
         return _CppPhysics.overlap_sphere(c, float(radius), int(layer_mask), bool(query_triggers))
 
     @staticmethod
-    def overlap_box(center, half_extents, layer_mask: int = (0xFFFFFFFF & ~(1 << 2)),
+    def overlap_box(center, half_extents, orientation=None, layer_mask: int = (0xFFFFFFFF & ~(1 << 2)),
                     query_triggers: bool = True):
-        """Find all colliders within an axis-aligned box.
+        """Find all colliders within an oriented box.
 
         Args:
             center: World-space center of the box.
@@ -113,7 +113,15 @@ class Physics(metaclass=_PhysicsMeta):
         """
         c = coerce_vec3(center)
         he = coerce_vec3(half_extents)
-        return _CppPhysics.overlap_box(c, he, int(layer_mask), bool(query_triggers))
+        return _CppPhysics.overlap_box(c, he, coerce_quat(orientation), int(layer_mask), bool(query_triggers))
+
+    @staticmethod
+    def overlap_capsule(point0, point1, radius: float, layer_mask: int = (0xFFFFFFFF & ~(1 << 2)),
+                        query_triggers: bool = True):
+        """Find all colliders within a capsule defined by two segment endpoints."""
+        return _CppPhysics.overlap_capsule(
+            coerce_vec3(point0), coerce_vec3(point1), float(radius), int(layer_mask), bool(query_triggers)
+        )
 
     # ------------------------------------------------------------------
     # Shape casts
@@ -138,7 +146,7 @@ class Physics(metaclass=_PhysicsMeta):
         return _CppPhysics.sphere_cast(o, float(radius), d, max_distance, int(layer_mask), bool(query_triggers))
 
     @staticmethod
-    def box_cast(center, half_extents, direction, max_distance: float = 1000.0,
+    def box_cast(center, half_extents, direction, orientation=None, max_distance: float = 1000.0,
                  layer_mask: int = (0xFFFFFFFF & ~(1 << 2)), query_triggers: bool = True):
         """Cast a box along a direction and return closest RaycastHit, or None.
 
@@ -154,7 +162,18 @@ class Physics(metaclass=_PhysicsMeta):
         c = coerce_vec3(center)
         he = coerce_vec3(half_extents)
         d = coerce_vec3(direction)
-        return _CppPhysics.box_cast(c, he, d, max_distance, int(layer_mask), bool(query_triggers))
+        return _CppPhysics.box_cast(
+            c, he, d, coerce_quat(orientation), max_distance, int(layer_mask), bool(query_triggers)
+        )
+
+    @staticmethod
+    def capsule_cast(point0, point1, radius: float, direction, max_distance: float = 1000.0,
+                     layer_mask: int = (0xFFFFFFFF & ~(1 << 2)), query_triggers: bool = True):
+        """Cast a capsule and return the closest RaycastHit, or None."""
+        return _CppPhysics.capsule_cast(
+            coerce_vec3(point0), coerce_vec3(point1), float(radius), coerce_vec3(direction), max_distance,
+            int(layer_mask), bool(query_triggers)
+        )
 
     # ------------------------------------------------------------------
     # Layer collision control

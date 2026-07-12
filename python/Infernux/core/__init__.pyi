@@ -6,6 +6,7 @@ from .material import Material as Material
 from .texture import Texture as Texture
 from .shader import Shader as Shader
 from .audio_clip import AudioClip as AudioClip
+from .physic_material import PhysicMaterial as PhysicMaterial
 from .assets import AssetManager as AssetManager
 from .asset_types import (
     TextureImportSettings as TextureImportSettings,
@@ -22,6 +23,7 @@ from .asset_ref import (
     TextureRef as TextureRef,
     ShaderRef as ShaderRef,
     AudioClipRef as AudioClipRef,
+    PhysicMaterialRef as PhysicMaterialRef,
 )
 
 __all__ = [
@@ -29,6 +31,7 @@ __all__ = [
     "Texture",
     "Shader",
     "AudioClip",
+    "PhysicMaterial",
     "AssetManager",
     "TextureImportSettings",
     "TextureType",
@@ -42,4 +45,5 @@ __all__ = [
     "TextureRef",
     "ShaderRef",
     "AudioClipRef",
+    "PhysicMaterialRef",
 ]

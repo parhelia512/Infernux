@@ -547,44 +547,20 @@ class IGUI:
 
         Returns the new selected index (unchanged if nothing was picked).
         """
-        display = labels[current_idx] if 0 <= current_idx < len(labels) else ""
-        popup_tag = f"##combo_pop_{combo_id}"
-        filter_key = f"_igui_combo_{combo_id}"
-
         btn_w = width if width > 0.0 else ctx.get_content_region_avail_width()
         color_count = Theme.push_inline_button_style(ctx)
-        if ctx.button(f"{display}##combo_{combo_id}", None, width=btn_w,
-                      height=Theme.INSPECTOR_INLINE_BTN_H):
-            ctx.open_popup(popup_tag)
-            _popup_needs_focus.add(filter_key)
-            _picker_filters.pop(filter_key, None)
-        ctx.pop_style_color(color_count)
-
-        new_idx = current_idx
-        if ctx.begin_popup(popup_tag):
-            # Auto-focus on first frame
-            if filter_key in _popup_needs_focus:
-                ctx.set_keyboard_focus_here()
-                _popup_needs_focus.discard(filter_key)
-
-            prev_filter = _picker_filters.get(filter_key, "")
-            filt = ctx.input_text_with_hint("##filter", t("igui.search_hint"), prev_filter, 256)
-            _picker_filters[filter_key] = filt
-            ctx.separator()
-
-            filt_lower = filt.lower()
-            for idx, lbl in enumerate(labels):
-                if filt_lower and filt_lower not in lbl.lower():
-                    continue
-                ctx.push_id(idx)
-                if ctx.selectable(lbl, idx == current_idx):
-                    new_idx = idx
-                    ctx.close_current_popup()
-                ctx.pop_id()
-
-            ctx.end_popup()
-
-        return new_idx
+        try:
+            return ctx.searchable_combo(
+                combo_id,
+                current_idx,
+                list(labels),
+                btn_w,
+                8,
+                t("igui.search_hint"),
+                t("igui.no_results"),
+            )
+        finally:
+            ctx.pop_style_color(color_count)
 
     # ------------------------------------------------------------------
     #  Internal drawing helpers

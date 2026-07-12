@@ -49,7 +49,7 @@ static std::shared_ptr<ShaderAsset> CompileShaderAsset(const std::string &filePa
     std::string ext = FromFsPath(fsPath.extension());
 
     // Read metadata for shader_id
-    const InxResourceMeta *meta = adb->GetMetaByGuid(guid);
+    const auto meta = adb->GetMetaByGuid(guid);
     std::string shaderId;
     if (meta && meta->HasKey("shader_id")) {
         shaderId = meta->GetDataAs<std::string>("shader_id");
@@ -61,7 +61,7 @@ static std::shared_ptr<ShaderAsset> CompileShaderAsset(const std::string &filePa
     // Use InxShaderLoader to compile (it manages glslang, preprocessing, etc.)
     InxShaderLoader compiler(true, false, false, false, false, false, false, false, false, false);
 
-    // RegisterResource already created the .meta — use it for Load()
+    // Asset import already created the .meta; use it for Load().
     InxResourceMeta loadMeta;
     if (meta) {
         loadMeta = *meta;
@@ -144,7 +144,7 @@ static std::shared_ptr<ShaderAsset> CompileShaderAsset(const std::string &filePa
 // Load
 // =============================================================================
 
-std::shared_ptr<void> ShaderLoader::Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb)
+RuntimeAssetPayload ShaderLoader::Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb)
 {
     return CompileShaderAsset(filePath, guid, adb);
 }
@@ -153,10 +153,10 @@ std::shared_ptr<void> ShaderLoader::Load(const std::string &filePath, const std:
 // Reload — recompile and replace in-place
 // =============================================================================
 
-bool ShaderLoader::Reload(std::shared_ptr<void> existing, const std::string &filePath, const std::string &guid,
+bool ShaderLoader::Reload(const RuntimeAssetPayload &existing, const std::string &filePath, const std::string &guid,
                           AssetDatabase *adb)
 {
-    auto oldAsset = std::static_pointer_cast<ShaderAsset>(existing);
+    auto oldAsset = existing.Get<ShaderAsset>();
     if (!oldAsset) {
         INXLOG_WARN("ShaderLoader::Reload: null existing instance");
         return false;
@@ -176,23 +176,25 @@ bool ShaderLoader::Reload(std::shared_ptr<void> existing, const std::string &fil
 // ScanDependencies — shaders have no outgoing asset dependencies
 // =============================================================================
 
+size_t ShaderLoader::EstimateRuntimeBytes(const RuntimeAssetPayload &payload) const
+{
+    const auto shader = payload.Get<ShaderAsset>();
+    if (!shader)
+        throw std::invalid_argument("ShaderLoader cannot estimate an empty runtime payload");
+    return shader->GetRuntimeMemoryBytes();
+}
+
 std::set<std::string> ShaderLoader::ScanDependencies(const std::string & /*filePath*/, AssetDatabase * /*adb*/)
 {
     return {};
 }
 
 // =============================================================================
-// LoadMeta / CreateMeta — delegate to InxShaderLoader (the shader compiler)
+// CreateMeta — delegate to InxShaderLoader (the shader compiler)
 // =============================================================================
 
-bool ShaderLoader::LoadMeta(const char *content, const std::string &filePath, InxResourceMeta &metaData)
-{
-    InxShaderLoader compiler(true, false, false, false, false, false, false, false, false, false);
-    return compiler.LoadMeta(content, filePath, metaData);
-}
-
 void ShaderLoader::CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
-                              InxResourceMeta &metaData)
+                              InxResourceMeta &metaData) const
 {
     InxShaderLoader compiler(true, false, false, false, false, false, false, false, false, false);
     compiler.CreateMeta(content, contentSize, filePath, metaData);

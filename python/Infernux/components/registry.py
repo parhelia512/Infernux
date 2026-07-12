@@ -48,6 +48,34 @@ def get_type(name: str) -> Optional[Type['InxComponent']]:
     return _find_subclass(InxComponent, name)
 
 
+def get_type_by_identity(
+    name: str,
+    script_guid: str,
+    type_guid: str,
+) -> Optional[Type['InxComponent']]:
+    """Resolve exactly one component class by its complete stable identity."""
+    from .component import InxComponent
+
+    matches = []
+
+    def collect(base: type) -> None:
+        for component_type in base.__subclasses__():
+            known_script_guids = {
+                component_type._get_intrinsic_script_guid(),
+                getattr(component_type, "_asset_script_guid_", ""),
+            }
+            if (
+                component_type.__name__ == name
+                and type_guid == component_type._get_type_guid()
+                and script_guid in known_script_guids
+            ):
+                matches.append(component_type)
+            collect(component_type)
+
+    collect(InxComponent)
+    return matches[0] if len(matches) == 1 else None
+
+
 def get_all_types() -> Dict[str, Type['InxComponent']]:
     """
     Get all known InxComponent subclass types.

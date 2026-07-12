@@ -22,7 +22,6 @@ from Infernux.engine.resources_manager import ResourcesManager
 from Infernux.engine.play_mode import PlayModeManager, PlayModeState
 from Infernux.engine.scene_manager import SceneFileManager
 from Infernux.engine.ui import (
-    FrameSchedulerPanel,
     SceneViewPanel,
     GameViewPanel,
     WindowManager,
@@ -156,10 +155,6 @@ class BootstrapPanelsMixin:
     def _create_panels(self):
         engine = self.engine
         wm = self.window_manager
-
-        # Per-frame scheduler
-        self.frame_scheduler = FrameSchedulerPanel(engine=engine)
-        engine.register_gui("frame_scheduler", self.frame_scheduler)
 
         # Menu bar (native C++ panel)
         from Infernux.lib import MenuBarPanel as NativeMenuBarPanel

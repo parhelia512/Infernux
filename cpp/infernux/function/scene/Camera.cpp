@@ -1,8 +1,10 @@
 #include "Camera.h"
+#include "ComponentDocumentValidation.h"
 #include "ComponentFactory.h"
 #include "GameObject.h"
 #include <InxLog.h>
 #include <cmath>
+#include <limits>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
@@ -10,19 +12,15 @@ using json = nlohmann::json;
 namespace infernux
 {
 
-INFERNUX_REGISTER_COMPONENT("Camera", Camera)
+INFERNUX_REGISTER_VALIDATED_COMPONENT("Camera", Camera)
 
 // ============================================================================
 // Serialization
 // ============================================================================
 
-std::string Camera::Serialize() const
+nlohmann::json Camera::SerializeDocument() const
 {
-    json j;
-    j["schema_version"] = 1;
-    j["type"] = GetTypeName();
-    j["enabled"] = IsEnabled();
-    j["component_id"] = GetComponentID();
+    json j = Component::SerializeDocument();
 
     j["projectionMode"] = static_cast<int>(m_projectionMode);
     j["fov"] = m_fov;
@@ -35,60 +33,62 @@ std::string Camera::Serialize() const
     j["clearFlags"] = static_cast<int>(m_clearFlags);
     j["backgroundColor"] = {m_backgroundColor.r, m_backgroundColor.g, m_backgroundColor.b, m_backgroundColor.a};
 
-    return j.dump();
+    return j;
 }
 
-bool Camera::Deserialize(const std::string &jsonStr)
+void Camera::ValidateSerializedDocument(const nlohmann::json &j)
+{
+    using namespace component_document_validation;
+    ValidateComponentDocument(j, "Camera", 1,
+                              {"projectionMode", "fov", "aspectRatio", "orthoSize", "nearClip", "farClip", "depth",
+                               "cullingMask", "clearFlags", "backgroundColor"});
+    const int projectionMode = RequireInteger(j, "projectionMode", "Camera");
+    const float fov = RequireFiniteFloat(j, "fov", "Camera");
+    const float aspectRatio = RequireFiniteFloat(j, "aspectRatio", "Camera");
+    const float orthoSize = RequireFiniteFloat(j, "orthoSize", "Camera");
+    const float nearClip = RequireFiniteFloat(j, "nearClip", "Camera");
+    const float farClip = RequireFiniteFloat(j, "farClip", "Camera");
+    RequireFiniteFloat(j, "depth", "Camera");
+    const uint64_t cullingMask = RequireUnsignedInteger(j, "cullingMask", "Camera");
+    const int clearFlags = RequireInteger(j, "clearFlags", "Camera");
+    RequireFiniteVector(j, "backgroundColor", 4, "Camera");
+
+    if (projectionMode < static_cast<int>(CameraProjection::Perspective) ||
+        projectionMode > static_cast<int>(CameraProjection::Orthographic))
+        throw std::invalid_argument("Camera.projectionMode is unsupported");
+    if (fov <= 0.0f || fov >= 180.0f)
+        throw std::invalid_argument("Camera.fov must be in (0, 180)");
+    if (aspectRatio < 0.01f || orthoSize <= 0.0f)
+        throw std::invalid_argument("Camera aspectRatio and orthoSize must be positive");
+    if (nearClip <= 0.0f || farClip <= nearClip)
+        throw std::invalid_argument("Camera clip planes are invalid");
+    if (cullingMask > std::numeric_limits<uint32_t>::max())
+        throw std::invalid_argument("Camera.cullingMask exceeds 32 bits");
+    if (clearFlags < static_cast<int>(CameraClearFlags::Skybox) ||
+        clearFlags > static_cast<int>(CameraClearFlags::DontClear))
+        throw std::invalid_argument("Camera.clearFlags is unsupported");
+}
+
+bool Camera::DeserializeDocument(const nlohmann::json &j)
 {
     try {
-        json j = json::parse(jsonStr);
+        ValidateSerializedDocument(j);
+        if (!Component::DeserializeDocument(j))
+            return false;
 
-        if (j.contains("enabled")) {
-            SetEnabled(j["enabled"].get<bool>());
-        }
-        if (j.contains("component_id")) {
-            SetComponentID(j["component_id"].get<uint64_t>());
-        }
-        if (j.contains("projectionMode")) {
-            m_projectionMode = static_cast<CameraProjection>(j["projectionMode"].get<int>());
-            m_projectionDirty = true;
-        }
-        if (j.contains("fov")) {
-            m_fov = j["fov"].get<float>();
-            m_projectionDirty = true;
-        }
-        if (j.contains("aspectRatio")) {
-            m_aspectRatio = j["aspectRatio"].get<float>();
-            m_projectionDirty = true;
-        }
-        if (j.contains("orthoSize")) {
-            m_orthoSize = j["orthoSize"].get<float>();
-            m_projectionDirty = true;
-        }
-        if (j.contains("nearClip")) {
-            m_nearClip = j["nearClip"].get<float>();
-            m_projectionDirty = true;
-        }
-        if (j.contains("farClip")) {
-            m_farClip = j["farClip"].get<float>();
-            m_projectionDirty = true;
-        }
-        if (j.contains("depth")) {
-            m_depth = j["depth"].get<float>();
-        }
-        if (j.contains("cullingMask")) {
-            m_cullingMask = j["cullingMask"].get<uint32_t>();
-        }
-        if (j.contains("clearFlags")) {
-            m_clearFlags = static_cast<CameraClearFlags>(j["clearFlags"].get<int>());
-        }
-        if (j.contains("backgroundColor")) {
-            auto bg = j["backgroundColor"];
-            if (bg.is_array() && bg.size() >= 4) {
-                m_backgroundColor =
-                    glm::vec4(bg[0].get<float>(), bg[1].get<float>(), bg[2].get<float>(), bg[3].get<float>());
-            }
-        }
+        m_projectionMode = static_cast<CameraProjection>(j["projectionMode"].get<int>());
+        m_fov = j["fov"].get<float>();
+        m_aspectRatio = j["aspectRatio"].get<float>();
+        m_orthoSize = j["orthoSize"].get<float>();
+        m_nearClip = j["nearClip"].get<float>();
+        m_farClip = j["farClip"].get<float>();
+        m_depth = j["depth"].get<float>();
+        m_cullingMask = j["cullingMask"].get<uint32_t>();
+        m_clearFlags = static_cast<CameraClearFlags>(j["clearFlags"].get<int>());
+        const auto &background = j["backgroundColor"];
+        m_backgroundColor = glm::vec4(background[0].get<float>(), background[1].get<float>(),
+                                      background[2].get<float>(), background[3].get<float>());
+        m_projectionDirty = true;
 
         return true;
     } catch (const std::exception &e) {

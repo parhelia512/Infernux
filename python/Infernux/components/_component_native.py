@@ -111,16 +111,15 @@ class ComponentNativeMixin:
         # Also store weak reference for safe access
         if game_object is not None:
             self._game_object_ref = weakref.ref(game_object)
-            # Register into active-instances table (works in both edit & play modes)
-            go_id = game_object.id
-            _registry = type(self)._active_instances
-            lst = _registry.get(go_id)
-            if lst is None:
-                _registry[go_id] = [self]
-            else:
-                if self not in lst:   # guard against duplicate calls
+            if self._registers_active_instance:
+                go_id = game_object.id
+                _registry = type(self)._active_instances
+                lst = _registry.get(go_id)
+                if lst is None:
+                    _registry[go_id] = [self]
+                elif self not in lst:
                     lst.append(self)
-            self._registered_go_id = go_id
+                self._registered_go_id = go_id
         else:
             self._game_object_ref = None
 

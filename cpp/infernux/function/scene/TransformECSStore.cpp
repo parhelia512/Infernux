@@ -222,6 +222,10 @@ void TransformECSStore::InvalidateSubtree(Transform *root, bool clearWorldEulerE
         self.m_fcRotationValid[idx] = 0;
     }
 
+    if (m_invalidationObserver) {
+        m_invalidationObserver(root);
+    }
+
     GameObject *go = root->GetGameObject();
     if (!go) {
         return;
@@ -353,12 +357,8 @@ void TransformECSStore::ScatterLocalPositions(Transform *const *transforms, cons
         m_worldMatrixDirty[idx] = 1;
     }
     m_anyWorldMatrixDirty = true;
-    // Invalidate subtrees only for objects that actually have children.
     for (size_t i = 0; i < count; ++i) {
-        GameObject *go = transforms[i]->GetGameObject();
-        if (go && go->GetChildCount() > 0) {
-            InvalidateSubtree(transforms[i], false);
-        }
+        InvalidateSubtree(transforms[i], false);
     }
 }
 
@@ -384,10 +384,7 @@ void TransformECSStore::ScatterLocalScales(Transform *const *transforms, const f
     }
     m_anyWorldMatrixDirty = true;
     for (size_t i = 0; i < count; ++i) {
-        GameObject *go = transforms[i]->GetGameObject();
-        if (go && go->GetChildCount() > 0) {
-            InvalidateSubtree(transforms[i], false);
-        }
+        InvalidateSubtree(transforms[i], false);
     }
 }
 
@@ -418,10 +415,7 @@ void TransformECSStore::ScatterLocalRotations(Transform *const *transforms, cons
     }
     m_anyWorldMatrixDirty = true;
     for (size_t i = 0; i < count; ++i) {
-        GameObject *go = transforms[i]->GetGameObject();
-        if (go && go->GetChildCount() > 0) {
-            InvalidateSubtree(transforms[i], true);
-        }
+        InvalidateSubtree(transforms[i], true);
     }
 }
 
@@ -451,10 +445,7 @@ void TransformECSStore::ScatterLocalEulerAngles(Transform *const *transforms, co
     }
     m_anyWorldMatrixDirty = true;
     for (size_t i = 0; i < count; ++i) {
-        GameObject *go = transforms[i]->GetGameObject();
-        if (go && go->GetChildCount() > 0) {
-            InvalidateSubtree(transforms[i], true);
-        }
+        InvalidateSubtree(transforms[i], true);
     }
 }
 
@@ -488,12 +479,8 @@ void TransformECSStore::ScatterWorldPositions(Transform *const *transforms, cons
         m_worldMatrixDirty[idx] = 1;
     }
     m_anyWorldMatrixDirty = true;
-    // Batch invalidate children (skip leaf nodes quickly).
     for (size_t i = 0; i < count; ++i) {
-        GameObject *go = transforms[i]->GetGameObject();
-        if (go && go->GetChildCount() > 0) {
-            InvalidateSubtree(transforms[i], false);
-        }
+        InvalidateSubtree(transforms[i], false);
     }
 }
 
@@ -598,6 +585,10 @@ void TransformECSStore::EndFrameCache()
         Transform *parent = owner->GetParent();
         GameObject *go = owner->GetGameObject();
         const bool hasChildren = (go && go->GetChildCount() > 0);
+
+        if (m_invalidationObserver) {
+            m_invalidationObserver(owner);
+        }
 
         // World position dirty → compute local position from inverse parent.
         if (d & 0x01) {

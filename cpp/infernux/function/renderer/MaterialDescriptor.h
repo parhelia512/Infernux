@@ -2,6 +2,7 @@
 
 #include "FrameDeletionQueue.h"
 #include "shader/ShaderProgram.h"
+#include <atomic>
 #include <function/resources/InxMaterial/InxMaterial.h>
 #include <functional>
 #include <glm/glm.hpp>
@@ -15,6 +16,10 @@
 
 namespace infernux
 {
+namespace vk
+{
+class VkTexture;
+}
 
 // Forward declaration
 class InxVkResourceManager;
@@ -127,6 +132,7 @@ struct MaterialDescriptorSet
     {
         VkImageView imageView = VK_NULL_HANDLE;
         VkSampler sampler = VK_NULL_HANDLE;
+        std::shared_ptr<vk::VkTexture> keepAlive;
     };
     std::unordered_map<uint32_t, TextureBinding> textureBindings;
 
@@ -136,15 +142,14 @@ struct MaterialDescriptorSet
 /**
  * @brief Callback type for resolving texture paths to GPU resources
  *
- * Given a texture file path (from material Texture2D properties) and the
- * binding name from shader reflection (e.g. "normalMap", "albedoTex"),
- * returns the VkImageView and VkSampler for that texture.
- * The callback should handle caching, format selection (e.g. UNORM for
- * normal maps), and GPU upload internally.
- * Returns {VK_NULL_HANDLE, VK_NULL_HANDLE} on failure.
+ * Given a texture asset GUID (from material Texture2D properties) and the
+ * binding name from shader reflection (e.g.
+ * "normalMap", "albedoTex"), returns the VkImageView and VkSampler for that texture. The callback should handle
+ * caching, format selection (e.g. UNORM for normal maps), and GPU upload internally. Returns {VK_NULL_HANDLE,
+ * VK_NULL_HANDLE} on failure.
  */
-using TextureResolver =
-    std::function<std::pair<VkImageView, VkSampler>(const std::string &texturePath, const std::string &bindingName)>;
+using TextureResolver = std::function<MaterialDescriptorSet::TextureBinding(const std::string &textureGuid,
+                                                                            const std::string &bindingName)>;
 
 /**
  * @brief MaterialDescriptorManager - Manages material-specific descriptor sets
@@ -180,8 +185,9 @@ class MaterialDescriptorManager
      * @brief Set a texture resolver callback for loading material textures
      *
      * When a material has Texture2D properties, this callback is used to
-     * resolve file paths to VkImageView + VkSampler pairs. If not set,
-     * all texture slots fall back to the default texture.
+     * resolve asset GUIDs to VkImageView + VkSampler pairs. If not set,
+     * all texture slots fall back to the
+     * default texture.
      */
     void SetTextureResolver(TextureResolver resolver)
     {
@@ -283,6 +289,19 @@ class MaterialDescriptorManager
      */
     void Clear();
 
+    [[nodiscard]] size_t GetDescriptorSetCount() const noexcept
+    {
+        return m_descriptorSets.size();
+    }
+    [[nodiscard]] size_t GetRetiredDescriptorSetCount() const noexcept
+    {
+        return m_pendingDescriptorSetReleases->load(std::memory_order_relaxed);
+    }
+    [[nodiscard]] size_t GetDescriptorPoolCount() const noexcept
+    {
+        return m_descriptorPools.size();
+    }
+
     /**
      * @brief Set default texture for fallback
      */
@@ -304,7 +323,7 @@ class MaterialDescriptorManager
     uint32_t m_poolPageSize = 256; ///< Number of descriptor sets per pool page
 
     std::unordered_map<std::string, std::unique_ptr<MaterialDescriptorSet>> m_descriptorSets;
-    std::vector<std::shared_ptr<MaterialDescriptorSet>> m_retiredDescriptorSets;
+    std::shared_ptr<std::atomic_size_t> m_pendingDescriptorSetReleases = std::make_shared<std::atomic_size_t>(0);
 
     /// Tracks every VkDescriptorSet handle allocated from this manager's pools.
     /// Cleared in Clear() after vkResetDescriptorPool invalidates all handles.
@@ -376,6 +395,8 @@ class MaterialDescriptorManager
      * @return The newly created pool, or VK_NULL_HANDLE on failure.
      */
     VkDescriptorPool CreateDescriptorPool(uint32_t maxMaterials);
+
+    void RetireDescriptorSet(std::shared_ptr<MaterialDescriptorSet> descriptorSet);
 
     [[nodiscard]] bool IsPlaceholderTexturePath(std::string_view texturePath) const;
 

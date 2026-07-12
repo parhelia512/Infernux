@@ -43,10 +43,12 @@ class PlayModeSerializationMixin:
             data[name] = component._serialize_value(raw)
 
         script_guid = getattr(component, "_script_guid", None)
+        type_guid = component.__class__._get_type_guid()
 
         return {
             "type_name": getattr(component, "type_name", component.__class__.__name__),
             "script_guid": script_guid,
+            "type_guid": type_guid,
             "enabled": getattr(component, "enabled", True),
             "fields": data,
         }
@@ -60,6 +62,8 @@ class PlayModeSerializationMixin:
         """
         if not state or component is None:
             return
+        if component.__class__._get_type_guid() != state["type_guid"]:
+            raise ValueError("Play Mode component type GUID changed during state restore")
         component.enabled = bool(state.get("enabled", True))
 
         fields = state.get("fields", {})
@@ -83,32 +87,6 @@ class PlayModeSerializationMixin:
 
         if state.get("script_guid"):
             component._script_guid = state.get("script_guid")
-
-    def _restore_pending_py_components(self):
-        """
-        Restore Python components after scene has been deserialized.
-        
-        C++ Scene::Deserialize() stores pending Python component info,
-        which we retrieve and use to recreate the actual Python instances.
-
-        Delegates to the shared :func:`component_restore.restore_pending_py_components`
-        with ``batch_on_after_deserialize=True`` so all components are attached
-        before any ``on_after_deserialize`` callback fires.
-        """
-        scene_manager = self._get_scene_manager()
-        if not scene_manager:
-            return
-        scene = scene_manager.get_active_scene()
-        if not scene:
-            return
-
-        from Infernux.engine.component_restore import restore_pending_py_components
-        restore_pending_py_components(
-            scene,
-            asset_database=self._asset_database,
-            pre_warm_renderstack=True,
-            batch_on_after_deserialize=True,
-        )
 
     def _materialize_prefab_references_for_play(self):
         """Instantiate prefab-backed GameObject refs before runtime lifecycle begins."""

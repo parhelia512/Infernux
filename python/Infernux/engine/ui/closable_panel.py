@@ -3,7 +3,7 @@ Base class for closable editor panels.
 """
 
 from Infernux.lib import InxGUIRenderable, InxGUIContext
-from typing import Optional, Callable, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .window_manager import WindowManager
@@ -26,7 +26,6 @@ class ClosablePanel(InxGUIRenderable):
 
     # ── Class-level focus tracking ──
     _active_panel_id: Optional[str] = None
-    _on_panel_focus_changed: Optional[Callable[[str, str], None]] = None
     
     def __init__(self, title: str, window_id: Optional[str] = None):
         super().__init__()
@@ -176,33 +175,13 @@ class ClosablePanel(InxGUIRenderable):
         if focus_window:
             ctx.set_window_focus()
 
-        old_id = ClosablePanel._active_panel_id or ""
-        if old_id == self._window_id:
+        if ClosablePanel._active_panel_id == self._window_id:
             return
 
         ClosablePanel._active_panel_id = self._window_id
 
-        # Canonical channel: EditorEventBus.PANEL_FOCUSED.
-        # The legacy class-level callback is kept for now so existing
-        # bootstrap wiring keeps working, but new subscribers should prefer
-        # EditorEventBus to avoid the dual-channel split that previously
-        # left PANEL_FOCUSED defined-but-never-emitted.
-        try:
-            from .event_bus import EditorEvent, EditorEventBus
-            EditorEventBus.instance().emit(EditorEvent.PANEL_FOCUSED, self._window_id)
-        except Exception:
-            # Event bus unavailable during bootstrap import — fall through to the
-            # legacy callback so the focus signal is never silently lost.
-            pass
-
-        cb = ClosablePanel._on_panel_focus_changed
-        if cb is not None:
-            cb(old_id, self._window_id)
-
-    @classmethod
-    def set_on_panel_focus_changed(cls, callback: Optional[Callable[[str, str], None]]):
-        """Set a class-level callback ``(old_panel_id, new_panel_id)`` fired on focus changes."""
-        cls._on_panel_focus_changed = callback
+        from .event_bus import EditorEvent, EditorEventBus
+        EditorEventBus.instance().emit(EditorEvent.PANEL_FOCUSED, self._window_id)
 
     @classmethod
     def get_active_panel_id(cls) -> Optional[str]:

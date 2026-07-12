@@ -72,6 +72,8 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
         file_ops.create_shader, cur, name, typ, adb)
     pp.create_material = lambda cur, name: _safe_project_create(
         file_ops.create_material, cur, name, adb)
+    pp.create_physic_material = lambda cur, name: _safe_project_create(
+        file_ops.create_physic_material, cur, name, adb)
     pp.create_scene = lambda cur, name: _safe_project_create(
         file_ops.create_scene, cur, name, adb)
     pp.create_animclip = lambda cur, name: _safe_project_create(

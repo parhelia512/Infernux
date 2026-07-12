@@ -9,22 +9,27 @@
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 
 #include "BoxCollider.h"
+#include "ComponentDocumentValidation.h"
 #include "ComponentFactory.h"
 #include "GameObject.h"
 #include "MeshRenderer.h"
 #include "Transform.h"
 #include <InxLog.h>
 
+#include <cmath>
 #include <nlohmann/json.hpp>
 
 namespace infernux
 {
 
-INFERNUX_REGISTER_COMPONENT("BoxCollider", BoxCollider)
+INFERNUX_REGISTER_VALIDATED_COMPONENT("BoxCollider", BoxCollider)
 
 void BoxCollider::SetSize(const glm::vec3 &size)
 {
-    m_size = glm::max(size, glm::vec3(0.001f)); // clamp to avoid zero extents
+    if (!std::isfinite(size.x) || !std::isfinite(size.y) || !std::isfinite(size.z) || size.x < 0.001f ||
+        size.y < 0.001f || size.z < 0.001f)
+        throw std::invalid_argument("box size must be finite and at least 0.001 on every axis");
+    m_size = size;
     RebuildShape();
 }
 
@@ -84,25 +89,35 @@ void *BoxCollider::CreateJoltShapeRaw() const
 // Serialization
 // ============================================================================
 
-std::string BoxCollider::Serialize() const
+nlohmann::json BoxCollider::SerializeDocument() const
 {
-    // Start with base class fields
-    auto baseJson = nlohmann::json::parse(Collider::Serialize());
+    auto baseJson = Collider::SerializeDocument();
     baseJson["size"] = {m_size.x, m_size.y, m_size.z};
-    return baseJson.dump();
+    return baseJson;
 }
 
-bool BoxCollider::Deserialize(const std::string &jsonStr)
+void BoxCollider::ValidateSerializedDocument(const nlohmann::json &j)
 {
-    if (!Collider::Deserialize(jsonStr))
-        return false;
+    using namespace component_document_validation;
+    ValidateComponentDocument(j, "BoxCollider", 1, {"is_trigger", "center", "physic_material_guid", "size"});
+    RequireBoolean(j, "is_trigger", "BoxCollider");
+    RequireFiniteVector(j, "center", 3, "BoxCollider");
+    RequireString(j, "physic_material_guid", "BoxCollider");
+    RequireFiniteVector(j, "size", 3, "BoxCollider");
+    const auto &size = j["size"];
+    if (size[0].get<float>() < 0.001f || size[1].get<float>() < 0.001f || size[2].get<float>() < 0.001f)
+        throw std::invalid_argument("BoxCollider.size values must be at least 0.001");
+}
 
+bool BoxCollider::DeserializeDocument(const nlohmann::json &j)
+{
     try {
-        auto j = nlohmann::json::parse(jsonStr);
-        if (j.contains("size")) {
-            auto &s = j["size"];
-            m_size = glm::vec3(s[0].get<float>(), s[1].get<float>(), s[2].get<float>());
-        }
+        ValidateSerializedDocument(j);
+        const auto &size = j["size"];
+        const glm::vec3 stagedSize(size[0].get<float>(), size[1].get<float>(), size[2].get<float>());
+        if (!Collider::DeserializeDocument(j))
+            return false;
+        m_size = stagedSize;
         // Rebuild Jolt shape so Inspector edits take effect immediately.
         // Safe during scene load: RebuildShape() is a no-op when bodyId == 0xFFFFFFFF.
         RebuildShape();
