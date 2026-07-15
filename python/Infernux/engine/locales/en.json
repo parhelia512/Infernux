@@ -302,6 +302,7 @@
   "build.debug_mode": "Debug Mode",
   "build.lto": "LTO (slower build, better perf)",
   "build.enable_jit": "JIT (Numba acceleration)",
+  "build.debug_player_mcp": "Export Debug Player MCP",
   "build.output_directory": "Output Directory",
   "build.output_directory_hint": "Use an empty folder, or reuse one containing {marker} from a previous Infernux build.",
   "build.output_directory_error_title": "Invalid Build Output Directory",

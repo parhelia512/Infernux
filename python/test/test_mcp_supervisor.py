@@ -65,6 +65,8 @@ def test_supervisor_prepares_desktop_style_project_and_persists_policy(tmp_path)
     assert handoff["working_directory"] == str(project.resolve())
     assert handoff["endpoint"] == "http://127.0.0.1:9713/mcp"
     assert handoff["probe_argv"][-4:] == ["call", "mcp_session_status", "--args", "{}"]
+    assert handoff["checkpoint_list_argv"][-3:] == ["mcp_checkpoint_list", "--args", "{}"]
+    assert "mcp_checkpoint_list" in handoff["instructions"][-1]
     assert "lease" not in json.dumps(handoff).lower()
     persisted_handoff = json.loads((project / ".infernux" / "mcp_sessions" / supervisor.session_id / "agent-handoff.json").read_text(encoding="utf-8"))
     assert persisted_handoff == handoff
@@ -461,7 +463,7 @@ def test_supervisor_public_status_excludes_private_lease_but_persists_recovery_s
     assert persisted["supervisor_lease"] == supervisor._supervisor_lease
 
 
-def _write_debug_player_output(tmp_path, project_root, *, debug_build=True):
+def _write_debug_player_output(tmp_path, project_root, *, debug_build=True, scenes=None):
     output = tmp_path / "PlayerBuild"
     data = output / "Data"
     data.mkdir(parents=True)
@@ -475,6 +477,7 @@ def _write_debug_player_output(tmp_path, project_root, *, debug_build=True):
     (data / "BuildManifest.json").write_text(json.dumps({
         "game_name": "Pilot",
         "debug_build": debug_build,
+        "scenes": scenes or [],
     }), encoding="utf-8")
     return executable
 
@@ -510,6 +513,41 @@ def test_supervisor_launches_only_verified_debug_player_output(tmp_path, monkeyp
     assert captured["argv"] == [str(executable)]
     assert captured["env"]["_INFERNUX_PLAYER_CONTROL_TOKEN"] == supervisor._player_control_token
     assert "_INFERNUX_PLAYER_DEBUG_BUILD" not in captured["env"]
+    supervisor._close_player_log()
+
+
+def test_supervisor_player_scene_override_is_limited_to_manifest_scene(tmp_path, monkeypatch):
+    project = tmp_path / "Desktop" / "ScenePilot"
+    (project / "Assets").mkdir(parents=True)
+    race_scene = project / "Assets" / "RaceTrack.scene"
+    race_scene.write_text("{}", encoding="utf-8")
+    supervisor = SupervisorSession(str(project), session_id="player-start-scene")
+    supervisor.prepare_project()
+    executable = _write_debug_player_output(tmp_path, project, scenes=["Assets/RaceTrack.scene"])
+    captured = {}
+
+    class _PlayerProcess:
+        pid = 8450
+
+        @staticmethod
+        def poll():
+            return None
+
+    def _popen(_argv, **kwargs):
+        captured.update(kwargs)
+        with open(kwargs["env"]["_INFERNUX_READY_FILE"], "w", encoding="utf-8") as stream:
+            stream.write("ENGINE_LOADED\n")
+        return _PlayerProcess()
+
+    monkeypatch.setattr(supervisor_module.subprocess, "Popen", _popen)
+    status = supervisor.launch_player(str(executable), start_scene="Assets/racetrack.scene", timeout_seconds=1.0)
+
+    assert status["player_start_scene"] == "Assets/RaceTrack.scene"
+    assert captured["env"]["_INFERNUX_PLAYER_START_SCENE"] == "Assets/RaceTrack.scene"
+    with pytest.raises(ValueError, match="BuildManifest"):
+        supervisor_module._resolve_player_start_scene(
+            "Assets/Other.scene", str(project), {"scenes": ["Assets/RaceTrack.scene"]}
+        )
     supervisor._close_player_log()
 
 

@@ -13,6 +13,7 @@
     <meta property="og:description" content="A C++17/Vulkan native runtime with a Python production layer, an integrated editor, and an inspectable MIT-licensed architecture.">
     <meta property="og:url" content="https://infernux-engine.com/">
     <meta property="og:image" content="https://infernux-engine.com/assets/demo.png">
+    <meta property="og:image:type" content="image/png">
     <meta property="og:image:width" content="1245">
     <meta property="og:image:height" content="653">
     <meta property="og:image:alt" content="Infernux editor running a voxel scene">
@@ -20,16 +21,15 @@
     <meta name="twitter:title" content="Infernux · 熔炉 — Open game engine">
     <meta name="twitter:description" content="C++17/Vulkan runtime · Python production layer · MIT licensed.">
     <meta name="twitter:image" content="https://infernux-engine.com/assets/demo.png">
+    <meta name="twitter:image:alt" content="Infernux editor running a voxel scene">
     <title>Infernux · 熔炉 — Open game engine</title>
     <link rel="icon" type="image/png" href="assets/logo.png">
     <link rel="apple-touch-icon" href="assets/logo.png">
     <link rel="manifest" href="site.webmanifest">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
-    <link rel="stylesheet" href="css/style.css?v=7">
+    <link rel="stylesheet" href="css/fonts.css?v=1">
+    <link rel="stylesheet" href="css/style.css?v=12">
     <link rel="stylesheet" href="css/mission.css?v=2">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/fontawesome-subset.css?v=6.4.0">
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -43,19 +43,20 @@
         </div>
         <nav class="navbar" aria-label="Primary navigation">
             <div class="nav-container">
-                <a href="#home" class="nav-logo">
-                    <span class="logo-icon"><img src="assets/logo.png" alt="Infernux logo"></span>
+                <a href="#home" class="nav-logo" aria-current="page">
+                    <span class="logo-icon"><img src="assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
                     <span class="logo-text" data-i18n="brand.navShort">熔炉 · INFERNUX</span>
                 </a>
                 <div class="nav-links" id="primary-navigation">
-                    <a href="#home" class="active" data-i18n="nav.home">Home</a>
-                    <a href="#system" data-i18n="nav.features">Principles</a>
-                    <a href="#capabilities" data-i18n="nav.showcase">Capabilities</a>
+                    <a href="wiki/site/en/learn/getting-started.html" data-href-en="wiki/site/en/learn/getting-started.html" data-href-zh="wiki/site/zh/learn/getting-started.html" class="nav-priority" data-i18n="nav.start">Start</a>
+                    <a href="wiki.html#start-here" data-i18n="nav.learn">Learn</a>
+                    <a href="wiki.html?layer=manual#written-guides" data-i18n="nav.manual">Manual</a>
+                    <a href="wiki/site/en/api/index.html" data-href-en="wiki/site/en/api/index.html" data-href-zh="wiki/site/zh/api/index.html" data-i18n="nav.api">API</a>
                     <a href="roadmap.html" data-i18n="nav.roadmap">Roadmap</a>
-                    <a href="wiki.html" data-i18n="nav.learn">Learn &amp; Docs</a>
-                    <a href="community.html" data-i18n="nav.community">Community</a>
+                    <a href="community.html" class="nav-priority" data-i18n="nav.community">Community</a>
+                    <a href="download.html" data-i18n="nav.download">Download</a>
                     <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
-                        <i class="fab fa-github"></i> GitHub
+                        <i class="fab fa-github" aria-hidden="true"></i> GitHub
                     </a>
                 </div>
                 <div class="nav-right">
@@ -86,15 +87,23 @@
                         <p class="hero-subtitle" data-i18n="hero.subtitle">C++ / Vulkan core · Python production layer · repository-first</p>
                         <p class="hero-description" data-i18n="home.hero.description">熔炉 (Infernux) is a from-scratch game engine that pairs a C++17 / Vulkan native runtime with a Python production layer for gameplay, editor tooling, and render-stack authoring. It is built for teams who want readable internals, a fast inner loop, and an MIT-licensed codebase they can actually own.</p>
                         <div class="hero-actions">
-                            <a href="https://github.com/ChenlizheMe/Infernux/releases/latest/download/InfernuxHubInstaller.exe" class="btn btn-primary" target="_blank" rel="noopener">
-                                <i class="fas fa-download"></i>
+                            <a href="wiki/site/en/learn/getting-started.html" data-href-en="wiki/site/en/learn/getting-started.html" data-href-zh="wiki/site/zh/learn/getting-started.html" class="btn btn-primary">
+                                <i class="fas fa-rocket" aria-hidden="true"></i>
+                                <span data-i18n="home.hero.start">Start your first project</span>
+                            </a>
+                            <a href="download.html" class="btn btn-secondary" aria-describedby="hero-platform-note">
+                                <i class="fas fa-download" aria-hidden="true"></i>
                                 <span data-i18n="download.hubInstaller">Download Hub installer</span>
                             </a>
-                            <a href="https://github.com/ChenlizheMe/Infernux" class="btn btn-secondary" target="_blank" rel="noopener">
-                                <i class="fab fa-github"></i>
+                        </div>
+                        <p class="hero-platform-note" id="hero-platform-note" data-i18n="home.hero.platform">Windows 10/11 x64 · v0.2.1 technical preview · broader platforms in development</p>
+                        <div class="hero-text-links" aria-label="More ways to explore Infernux" data-i18n-aria-label="home.hero.moreActions">
+                            <a href="#runtime-capture" data-i18n="home.hero.browseDemo">Inspect the benchmark</a>
+                            <span aria-hidden="true">/</span>
+                            <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                                <i class="fab fa-github" aria-hidden="true"></i>
                                 <span data-i18n="hero.viewGithub">Inspect the repository</span>
                             </a>
-                            <a href="wiki.html#start-here" class="btn btn-secondary" data-i18n="home.hero.docs">Start learning</a>
                         </div>
                         <div class="hero-meta">
                             <div class="metric-card">
@@ -147,24 +156,24 @@
                 <p data-i18n="home.manifesto">熔炉 is shaped around a simple position: keep the hot path native, keep the workflow scriptable, and keep the architecture readable enough that a team can actually take ownership of it instead of negotiating with a vendor.</p>
             </section>
 
-            <section class="section">
+            <section class="section" id="runtime-capture">
                 <div class="section-head">
                     <div>
                         <div class="section-kicker" data-i18n="home.demo.kicker">Runtime capture · 0.2.1</div>
-                        <h2 class="section-title" data-i18n="home.demo.title">Live editor session running a height-shaded voxel scene at production density.</h2>
+                        <h2 class="section-title" data-i18n="home.demo.title">10,000-cube reference workload running inside the editor.</h2>
                     </div>
-                    <p class="section-intro" data-i18n="home.demo.intro">The capture below is unedited: the editor sits in Play mode, the inspector is open on a custom <code>height_gradient</code> shader, and the runtime is keeping the entire pixel grid lit and updating without any scripted interaction.</p>
+                    <p class="section-intro" data-i18n="home.demo.intro">A dual-axis sine-wave workload updates a 100 × 100 cube grid through the Batch + JIT path while one directional light and one shared material keep the render setup explicit.</p>
                 </div>
                 <div class="stack-layout demo-layout">
                     <div class="demo-frame" data-reveal>
-                        <img src="assets/demo.png" width="1245" height="653" alt="Infernux 0.2.1 editor running a height-shaded voxel scene at runtime" decoding="async">
+                        <img src="assets/demo.png" width="1245" height="653" alt="Infernux 0.2.1 editor running the 10,000-cube ocean FFT reference workload" loading="lazy" decoding="async">
                     </div>
                     <div class="stack-board" data-reveal>
-                        <h3 data-i18n="home.demo.panel.title">What this capture proves</h3>
-                        <ul class="list-clean">
-                            <li data-i18n="home.demo.panel.item1">A real editor session — Hierarchy, Scene/Game/UI tabs, Project, Console, and Inspector all attached to the live runtime.</li>
-                            <li data-i18n="home.demo.panel.item2">Custom material authored in Python: <code>height_gradient.frag</code> shading hundreds of cube clones in a single material slot.</li>
-                            <li data-i18n="home.demo.panel.item3">173 FPS on the test workstation while running play mode, build pipeline, and the inspector in parallel.</li>
+                            <h3 data-i18n="home.demo.panel.title">Benchmark evidence and limits</h3>
+                            <ul class="list-clean">
+                            <li data-i18n="home.demo.panel.item1">Test environment: 1920 × 1080, V-Sync off, Windows 11, Core Ultra 7 265K, RTX 5070 Ti and 64 GB DDR5-6400.</li>
+                            <li data-i18n="home.demo.panel.item2">After a 60-frame warm-up, the 10,000-cube single-material workload averaged 127 FPS in the Infernux editor and 171 FPS at runtime over 300 frames.</li>
+                            <li data-i18n="home.demo.panel.item3">Unity 6 is included only as a reference: shading complexity, batching and editor maturity differ. Read the <a href="https://arxiv.org/abs/2604.10263" target="_blank" rel="noopener">methodology and complete tables</a> before comparing results.</li>
                         </ul>
                     </div>
                 </div>
@@ -274,7 +283,7 @@
                     <p class="copy-body" data-i18n="cta.desc">熔炉 exists for teams who want source access, architectural clarity, and a workflow they can actually reshape. Start with the docs, inspect the code, and push the engine further.</p>
                 </div>
                 <div class="cta-buttons">
-                    <a href="https://github.com/ChenlizheMe/Infernux/releases/latest/download/InfernuxHubInstaller.exe" class="btn btn-primary" target="_blank" rel="noopener">
+                    <a href="download.html" class="btn btn-primary">
                         <i class="fas fa-download"></i>
                         <span data-i18n="download.hubInstaller">Download Hub installer</span>
                     </a>
@@ -293,7 +302,7 @@
             <div class="footer-content">
                 <div class="footer-brand">
                     <div class="nav-logo">
-                        <span class="logo-icon"><img src="assets/logo.png" alt="Infernux logo"></span>
+                        <span class="logo-icon"><img src="assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
                         <span class="logo-text" data-i18n="brand.footerTitle">熔炉 · INFERNUX</span>
                     </div>
                     <p data-i18n="footer.tagline">Open code, explicit architecture, and a render stack you can actually reason about.</p>
@@ -317,22 +326,37 @@
         </div>
     </footer>
 
-    <script src="js/i18n.js?v=7"></script>
-    <script src="js/main.js?v=6"></script>
+    <script src="js/i18n.js?v=11"></script>
+    <script src="js/main.js?v=9"></script>
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "Infernux",
-      "alternateName": "熔炉",
-      "applicationCategory": "DeveloperApplication",
-      "operatingSystem": "Windows 10, Windows 11",
-      "softwareVersion": "0.2.1",
-      "license": "https://opensource.org/licenses/MIT",
-      "url": "https://infernux-engine.com/",
-      "downloadUrl": "https://github.com/ChenlizheMe/Infernux/releases/latest",
-      "codeRepository": "https://github.com/ChenlizheMe/Infernux",
-      "isAccessibleForFree": true
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://infernux-engine.com/#website",
+          "name": "Infernux",
+          "alternateName": "熔炉",
+          "url": "https://infernux-engine.com/",
+          "inLanguage": ["en", "zh-CN"]
+        },
+        {
+          "@type": "SoftwareApplication",
+          "@id": "https://infernux-engine.com/#software",
+          "name": "Infernux",
+          "alternateName": "熔炉",
+          "applicationCategory": "DeveloperApplication",
+          "operatingSystem": "Windows 10, Windows 11",
+          "softwareVersion": "0.2.1",
+          "license": "https://opensource.org/licenses/MIT",
+          "url": "https://infernux-engine.com/",
+          "downloadUrl": "https://github.com/ChenlizheMe/Infernux/releases/latest",
+          "codeRepository": "https://github.com/ChenlizheMe/Infernux",
+          "screenshot": "https://infernux-engine.com/assets/demo.png",
+          "sameAs": "https://github.com/ChenlizheMe/Infernux",
+          "isAccessibleForFree": true
+        }
+      ]
     }
     </script>
 </body>

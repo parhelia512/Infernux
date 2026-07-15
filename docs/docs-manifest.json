@@ -6,12 +6,27 @@
   "documented_release": "0.2.1",
   "release_status": "preview",
   "last_verified": "2026-07-15",
-  "languages": ["en", "zh-CN"],
+  "build": {
+    "status": "unstamped",
+    "source_commit": null,
+    "source_url": null,
+    "generated_at": null,
+    "timestamp_source": "source-commit"
+  },
+  "languages": [
+    "en",
+    "zh-CN"
+  ],
   "indexes": {
     "llms": "/llms.txt",
+    "llms_full": "/llms-full.txt",
     "curated_docs": "/docs-index.json",
+    "learning_paths": "/learning-paths.json",
+    "docs_health": "/docs-health.json",
     "api": "/api-index.json",
     "api_changes": "/api-changes.json",
+    "release": "/release.json",
+    "release_notes": "/release-notes.json",
     "wiki_catalog": "/assets/wiki-docs.json",
     "sitemap": "/sitemap.xml",
     "community": "/community.html"

@@ -1,10 +1,13 @@
 ---
+title: "Engine Map"
+description: "A routing map from common Infernux development tasks to the responsible engine systems and canonical API pages."
 category: Manual
 tags: ["overview", "systems", "reference"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.Transform","Infernux.components.InxComponent","Infernux.components.serialized_field","Infernux.GameObject","Infernux.scene.SceneManager","Infernux.input.Input","Infernux.input.KeyCode","Infernux.physics.Physics","Infernux.components.builtin.Rigidbody","Infernux.coroutine.Coroutine","Infernux.coroutine.WaitForSeconds","Infernux.timing.Time","Infernux.debug.Debug","Infernux.ui.UICanvas","Infernux.ui.UIButton","Infernux.components.builtin.Camera","Infernux.components.builtin.Light","Infernux.renderstack.RenderStack","Infernux.rendergraph.RenderGraph","Infernux.jit.njit"]
 agent_summary: "A routing map from common Infernux development tasks to the responsible engine systems and canonical API pages."
 source_paths: ["python/Infernux", "docs/wiki/docs/en/api"]
 ---
@@ -16,6 +19,7 @@ Use this page when you know **what you want to build** but not which Infernux ty
 ## Core authoring model
 
 ```text
+[INX-DIAGRAM:hierarchy:Project ownership from Scene to behavior]
 Project
 └─ Scene
    └─ GameObject
@@ -49,6 +53,7 @@ A Scene contains GameObjects. Each GameObject always has spatial state through i
 ## Component lifecycle at a glance
 
 ```text
+[INX-DIAGRAM:timeline:Component lifecycle and per-frame update phases]
 created → awake → enabled → start → update / fixed_update / late_update → disabled → destroyed
 ```
 
@@ -82,4 +87,3 @@ Infernux is in preview. Before relying on a behavior:
 4. inspect the Console for the first relevant error.
 
 For your first practical workflow, continue to [Your First Component](../learn/first-component.md).
-

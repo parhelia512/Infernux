@@ -6,6 +6,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const docsRoot = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(docsRoot, "..");
 const wikiDocsRoot = path.join(docsRoot, "wiki", "docs");
+const mkdocsConfigPath = path.join(docsRoot, "wiki", "mkdocs.yml");
 const canonicalOrigin = "https://infernux-engine.com";
 const checkOnly = process.argv.includes("--check");
 
@@ -17,6 +18,18 @@ async function walk(directory, extension = ".md") {
         else if (entry.isFile() && entry.name.endsWith(extension)) result.push(absolute);
     }
     return result.sort((a, b) => a.localeCompare(b, "en"));
+}
+
+async function readNavigationOrder() {
+    const config = await readFile(mkdocsConfigPath, "utf8");
+    const order = new Map();
+    let position = 0;
+    for (const line of config.split(/\r?\n/)) {
+        const match = line.match(/:\s+((?:en|zh)\/(?:architecture|learn|manual)\/[^\s#]+\.md)\s*$/);
+        if (!match || order.has(match[1])) continue;
+        order.set(match[1], position++);
+    }
+    return order;
 }
 
 function posix(value) {
@@ -88,7 +101,22 @@ function stableSlug(relativePath) {
     return posix(relativePath).replace(/\.md$/i, "").replace(/\//g, ".");
 }
 
-async function buildCuratedDocuments() {
+function extractRelatedApi(body, meta, language, apiSymbols) {
+    const candidates = [];
+    for (const match of body.matchAll(/\]\(\.\.\/api\/([^/)#]+)\.md(?:#[^)]+)?\)/g)) candidates.push(match[1]);
+    for (const value of Array.isArray(meta.related_api) ? meta.related_api : []) candidates.push(value);
+    const localSymbols = apiSymbols.filter((symbol) => symbol.language === language);
+    const byFile = new Map(localSymbols.map((symbol) => [path.basename(symbol.source, ".md"), symbol.symbol_key]));
+    const byKey = new Map(localSymbols.map((symbol) => [symbol.symbol_key, symbol.symbol_key]));
+    const related = [];
+    for (const candidate of candidates) {
+        const key = byKey.get(candidate) || byFile.get(candidate);
+        if (key && !related.includes(key)) related.push(key);
+    }
+    return related;
+}
+
+async function buildCuratedDocuments(navigationOrder, apiSymbols) {
     const documents = [];
     for (const lang of ["en", "zh"]) {
         const languageRoot = path.join(wikiDocsRoot, lang);
@@ -100,20 +128,24 @@ async function buildCuratedDocuments() {
             const markdown = await readFile(file, "utf8");
             const { meta, body } = parseFrontMatter(markdown);
             const webPath = `/wiki/site/${lang}/${posix(relativeToLanguage).replace(/\.md$/, ".html")}`;
+            const navigationKey = `${lang}/${posix(relativeToLanguage)}`;
             documents.push({
                 id: `${lang}.${stableSlug(relativeToLanguage)}`,
                 language: languageCode(lang),
                 layer,
-                title: markdownTitle(body, path.basename(file, ".md")),
+                title: meta.title || markdownTitle(body, path.basename(file, ".md")),
+                description: meta.description || meta.agent_summary || firstParagraph(body),
                 url: webPath,
                 canonical_url: `${canonicalOrigin}${webPath}`,
                 source: posix(path.relative(repoRoot, file)),
+                navigation_order: navigationOrder.get(navigationKey) ?? null,
                 status: meta.status || "unversioned",
                 since: meta.since || null,
                 last_verified: meta.last_verified || null,
                 audience: Array.isArray(meta.audience) ? meta.audience : [],
                 tags: Array.isArray(meta.tags) ? meta.tags : [],
-                summary: meta.agent_summary || firstParagraph(body),
+                related_api: extractRelatedApi(body, meta, languageCode(lang), apiSymbols),
+                summary: meta.agent_summary || meta.description || firstParagraph(body),
                 source_paths: Array.isArray(meta.source_paths) ? meta.source_paths : []
             });
         }
@@ -134,6 +166,13 @@ function extractSignatures(body) {
         if (value && !value.includes("TODO") && !signatures.includes(value)) signatures.unshift(value);
     }
     return signatures;
+}
+
+function exampleStatus(body) {
+    const section = body.match(/<!-- USER CONTENT START --> example\s*([\s\S]*?)<!-- USER CONTENT END -->/)?.[1] || "";
+    if (/```(?:python)?[\s\S]*?```/.test(section) && !section.includes("TODO: Add example")) return "curated";
+    if (/Example status|示例状态/.test(section)) return "unavailable";
+    return "unknown";
 }
 
 async function buildApiSymbols() {
@@ -164,6 +203,7 @@ async function buildApiSymbols() {
                 symbol: stableSymbol,
                 kind,
                 signatures: extractSignatures(body),
+                example_status: exampleStatus(body),
                 summary: descriptionSection(body),
                 status: "preview",
                 since: null,
@@ -175,6 +215,15 @@ async function buildApiSymbols() {
         }
     }
     return symbols.sort((a, b) => a.id.localeCompare(b.id, "en"));
+}
+
+function attachRelatedDocuments(symbols, documents) {
+    return symbols.map((symbol) => ({
+        ...symbol,
+        related_documents: documents
+            .filter((document) => document.language === symbol.language && document.related_api.includes(symbol.symbol_key))
+            .map((document) => ({ id: document.id, title: document.title, url: document.url }))
+    }));
 }
 
 function json(value) {
@@ -195,20 +244,23 @@ async function emit(relativePath, value) {
 }
 
 const manifest = JSON.parse(await readFile(path.join(docsRoot, "docs-manifest.json"), "utf8"));
-const documents = await buildCuratedDocuments();
-const symbols = await buildApiSymbols();
+const navigationOrder = await readNavigationOrder();
+const rawSymbols = await buildApiSymbols();
+const documents = await buildCuratedDocuments(navigationOrder, rawSymbols);
+const symbols = attachRelatedDocuments(rawSymbols, documents);
 
 await emit("docs-index.json", {
-    schema_version: 2,
+    schema_version: 3,
     generated_for_release: manifest.documented_release,
     document_count: documents.length,
     documents
 });
 await emit("api-index.json", {
-    schema_version: 1,
+    schema_version: 3,
     generated_for_release: manifest.documented_release,
     status_default: manifest.release_status,
     symbol_count: symbols.length,
+    curated_example_count: symbols.filter((symbol) => symbol.example_status === "curated").length,
     symbols
 });
 

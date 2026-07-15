@@ -59,6 +59,7 @@ class InxGUISemantics
   public:
     static void SetCaptureEnabled(bool enabled);
     [[nodiscard]] static bool IsCaptureEnabled();
+    [[nodiscard]] static bool HasPendingCaptureRequest();
     static uint64_t RequestSnapshot(uint64_t inputSequence = 0);
 
     static void BeginFrame(uint64_t frame);

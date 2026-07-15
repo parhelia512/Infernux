@@ -160,8 +160,6 @@ def test_player_control_press_owns_hold_duration_inside_player(tmp_path, monkeyp
     engine = _Engine()
     samples = iter((
         {"scene_name": "racetrack", "renderer_frame": 10, "objects": {"PlayerCar": {"position": [0, 0, 0]}}},
-        {"scene_name": "racetrack", "renderer_frame": 11, "objects": {"PlayerCar": {"position": [0, 0, 0]}}},
-        {"scene_name": "racetrack", "renderer_frame": 12, "objects": {"PlayerCar": {"position": [0, 0, 1]}}},
         {"scene_name": "racetrack", "renderer_frame": 13, "objects": {"PlayerCar": {"position": [0, 0, 3]}}},
         {"scene_name": "results", "renderer_frame": 14, "objects": {}},
     ))
@@ -223,6 +221,12 @@ def test_player_control_press_owns_hold_duration_inside_player(tmp_path, monkeyp
             "objects": {"PlayerCar": {"position": [0, 0, 3]}},
         },
     }
+
+    _write_request(request, "press-nan", "press", scancode=26, duration_seconds=float("nan"))
+    assert channel.poll(engine) is None
+    rejected = json.loads(response.read_text(encoding="utf-8"))
+    assert rejected["ok"] is False
+    assert "duration_seconds" in rejected["error"]
 
 
 def test_player_control_capture_starts_when_target_scene_objects_are_ready(tmp_path, monkeypatch):
@@ -293,6 +297,162 @@ def test_player_control_capture_starts_when_target_scene_objects_are_ready(tmp_p
     assert [round(sample["time"], 2) for sample in completed["trajectory"]] == [0.0, 0.11, 0.2]
     assert completed["trajectory"][0]["objects"]["NpcRacer"]["position"] == [2.0, 0.5, 0.0]
     assert completed["trajectory"][-1]["objects"]["NpcRacer"]["position"][2] > 0.8
+
+
+def test_player_control_capture_owns_frame_bounded_input_and_pauses(tmp_path, monkeypatch):
+    request, response, channel = _configure(tmp_path, monkeypatch)
+    engine = _Engine()
+    now = [5.0]
+    scene_name = ["MainMenu"]
+    frame = [0]
+    paused = []
+    monkeypatch.setattr(player_control.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(player_control, "_active_scene_name", lambda: scene_name[0])
+    monkeypatch.setattr(player_control, "_time_frame_count", lambda: frame[0])
+    monkeypatch.setattr(player_control, "_pause_player_scene", lambda: paused.append(True) or True)
+    monkeypatch.setattr(
+        player_control,
+        "_observe_motion_state",
+        lambda _engine, _names, _probes: {
+            "scene_name": scene_name[0],
+            "renderer_frame": 100 + frame[0],
+            "objects": {"PlayerCar": {"position": [0.0, 0.5, float(frame[0])]}}},
+    )
+    _write_request(
+        request,
+        "frame-capture-arm",
+        "motion_capture_arm",
+        object_names=["PlayerCar"],
+        seconds=1.0,
+        sample_interval=0.02,
+        trigger_scene_name="racetrack",
+        hold_scancodes=[26, 4],
+        hold_frame_count=2,
+        wait_frame_count=2,
+        pause_on_complete=True,
+    )
+
+    assert channel.poll(engine) is None
+    capture_id = json.loads(response.read_text(encoding="utf-8"))["data"]["capture_id"]
+    response.unlink()
+
+    scene_name[0] = "racetrack"
+    frame[0] = 20
+    now[0] = 6.0
+    assert channel.poll(engine) is None
+    assert engine.native.keys == [(26, True, False), (4, True, False)]
+
+    frame[0] = 21
+    now[0] = 6.03
+    assert channel.poll(engine) is None
+    frame[0] = 22
+    now[0] = 6.06
+    assert channel.poll(engine) is None
+    assert engine.native.keys == [(26, True, False), (4, True, False), (4, False, False), (26, False, False)]
+
+    engine.native.last_processed_synthetic_input_sequence = 15
+    frame[0] = 24
+    now[0] = 6.12
+    assert channel.poll(engine) is None
+    assert paused == [True]
+
+    _write_request(request, "frame-capture-status", "motion_capture_status", capture_id=capture_id)
+    assert channel.poll(engine) is None
+    completed = json.loads(response.read_text(encoding="utf-8"))["data"]
+    assert completed["status"] == "completed"
+    assert completed["frame_count"] == 4
+    assert completed["hold_frame_count"] == 2
+    assert completed["wait_frame_count"] == 2
+    assert completed["elapsed_frame_count"] == 4
+    assert completed["input_released_after_hold_frame"] == 2
+    assert completed["paused_on_complete"] is True
+    assert [item["scancode"] for item in completed["input_releases"]] == [4, 26]
+
+
+def test_player_control_capture_stops_on_sampled_public_condition(tmp_path, monkeypatch):
+    request, response, channel = _configure(tmp_path, monkeypatch)
+    engine = _Engine()
+    now = [5.0]
+    scene_name = ["MainMenu"]
+    frame = [0]
+    paused = []
+    samples = iter((
+        {"scene_name": "racetrack", "renderer_frame": 20, "objects": {"PlayerCar": {
+            "position": [0.0, 0.5, 0.0],
+            "component_fields": {"RaceHUDController[0]": {"player_progress": 0.1}},
+        }}},
+        {"scene_name": "racetrack", "renderer_frame": 21, "objects": {"PlayerCar": {
+            "position": [0.0, 0.5, 2.0],
+            "component_fields": {"RaceHUDController[0]": {"player_progress": 0.8}},
+        }}},
+    ))
+    monkeypatch.setattr(player_control.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(player_control, "_active_scene_name", lambda: scene_name[0])
+    monkeypatch.setattr(player_control, "_time_frame_count", lambda: frame[0])
+    monkeypatch.setattr(player_control, "_pause_player_scene", lambda: paused.append(True) or True)
+    monkeypatch.setattr(player_control, "_observe_motion_state", lambda *_args: next(samples))
+    _write_request(
+        request,
+        "condition-capture-arm",
+        "motion_capture_arm",
+        object_names=["PlayerCar"],
+        seconds=2.0,
+        sample_interval=0.02,
+        trigger_scene_name="racetrack",
+        hold_scancodes=[26],
+        hold_frame_count=120,
+        wait_frame_count=2,
+        wait_seconds=0.1,
+        pause_on_complete=False,
+        pause_on_condition=True,
+        component_probes=[{
+            "object_name": "PlayerCar",
+            "component_type": "RaceHUDController",
+            "fields": ["player_progress"],
+        }],
+        stop_assertions=[{
+            "kind": "component_field",
+            "object_name": "PlayerCar",
+            "component_type": "RaceHUDController",
+            "field": "player_progress",
+            "operator": "greater_or_equal",
+            "value": 0.75,
+        }],
+    )
+
+    assert channel.poll(engine) is None
+    capture_id = json.loads(response.read_text(encoding="utf-8"))["data"]["capture_id"]
+    response.unlink()
+    scene_name[0] = "racetrack"
+    frame[0] = 20
+    now[0] = 6.0
+    assert channel.poll(engine) is None
+    assert engine.native.keys == [(26, True, False)]
+
+    frame[0] = 21
+    now[0] = 6.03
+    assert channel.poll(engine) is None
+    assert engine.native.keys == [(26, True, False), (26, False, False)]
+
+    engine.native.last_processed_synthetic_input_sequence = 13
+    frame[0] = 23
+    now[0] = 6.06
+    assert channel.poll(engine) is None
+    assert paused == []
+
+    now[0] = 6.14
+    assert channel.poll(engine) is None
+    _write_request(request, "condition-capture-status", "motion_capture_status", capture_id=capture_id)
+    assert channel.poll(engine) is None
+    completed = json.loads(response.read_text(encoding="utf-8"))["data"]
+    assert completed["status"] == "condition_met"
+    assert completed["stop_condition"]["passed"] is True
+    assert completed["condition_met_at_frame"] == 1
+    assert completed["condition_settle_until_frame"] == 3
+    assert completed["condition_settle_until_time"] == 6.13
+    assert completed["input_released_after_hold_frame"] == 1
+    assert completed["paused_on_complete"] is True
+    assert paused == [True]
 
 
 def test_player_control_capture_rejects_late_arm_in_target_scene(tmp_path, monkeypatch):
@@ -383,6 +543,7 @@ def test_player_observation_reports_update_dispatch_diagnostics(monkeypatch):
     assert data["scene_playing"] is True
     assert data["scene_manager_playing"] is True
     assert data["scene_manager_paused"] is False
+    assert data["play_state"] == "playing"
     component = data["objects"]["Prompt"]["python_components"][0]
     assert component["update_overridden"] is True
     assert component["load_requested"] is False
@@ -403,6 +564,14 @@ def test_player_observation_reports_update_dispatch_diagnostics(monkeypatch):
         "material_descriptor_set_count": 3,
         "retired_material_descriptor_set_count": 0,
     }
+
+    scene_manager.is_paused = lambda: True
+    engine.get_play_mode_manager = lambda: type("_PlayManager", (), {
+        "state": type("_State", (), {"name": "PLAYING"})(),
+    })()
+    paused_data = player_control._observe_player(engine, ["Prompt"])
+
+    assert paused_data["play_state"] == "paused"
 
 
 def test_player_observation_discovers_bounded_objects_by_public_component_type(monkeypatch):

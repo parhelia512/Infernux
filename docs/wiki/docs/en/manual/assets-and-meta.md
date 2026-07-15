@@ -1,10 +1,13 @@
 ---
+title: "Assets and `.meta` files"
+description: "Explain project assets, GUID and path identity, .meta sidecars, typed references, import settings, safe move/delete operations, caching, and runtime loading."
 category: Manual
 tags: ["assets", "guid", "meta", "import", "material", "texture"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.core.Texture","Infernux.core.Material","Infernux.ui.UIImage"]
 agent_summary: "Explain project assets, GUID and path identity, .meta sidecars, typed references, import settings, safe move/delete operations, caching, and runtime loading."
 source_paths: ["python/Infernux/core/assets.py", "python/Infernux/core/asset_ref.py", "python/Infernux/core/asset_types.py", "python/Infernux/engine/asset_reference_cleanup.py"]
 ---
@@ -12,6 +15,22 @@ source_paths: ["python/Infernux/core/assets.py", "python/Infernux/core/asset_ref
 # Assets and `.meta` files
 
 An asset has two forms of identity: its current path and a stable GUID recorded through the asset database and sidecar metadata. Paths are useful to people; GUIDs let serialized references survive a rename or move.
+
+```text
+[INX-DIAGRAM:pipeline:Asset identity from source file to runtime object]
+source file + matching .meta
+             │ path + stable GUID + import settings
+             ▼
+        importer / reimport
+             ▼
+      Asset database + cache
+             │
+             ├── AssetRef: GUID + path_hint ── resolve ──┐
+             └── project path ── AssetManager.load ──────┼──▶ typed runtime object
+
+editor move / rename ── preserves GUID and updates references
+raw .meta copy ── duplicates GUID ── breaks identity
+```
 
 ## Project workflow
 
@@ -39,6 +58,15 @@ if icon is None:
 ```
 
 `load_by_guid()` is appropriate when a stable serialized identifier is already available. `find_assets()` matches project assets by filename pattern. Loading is cached; call `invalidate_path`, `invalidate`, or `flush` only when tooling has changed files outside the normal import flow.
+
+## Choose a reference path
+
+| Situation | Use | Avoid |
+|---|---|---|
+| Serialized component field | typed `AssetRef` and GUID | storing only a fragile absolute path |
+| Known project asset in setup code | `AssetManager.load(project_path, type)` | lower-level file loading that bypasses project identity |
+| Existing serialized GUID | `load_by_guid()` or `resolve()` | guessing the asset's current path |
+| External tool changed a source file | rescan/reimport, then targeted invalidation | flushing every asset during normal frame work |
 
 ## Import settings
 
@@ -71,4 +99,3 @@ Texture metadata includes type, wrap/filter mode, mipmap generation, sRGB interp
 - [Material](../api/Material.md)
 - [UIImage](../api/UIImage.md)
 - [Build and Share](../learn/build-and-share.md)
-

@@ -1,10 +1,13 @@
 ---
+title: "Animation Workflow"
+description: "Create 2D or 3D animation clips, place them in an .animfsm controller, attach SpiritAnimator or SkeletalAnimator, and verify state, transition, event, and playback behavior."
 category: Learn
 tags: ["animation", "2d", "3d", "fsm", "animator"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: []
 agent_summary: "Create 2D or 3D animation clips, place them in an .animfsm controller, attach SpiritAnimator or SkeletalAnimator, and verify state, transition, event, and playback behavior."
 source_paths: ["python/Infernux/engine/ui/animclip2d_editor_panel.py", "python/Infernux/engine/ui/animfsm_editor_panel.py", "python/Infernux/core/animation_clip.py", "python/Infernux/core/animation_clip3d.py", "python/Infernux/core/anim_state_machine.py", "python/Infernux/components/spirit_animator.py", "python/Infernux/components/skeletal_animator.py"]
 ---

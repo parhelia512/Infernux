@@ -72,18 +72,18 @@ class NewProjectView(QDialog):
         ver_label = QLabel(tr("Engine Version:"))
         self.version_combo = QComboBox()
         self.version_combo.setFixedHeight(32)
-        self._no_version_hint = QLabel(
+        self._no_version_hint = QLabel(tr(
             "No engine versions installed. Go to the Installs tab to download one first."
-        )
+        ))
         self._no_version_hint.setWordWrap(True)
         self._no_version_hint.setVisible(False)
-        self._no_version_hint.setStyleSheet("color: #f5a623; font-size: 12px; padding-top: 2px;")
-        self._runtime_hint = QLabel(
+        self._no_version_hint.setStyleSheet("color: #eb5757; font-size: 12px; padding-top: 2px;")
+        self._runtime_hint = QLabel(tr(
             "Python 3.12 is not installed yet. Go to the Installs tab to install it first."
-        )
+        ))
         self._runtime_hint.setWordWrap(True)
         self._runtime_hint.setVisible(False)
-        self._runtime_hint.setStyleSheet("color: #f5a623; font-size: 12px; padding-top: 2px;")
+        self._runtime_hint.setStyleSheet("color: #eb5757; font-size: 12px; padding-top: 2px;")
         ver_layout.addWidget(ver_label)
         ver_layout.addWidget(self.version_combo)
         ver_layout.addWidget(self._no_version_hint)
@@ -126,7 +126,7 @@ class NewProjectView(QDialog):
 
         if dev_mode:
             # Dev mode: add a "dev (current env)" option at the top
-            self.version_combo.insertItem(0, "dev (current environment)", "")
+            self.version_combo.insertItem(0, tr("dev (current environment)"), "")
             self.version_combo.setCurrentIndex(0)
         else:
             missing_runtime = self._runtime_manager is not None and not self._runtime_manager.has_runtime()
@@ -144,11 +144,11 @@ class NewProjectView(QDialog):
         missing_runtime = is_frozen() and self._runtime_manager is not None and not self._runtime_manager.has_runtime()
         has_version = self._has_selected_version()
         if is_frozen():
-            self._no_version_hint.setText(
+            self._no_version_hint.setText(tr(
                 "No engine versions installed. Go to the Installs tab to download one first."
                 if not self._has_installed_versions
                 else "Select an installed engine version before creating a project."
-            )
+            ))
             self._no_version_hint.setVisible(not has_version)
         else:
             self._no_version_hint.setVisible(False)

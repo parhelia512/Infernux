@@ -1,0 +1,67 @@
+.download-hero { margin-bottom: 28px; }
+
+.release-telemetry {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 26px;
+}
+
+.release-telemetry span {
+    min-width: 0;
+    padding: 14px 16px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+}
+
+.release-telemetry small,
+.release-telemetry strong { display: block; }
+.release-telemetry small { margin-bottom: 7px; color: var(--text-soft); font-family: var(--font-mono); font-size: .66rem; letter-spacing: .12em; text-transform: uppercase; }
+.release-telemetry strong { overflow-wrap: anywhere; font-size: .9rem; }
+.release-source { margin: 14px 0 0; color: var(--text-soft); font-family: var(--font-mono); font-size: .72rem; }
+
+.download-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 28px; }
+.download-card { display: flex; flex-direction: column; min-width: 0; padding: 26px; background: linear-gradient(155deg, var(--bg-panel), var(--bg-elevated)); border: 1px solid var(--border-strong); box-shadow: var(--shadow-soft); }
+.download-card > i { margin: 30px 0 18px; color: var(--accent); font-size: 1.7rem; }
+.download-card h3 { margin: 0 0 10px; }
+.download-card > p { min-height: 74px; margin: 0; color: var(--text-muted); line-height: 1.7; }
+.download-card dl { display: grid; gap: 8px; margin: 22px 0 12px; }
+.download-card dl div { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 12px; }
+.download-card dt { color: var(--text-soft); font-family: var(--font-mono); font-size: .7rem; text-transform: uppercase; }
+.download-card dd { margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: .72rem; }
+.checksum { display: block; min-height: 67px; padding: 12px; overflow-wrap: anywhere; white-space: normal; color: var(--text-muted); background: var(--code-bg); border: 1px solid var(--border); font-size: .7rem; line-height: 1.55; }
+.download-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: auto; padding-top: 18px; }
+
+.download-protocol { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 30px; align-items: center; margin-top: var(--section-space); padding: 28px; background: var(--bg-panel); border: 1px solid var(--border-strong); }
+.download-protocol h2 { margin: 12px 0 8px; }
+.download-protocol p { margin: 0; color: var(--text-muted); }
+.download-protocol pre { margin: 0; padding: 18px; overflow-x: auto; background: var(--code-bg); border: 1px solid var(--border); }
+.download-protocol code { font-family: var(--font-mono); font-size: .78rem; }
+
+.release-notes-status { color: var(--text-soft); font: .72rem/1.6 var(--font-mono); }
+.release-notes-summary { margin-top: 20px; padding: 18px 20px; border-left: 2px solid var(--accent); background: var(--accent-soft); color: var(--text-muted); line-height: 1.7; }
+.release-notes-summary:empty { display: none; }
+.release-notes-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.release-note-section { padding: 20px; border: 1px solid var(--border); background: var(--bg-panel); }
+.release-note-section h3 { margin: 0 0 14px; font-size: 1rem; }
+.release-note-section ul { display: grid; gap: 12px; margin: 0; padding-left: 18px; color: var(--text-muted); }
+.release-note-section li { line-height: 1.6; }
+.release-note-section li strong { color: var(--text); }
+.release-note-section-upgrade { grid-column: 1 / -1; border-color: var(--hazard); background: var(--hazard-soft); }
+
+.requirement-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 24px; }
+.requirement-grid article { padding: 20px; background: var(--bg-panel); border: 1px solid var(--border); }
+.requirement-grid h3 { margin: 0 0 8px; }
+.requirement-grid p { margin: 0; color: var(--text-muted); line-height: 1.7; }
+
+@media (max-width: 900px) {
+    .release-telemetry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .download-grid, .download-protocol, .release-notes-grid { grid-template-columns: 1fr; }
+    .release-note-section-upgrade { grid-column: auto; }
+}
+
+@media (max-width: 640px) {
+    .release-telemetry, .requirement-grid { grid-template-columns: 1fr; }
+    .download-card, .download-protocol { padding: 18px; }
+    .download-actions .btn { width: 100%; justify-content: center; }
+}

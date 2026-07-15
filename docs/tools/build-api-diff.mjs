@@ -127,14 +127,40 @@ function buildDiff(previous, current) {
 await mkdir(snapshotsRoot, { recursive: true });
 const expected = snapshotFromIndex();
 const snapshotFile = path.join(snapshotsRoot, `${release}.json`);
+const expectedText = json(expected);
+let currentText = await readFile(snapshotFile, "utf8").catch(() => "");
 
 if (recordCurrent) {
-  await writeFile(snapshotFile, json(expected), "utf8");
+  if (currentText && currentText.replace(/\r\n/g, "\n") !== expectedText) {
+    throw new Error(`Refusing to overwrite immutable API snapshot ${release}. Bump docs-manifest.json documented_release and release.json before recording a new release baseline.`);
+  }
+  if (!currentText) {
+    await writeFile(snapshotFile, expectedText, "utf8");
+    currentText = expectedText;
+  }
 }
 
-const currentText = await readFile(snapshotFile, "utf8").catch(() => "");
-if (currentText.replace(/\r\n/g, "\n") !== json(expected)) {
-  throw new Error(`API snapshot ${release} is missing or stale. If this is an intentional release baseline, run: node docs/tools/build-api-diff.mjs --record-current`);
+if (currentText.replace(/\r\n/g, "\n") !== expectedText) {
+  if (!currentText) {
+    throw new Error(`API snapshot ${release} is missing. Record it only when ${release} is a new, intentional release baseline: node docs/tools/build-api-diff.mjs --record-current`);
+  }
+  const recorded = JSON.parse(currentText);
+  const drift = buildDiff(recorded, expected);
+  const changedPreview = drift.changed.slice(0, 12)
+    .map((item) => `${item.symbol_key} (${item.changed_fields.join(", ")})`)
+    .join("; ");
+  const addedPreview = drift.added.slice(0, 12).join(", ");
+  const removedPreview = drift.removed.slice(0, 12).join(", ");
+  const details = [
+    changedPreview && `changed: ${changedPreview}`,
+    addedPreview && `added: ${addedPreview}`,
+    removedPreview && `removed: ${removedPreview}`,
+  ].filter(Boolean).join(" | ");
+  throw new Error(
+    `API index drifted from immutable release ${release}: ${drift.counts.added} added, ${drift.counts.removed} removed, ${drift.counts.changed} changed. ` +
+    `Do not overwrite the published snapshot. Regenerate the API index from the ${release} release source, or bump documented_release and release.json before recording a new snapshot.` +
+    (details ? ` ${details}` : "")
+  );
 }
 
 const releases = await availableReleases();
@@ -156,4 +182,3 @@ if (check) {
     ? `Compared API ${release} with ${previousRelease}: ${output.counts.added} added, ${output.counts.removed} removed, ${output.counts.changed} changed.`
     : `Recorded API ${release} as the first comparison baseline; no earlier snapshot exists.`);
 }
-

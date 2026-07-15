@@ -58,9 +58,7 @@ UI 按钮组件。用户点击的地方——程序员 Debug 的地方。
 ## 示例
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for UIButton
-```
+> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。
 <!-- USER CONTENT END -->
 
 ## 另请参阅

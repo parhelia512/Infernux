@@ -19,6 +19,8 @@
 | 名称 | 类型 | 描述 |
 |------|------|------|
 | convex | `bool` | 是否使用凸包近似。 |
+| shape_error | `str` | Last native mesh cooking error, or an empty string after success. *(只读)* |
+| is_cooking | `bool` | Whether collision geometry is currently cooking on a worker. *(只读)* |
 
 <!-- USER CONTENT START --> properties
 
@@ -27,9 +29,7 @@
 ## 示例
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for MeshCollider
-```
+> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。
 <!-- USER CONTENT END -->
 
 ## 另请参阅

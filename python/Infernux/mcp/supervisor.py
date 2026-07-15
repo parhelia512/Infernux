@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 import json
+import math
 import os
 import signal
 import secrets
@@ -49,6 +50,7 @@ class SupervisorSession:
     _project_lock_token: str = field(default="", init=False, repr=False)
     _player_control_token: str = field(default="", init=False, repr=False)
     _player_executable: str = field(default="", init=False, repr=False)
+    _player_start_scene: str = field(default="", init=False, repr=False)
     _player_ready: bool = field(default=False, init=False, repr=False)
     _mcp_ready: bool = field(default=False, init=False, repr=False)
     _editor_log_handle: Any = field(default=None, init=False, repr=False)
@@ -172,6 +174,7 @@ class SupervisorSession:
         resumed._mcp_ready = bool(state.get("mcp_ready", False))
         resumed._player_control_token = str(state.get("player_control_token", "") or "").strip()
         resumed._player_executable = os.path.abspath(str(state.get("player_executable", "") or "")) if state.get("player_executable") else ""
+        resumed._player_start_scene = str(state.get("player_start_scene", "") or "").strip()
         resumed._player_ready = bool(state.get("player_ready", False))
         persisted_pid = int(state.get("editor_pid", 0) or 0)
         if persisted_pid > 0 and _pid_is_running(persisted_pid):
@@ -304,6 +307,7 @@ class SupervisorSession:
         self,
         executable_path: str,
         *,
+        start_scene: str = "",
         wait_for_ready: bool = True,
         timeout_seconds: float = 30.0,
     ) -> dict[str, Any]:
@@ -314,8 +318,9 @@ class SupervisorSession:
             status = self.status() | {"already_running": True}
             return self.wait_for_player_ready(timeout_seconds=timeout_seconds) if wait_for_ready else status
 
-        executable, _manifest = _validate_player_executable(executable_path, self.project_root)
+        executable, manifest = _validate_player_executable(executable_path, self.project_root)
         self._player_executable = executable
+        self._player_start_scene = _resolve_player_start_scene(start_scene, self.project_root, manifest)
         self._player_control_token = secrets.token_urlsafe(32)
         self._player_ready = False
         self._attached_player_pid = 0
@@ -333,6 +338,8 @@ class SupervisorSession:
         env["_INFERNUX_PLAYER_CONTROL_FILE"] = self.player_control_path
         env["_INFERNUX_PLAYER_RESPONSE_FILE"] = self.player_response_path
         env["_INFERNUX_PLAYER_CONTROL_TOKEN"] = self._player_control_token
+        if self._player_start_scene:
+            env["_INFERNUX_PLAYER_START_SCENE"] = self._player_start_scene
         try:
             self._player_process = subprocess.Popen(
                 [self._player_executable],
@@ -413,9 +420,7 @@ class SupervisorSession:
         scancode = int(key) if isinstance(key, int) else int(InputManager.name_to_scancode(str(key)))
         if scancode <= 0:
             raise ValueError(f"Unknown key: {key!r}.")
-        duration = float(duration_seconds)
-        if duration < 0.02 or duration > 10.0:
-            raise ValueError("duration_seconds must be between 0.02 and 10.0.")
+        duration = _bounded_finite_float(duration_seconds, "duration_seconds", minimum=0.02, maximum=10.0)
         names = [str(name or "").strip() for name in (object_names or []) if str(name or "").strip()]
         if len(names) > 32:
             raise ValueError("object_names cannot contain more than 32 entries.")
@@ -440,7 +445,17 @@ class SupervisorSession:
         sample_interval: float = 0.1,
         trigger_scene_name: str = "",
         trigger_timeout: float = 60.0,
+        hold_key: str | int | None = None,
+        hold_keys: list[str | int] | None = None,
+        frame_count: int | None = None,
+        hold_frame_count: int | None = None,
+        wait_frame_count: int | None = None,
+        wait_seconds: float = 0.0,
+        pause_on_complete: bool = False,
         component_probes: list[dict[str, Any]] | None = None,
+        stop_assertions: list[dict[str, Any]] | None = None,
+        stop_mode: str = "all",
+        pause_on_condition: bool = True,
         timeout_seconds: float = 3.0,
     ) -> dict[str, Any]:
         """Arm Player-owned startup sampling before a real cross-scene input."""
@@ -449,16 +464,16 @@ class SupervisorSession:
             raise ValueError("object_names must contain at least one public object name.")
         if len(names) > 32:
             raise ValueError("object_names cannot contain more than 32 entries.")
-        duration = float(seconds)
-        interval = float(sample_interval)
-        trigger_wait = float(trigger_timeout)
-        if duration < 0.1 or duration > 10.0:
-            raise ValueError("seconds must be between 0.1 and 10.0.")
-        if interval < 0.02 or interval > 1.0:
-            raise ValueError("sample_interval must be between 0.02 and 1.0.")
-        if trigger_wait < 0.5 or trigger_wait > 120.0:
-            raise ValueError("trigger_timeout must be between 0.5 and 120.0.")
+        duration = _bounded_finite_float(seconds, "seconds", minimum=0.1, maximum=10.0)
+        interval = _bounded_finite_float(sample_interval, "sample_interval", minimum=0.02, maximum=1.0)
+        trigger_wait = _bounded_finite_float(trigger_timeout, "trigger_timeout", minimum=0.5, maximum=120.0)
+        settle_wait = _bounded_finite_float(wait_seconds, "wait_seconds", minimum=0.0, maximum=30.0)
         probes = _normalize_player_component_probes(component_probes, names)
+        hold_scancodes = _normalize_player_hold_scancodes(hold_key, hold_keys)
+        assertions = _normalize_player_stop_assertions(stop_assertions)
+        normalized_stop_mode = str(stop_mode or "all").strip().lower()
+        if normalized_stop_mode not in {"all", "any"}:
+            raise ValueError("stop_mode must be 'all' or 'any'.")
         with self._operation_lock():
             return self._call_player_control(
                 "motion_capture_arm",
@@ -469,6 +484,15 @@ class SupervisorSession:
                     "sample_interval": interval,
                     "trigger_scene_name": str(trigger_scene_name or "").strip(),
                     "trigger_timeout": trigger_wait,
+                    "hold_scancodes": hold_scancodes,
+                    "frame_count": frame_count,
+                    "hold_frame_count": hold_frame_count,
+                    "wait_frame_count": wait_frame_count,
+                    "wait_seconds": settle_wait,
+                    "pause_on_complete": bool(pause_on_complete),
+                    "stop_assertions": assertions,
+                    "stop_mode": normalized_stop_mode,
+                    "pause_on_condition": bool(pause_on_condition),
                 },
                 timeout_seconds=timeout_seconds,
             )
@@ -568,6 +592,7 @@ class SupervisorSession:
         *,
         timeout_seconds: float,
     ) -> dict[str, Any]:
+        timeout = _bounded_finite_float(timeout_seconds, "timeout_seconds", minimum=0.1, maximum=300.0)
         player = self._player_state()
         if not player["running"]:
             raise RuntimeError("Standalone Player is not running.")
@@ -586,7 +611,7 @@ class SupervisorSession:
             "action": str(action),
             **arguments,
         })
-        deadline = time.monotonic() + max(float(timeout_seconds), 0.1)
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             response = _read_json_object(self.player_response_path)
             if str(response.get("command_id", "") or "") == command_id:
@@ -1204,6 +1229,7 @@ class SupervisorSession:
             "player_process_owner": player["owner"],
             "player_ready": bool(self._player_ready and player["running"]),
             "player_executable": self._player_executable,
+            "player_start_scene": self._player_start_scene,
             "player_stdout_path": self.player_stdout_path,
             "player_runtime_log_path": self.player_runtime_log_path,
             "player_debug_log_path": self.player_debug_log_path,
@@ -1236,11 +1262,12 @@ class SupervisorSession:
             "client_base_argv": base_argv,
             "probe_argv": [*base_argv, "call", "mcp_session_status", "--args", "{}"],
             "list_tools_argv": [*base_argv, "list-tools"],
+            "checkpoint_list_argv": [*base_argv, "call", "mcp_checkpoint_list", "--args", "{}"],
             "instructions": [
                 "Run probe_argv through the available shell before deciding that MCP tools are unavailable.",
                 "Use the returned MCP tool schema and current mode policy; do not infer unavailable privileged tools.",
                 "A missing directly injected connector is not an MCP outage when probe_argv succeeds.",
-                "Call mcp_checkpoint_status before starting a managed attempt; only the external Supervisor may create or restore checkpoints.",
+                "For a managed attempt, call mcp_checkpoint_list, then mcp_checkpoint_status for the selected checkpoint before mcp_attempt_start; only the external Supervisor may create or restore checkpoints.",
             ],
         }
 
@@ -1279,6 +1306,7 @@ class SupervisorSession:
         self._player_process = None
         self._attached_player_pid = 0
         self._player_control_token = ""
+        self._player_start_scene = ""
         self._player_ready = False
         self._close_player_log()
         for path in (self.player_control_path, self.player_ready_path):
@@ -1398,6 +1426,32 @@ def _validate_player_executable(executable_path: str, project_root: str) -> tupl
     if not bool(manifest.get("debug_build", False)):
         raise RuntimeError("Supervisor validation control is available only in a Debug Player build.")
     return executable, manifest
+
+
+def _resolve_player_start_scene(start_scene: str, project_root: str, manifest: dict[str, Any]) -> str:
+    """Return a BuildManifest-whitelisted relative scene path for Debug validation."""
+    requested = str(start_scene or "").strip()
+    if not requested:
+        return ""
+
+    root = os.path.abspath(project_root)
+    candidate = os.path.abspath(requested if os.path.isabs(requested) else os.path.join(root, requested))
+    try:
+        if os.path.commonpath([root, candidate]) != root:
+            raise ValueError("Player validation start_scene must stay inside the project root.")
+    except ValueError as exc:
+        raise ValueError("Player validation start_scene must stay inside the project root.") from exc
+    if os.path.splitext(candidate)[1].lower() != ".scene":
+        raise ValueError("Player validation start_scene must name a .scene file.")
+
+    for listed in manifest.get("scenes", []) or []:
+        scene = str(listed or "").strip()
+        if not scene:
+            continue
+        manifest_candidate = os.path.abspath(scene if os.path.isabs(scene) else os.path.join(root, scene))
+        if os.path.normcase(manifest_candidate) == os.path.normcase(candidate):
+            return os.path.relpath(manifest_candidate, root).replace("\\", "/")
+    raise ValueError("Player validation start_scene must be declared by the current Debug Player BuildManifest.")
 
 
 def _compact_checkpoint_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -1565,6 +1619,51 @@ def _normalize_player_component_probes(
             "ordinal": ordinal,
         })
     return probes
+
+
+def _bounded_finite_float(value: Any, name: str, *, minimum: float, maximum: float) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number.")
+    result = float(value)
+    if not math.isfinite(result) or result < minimum or result > maximum:
+        raise ValueError(f"{name} must be between {minimum:g} and {maximum:g}.")
+    return result
+
+
+def _normalize_player_hold_scancodes(
+    hold_key: str | int | None,
+    hold_keys: list[str | int] | None,
+) -> list[int]:
+    if hold_key is not None and hold_keys:
+        raise ValueError("Use hold_key or hold_keys, not both.")
+    values = list(hold_keys or ([] if hold_key is None else [hold_key]))
+    if len(values) > 8:
+        raise ValueError("hold_keys may contain at most 8 keys.")
+    from Infernux.lib import InputManager
+
+    scancodes = []
+    for value in values:
+        if isinstance(value, bool):
+            raise ValueError("hold_keys entries must be key names or SDL scancodes.")
+        scancode = int(value) if isinstance(value, int) else int(InputManager.name_to_scancode(str(value)))
+        if scancode <= 0:
+            raise ValueError(f"Unknown hold key: {value!r}.")
+        scancodes.append(scancode)
+    if len(set(scancodes)) != len(scancodes):
+        raise ValueError("hold_keys must not contain duplicate keys.")
+    return scancodes
+
+
+def _normalize_player_stop_assertions(assertions: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    values = list(assertions or [])
+    if len(values) > 16:
+        raise ValueError("stop_assertions may contain at most 16 items.")
+    normalized = []
+    for item in values:
+        if not isinstance(item, dict):
+            raise ValueError("stop_assertions entries must be objects.")
+        normalized.append(dict(item))
+    return normalized
 
 
 def _normalize_player_discovery_component_types(component_types: list[str] | None) -> list[str]:

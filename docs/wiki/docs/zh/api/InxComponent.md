@@ -62,6 +62,16 @@
 
 <!-- USER CONTENT END -->
 
+## 静态方法
+
+| 方法 | 描述 |
+|------|------|
+| `InxComponent.reserve_instances(count: int) → None` | Preallocate numeric-field storage for bulk component creation. |
+
+<!-- USER CONTENT START --> static_methods
+
+<!-- USER CONTENT END -->
+
 ## 生命周期方法
 
 | 方法 | 描述 |

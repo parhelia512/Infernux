@@ -52,6 +52,8 @@ Pythonic wrapper around C++ InxMaterial.
 
 | Method | Description |
 |------|------|
+| `to_dict() → dict` | Return the material document without encoding JSON text. |
+| `apply_dict(document: dict) → bool` | Transactionally apply a material document. |
 | `dispose() → None` | Release the underlying native material resources. |
 | `clone() → Material` | Create a deep copy of this material, including shader state and properties. |
 | `set_shader(shader_name: str) → None` | Set the shader used by this material. |
@@ -73,7 +75,6 @@ Pythonic wrapper around C++ InxMaterial.
 | `has_property(name: str) → bool` | Check whether a shader property exists on this material. |
 | `get_property(name: str) → Any` | Get a shader property value by name. |
 | `get_all_properties() → dict` | Get all shader properties as a dictionary. |
-| `to_dict() → dict` | Serialize the material to a dictionary. |
 | `save(file_path: str) → bool` | Save the material to a file. |
 | `set_param(name: str, value: Any) → None` | Set a non-texture material property using type/shape dispatch. |
 | `set_texture(name: str, value: Any) → None` | Set a texture property from GUID, path, Texture, or None. |
@@ -113,9 +114,7 @@ Pythonic wrapper around C++ InxMaterial.
 ## Example
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for Material
-```
+> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
 <!-- USER CONTENT END -->
 
 ## See Also

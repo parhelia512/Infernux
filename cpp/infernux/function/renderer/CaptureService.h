@@ -58,7 +58,10 @@ class CaptureService
     /// The renderer attaches the readback ticket after that frame is submitted.
     [[nodiscard]] uint64_t Request(CaptureSource source, uint64_t sourceGeneration, uint64_t engineFrame,
                                    std::string outputPath);
-    [[nodiscard]] bool AttachReadback(uint64_t captureId, std::shared_ptr<vk::ImageReadbackTicket> ticket);
+    /// Attach a readback produced by the requested render frame. The captured
+    /// frame replaces the request-time frame in the returned metadata.
+    [[nodiscard]] bool AttachReadback(uint64_t captureId, std::shared_ptr<vk::ImageReadbackTicket> ticket,
+                                      uint64_t engineFrame);
     void Fail(uint64_t captureId, std::string error);
     [[nodiscard]] CaptureSnapshot Query(uint64_t captureId) const;
     [[nodiscard]] bool Cancel(uint64_t captureId);

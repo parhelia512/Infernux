@@ -18,6 +18,7 @@
 |------|------|------|
 | name | `str` | 场景名称。 |
 | structure_version | `int` |  *(只读)* |
+| world_id | `int` |  *(只读)* |
 | main_camera | `Optional[Camera]` |  |
 
 <!-- USER CONTENT START --> properties
@@ -37,21 +38,21 @@
 | `get_all_objects() → List[GameObject]` |  |
 | `find(name: str) → Optional[GameObject]` |  |
 | `find_by_id(id: int) → Optional[GameObject]` |  |
+| `resolve_game_object(handle: ObjectHandle) → Optional[GameObject]` |  |
+| `resolve_component(handle: ObjectHandle) → Optional[Component]` |  |
 | `find_object_by_id(id: int) → Optional[GameObject]` |  |
 | `find_with_tag(tag: str) → Optional[GameObject]` |  |
 | `find_game_objects_with_tag(tag: str) → List[GameObject]` |  |
 | `find_game_objects_in_layer(layer: int) → List[GameObject]` |  |
 | `destroy_game_object(game_object: GameObject) → None` |  |
-| `instantiate_game_object(source: GameObject, parent: Optional[GameObject] = None) → Optional[GameObject]` |  |
-| `instantiate_from_json(json_str: str, parent: Optional[GameObject] = None) → Optional[GameObject]` |  |
 | `process_pending_destroys() → None` |  |
 | `is_playing() → bool` |  |
 | `awake_object(game_object: GameObject) → None` |  |
 | `serialize() → str` |  |
-| `deserialize(json_str: str) → None` |  |
+| `serialize_document() → Dict[str, Any]` |  |
 | `save_to_file(path: str) → None` |  |
-| `load_from_file(path: str) → None` |  |
 | `has_pending_py_components() → bool` |  |
+| `get_pending_py_components() → List[PendingPyComponent]` |  |
 | `take_pending_py_components() → List[PendingPyComponent]` |  |
 
 <!-- USER CONTENT START --> public_methods
@@ -71,9 +72,7 @@
 ## 示例
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for Scene
-```
+> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。
 <!-- USER CONTENT END -->
 
 ## 另请参阅

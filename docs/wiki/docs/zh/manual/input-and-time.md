@@ -1,10 +1,13 @@
 ---
+title: "输入与时间"
+description: "解释 held/down/up 输入语义、Game 视图焦点、鼠标坐标、帧时间、固定时间、非缩放时间与帧率无关移动。"
 category: 手册
 tags: ["输入", "时间", "键盘", "鼠标", "帧"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.input.Input","Infernux.input.KeyCode","Infernux.timing.Time","Infernux.components.builtin.Camera","Infernux.components.InxComponent"]
 agent_summary: "解释 held/down/up 输入语义、Game 视图焦点、鼠标坐标、帧时间、固定时间、非缩放时间与帧率无关移动。"
 source_paths: ["python/Infernux/input", "python/Infernux/timing.pyi"]
 ---
@@ -74,7 +77,31 @@ class KeyboardMover(InxComponent):
 - 在 `fixed_update(fixed_delta_time)` 执行物理决策。
 - 输入需要驱动物理时，在 `update` 保存意图，再在 `fixed_update` 消费该状态。
 
+```text
+[INX-DIAGRAM:decision:输入意图如何跨越渲染帧与固定时间线]
+键盘 / 鼠标 / 触摸
+          │
+          ▼
+Game 视口有焦点？ ── 否 ──▶ 忽略玩法输入
+          │ 是
+          ▼
+update：采样 held / down / up 并保存意图
+          ├──▶ 逐帧移动 ── delta_time ──▶ Transform
+          └──▶ fixed_update ── fixed_delta_time ──▶ Rigidbody / 物理
+
+暂停 UI 与提示 ── unscaled_delta_time ──▶ 独立继续运行
+```
+
 不要假设一个渲染帧等于一个物理步。慢帧可能执行多个固定步，快帧也可能在下一个固定步之前完成渲染。
+
+## 选择时间域
+
+| 行为 | 使用 | 避免 |
+|---|---|---|
+| 跟随渲染帧的视觉移动 | 回调参数 `delta_time` | 假设固定帧率 |
+| 物理命令 | `fixed_update` 与 `fixed_delta_time` | 在每个固定步重复一次单帧输入边沿 |
+| 会随暂停停止的玩法 | 缩放时间 | 忽略 `time_scale` 的实际时间 |
+| 暂停菜单与无障碍提示 | 非缩放时间 | 随玩法一同冻结的缩放时间 |
 
 ## 常见失败
 
@@ -101,4 +128,3 @@ class KeyboardMover(InxComponent):
 - [Time](../api/Time.md)
 - [Camera](../api/Camera.md)
 - [InxComponent 生命周期](../api/InxComponent.md)
-

@@ -1,10 +1,13 @@
 ---
+title: "Physics"
+description: "Explain Rigidbody and Collider roles, dynamic versus kinematic movement, fixed-step forces, collision/trigger callbacks, layers, and physics queries."
 category: Manual
 tags: ["physics", "rigidbody", "collider", "raycast", "trigger"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.physics.Physics","Infernux.components.builtin.Rigidbody","Infernux.components.builtin.Collider","Infernux.components.builtin.BoxCollider","Infernux.components.builtin.SphereCollider","Infernux.components.InxComponent"]
 agent_summary: "Explain Rigidbody and Collider roles, dynamic versus kinematic movement, fixed-step forces, collision/trigger callbacks, layers, and physics queries."
 source_paths: ["python/Infernux/physics", "python/Infernux/components/builtin", "python/Infernux/components/component.py"]
 ---
@@ -35,6 +38,19 @@ Do not move a dynamic Rigidbody by writing its Transform every frame. That bypas
 ## Fixed-step control
 
 Physics decisions belong in `fixed_update(fixed_delta_time)`:
+
+```text
+[INX-DIAGRAM:timeline:Fixed-step physics command and callback flow]
+fixed_update command
+        │
+        ▼
+apply force / velocity / kinematic target
+        │
+        ▼
+physics simulation → contact and trigger resolution → enter / stay / exit callbacks
+        │
+        └── next fixed step (independent of render-frame delta_time)
+```
 
 ```python
 from Infernux import InxComponent, Rigidbody, Vector3
@@ -111,4 +127,3 @@ class GroundProbe(InxComponent):
 - [SphereCollider](../api/SphereCollider.md)
 - [InxComponent collision lifecycle](../api/InxComponent.md)
 - [Input and Time](input-and-time.md)
-

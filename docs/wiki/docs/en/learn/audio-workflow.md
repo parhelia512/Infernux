@@ -1,10 +1,13 @@
 ---
+title: "Audio Workflow"
+description: "Import a WAV clip, configure one AudioListener and a multi-track AudioSource, test looping and one-shot playback, and diagnose lifetime or spatial attenuation issues."
 category: Learn
 tags: ["audio", "listener", "source", "wav", "sfx"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.components.builtin.AudioSource","Infernux.components.builtin.AudioListener","Infernux.core.AudioClip"]
 agent_summary: "Import a WAV clip, configure one AudioListener and a multi-track AudioSource, test looping and one-shot playback, and diagnose lifetime or spatial attenuation issues."
 source_paths: ["python/Infernux/core/audio_clip.pyi", "python/Infernux/core/asset_types.py", "python/Infernux/components/builtin/audio_source.pyi", "python/Infernux/components/builtin/audio_listener.pyi"]
 ---

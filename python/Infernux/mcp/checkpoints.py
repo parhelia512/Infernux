@@ -234,6 +234,40 @@ def checkpoint_status(
     }
 
 
+def list_checkpoints(project_root: str, artifact_root: str, *, session_id: str = "") -> list[dict[str, Any]]:
+    """List payload-verified checkpoints without scanning the current project."""
+    root = os.path.join(os.path.abspath(artifact_root), "checkpoints")
+    if not os.path.isdir(root):
+        return []
+
+    results: list[dict[str, Any]] = []
+    for checkpoint_id in sorted(os.listdir(root)):
+        path = os.path.join(root, checkpoint_id)
+        if not os.path.isdir(path) or checkpoint_id.startswith("."):
+            continue
+        try:
+            manifest = load_checkpoint(
+                project_root,
+                artifact_root,
+                checkpoint_id,
+                session_id=session_id,
+                verify_payload=True,
+            )
+        except (OSError, ValueError, CheckpointError):
+            continue
+        ledger = manifest.get("ledger") or {}
+        results.append({
+            "checkpoint_id": str(manifest.get("checkpoint_id") or checkpoint_id),
+            "created_at": float(manifest.get("created_at", 0.0) or 0.0),
+            "ledger_digest": str(ledger.get("digest") or ""),
+            "file_count": int(ledger.get("file_count", 0) or 0),
+            "total_bytes": int(ledger.get("total_bytes", 0) or 0),
+            "payload_valid": True,
+            "metadata": dict(manifest.get("metadata") or {}),
+        })
+    return results
+
+
 def restore_checkpoint(
     project_root: str,
     artifact_root: str,

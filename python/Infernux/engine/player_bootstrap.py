@@ -7,7 +7,7 @@ Replaces :class:`EditorBootstrap` with a stripped-down path that:
   3. Sets up SceneFileManager + PlayModeManager (scene loading needs them)
   4. Enables the game camera
   5. Registers the fullscreen PlayerGUI (with optional splash sequence)
-  6. Loads the first scene from BuildSettings.json
+  6. Loads the first scene from BuildSettings.json (or a Supervisor-approved Debug validation scene)
   7. Enters play mode
   8. Runs the main loop
 
@@ -144,6 +144,13 @@ class PlayerBootstrap:
             data_root=self.project_path,
         )
         self.engine.register_gui("player_gui", self._player_gui)
+        if os.environ.get("_INFERNUX_PLAYER_MCP_COMPILED") == "1" and self._player_gui._control.enabled:
+            try:
+                from Infernux.mcp.player_gateway import start_player_gateway
+
+                start_player_gateway(self._player_gui._control)
+            except Exception as exc:
+                Debug.log_warning(f"Debug Player MCP gateway unavailable: {exc}")
 
     def _load_initial_scene(self):
         import json as _json
@@ -163,6 +170,22 @@ class PlayerBootstrap:
             return
 
         first_scene = scenes[0]
+        requested_scene = os.environ.get("_INFERNUX_PLAYER_START_SCENE", "").strip()
+        if requested_scene:
+            candidate = os.path.abspath(
+                requested_scene if os.path.isabs(requested_scene) else os.path.join(self.project_path, requested_scene)
+            )
+            try:
+                is_inside_project = os.path.commonpath([os.path.abspath(self.project_path), candidate]) == os.path.abspath(
+                    self.project_path
+                )
+            except ValueError:
+                is_inside_project = False
+            if is_inside_project and os.path.splitext(candidate)[1].lower() == ".scene" and os.path.isfile(candidate):
+                first_scene = candidate
+                Debug.log_internal(f"Loaded Supervisor validation scene: {os.path.basename(first_scene)}")
+            else:
+                Debug.log_warning("Ignored invalid Supervisor Player start-scene override")
         # Resolve relative paths against project root (packaged builds
         # store scene paths relative to the game folder)
         if not os.path.isabs(first_scene):

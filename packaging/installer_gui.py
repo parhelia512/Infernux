@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from installer.install_python_runtime import install_runtime_for_app
 from installer_safety import install_target_error, is_recognized_install_dir, write_install_marker
+from i18n import tr
 import logging
 
 if sys.platform == "win32":
@@ -183,14 +184,14 @@ class InstallWorker(QObject):
                 raise RuntimeError(f"Hub payload directory not found: {payload_dir}")
 
             os.makedirs(self.install_dir, exist_ok=True)
-            self.progress.emit("Copying Infernux Hub files...")
+            self.progress.emit(tr("Copying Infernux Hub files..."))
             shutil.copytree(payload_dir, self.install_dir, dirs_exist_ok=True)
             write_install_marker(self.install_dir)
 
-            self.progress.emit("Installing private Python 3.12 runtime...")
+            self.progress.emit(tr("Installing private Python 3.12 runtime..."))
             install_runtime_for_app(self.install_dir, progress_callback=self.progress.emit)
 
-            self.progress.emit("Registering Infernux Hub...")
+            self.progress.emit(tr("Registering Infernux Hub..."))
             _write_registry(self.install_dir)
             _create_start_menu_shortcut(self.install_dir)
 
@@ -206,7 +207,7 @@ class InstallerWindow(QWidget):
         self._thread: QThread | None = None
         self._worker: InstallWorker | None = None
 
-        self.setWindowTitle("Infernux Hub Installer")
+        self.setWindowTitle(tr("Infernux Hub Installer"))
         self.setFixedSize(600, 320)
 
         icon_path = os.path.join(_resource_dir(), "icon.png")
@@ -219,30 +220,30 @@ class InstallerWindow(QWidget):
         root.setContentsMargins(20, 20, 20, 20)
         root.setSpacing(14)
 
-        title = QLabel("Install Infernux Hub")
+        title = QLabel(tr("Install Infernux Hub"))
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         root.addWidget(title)
 
-        intro = QLabel(
+        intro = QLabel(tr(
             "This installer copies Infernux Hub onto your machine. During setup, it will download and prepare "
             "a managed full Python 3.12 runtime under C:\\Users\\Public\\InfernuxHub for use by all projects."
-        )
+        ))
         intro.setWordWrap(True)
         intro.setMinimumHeight(56)
         intro.setContentsMargins(0, 0, 0, 6)
         root.addWidget(intro)
 
-        root.addWidget(QLabel("Install location"))
+        root.addWidget(QLabel(tr("Install location")))
 
         path_row = QHBoxLayout()
         self.path_edit = QLineEdit(default_dir)
         path_row.addWidget(self.path_edit, 1)
-        browse_button = QPushButton("Browse...")
+        browse_button = QPushButton(tr("Browse..."))
         browse_button.clicked.connect(self._browse)
         path_row.addWidget(browse_button)
         root.addLayout(path_row)
 
-        self.status_label = QLabel("Ready to install.")
+        self.status_label = QLabel(tr("Ready to install."))
         self.status_label.setWordWrap(True)
         root.addWidget(self.status_label)
 
@@ -254,29 +255,29 @@ class InstallerWindow(QWidget):
 
         button_row = QHBoxLayout()
         button_row.addStretch()
-        self.install_button = QPushButton("Install")
+        self.install_button = QPushButton(tr("Install"))
         self.install_button.clicked.connect(self._start_install)
         button_row.addWidget(self.install_button)
-        self.launch_button = QPushButton("Launch Hub")
+        self.launch_button = QPushButton(tr("Launch Hub"))
         self.launch_button.setEnabled(False)
         self.launch_button.clicked.connect(self._launch_hub)
         button_row.addWidget(self.launch_button)
         root.addLayout(button_row)
 
     def _browse(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Select installation directory", self.path_edit.text())
+        folder = QFileDialog.getExistingDirectory(self, tr("Select installation directory"), self.path_edit.text())
         if folder:
             self.path_edit.setText(folder)
 
     def _start_install(self) -> None:
         install_dir = os.path.abspath(self.path_edit.text().strip())
         if not install_dir:
-            QMessageBox.warning(self, "Missing Directory", "Please select an installation directory.")
+            QMessageBox.warning(self, tr("Missing Directory"), tr("Please select an installation directory."))
             return
 
         safety_error = install_target_error(install_dir)
         if safety_error:
-            QMessageBox.critical(self, "Unsafe Install Location", safety_error)
+            QMessageBox.critical(self, tr("Unsafe Install Location"), safety_error)
             return
 
         if os.path.exists(install_dir) and os.listdir(install_dir):
@@ -291,7 +292,7 @@ class InstallerWindow(QWidget):
                 warning = "The selected Infernux Hub directory already contains files. Continue and update it?"
             answer = QMessageBox.question(
                 self,
-                "Directory Not Empty",
+                tr("Directory Not Empty"),
                 warning,
             )
             if answer != QMessageBox.Yes:
@@ -299,7 +300,7 @@ class InstallerWindow(QWidget):
 
         self.install_button.setEnabled(False)
         self.launch_button.setEnabled(False)
-        self.status_label.setText("Starting installation...")
+        self.status_label.setText(tr("Starting installation..."))
         self.progress_bar.setRange(0, 0)
 
         self._thread = QThread(self)
@@ -319,7 +320,7 @@ class InstallerWindow(QWidget):
         self._installed_dir = install_dir
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(1)
-        self.status_label.setText(f"Installation completed successfully. Installed to: {install_dir}")
+        self.status_label.setText(tr("Installation completed successfully. Installed to: {path}", path=install_dir))
         self.install_button.setEnabled(True)
         self.launch_button.setEnabled(True)
 
@@ -327,15 +328,15 @@ class InstallerWindow(QWidget):
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
         self.install_button.setEnabled(True)
-        self.status_label.setText("Installation failed.")
-        QMessageBox.critical(self, "Installation Failed", message)
+        self.status_label.setText(tr("Installation failed."))
+        QMessageBox.critical(self, tr("Installation Failed"), message)
 
     def _launch_hub(self) -> None:
         if not self._installed_dir:
             return
         exe_path = os.path.join(self._installed_dir, "Infernux Hub.exe")
         if not os.path.isfile(exe_path):
-            QMessageBox.warning(self, "Launch Failed", f"Hub executable not found: {exe_path}")
+            QMessageBox.warning(self, tr("Launch Failed"), tr("Hub executable not found: {path}", path=exe_path))
             return
         os.startfile(exe_path)
 

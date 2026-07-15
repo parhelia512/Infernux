@@ -623,3 +623,29 @@ def test_node_graph_exports_link_hit_point_as_semantic_rect():
     assert recorded[0][1] == "Countdown to Replay"
     assert recorded[0][7] == "animfsm.graph.link.link-uid"
     assert recorded[0][4:6] == (14.0, 14.0)
+
+
+def test_animfsm_3d_clip_picker_includes_embedded_model_takes(monkeypatch):
+    from Infernux.core import asset_types
+    from Infernux.core.assets import AssetManager
+
+    model_path = "Assets/Models/Racer.fbx"
+    monkeypatch.setattr(
+        AssetManager,
+        "find_assets",
+        classmethod(lambda _cls, pattern: [model_path] if pattern == "*.fbx" else []),
+    )
+    monkeypatch.setattr(
+        asset_types,
+        "read_meta_file",
+        lambda path: {"animation_names_csv": "Idle, Drive"} if path == model_path else {},
+    )
+    monkeypatch.setattr(
+        asset_types,
+        "read_meta_guid",
+        lambda path: "a" * 32 if path == model_path else "",
+    )
+
+    items = AnimFSMEditorPanel._embedded_clip3d_picker_items("drive")
+
+    assert items == [("Racer | Drive", f"{'a' * 32}::subanim:1")]

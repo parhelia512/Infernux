@@ -1,10 +1,13 @@
 ---
+title: "Your First Component"
+description: "Create an InxComponent Python script, expose a serialized speed field, attach it to a GameObject, and verify lifecycle behavior in Play mode."
 category: Learn
 tags: ["beginner", "python", "component", "inspector"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["new-user", "agent"]
+related_api: ["Infernux.components.InxComponent"]
 agent_summary: "Create an InxComponent Python script, expose a serialized speed field, attach it to a GameObject, and verify lifecycle behavior in Play mode."
 source_paths: ["python/Infernux/components", "python/Infernux/__init__.pyi"]
 ---
@@ -12,6 +15,8 @@ source_paths: ["python/Infernux/components", "python/Infernux/__init__.pyi"]
 # Your First Component
 
 Infernux gameplay scripts are Python classes derived from `InxComponent`. This tutorial creates a component that rotates its owning object and exposes its speed in the Inspector.
+
+**Estimated time:** 10 minutes.
 
 ## Before you start
 
@@ -99,7 +104,10 @@ See the [InxComponent API](../api/InxComponent.md) for the complete lifecycle an
 
 Use `speed * delta_time`; do not add a fixed number of degrees per frame.
 
+## Completion standard
+
+You are done when `SpinComponent` appears in the Inspector, exposes **Speed**, rotates its GameObject in Play mode, logs its start exactly once, and stops without repeating Console errors.
+
 ## Next step
 
 Use the [Engine Map](../manual/engine-map.md) to choose the next system—input, physics, scenes, UI, coroutines, or rendering—and then open its exact API page.
-

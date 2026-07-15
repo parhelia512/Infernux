@@ -41,8 +41,8 @@
 | velocity | `Any` | 线速度。 |
 | angular_velocity | `Any` | 角速度。 |
 | world_center_of_mass | `Any` | The center of mass in world space. *(只读)* |
-| position | `Any` | 刚体位置。 *(只读)* |
-| rotation | `Tuple[float, float, float, float]` | 刚体旋转。 *(只读)* |
+| position | `Any` | 刚体位置。 |
+| rotation | `Tuple[float, float, float, float]` | 刚体旋转。 |
 
 <!-- USER CONTENT START --> properties
 

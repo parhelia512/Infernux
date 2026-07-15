@@ -1,10 +1,13 @@
 ---
+title: "3D 基础"
+description: "使用透视 Camera、MeshRenderer、材质、Light、阴影与 RenderStack 构建并验证最小受光 3D 场景。"
 category: 学习
 tags: ["3D", "网格", "材质", "灯光", "相机"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["new-user", "agent"]
+related_api: []
 agent_summary: "使用透视 Camera、MeshRenderer、材质、Light、阴影与 RenderStack 构建并验证最小受光 3D 场景。"
 source_paths: ["python/Infernux/components/builtin/mesh_renderer.pyi", "python/Infernux/components/builtin/camera.pyi", "python/Infernux/components/builtin/light.pyi", "python/Infernux/core/material.pyi", "python/Infernux/renderstack"]
 ---

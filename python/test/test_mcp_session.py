@@ -143,6 +143,34 @@ def test_managed_attempt_requires_exact_checkpoint_and_writes_persistence_delta(
         session.start_attempt("must restore first", "clean-race-001")
 
 
+def test_checkpoint_list_returns_payload_verified_choices_without_project_scan(tmp_path):
+    assets = tmp_path / "Assets"
+    settings = tmp_path / "ProjectSettings"
+    assets.mkdir()
+    settings.mkdir()
+    (assets / "Race.scene").write_text("clean\n", encoding="utf-8")
+    (settings / "BuildSettings.json").write_text("{}\n", encoding="utf-8")
+    configured = session.configure(
+        str(tmp_path),
+        _config("global_validation", session_id="checkpoint-list-session", managed_checkpoints_required=True),
+    )
+    checkpoint_store.create_checkpoint(
+        str(tmp_path),
+        configured.artifact_root,
+        "race-clean-001",
+        session_id=configured.session_id,
+        metadata={"reason": "weak-agent entry"},
+    )
+
+    listed = session.list_checkpoints()
+
+    assert len(listed) == 1
+    assert listed[0]["checkpoint_id"] == "race-clean-001"
+    assert listed[0]["payload_valid"] is True
+    assert listed[0]["file_count"] == 2
+    assert listed[0]["metadata"] == {"reason": "weak-agent entry"}
+
+
 def test_global_validation_writes_logic_backed_blocker(tmp_path):
     session.configure(str(tmp_path), _config("global_validation"))
     attempt = session.start_attempt("physics contact validation", "clean-physics-001")

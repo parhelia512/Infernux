@@ -28,5 +28,12 @@ jobs:
           node-version: "22"
 
       - name: Check production routes and machine indexes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: node docs/tools/check-deployed-site.mjs --base-url https://infernux-engine.com
 
+      - name: Audit GitHub community readiness
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        # Remove --allow-uninstalled after the repository administrator installs Giscus.
+        run: node docs/tools/check-community-readiness.mjs --allow-uninstalled

@@ -1,10 +1,13 @@
 ---
+title: "Debugging and the Console"
+description: "A repeatable Infernux debugging workflow using the Console, Debug logging, lifecycle checks, minimal reproduction, and evidence suitable for GitHub Issues."
 category: Manual
 tags: ["debugging", "console", "logging", "troubleshooting"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.debug.Debug","Infernux.components.InxComponent"]
 agent_summary: "A repeatable Infernux debugging workflow using the Console, Debug logging, lifecycle checks, minimal reproduction, and evidence suitable for GitHub Issues."
 source_paths: ["python/Infernux/debug.py", "python/Infernux/engine/ui/console_utils.py", "python/Infernux/components/component.py"]
 ---

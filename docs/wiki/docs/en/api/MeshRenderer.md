@@ -41,7 +41,6 @@ A MeshRenderer can use an inline primitive or an imported mesh asset and support
 | `has_render_material() → bool` | Return whether a material is assigned at slot 0. |
 | `get_effective_material(slot: int = ...) → Any` | Return the effective material for the given slot, including fallbacks. |
 | `get_material(slot: int) → Any` | Return the material at the specified slot index. |
-| `set_material(slot: int, guid: str) → None` | Assign a material to the specified slot by asset GUID. |
 | `get_material_guids() → List[str]` | Return the list of material GUIDs for all slots. |
 | `set_materials(guids: List[str]) → None` | Set all material slots from a list of asset GUIDs. |
 | `set_material_slot_count(count: int) → None` | Set the number of material slots on this renderer. |

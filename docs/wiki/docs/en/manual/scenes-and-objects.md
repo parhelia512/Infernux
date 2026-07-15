@@ -1,10 +1,13 @@
 ---
+title: "Scenes and Objects"
+description: "Explain Infernux scene ownership, GameObject identity, Transform hierarchy, component lookup, activation, and build-index scene loading."
 category: Manual
 tags: ["scene", "gameobject", "transform", "hierarchy"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.GameObject","Infernux.Transform","Infernux.Scene","Infernux.scene.SceneManager","Infernux.components.InxComponent"]
 agent_summary: "Explain Infernux scene ownership, GameObject identity, Transform hierarchy, component lookup, activation, and build-index scene loading."
 source_paths: ["python/Infernux/scene", "python/Infernux/components", "python/Infernux/lib/_Infernux.pyi"]
 ---
@@ -16,6 +19,7 @@ Scenes, GameObjects, Transforms, and components form the ownership model for run
 ## Ownership model
 
 ```text
+[INX-DIAGRAM:hierarchy:Scene ownership and component boundaries]
 Scene
 └─ GameObject
    ├─ Transform
@@ -120,4 +124,3 @@ Use `dont_destroy_on_load(game_object)` only for deliberately persistent objects
 - [SceneManager](../api/SceneManager.md)
 - [InxComponent](../api/InxComponent.md)
 - [Build and Share a Project](../learn/build-and-share.md)
-

@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 
@@ -24,7 +25,9 @@ def _common_nuitka_command(output_dir: Path) -> list[str]:
         f"--output-dir={output_dir}",
     ]
     if os.name == "nt":
-        command.extend(["--windows-console-mode=disable", "--mingw64"])
+        # MSVC handles non-ASCII Windows user/cache paths reliably. MinGW's
+        # std::filesystem conversion can abort for Chinese account names.
+        command.extend(["--windows-console-mode=disable", "--msvc=latest"])
     return command
 
 
@@ -37,8 +40,7 @@ def _build_hub(source_root: Path, build_dir: Path, dist_dir: Path) -> None:
     command = _common_nuitka_command(output_dir) + [
         "--standalone",
         "--output-filename=Infernux Hub.exe" if os.name == "nt" else "--output-filename=Infernux Hub",
-        f"--include-data-dir={packaging_dir / 'resources'}=resources",
-        f"--include-data-file={packaging_dir / 'runtime' / 'runtime_bundle.zip'}=InfernuxHubData/runtime/runtime_bundle.zip",
+        f"--include-data-file={packaging_dir / 'resources' / 'icon.png'}=resources/icon.png",
         "--nofollow-import-to=Infernux,numpy,scipy,pandas,matplotlib,cv2,PIL,tkinter",
     ]
     if sys.platform == "darwin":
@@ -59,6 +61,13 @@ def _build_hub(source_root: Path, build_dir: Path, dist_dir: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(produced, destination)
 
+    project = tomllib.loads((source_root / "pyproject.toml").read_text(encoding="utf-8"))
+    version_file = destination / "hub-version.json"
+    version_file.write_text(
+        '{\n  "version": "' + project["project"]["version"] + '"\n}\n',
+        encoding="utf-8",
+    )
+
 
 def _build_installer(source_root: Path, build_dir: Path, dist_dir: Path) -> None:
     packaging_dir = source_root / "packaging"
@@ -72,7 +81,7 @@ def _build_installer(source_root: Path, build_dir: Path, dist_dir: Path) -> None
     command = _common_nuitka_command(output_dir) + [
         "--onefile",
         "--output-filename=InfernuxHubInstaller.exe" if os.name == "nt" else "--output-filename=InfernuxHubInstaller",
-        f"--include-data-dir={packaging_dir / 'resources'}=resources",
+        f"--include-data-file={packaging_dir / 'resources' / 'icon.png'}=resources/icon.png",
         f"--include-data-dir={hub_payload}=payload",
     ]
     if os.name == "nt":

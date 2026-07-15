@@ -1,10 +1,13 @@
 ---
+title: "资源与 `.meta` 文件"
+description: "解释项目资源、GUID 与路径身份、.meta 边车文件、类型化引用、导入设置、安全移动/删除、缓存和运行时加载。"
 category: 手册
 tags: ["资源", "GUID", "meta", "导入", "材质", "纹理"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.core.Texture","Infernux.core.Material","Infernux.ui.UIImage"]
 agent_summary: "解释项目资源、GUID 与路径身份、.meta 边车文件、类型化引用、导入设置、安全移动/删除、缓存和运行时加载。"
 source_paths: ["python/Infernux/core/assets.py", "python/Infernux/core/asset_ref.py", "python/Infernux/core/asset_types.py", "python/Infernux/engine/asset_reference_cleanup.py"]
 ---
@@ -12,6 +15,22 @@ source_paths: ["python/Infernux/core/assets.py", "python/Infernux/core/asset_ref
 # 资源与 `.meta` 文件
 
 一个资源具有两种身份：当前路径，以及通过资源数据库和边车元数据记录的稳定 GUID。路径便于人类理解；GUID 让序列化引用在资源改名或移动后仍可保持。
+
+```text
+[INX-DIAGRAM:pipeline:资源从源文件到运行时对象的身份链]
+源文件 + 匹配的 .meta
+             │ 路径 + 稳定 GUID + 导入设置
+             ▼
+         导入 / 重新导入
+             ▼
+        资源数据库 + 缓存
+             │
+             ├── AssetRef：GUID + path_hint ── resolve ──┐
+             └── 项目路径 ── AssetManager.load ──────────┼──▶ 类型化运行时对象
+
+编辑器移动 / 改名 ── 保持 GUID 并更新引用
+直接复制 .meta ── 产生重复 GUID ── 破坏身份
+```
 
 ## 项目工作流
 
@@ -39,6 +58,15 @@ if icon is None:
 ```
 
 已有稳定序列化标识时可使用 `load_by_guid()`；`find_assets()` 按文件名模式查找项目资源。加载带缓存，只有工具绕过常规导入流程修改文件时才需要 `invalidate_path`、`invalidate` 或 `flush`。
+
+## 选择引用路径
+
+| 场景 | 使用 | 避免 |
+|---|---|---|
+| 序列化组件字段 | 类型化 `AssetRef` 与 GUID | 只保存脆弱的绝对路径 |
+| 初始化代码中已知的项目资源 | `AssetManager.load(project_path, type)` | 绕过项目身份的底层文件加载 |
+| 已有序列化 GUID | `load_by_guid()` 或 `resolve()` | 猜测资源当前路径 |
+| 外部工具修改了源文件 | 重新扫描/导入，再做定向失效 | 在正常逐帧逻辑中刷新全部资源 |
 
 ## 导入设置
 
@@ -71,4 +99,3 @@ if icon is None:
 - [Material](../api/Material.md)
 - [UIImage](../api/UIImage.md)
 - [构建并分享](../learn/build-and-share.md)
-

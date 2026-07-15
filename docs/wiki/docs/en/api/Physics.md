@@ -18,6 +18,7 @@ Spatial queries accept layer masks and explicit trigger handling. Keep query vol
 
 | Name | Type | Description |
 |------|------|------|
+| body_count | `int` | Number of native physics bodies currently owned by the world. *(read-only)* |
 | gravity | `Any` | The global gravity vector applied to all rigidbodies. |
 
 <!-- USER CONTENT START --> properties
@@ -33,9 +34,11 @@ Spatial queries accept layer masks and explicit trigger handling. Keep query vol
 | `static Physics.raycast(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]` | Cast a ray and return the first hit, or None. |
 | `static Physics.raycast_all(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → List[Any]` | Cast a ray and return all hits. |
 | `static Physics.overlap_sphere(center: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]` | Find all colliders within a sphere. |
-| `static Physics.overlap_box(center: Any, half_extents: Any, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]` | Find all colliders within an axis-aligned box. |
+| `static Physics.overlap_box(center: Any, half_extents: Any, orientation: Any = ..., layer_mask: int = ..., query_triggers: bool = ...) → List[Any]` | Find all colliders within an oriented box. |
+| `static Physics.overlap_capsule(point0: Any, point1: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]` |  |
 | `static Physics.sphere_cast(origin: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]` | Cast a sphere along a direction and return the first hit, or None. |
-| `static Physics.box_cast(center: Any, half_extents: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]` | Cast a box along a direction and return the first hit, or None. |
+| `static Physics.box_cast(center: Any, half_extents: Any, direction: Any, orientation: Any = ..., max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]` | Cast a box along a direction and return the first hit, or None. |
+| `static Physics.capsule_cast(point0: Any, point1: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]` |  |
 | `static Physics.ignore_layer_collision(layer1: int, layer2: int, ignore: bool = ...) → None` | Set whether collisions between two layers are ignored. |
 | `static Physics.get_ignore_layer_collision(layer1: int, layer2: int) → bool` | Check if collisions between two layers are ignored. |
 

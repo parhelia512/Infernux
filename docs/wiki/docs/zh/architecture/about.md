@@ -1,11 +1,16 @@
 ---
-
+title: "为什么会有Infernux"
+description: "一篇非技术性的项目缘起随笔，说明 Infernux 为什么采用 C++ 核心与 Python 创作层，以及项目希望走向哪里。"
 category: 随笔
-
 tags: ["愿景"]
-
+status: stable
+since: "0.1.0"
+last_verified: "2026-07-15"
+audience: ["user", "contributor"]
+related_api: []
+agent_summary: "一篇非技术性的项目缘起随笔，说明 Infernux 为什么采用 C++ 核心与 Python 创作层，以及项目希望走向哪里。"
+source_paths: ["README.md"]
 date: "2026-03-28"
-
 ---
 
 # 为什么会有Infernux

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import time
+import io
 from pathlib import Path
 
 
@@ -12,6 +13,7 @@ if str(PACKAGING_DIR) not in sys.path:
 from PySide6.QtWidgets import QApplication
 
 from splash_screen import EngineSplashScreen
+import splash_screen
 
 
 class _FinishedProcess:
@@ -61,4 +63,37 @@ def test_running_process_without_ready_signal_times_out(tmp_path: Path):
     splash._poll_launch_state()
 
     assert timed_out == [True]
+    splash._spin_timer.stop()
+
+
+def test_launch_lock_tracks_engine_pid_not_hub_pid(tmp_path: Path, monkeypatch):
+    _app()
+    (tmp_path / "ProjectSettings").mkdir()
+
+    class Process:
+        pid = 424242
+        stderr = io.BytesIO()
+
+        @staticmethod
+        def poll():
+            return None
+
+        @staticmethod
+        def terminate():
+            return None
+
+    captured = []
+    monkeypatch.setattr(splash_screen.subprocess, "Popen", lambda *_args, **_kwargs: Process())
+    monkeypatch.setattr(
+        splash_screen,
+        "write_project_lock",
+        lambda project, pid, token, mode, state: captured.append((project, pid, state)),
+    )
+    monkeypatch.setattr(splash_screen, "remove_project_lock", lambda *_args, **_kwargs: None)
+    splash = EngineSplashScreen("", "Test")
+
+    splash.launch(sys.executable, "pass", str(tmp_path), detached=True)
+
+    assert captured == [(str(tmp_path), 424242, "launching")]
+    splash._poll_timer.stop()
     splash._spin_timer.stop()

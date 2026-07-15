@@ -163,8 +163,8 @@ class EngineSplashScreen(QWidget):
         self._progress_bar.setTextVisible(False)
         self._progress_bar.setFixedHeight(4)
         self._progress_bar.setStyleSheet(
-            "QProgressBar { background: #333333; border: none; border-radius: 2px; }"
-            "QProgressBar::chunk { background: #6d7cff; border-radius: 2px; }"
+            "QProgressBar { background: #292929; border: none; border-radius: 2px; }"
+            "QProgressBar::chunk { background: #eb5757; border-radius: 2px; }"
         )
         layout.addWidget(self._progress_bar)
         # Spinner animation timer
@@ -195,11 +195,11 @@ class EngineSplashScreen(QWidget):
 
         # Dark rounded-rect background
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(QColor(13, 15, 20, 248)))
+        p.setBrush(QBrush(QColor(25, 25, 25, 248)))
         p.drawRoundedRect(self.rect(), 18, 18)
 
         # Subtle border
-        p.setPen(QPen(QColor(58, 67, 91, 210), 1))
+        p.setPen(QPen(QColor(58, 58, 58, 210), 1))
         p.setBrush(Qt.NoBrush)
         p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 18, 18)
 
@@ -207,7 +207,7 @@ class EngineSplashScreen(QWidget):
         spinner_size = 28
         sx = (self.width() - spinner_size) // 2
         sy = self.height() - 52
-        pen = QPen(QColor(104, 119, 255), 3)
+        pen = QPen(QColor(235, 87, 87), 3)
         pen.setCapStyle(Qt.RoundCap)
         p.setPen(pen)
         p.drawArc(sx, sy, spinner_size, spinner_size, self._angle * 16, 270 * 16)
@@ -330,6 +330,7 @@ class EngineSplashScreen(QWidget):
     def _drain_stderr(self):
         """Read stderr until EOF so the pipe buffer never stalls the engine."""
         proc = self._process
+        chunks = self._stderr_chunks
         if proc is None or proc.stderr is None:
             return
         try:
@@ -337,7 +338,7 @@ class EngineSplashScreen(QWidget):
                 chunk = proc.stderr.read(4096)
                 if not chunk:
                     break
-                self._stderr_chunks.append(chunk)
+                chunks.append(chunk)
         except (ValueError, OSError) as _exc:
             logging.getLogger(__name__).debug("[Suppressed] %s: %s", type(_exc).__name__, _exc)
             pass
@@ -379,7 +380,7 @@ class EngineSplashScreen(QWidget):
             if content.startswith("LOADING:"):
                 try:
                     _, fraction, message = content.split(":", 2)
-                    self._status.setText(message)
+                    self._status.setText(tr(message))
                     current, total = fraction.split("/")
                     self._progress_bar.setValue(
                         int(int(current) * 100 / int(total))

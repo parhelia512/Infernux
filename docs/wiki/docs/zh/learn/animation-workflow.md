@@ -1,10 +1,13 @@
 ---
+title: "动画工作流"
+description: "创建 2D 或 3D 动画 Clip，放入 .animfsm 控制器，挂载 SpiritAnimator 或 SkeletalAnimator，并验证状态、过渡、事件与播放行为。"
 category: 学习
 tags: ["动画", "2D", "3D", "FSM", "Animator"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: []
 agent_summary: "创建 2D 或 3D 动画 Clip，放入 .animfsm 控制器，挂载 SpiritAnimator 或 SkeletalAnimator，并验证状态、过渡、事件与播放行为。"
 source_paths: ["python/Infernux/engine/ui/animclip2d_editor_panel.py", "python/Infernux/engine/ui/animfsm_editor_panel.py", "python/Infernux/core/animation_clip.py", "python/Infernux/core/animation_clip3d.py", "python/Infernux/core/anim_state_machine.py", "python/Infernux/components/spirit_animator.py", "python/Infernux/components/skeletal_animator.py"]
 ---

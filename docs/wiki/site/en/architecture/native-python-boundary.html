@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Maps ownership across the C++ runtime, pybind11 module, Python public API, and PyComponentProxy lifecycle bridge, including the rules for identity, lifetime, and serialization.">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>Native–Python Boundary - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="Native–Python Boundary - Infernux Documentation">
+    <meta property="og:description" content="Maps ownership across the C++ runtime, pybind11 module, Python public API, and PyComponentProxy lifecycle bridge, including the rules for identity, lifetime, and serialization.">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta property="og:image" content="https://infernux-engine.com/assets/demo.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1245">
+    <meta property="og:image:height" content="653">
+    <meta property="og:image:alt" content="Infernux editor showing a NASA Punk interface and lava-lit voxel terrain.">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="Architecture">
+    <meta property="article:tag" content="cpp"><meta property="article:tag" content="python"><meta property="article:tag" content="pybind11"><meta property="article:tag" content="components"><meta property="article:tag" content="lifecycle">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Native–Python Boundary - Infernux Documentation">
+    <meta name="twitter:description" content="Maps ownership across the C++ runtime, pybind11 module, Python public API, and PyComponentProxy lifecycle bridge, including the rules for identity, lifetime, and serialization.">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/demo.png">
+    <meta name="twitter:image:alt" content="Infernux editor showing a NASA Punk interface and lava-lit voxel terrain.">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html#document",
+          "headline": "Native\u2013Python Boundary",
+          "name": "Native\u2013Python Boundary",
+          "description": "Maps ownership across the C++ runtime, pybind11 module, Python public API, and PyComponentProxy lifecycle bridge, including the rules for identity, lifetime, and serialization.",
+          "url": "https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html"
+          },
+          "inLanguage": "en",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Architecture reference",
+          "articleSection": "Architecture",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/demo.png",
+            "width": 1245,
+            "height": 653,
+            "caption": "Infernux editor showing a NASA Punk interface and lava-lit voxel terrain."
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["cpp", "python", "pybind11", "components", "lifecycle"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Documentation",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Architecture",
+              "item": "https://infernux-engine.com/wiki.html?layer=architecture#written-guides"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "Native\u2013Python Boundary",
+              "item": "https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html"
+            }
+            
+          ]
+        }
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html">
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/architecture/native-python-boundary.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=12">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=1">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=4">
+    <link rel="stylesheet" href="/css/wiki-template.8eba3304d580e5c4.css">
+</head>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <!-- Top Navigation -->
+    <nav class="navbar" aria-label="Primary navigation">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/en/learn/getting-started.html" class="nav-priority">Start</a>
+                <a href="/wiki.html#start-here">Learn</a>
+                <a href="/wiki.html?layer=manual#written-guides" class="active" aria-current="page">Manual</a>
+                <a href="/wiki/site/en/api/index.html">API</a>
+                <a href="/roadmap.html">Roadmap</a>
+                <a href="/community.html" class="nav-priority">Community</a>
+                <a href="/download.html">Download</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="Copy version, sources, and canonical link" aria-label="Copy page context for an Agent">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>Copy for Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span>Search docs</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button type="button" class="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell" id="main-content" style="padding-top: calc(var(--nav-height) + 60px); min-height: 80vh; padding-bottom: 80px;">
+        <div class="container" style="max-width: 860px; margin: 0 auto;">
+            <div class="api-main" style="padding: 0; max-width: none;">
+                
+    <nav class="doc-breadcrumb" aria-label="Breadcrumb">
+        <a href="/wiki.html">Docs</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html?layer=architecture#written-guides">Architecture</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">Native–Python Boundary</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="Document version and sources" data-status="preview" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">preview</strong>
+                        <span class="doc-provenance-item"><span>Since</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>Verified</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>Audience</span> advanced-user, contributor, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">Docs manifest</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/zh/architecture/native-python-boundary.html" lang="zh">阅读中文</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>Source evidence · 7</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/cpp/infernux/tools/pybinding/BindingInfernux.cpp" target="_blank" rel="noopener">cpp/infernux/tools/pybinding/BindingInfernux.cpp</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/cpp/infernux/tools/pybinding/BindingScene.cpp" target="_blank" rel="noopener">cpp/infernux/tools/pybinding/BindingScene.cpp</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/cpp/infernux/function/scene/PyComponentProxy.cpp" target="_blank" rel="noopener">cpp/infernux/function/scene/PyComponentProxy.cpp</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/python/Infernux/__init__.py" target="_blank" rel="noopener">python/Infernux/__init__.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/python/Infernux/lib/__init__.py" target="_blank" rel="noopener">python/Infernux/lib/__init__.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/python/Infernux/components/component.py" target="_blank" rel="noopener">python/Infernux/components/component.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/python/Infernux/components/registry.py" target="_blank" rel="noopener">python/Infernux/components/registry.py</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>On this page</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>Hide sections</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="Sections on this page"></nav>
+    </aside>
+    
+                <h1 id="nativepython-boundary">Native–Python Boundary<a class="headerlink" href="#nativepython-boundary" title="Permanent link">&para;</a></h1>
+<p>Infernux is Python-native at the authoring layer, but it is not a Python-only engine. The runtime deliberately divides responsibility between a C++ execution core and a Python orchestration and gameplay layer. Understanding that boundary is the fastest way to answer three recurring questions: where a feature belongs, who owns an object's lifetime, and whether a call is cheap enough for a per-frame loop.</p>
+<h2 id="the-four-layers">The four layers<a class="headerlink" href="#the-four-layers" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Game script / editor tool
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>        │ public imports and Unity-style wrappers
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        ▼
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>Infernux Python package
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        │ Infernux.lib re-exports native symbols
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        ▼
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>_Infernux pybind11 extension
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        │ non-owning handles, value conversion, callback forwarding
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        ▼
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>C++ runtime: scene, renderer, physics, audio, assets
+</code></pre></div>
+<p>The native extension is created by <code>PYBIND11_MODULE(_Infernux, m)</code> in <code>BindingInfernux.cpp</code>. The same module then registers focused binding groups for scenes, resources, render graphs, input, physics, audio, batch operations, and other subsystems. This is the capability surface, not the recommended user-facing namespace.</p>
+<p><code>Infernux.lib</code> exposes the bound types. The top-level <code>Infernux</code> package and its subpackages then add stable imports, Pythonic wrappers, editor behavior, gameplay components, and compatibility routing. User code should normally import from documented public modules rather than <code>_Infernux</code> directly.</p>
+<h2 id="ownership-rules">Ownership rules<a class="headerlink" href="#ownership-rules" title="Permanent link">&para;</a></h2>
+<p>The most important distinction is between <strong>lifetime authority</strong> and <strong>Python reachability</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Object family</th>
+<th>Lifetime authority</th>
+<th>Python sees</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Engine and managers</td>
+<td>C++ singleton or engine instance</td>
+<td>a non-owning facade or bound instance</td>
+</tr>
+<tr>
+<td>Scene and GameObject</td>
+<td>C++ scene graph</td>
+<td>handles and bound methods</td>
+</tr>
+<tr>
+<td>Built-in components</td>
+<td>C++ GameObject</td>
+<td>native component facades, sometimes wrapped for a consistent API</td>
+</tr>
+<tr>
+<td>Script components</td>
+<td>C++ <code>PyComponentProxy</code> plus a Python <code>InxComponent</code> mirror</td>
+<td>the gameplay object users subclass</td>
+</tr>
+<tr>
+<td>Pure Python authoring data</td>
+<td>Python</td>
+<td>builders, registries, editor orchestration</td>
+</tr>
+</tbody>
+</table>
+<p>Keeping a Python reference does not necessarily keep its native target alive. Scene changes and object destruction can invalidate native handles. Public wrappers therefore resolve components through the current GameObject and treat native lifetime errors as invalidation, not as permission to resurrect an object.</p>
+<h2 id="how-a-python-component-enters-the-engine">How a Python component enters the engine<a class="headerlink" href="#how-a-python-component-enters-the-engine" title="Permanent link">&para;</a></h2>
+<p>A gameplay component derives from <code>InxComponent</code>. Class creation performs work before any instance exists:</p>
+<ol>
+<li><code>__init_subclass__</code> discovers serializable fields and assigns stable type identity.</li>
+<li>Numeric fields are registered with the native <code>ComponentDataStore</code> bridge.</li>
+<li>The component class is made discoverable through the Python registry and script-loading path.</li>
+<li>When attached to a GameObject, the native scene creates a <code>PyComponentProxy</code> that holds the Python object.</li>
+</ol>
+<p>The proxy is the lifecycle authority. It binds the Python mirror to the native Component and GameObject, synchronizes enabled/start/destroyed state, acquires the GIL when forwarding a callback, and calls the internal <code>_call_awake</code>, <code>_call_update</code>, <code>_call_on_destroy</code>, and physics callback entry points.</p>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>C++ scene tick
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  → PyComponentProxy::Update(deltaTime)
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    → acquire GIL
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>      → Python InxComponent._call_update(deltaTime)
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        → user update(delta_time)
+</code></pre></div>
+<p>The proxy inspects whether <code>update</code>, <code>fixed_update</code>, or <code>late_update</code> is actually overridden. If a callback is not overridden and no coroutine scheduler needs it, the forwarding call can be skipped. This is an important optimization, but a large number of active Python callbacks still means a large number of boundary crossings.</p>
+<h2 id="identity-and-serialization">Identity and serialization<a class="headerlink" href="#identity-and-serialization" title="Permanent link">&para;</a></h2>
+<p>Python script components carry more identity than a class name:</p>
+<ul>
+<li><code>type_guid</code> identifies the module and qualified class type.</li>
+<li><code>script_guid</code> identifies the script asset used to restore the component.</li>
+<li><code>component_id</code> identifies the attached component instance.</li>
+<li><code>py_fields</code> stores the serialized field document.</li>
+</ul>
+<p><code>PyComponentProxy::SerializeDocument</code> refuses to serialize a Python component without stable script and type GUIDs. During loading, C++ restores the native scene structure and pending component records; Python resolves the script type and reconstructs its fields. This split is why renaming or moving scripts is an asset-identity concern, not merely an import concern.</p>
+<h2 id="boundary-cost-model">Boundary cost model<a class="headerlink" href="#boundary-cost-model" title="Permanent link">&para;</a></h2>
+<p>Treat each Python/native property access as a real operation involving dispatch, possible type conversion, and often the GIL. The practical rules are:</p>
+<ul>
+<li>Ordinary gameplay and editor interactions can use the object API directly.</li>
+<li>Avoid repeated per-object getter/setter traffic in large inner loops.</li>
+<li>Use batch APIs and contiguous arrays for data-parallel work.</li>
+<li>Keep resource allocation, Vulkan synchronization, scene ownership, and physics ownership in native subsystems.</li>
+<li>Keep declarative topology, tools, gameplay policy, and high-level composition in Python unless profiling proves otherwise.</li>
+</ul>
+<p>The JIT architecture page explains the batch path in detail. JIT only accelerates computation after boundary traffic has already been consolidated.</p>
+<h2 id="contributor-routing">Contributor routing<a class="headerlink" href="#contributor-routing" title="Permanent link">&para;</a></h2>
+<p>When changing behavior, begin with the owner:</p>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>Start here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Add or expose a native capability</td>
+<td>focused <code>Binding*.cpp</code>, then public Python export and stubs</td>
+</tr>
+<tr>
+<td>Change component lifetime semantics</td>
+<td>C++ <code>Component</code> / <code>PyComponentProxy</code> and Python lifecycle mixins together</td>
+</tr>
+<tr>
+<td>Add an Inspector field type</td>
+<td>serialized-field metadata, codec, Inspector rendering, and native CDS support if numeric</td>
+</tr>
+<tr>
+<td>Add a friendly gameplay API</td>
+<td>Python wrapper first; bind C++ only when the capability is absent</td>
+</tr>
+<tr>
+<td>Optimize many-object math</td>
+<td>batch bridge and data layout before JIT kernels</td>
+</tr>
+</tbody>
+</table>
+<p>Do not infer public API stability from a symbol merely existing in <code>_Infernux</code>. The generated API reference and its version metadata are the public contract for the documented release.</p>
+<h2 id="verification-notes">Verification notes<a class="headerlink" href="#verification-notes" title="Permanent link">&para;</a></h2>
+<p>This page describes the repository state verified on 2026-07-15. It does not promise that every bound <code>_Infernux</code> symbol is stable. For exact current signatures, consult the generated API reference; for measured high-volume scripting behavior, continue to <a href="jit.html">JIT-Accelerated Scripting</a>.</p>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="Document navigation and feedback">
+        <a class="doc-trail-fallback" href="/wiki.html">Back to documentation</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="Documentation build evidence">
+        <span class="doc-build-label">Build evidence</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">Reading release and source provenance…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">Machine manifest JSON</a>
+    </section>
+    
+    
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <section class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title" hidden>
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">Search Infernux documentation</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="Close documentation search"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="API symbol, system, workflow…">
+            </label>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </section>
+
+    <script src="/js/main.js?v=9"></script>
+    <script src="/js/docs-search.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=7"></script>
+</body>
+</html>

@@ -1,10 +1,13 @@
 ---
+title: "Input and Time"
+description: "Explain held/down/up input semantics, game-view focus, mouse coordinates, delta time, fixed time, unscaled time, and frame-independent movement."
 category: Manual
 tags: ["input", "time", "keyboard", "mouse", "frame"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.input.Input","Infernux.input.KeyCode","Infernux.timing.Time","Infernux.components.builtin.Camera","Infernux.components.InxComponent"]
 agent_summary: "Explain held/down/up input semantics, game-view focus, mouse coordinates, delta time, fixed time, unscaled time, and frame-independent movement."
 source_paths: ["python/Infernux/input", "python/Infernux/timing.pyi"]
 ---
@@ -74,7 +77,31 @@ Use scaled time for gameplay that should slow or pause. Use unscaled time for pa
 - Apply physics decisions in `fixed_update(fixed_delta_time)`.
 - If input must drive physics, capture the intent in `update`, then consume the stored intent in `fixed_update`.
 
+```text
+[INX-DIAGRAM:decision:Input intent across render and fixed timelines]
+keyboard / mouse / touch
+          │
+          ▼
+Game viewport focused? ── no ──▶ ignore gameplay input
+          │ yes
+          ▼
+update: sample held / down / up and store intent
+          ├──▶ frame movement ── delta_time ──▶ Transform
+          └──▶ fixed_update ── fixed_delta_time ──▶ Rigidbody / physics
+
+paused UI and prompts ── unscaled_delta_time ──▶ continue independently
+```
+
 Do not assume one rendered frame equals one physics step. A slow frame may require multiple fixed steps, while a fast frame may render before the next fixed step.
+
+## Choose the time domain
+
+| Behavior | Use | Avoid |
+|---|---|---|
+| Visual movement that follows rendered frames | callback `delta_time` | assuming a fixed frame rate |
+| Physics commands | `fixed_update` and `fixed_delta_time` | replaying one-frame input edges in every fixed step |
+| Pause-aware gameplay | scaled time | wall-clock time that ignores `time_scale` |
+| Pause menus and accessibility prompts | unscaled time | scaled time that freezes with gameplay |
 
 ## Common failures
 
@@ -101,4 +128,3 @@ Drive them from unscaled time rather than scaled gameplay time.
 - [Time](../api/Time.md)
 - [Camera](../api/Camera.md)
 - [InxComponent lifecycle](../api/InxComponent.md)
-

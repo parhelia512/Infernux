@@ -1,10 +1,13 @@
 ---
+title: "2D Foundations"
+description: "Build a minimal 2D scene with an orthographic Camera, SpriteRenderer, imported texture, predictable world scale, and a frame-rate-independent movement check."
 category: Learn
 tags: ["2d", "sprite", "camera", "beginner"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["new-user", "agent"]
+related_api: []
 agent_summary: "Build a minimal 2D scene with an orthographic Camera, SpriteRenderer, imported texture, predictable world scale, and a frame-rate-independent movement check."
 source_paths: ["python/Infernux/components/builtin/sprite_renderer.py", "python/Infernux/components/builtin/camera.pyi", "python/Infernux/core/asset_types.py"]
 ---

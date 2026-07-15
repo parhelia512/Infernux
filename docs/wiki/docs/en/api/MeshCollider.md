@@ -19,6 +19,8 @@ A collider that uses a mesh shape.
 | Name | Type | Description |
 |------|------|------|
 | convex | `bool` | Whether the mesh collider uses a convex hull. |
+| shape_error | `str` | Last native mesh cooking error, or an empty string after success. *(read-only)* |
+| is_cooking | `bool` | Whether collision geometry is currently cooking on a worker. *(read-only)* |
 
 <!-- USER CONTENT START --> properties
 
@@ -27,9 +29,7 @@ A collider that uses a mesh shape.
 ## Example
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for MeshCollider
-```
+> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
 <!-- USER CONTENT END -->
 
 ## See Also

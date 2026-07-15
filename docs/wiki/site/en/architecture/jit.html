@@ -1,321 +1,186 @@
 <!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deep Dive: JIT-Accelerated Scripting in Infernux - Infernux Scripting API</title>
-    <link rel="icon" type="image/png" href="/assets/logo.png">
-    <link rel="stylesheet" href="/css/style.css?v=2">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        /* ======================================================
-           Infernux API Reference — Unity-Inspired Dark Theme
-           ====================================================== */
-
-        /* Layout */
-        .api-layout {
-            display: flex;
-            min-height: calc(100vh - var(--nav-height));
-            padding-top: var(--nav-height);
-        }
-
-        /* ---- Sidebar ---- */
-        .api-sidebar {
-            width: 280px;
-            background: #0b0b12;
-            border-right: 1px solid var(--border);
-            position: sticky;
-            top: var(--nav-height);
-            height: calc(100vh - var(--nav-height));
-            overflow-y: auto;
-            flex-shrink: 0;
-        }
-        .api-sidebar::-webkit-scrollbar { width: 5px; }
-        .api-sidebar::-webkit-scrollbar-track { background: transparent; }
-        .api-sidebar::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
-
-        .sidebar-hdr {
-            padding: 14px 18px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        .sidebar-hdr h3 {
-            margin: 0;
-            font-size: 0.78rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            color: var(--text-muted);
-        }
-
-        /* Language toggle */
-        .lang-sw {
-            display: flex;
-            gap: 1px;
-            background: var(--border);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-        .lang-sw a {
-            padding: 3px 10px;
-            font-size: 0.7rem;
-            font-weight: 600;
-            color: var(--text-muted);
-            background: var(--bg-elevated);
-            text-decoration: none;
-            transition: all 0.12s;
-        }
-        .lang-sw a.on {
-            background: var(--primary);
-            color: #fff;
-        }
-        .lang-sw a:hover:not(.on) {
-            color: var(--text-primary);
-            background: var(--bg-hover);
-        }
-
-        /* Namespace tree */
-        .ns-tree { padding: 6px 0 20px; }
-
-        .ns-group { margin-bottom: 1px; }
-
-        .ns-hd {
-            display: flex;
-            align-items: center;
-            padding: 7px 16px;
-            cursor: pointer;
-            user-select: none;
-            transition: background 0.1s;
-        }
-        .ns-hd:hover { background: rgba(255,255,255,0.025); }
-
-        .ns-arr {
-            width: 14px;
-            font-size: 0.5rem;
-            color: #555;
-            transition: transform 0.15s;
-            margin-right: 8px;
-            flex-shrink: 0;
-        }
-        .ns-hd.open .ns-arr { transform: rotate(90deg); }
-
-        .ns-nm {
-            font-size: 0.84rem;
-            font-weight: 500;
-            color: var(--text-secondary);
-        }
-        .ns-hd.hi .ns-nm { color: var(--primary); }
-
-        .ns-ch {
-            display: none;
-            padding: 2px 0 4px;
-        }
-        .ns-hd.open + .ns-ch { display: block; }
-
-        .ns-ch a {
-            display: block;
-            padding: 3px 16px 3px 38px;
-            font-size: 0.82rem;
-            color: var(--text-muted);
-            text-decoration: none;
-            transition: color 0.1s, background 0.1s;
-            border-left: 2px solid transparent;
-        }
-        .ns-ch a:hover {
-            color: var(--text-primary);
-            background: rgba(255,255,255,0.02);
-        }
-        .ns-ch a.cur {
-            color: var(--text-primary);
-            background: rgba(255,107,53,0.07);
-            border-left-color: var(--primary);
-            font-weight: 600;
-        }
-
-        /* ---- Content ---- */
-        .api-main {
-            flex: 1;
-            padding: 36px 56px 80px;
-            max-width: 880px;
-            min-width: 0;
-        }
-
-        /* H1 — class name */
-        .api-main h1 {
-            font-size: 1.85rem;
-            font-weight: 700;
-            margin: 0 0 4px;
-            padding: 0;
-            border: none;
-            color: var(--text-primary);
-        }
-
-        /* "class in Package" subtitle */
-        .api-main .class-info {
-            font-size: 0.88rem;
-            color: var(--text-muted);
-            margin-bottom: 22px;
-            padding-bottom: 18px;
-            border-bottom: 1px solid var(--border);
-        }
-        .api-main .class-info b { color: var(--text-secondary); }
-        .api-main .class-info a { color: var(--primary); }
-
-        /* H2 — section headers */
-        .api-main h2 {
-            font-size: 0.92rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.6px;
-            color: var(--text-muted);
-            margin: 30px 0 8px;
-            padding-bottom: 6px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .api-main h3 {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--text-secondary);
-            margin: 18px 0 6px;
-        }
-
-        /* Paragraphs */
-        .api-main p {
-            font-size: 0.9rem;
-            color: var(--text-secondary);
-            line-height: 1.75;
-            margin-bottom: 12px;
-        }
-
-        .api-main blockquote {
-            margin: 12px 0;
-            padding: 10px 16px;
-            background: rgba(255,107,53,0.04);
-            border-left: 3px solid var(--primary);
-            border-radius: 0 4px 4px 0;
-        }
-        .api-main blockquote p { margin: 0; font-size: 0.85rem; }
-
-        /* Tables — Unity style: hidden header, 2-col */
-        .api-main table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 4px 0 18px;
-        }
-        .api-main thead { display: none; }
-
-        .api-main tbody tr {
-            border-bottom: 1px solid rgba(255,255,255,0.04);
-        }
-        .api-main tbody tr:last-child { border-bottom: none; }
-
-        .api-main td {
-            padding: 7px 0;
-            font-size: 0.86rem;
-            vertical-align: top;
-        }
-        .api-main td:first-child {
-            width: 200px;
-            padding-right: 20px;
-            color: var(--primary);
-            font-size: 0.86rem;
-            font-weight: 500;
-        }
-        .api-main td:last-child { color: var(--text-secondary); }
-        .api-main td a { color: var(--primary); }
-        .api-main tbody tr:hover { background: rgba(255,255,255,0.012); }
-
-        /* Inline code — normal font, subtle highlight */
-        .api-main code {
-            font-family: inherit;
-            font-size: inherit;
-            background: rgba(255,255,255,0.06);
-            padding: 1px 5px;
-            border-radius: 3px;
-            color: var(--primary-light);
-        }
-
-        /* Code blocks */
-        .api-main pre {
-            background: #0d0d15;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 16px 20px;
-            overflow-x: auto;
-            margin: 10px 0 18px;
-        }
-        .api-main pre code {
-            font-family: var(--font-mono);
-            background: none;
-            padding: 0;
-            font-size: 0.83rem;
-            line-height: 1.65;
-            color: var(--text-secondary);
-        }
-
-        /* Lists */
-        .api-main ul, .api-main ol { padding-left: 18px; margin-bottom: 12px; }
-        .api-main li {
-            margin-bottom: 4px;
-            color: var(--text-secondary);
-            font-size: 0.88rem;
-            line-height: 1.6;
-        }
-
-        .api-main hr {
-            border: none;
-            border-top: 1px solid var(--border);
-            margin: 26px 0;
-        }
-
-        /* ---- Footer ---- */
-        .api-ft { margin-left: 280px; }
-        .api-ft .footer-bottom p { font-size: 0.8rem; }
-
-        /* ---- Responsive ---- */
-        @media (max-width: 1024px) {
-            .api-sidebar { width: 240px; }
-            .api-main { padding: 28px 32px 60px; }
-            .api-ft { margin-left: 240px; }
-        }
-        @media (max-width: 768px) {
-            .api-layout { flex-direction: column; }
-            .api-sidebar {
-                width: 100%; position: relative; top: 0;
-                height: auto; max-height: 50vh;
-                border-right: none; border-bottom: 1px solid var(--border);
+    <meta name="description" content="Explains how batch reads, ComponentDataStore, NumPy buffers, and Numba JIT reduce Python/native boundary overhead for data-parallel gameplay workloads.">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>Deep Dive: JIT-Accelerated Scripting in Infernux - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/en/architecture/jit.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="Deep Dive: JIT-Accelerated Scripting in Infernux - Infernux Documentation">
+    <meta property="og:description" content="Explains how batch reads, ComponentDataStore, NumPy buffers, and Numba JIT reduce Python/native boundary overhead for data-parallel gameplay workloads.">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/en/architecture/jit.html">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta property="og:image" content="https://infernux-engine.com/assets/demo.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1245">
+    <meta property="og:image:height" content="653">
+    <meta property="og:image:alt" content="Infernux editor showing a NASA Punk interface and lava-lit voxel terrain.">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="Architecture">
+    <meta property="article:tag" content="jit"><meta property="article:tag" content="performance"><meta property="article:tag" content="python"><meta property="article:tag" content="numba"><meta property="article:tag" content="parallel">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Deep Dive: JIT-Accelerated Scripting in Infernux - Infernux Documentation">
+    <meta name="twitter:description" content="Explains how batch reads, ComponentDataStore, NumPy buffers, and Numba JIT reduce Python/native boundary overhead for data-parallel gameplay workloads.">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/demo.png">
+    <meta name="twitter:image:alt" content="Infernux editor showing a NASA Punk interface and lava-lit voxel terrain.">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://infernux-engine.com/wiki/site/en/architecture/jit.html#document",
+          "headline": "Deep Dive: JIT-Accelerated Scripting in Infernux",
+          "name": "Deep Dive: JIT-Accelerated Scripting in Infernux",
+          "description": "Explains how batch reads, ComponentDataStore, NumPy buffers, and Numba JIT reduce Python/native boundary overhead for data-parallel gameplay workloads.",
+          "url": "https://infernux-engine.com/wiki/site/en/architecture/jit.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/en/architecture/jit.html"
+          },
+          "inLanguage": "en",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Architecture reference",
+          "articleSection": "Architecture",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/demo.png",
+            "width": 1245,
+            "height": 653,
+            "caption": "Infernux editor showing a NASA Punk interface and lava-lit voxel terrain."
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
             }
-            .api-main { padding: 20px; max-width: 100%; }
-            .api-ft { margin-left: 0; }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["jit", "performance", "python", "numba", "parallel"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/en/architecture/jit.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Documentation",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Architecture",
+              "item": "https://infernux-engine.com/wiki.html?layer=architecture#written-guides"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "Deep Dive: JIT-Accelerated Scripting in Infernux",
+              "item": "https://infernux-engine.com/wiki/site/en/architecture/jit.html"
+            }
+            
+          ]
         }
-    </style>
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/architecture/jit.html">
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/architecture/jit.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/architecture/jit.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=12">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=1">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=4">
+    <link rel="stylesheet" href="/css/wiki-template.8eba3304d580e5c4.css">
 </head>
-<body>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <!-- Top Navigation -->
-    <nav class="navbar">
+    <nav class="navbar" aria-label="Primary navigation">
         <div class="nav-container">
             <a href="/index.html" class="nav-logo">
-                <span class="logo-icon"><img src="/assets/logo.png" alt="Infernux logo"></span>
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
                 <span class="logo-text">Infernux</span>
             </a>
-            <div class="nav-links">
-                <a href="/index.html">Home</a>
-                <a href="/index.html#system">Features</a>
-                <a href="/index.html#capabilities">Showcase</a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/en/learn/getting-started.html" class="nav-priority">Start</a>
+                <a href="/wiki.html#start-here">Learn</a>
+                <a href="/wiki.html?layer=manual#written-guides" class="active" aria-current="page">Manual</a>
+                <a href="/wiki/site/en/api/index.html">API</a>
                 <a href="/roadmap.html">Roadmap</a>
-                <a href="/wiki.html" class="active">Docs</a>
-                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank">
-                    <i class="fab fa-github"></i> GitHub
+                <a href="/community.html" class="nav-priority">Community</a>
+                <a href="/download.html">Download</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
                 </a>
             </div>
             <div class="nav-right">
-                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="Copy version, sources, and canonical link" aria-label="Copy page context for an Agent">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>Copy for Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span>Search docs</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
                     <i class="fas fa-moon" id="theme-icon"></i>
                 </button>
-                <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                <button type="button" class="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
                     <i class="fas fa-bars"></i>
                 </button>
             </div>
@@ -324,9 +189,69 @@
 
     
     <!-- Article Layout (No Sidebar) -->
-    <main class="page-shell" style="padding-top: calc(var(--nav-height) + 60px); min-height: 80vh; padding-bottom: 80px;">
+    <main class="page-shell" id="main-content" style="padding-top: calc(var(--nav-height) + 60px); min-height: 80vh; padding-bottom: 80px;">
         <div class="container" style="max-width: 860px; margin: 0 auto;">
             <div class="api-main" style="padding: 0; max-width: none;">
+                
+    <nav class="doc-breadcrumb" aria-label="Breadcrumb">
+        <a href="/wiki.html">Docs</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html?layer=architecture#written-guides">Architecture</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">Deep Dive: JIT-Accelerated Scripting in Infernux</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="Document version and sources" data-status="experimental" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">experimental</strong>
+                        <span class="doc-provenance-item"><span>Since</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>Verified</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>Audience</span> advanced-user, contributor, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">Docs manifest</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/zh/architecture/jit.html" lang="zh">阅读中文</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>Source evidence · 5</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/python/Infernux/jit.py" target="_blank" rel="noopener">python/Infernux/jit.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/python/Infernux/batch.py" target="_blank" rel="noopener">python/Infernux/batch.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/cpp/infernux/tools/pybinding/BindingBatch.cpp" target="_blank" rel="noopener">cpp/infernux/tools/pybinding/BindingBatch.cpp</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/cpp/infernux/function/scene/ComponentDataStore.cpp" target="_blank" rel="noopener">cpp/infernux/function/scene/ComponentDataStore.cpp</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/main/cpp/infernux/function/scene/TransformECSStore.cpp" target="_blank" rel="noopener">cpp/infernux/function/scene/TransformECSStore.cpp</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>On this page</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>Hide sections</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="Sections on this page"></nav>
+    </aside>
+    
                 <h1 id="deep-dive-jit-accelerated-scripting-in-infernux">Deep Dive: JIT-Accelerated Scripting in Infernux<a class="headerlink" href="#deep-dive-jit-accelerated-scripting-in-infernux" title="Permanent link">&para;</a></h1>
 <p>Infernux is a game engine whose entire gameplay layer is written in Python. That is a deliberate architectural choice — Python gives us hot reload, a massive ecosystem, and a low barrier to entry — but it also means that every per-frame update loop is, by default, interpreted. When you need to touch 100,000 transforms each frame, interpretation is not fast enough. This page walks through how the engine's JIT subsystem solves that problem, what design decisions it makes under the hood, and where the work is heading next.</p>
 <p>For the formal evaluation and benchmark tables, see the full technical report: <a href="https://arxiv.org/pdf/2604.10263"><em>Infernux: A Python-Native Game Engine with JIT-Accelerated Scripting</em> (arXiv:2604.10263)</a>.</p>
@@ -546,6 +471,22 @@
 <li><a href="https://arxiv.org/pdf/2604.10263">Infernux: A Python-Native Game Engine with JIT-Accelerated Scripting (arXiv:2604.10263)</a> — full technical report with benchmark methodology and evaluation.</li>
 <li><a href="about.html">Architecture Overview</a> — how the C++ runtime, pybind11 bindings, and Python production layer fit together.</li>
 </ul>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="Document navigation and feedback">
+        <a class="doc-trail-fallback" href="/wiki.html">Back to documentation</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="Documentation build evidence">
+        <span class="doc-build-label">Build evidence</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">Reading release and source provenance…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">Machine manifest JSON</a>
+    </section>
+    
+    
             </div>
         </div>
     </main>
@@ -560,13 +501,24 @@
     </footer>
     
 
-    <script src="/js/main.js?v=2"></script>
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        document.querySelectorAll('.ns-hd').forEach(function(h) {
-            h.addEventListener('click', function() { this.classList.toggle('open'); });
-        });
-    });
-    </script>
+    <section class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title" hidden>
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">Search Infernux documentation</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="Close documentation search"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="API symbol, system, workflow…">
+            </label>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </section>
+
+    <script src="/js/main.js?v=9"></script>
+    <script src="/js/docs-search.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=7"></script>
 </body>
 </html>

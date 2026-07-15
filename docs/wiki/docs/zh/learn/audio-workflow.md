@@ -1,10 +1,13 @@
 ---
+title: "音频工作流"
+description: "导入 WAV，配置一个 AudioListener 和多轨 AudioSource，测试循环与 One-shot 播放，并排查生命周期或空间衰减问题。"
 category: 学习
 tags: ["音频", "Listener", "Source", "WAV", "音效"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.components.builtin.AudioSource","Infernux.components.builtin.AudioListener","Infernux.core.AudioClip"]
 agent_summary: "导入 WAV，配置一个 AudioListener 和多轨 AudioSource，测试循环与 One-shot 播放，并排查生命周期或空间衰减问题。"
 source_paths: ["python/Infernux/core/audio_clip.pyi", "python/Infernux/core/asset_types.py", "python/Infernux/components/builtin/audio_source.pyi", "python/Infernux/components/builtin/audio_listener.pyi"]
 ---

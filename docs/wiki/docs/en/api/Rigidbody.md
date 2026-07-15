@@ -41,8 +41,8 @@ For dynamic bodies, use forces or velocity rather than writing Transform every f
 | velocity | `Any` | The linear velocity of the rigidbody in world space. |
 | angular_velocity | `Any` | The angular velocity of the rigidbody in radians per second. |
 | world_center_of_mass | `Any` | The center of mass in world space. *(read-only)* |
-| position | `Any` | The position of the rigidbody in world space. *(read-only)* |
-| rotation | `Tuple[float, float, float, float]` | The rotation of the rigidbody as a quaternion (x, y, z, w). *(read-only)* |
+| position | `Any` | The position of the rigidbody in world space. |
+| rotation | `Tuple[float, float, float, float]` | The rotation of the rigidbody as a quaternion (x, y, z, w). |
 
 <!-- USER CONTENT START --> properties
 

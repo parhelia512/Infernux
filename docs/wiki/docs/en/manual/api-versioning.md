@@ -1,10 +1,13 @@
 ---
+title: "API Versioning and Compatibility"
+description: "Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols."
 category: Manual
 tags: ["api", "version", "compatibility", "agent"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: []
 agent_summary: "Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols."
 source_paths: ["docs/tools/build-api-diff.mjs", "docs/api-snapshots", "docs/api-changes.json", "docs/api-index.json"]
 ---

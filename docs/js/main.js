@@ -2,6 +2,23 @@
  * Infernux Engine - Main JavaScript
  */
 
+// Register the root-scoped offline shell. HTML and machine-readable evidence
+// remain network-first inside the worker so a cache cannot silently replace a
+// newer authoritative document.
+if ("serviceWorker" in navigator && (window.isSecureContext || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+    window.addEventListener("load", async () => {
+        try {
+            const registration = await navigator.serviceWorker.register("/sw.js", {
+                scope: "/",
+                updateViaCache: "none"
+            });
+            registration.update().catch(() => {});
+        } catch (error) {
+            console.warn("Infernux offline shell could not be registered.", error);
+        }
+    });
+}
+
 // ── Theme toggle ─────────────────────────────
 function toggleTheme() {
     const html = document.documentElement;
@@ -47,20 +64,68 @@ function updateThemeIcon(theme) {
 function toggleMobileMenu() {
     const navLinks = document.querySelector('.nav-links');
     if (!navLinks) return;
-    setMobileMenuState(!navLinks.classList.contains('mobile-open'));
+    const open = !navLinks.classList.contains('mobile-open');
+    setMobileMenuState(open, { moveFocus: open });
 }
-function setMobileMenuState(open) {
+
+function mobileMenuElements() {
     const navLinks = document.querySelector('.nav-links');
     const button = document.querySelector('.mobile-menu-btn');
+    return { navLinks, button };
+}
+
+function mobileMenuFocusables() {
+    const { navLinks, button } = mobileMenuElements();
+    if (!navLinks || !button) return [];
+    return [button, ...navLinks.querySelectorAll('a[href]')];
+}
+
+function setMobileMenuState(open, { moveFocus = false, returnFocus = false } = {}) {
+    const { navLinks, button } = mobileMenuElements();
     if (!navLinks || !button) return;
-    navLinks.classList.toggle('mobile-open', open);
-    button.setAttribute('aria-expanded', String(open));
+    const nextOpen = Boolean(open && window.innerWidth <= 1180);
+    navLinks.classList.toggle('mobile-open', nextOpen);
+    document.body?.classList.toggle('mobile-menu-open', nextOpen);
+    button.setAttribute('aria-expanded', String(nextOpen));
     const zh = document.documentElement.lang?.toLowerCase().startsWith('zh');
-    button.setAttribute('aria-label', open
+    button.setAttribute('aria-label', nextOpen
         ? (zh ? '关闭导航菜单' : 'Close navigation menu')
         : (zh ? '打开导航菜单' : 'Open navigation menu'));
     const icon = button.querySelector('i');
-    if (icon) icon.className = open ? 'fas fa-xmark' : 'fas fa-bars';
+    if (icon) icon.className = nextOpen ? 'fas fa-xmark' : 'fas fa-bars';
+    if (nextOpen && moveFocus) {
+        window.requestAnimationFrame(() => navLinks.querySelector('a[href]')?.focus({ preventScroll: true }));
+    } else if (!nextOpen && returnFocus) {
+        button.focus({ preventScroll: true });
+    }
+}
+
+function handleMobileMenuKeydown(event) {
+    const { navLinks } = mobileMenuElements();
+    if (!navLinks?.classList.contains('mobile-open')) return;
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        setMobileMenuState(false, { returnFocus: true });
+        return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusables = mobileMenuFocusables();
+    if (focusables.length < 2) return;
+    const first = focusables[0];
+    const last = focusables.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+    }
+}
+
+function handleMobileMenuPointerDown(event) {
+    const { navLinks } = mobileMenuElements();
+    if (!navLinks?.classList.contains('mobile-open')) return;
+    if (!event.target?.closest?.('.navbar')) setMobileMenuState(false);
 }
 
 // Copy code to clipboard
@@ -125,15 +190,10 @@ function applyNavbarBackground() {
 
 window.addEventListener('scroll', applyNavbarBackground);
 window.addEventListener('resize', () => {
-    if (window.innerWidth > 820) setMobileMenuState(false);
+    if (window.innerWidth > 1180) setMobileMenuState(false);
 });
-document.addEventListener('keydown', event => {
-    if (event.key === 'Escape') {
-        const wasOpen = document.querySelector('.nav-links')?.classList.contains('mobile-open');
-        setMobileMenuState(false);
-        if (wasOpen) document.querySelector('.mobile-menu-btn')?.focus();
-    }
-});
+document.addEventListener('keydown', handleMobileMenuKeydown);
+document.addEventListener('pointerdown', handleMobileMenuPointerDown);
 document.addEventListener('site:language-changed', () => {
     const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
     updateThemeIcon(theme);
@@ -192,4 +252,14 @@ function showTab(tabId) {
             }
         });
     }
+}
+
+if (globalThis.__INFERNUX_NAV_TEST__) {
+    globalThis.__infernuxNavigation = {
+        handleMobileMenuKeydown,
+        handleMobileMenuPointerDown,
+        mobileMenuFocusables,
+        setMobileMenuState,
+        toggleMobileMenu
+    };
 }

@@ -1,45 +1,39 @@
-"""Project list pane with search, modern Notion-themed cards, and folder-open."""
+"""Project list pane with compact Unity Hub-inspired rows and folder-open."""
 
 import os
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QSizePolicy, QFrame, QPushButton, QLineEdit
+    QSizePolicy, QFrame, QPushButton, QLineEdit, QMenu,
 )
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 
 from database import ProjectDatabase
 from hub_utils import is_project_open
 from i18n import tr
 from version_manager import VersionManager
+from view.hover_widgets import AnimatedSurfaceFrame
 
 
-class _ProjectCard(QFrame):
-    """A single project card with initials avatar, name, date, path."""
+class _ProjectCard(AnimatedSurfaceFrame):
+    """A compact project row with identity, path, version and state."""
 
     def __init__(self, project_id: str, name: str, created_at: str, path: str,
-                 version_manager=None, parent=None):
-        super().__init__(parent)
-        self.setObjectName("projectCard")
+                 version_manager=None, on_remove_requested=None, parent=None):
+        super().__init__("projectCard", parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setMouseTracking(True)
         self.project_name = name
         self.project_id = project_id
         self.project_path = path
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(92)
+        self.setFixedHeight(72)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(14)
-
-        # --- Initials avatar ---
-        initials = "".join(w[0] for w in name.split()[:2]).upper() or name[:2].upper()
-        avatar = QPushButton(initials)
-        avatar.setObjectName("cardAvatar")
-        avatar.setFixedSize(44, 44)
-        avatar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        layout.addWidget(avatar)
+        layout.setContentsMargins(12, 8, 10, 8)
+        layout.setSpacing(12)
 
         # --- Text block ---
         text_col = QVBoxLayout()
@@ -56,44 +50,65 @@ class _ProjectCard(QFrame):
         text_col.addWidget(path_label)
 
         version = VersionManager.read_project_version(path) if os.path.isdir(path) else ""
-        if version:
-            version_label = QLabel(f"Infernux {version}")
-            version_label.setObjectName("cardVersion")
-            text_col.addWidget(version_label)
-
         layout.addLayout(text_col, 1)
 
         if not os.path.isdir(path):
-            status_text, status_kind = tr("Project path missing"), "error"
-        elif is_project_open(path):
-            status_text, status_kind = tr("Project Already Open"), "active"
-        elif version and version_manager is not None and not version_manager.is_installed(version):
-            status_text, status_kind = tr("Engine Version Not Installed"), "warning"
+            status_label = QLabel(tr("Project path missing"))
+            status_label.setObjectName("projectStatus")
+            status_label.setProperty("kind", "error")
+            layout.addWidget(
+                status_label,
+                alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            )
         else:
-            status_text, status_kind = tr("Ready"), "ready"
-        status_label = QLabel(status_text)
-        status_label.setObjectName("projectStatus")
-        status_label.setProperty("kind", status_kind)
-        layout.addWidget(status_label, alignment=Qt.AlignmentFlag.AlignRight)
+            version_label = QLabel(f"Infernux {version}" if version else tr("Unversioned"))
+            version_label.setObjectName("projectVersion")
+            if version and version_manager is not None and not version_manager.is_installed(version):
+                version_label.setProperty("kind", "warning")
+                version_label.setToolTip(tr("Engine Version Not Installed"))
+            elif is_project_open(path):
+                version_label.setProperty("kind", "active")
+                version_label.setToolTip(tr("Project Already Open"))
+            else:
+                version_label.setProperty("kind", "ready")
+            layout.addWidget(version_label, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        # --- Open-folder button ---
-        open_btn = QPushButton("⌂")
+        # --- Project action menu ---
+        open_btn = QPushButton("...")
         open_btn.setObjectName("cardOpenBtn")
-        open_btn.setFixedSize(32, 32)
-        open_btn.setToolTip(tr("Open project folder"))
+        open_btn.setFixedSize(38, 32)
+        open_btn.setToolTip(tr("Project actions"))
         open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(path)))
+        self._actions_button = open_btn
+        self._actions_menu = QMenu(open_btn)
+        show_action = self._actions_menu.addAction(tr("Show in Explorer"))
+        remove_action = self._actions_menu.addAction(tr("Remove from Hub"))
+        show_action.triggered.connect(
+            lambda _checked=False: QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        )
+        remove_action.triggered.connect(
+            lambda _checked=False: (
+                on_remove_requested(project_id)
+                if on_remove_requested is not None else None
+            )
+        )
+        open_btn.clicked.connect(self._show_actions_menu)
         layout.addWidget(open_btn)
+
+    def _show_actions_menu(self):
+        anchor = self._actions_button.mapToGlobal(self._actions_button.rect().bottomLeft())
+        self._actions_menu.exec(anchor)
 
     # --- Selection state ---
     def set_selected(self, selected: bool):
         self.setProperty("selected", selected)
-        self.style().unpolish(self)
-        self.style().polish(self)
+        self.set_selected_animated(selected)
 
 
 class ProjectListPane(QWidget):
     """Scrollable list of project cards with a search bar."""
+
+    remove_requested = Signal(str)
 
     def __init__(self, db: ProjectDatabase, version_manager=None, parent=None):
         super().__init__(parent)
@@ -104,7 +119,6 @@ class ProjectListPane(QWidget):
         self._all_projects = []
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setStyleSheet("background-color: transparent;")
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -117,15 +131,22 @@ class ProjectListPane(QWidget):
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.setFixedHeight(36)
         self.search_edit.textChanged.connect(self._apply_filter)
-        main_layout.addWidget(self.search_edit)
+        search_row = QHBoxLayout()
+        search_row.setContentsMargins(0, 0, 0, 0)
+        search_row.addStretch()
+        self.search_edit.setFixedWidth(300)
+        search_row.addWidget(self.search_edit)
+        main_layout.addLayout(search_row)
 
         # --- Scrollable card area ---
         scroll_area = QScrollArea()
+        scroll_area.setObjectName("projectScrollArea")
+        scroll_area.viewport().setObjectName("projectViewport")
         scroll_area.setWidgetResizable(True)
         main_layout.addWidget(scroll_area)
 
         self.container = QWidget()
-        self.container.setStyleSheet("background: transparent;")
+        self.container.setObjectName("projectListContainer")
         self.card_layout = QVBoxLayout(self.container)
         self.card_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.card_layout.setSpacing(6)
@@ -148,7 +169,7 @@ class ProjectListPane(QWidget):
         for record in self._all_projects:
             card = _ProjectCard(
                 record.project_id, record.name, record.created_at, record.path,
-                self.version_manager,
+                self.version_manager, self.remove_requested.emit,
             )
             card.mousePressEvent = lambda _ev, pid=record.project_id: self._on_select(pid)
             card.mouseDoubleClickEvent = lambda _ev, pid=record.project_id: self._on_double_click(pid)

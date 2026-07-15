@@ -1,8 +1,9 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "generated_for_release": "0.2.1",
   "status_default": "preview",
   "symbol_count": 158,
+  "curated_example_count": 28,
   "symbols": [
     {
       "id": "en:Infernux:CameraClearFlags",
@@ -12,13 +13,15 @@
       "symbol": "CameraClearFlags",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/CameraClearFlags.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/CameraClearFlags.html",
       "counterpart_url": "/wiki/site/zh/api/CameraClearFlags.html",
-      "source": "docs/wiki/docs/en/api/CameraClearFlags.md"
+      "source": "docs/wiki/docs/en/api/CameraClearFlags.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux:CameraProjection",
@@ -28,13 +31,15 @@
       "symbol": "CameraProjection",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/CameraProjection.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/CameraProjection.html",
       "counterpart_url": "/wiki/site/zh/api/CameraProjection.html",
-      "source": "docs/wiki/docs/en/api/CameraProjection.md"
+      "source": "docs/wiki/docs/en/api/CameraProjection.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux:Component",
@@ -46,20 +51,23 @@
       "signatures": [
         "str",
         "int",
+        "ObjectHandle",
         "bool",
         "GameObject",
         "List[str]",
         "is_component_type(type_name: str) → bool",
         "serialize() → str",
-        "deserialize(json_str: str) → None"
+        "serialize_document() → Dict[str, Any]"
       ],
+      "example_status": "unavailable",
       "summary": "Base class for all components attached to GameObjects.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Component.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Component.html",
       "counterpart_url": "/wiki/site/zh/api/Component.html",
-      "source": "docs/wiki/docs/en/api/Component.md"
+      "source": "docs/wiki/docs/en/api/Component.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux:ForceMode",
@@ -69,13 +77,15 @@
       "symbol": "ForceMode",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/ForceMode.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/ForceMode.html",
       "counterpart_url": "/wiki/site/zh/api/ForceMode.html",
-      "source": "docs/wiki/docs/en/api/ForceMode.md"
+      "source": "docs/wiki/docs/en/api/ForceMode.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux:GameObject",
@@ -88,6 +98,7 @@
         "str",
         "bool",
         "int",
+        "ObjectHandle",
         "Optional[GameObject]",
         "Transform",
         "Scene",
@@ -116,20 +127,35 @@
         "get_component_in_children(component_type: Any, include_inactive: bool = False) → Any",
         "get_component_in_parent(component_type: Any, include_inactive: bool = False) → Any",
         "serialize() → str",
-        "deserialize(json_str: str) → None",
+        "deserialize(json_str: str) → bool",
+        "serialize_document() → Dict[str, Any]",
+        "deserialize_document(document: Dict[str, Any]) → bool",
         "static GameObject.find(name: str) → Optional[GameObject]",
         "static GameObject.find_with_tag(tag: str) → Optional[GameObject]",
         "static GameObject.find_game_objects_with_tag(tag: str) → List[GameObject]",
         "static GameObject.instantiate(original: Any) → Optional[GameObject]",
         "static GameObject.destroy(game_object: GameObject) → None"
       ],
+      "example_status": "curated",
       "summary": "Game object in the scene hierarchy.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/GameObject.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/GameObject.html",
       "counterpart_url": "/wiki/site/zh/api/GameObject.html",
-      "source": "docs/wiki/docs/en/api/GameObject.md"
+      "source": "docs/wiki/docs/en/api/GameObject.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.scenes-and-objects",
+          "title": "Scenes and Objects",
+          "url": "/wiki/site/en/manual/scenes-and-objects.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux:LightShadows",
@@ -139,13 +165,15 @@
       "symbol": "LightShadows",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/LightShadows.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/LightShadows.html",
       "counterpart_url": "/wiki/site/zh/api/LightShadows.html",
-      "source": "docs/wiki/docs/en/api/LightShadows.md"
+      "source": "docs/wiki/docs/en/api/LightShadows.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux:LightType",
@@ -155,13 +183,15 @@
       "symbol": "LightType",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/LightType.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/LightType.html",
       "counterpart_url": "/wiki/site/zh/api/LightType.html",
-      "source": "docs/wiki/docs/en/api/LightType.md"
+      "source": "docs/wiki/docs/en/api/LightType.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux:LogLevel",
@@ -171,13 +201,15 @@
       "symbol": "LogLevel",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/LogLevel.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/LogLevel.html",
       "counterpart_url": "/wiki/site/zh/api/LogLevel.html",
-      "source": "docs/wiki/docs/en/api/LogLevel.md"
+      "source": "docs/wiki/docs/en/api/LogLevel.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux:PrimitiveType",
@@ -187,13 +219,15 @@
       "symbol": "PrimitiveType",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/PrimitiveType.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/PrimitiveType.html",
       "counterpart_url": "/wiki/site/zh/api/PrimitiveType.html",
-      "source": "docs/wiki/docs/en/api/PrimitiveType.md"
+      "source": "docs/wiki/docs/en/api/PrimitiveType.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux:Scene",
@@ -215,31 +249,39 @@
         "get_all_objects() → List[GameObject]",
         "find(name: str) → Optional[GameObject]",
         "find_by_id(id: int) → Optional[GameObject]",
+        "resolve_game_object(handle: ObjectHandle) → Optional[GameObject]",
+        "resolve_component(handle: ObjectHandle) → Optional[Component]",
         "find_object_by_id(id: int) → Optional[GameObject]",
         "find_with_tag(tag: str) → Optional[GameObject]",
         "find_game_objects_with_tag(tag: str) → List[GameObject]",
         "find_game_objects_in_layer(layer: int) → List[GameObject]",
         "destroy_game_object(game_object: GameObject) → None",
-        "instantiate_game_object(source: GameObject, parent: Optional[GameObject] = None) → Optional[GameObject]",
-        "instantiate_from_json(json_str: str, parent: Optional[GameObject] = None) → Optional[GameObject]",
         "process_pending_destroys() → None",
         "is_playing() → bool",
         "awake_object(game_object: GameObject) → None",
         "serialize() → str",
-        "deserialize(json_str: str) → None",
+        "serialize_document() → Dict[str, Any]",
         "save_to_file(path: str) → None",
-        "load_from_file(path: str) → None",
         "has_pending_py_components() → bool",
+        "get_pending_py_components() → List[PendingPyComponent]",
         "take_pending_py_components() → List[PendingPyComponent]",
         "start() → None"
       ],
+      "example_status": "unavailable",
       "summary": "A single scene containing GameObjects.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Scene.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Scene.html",
       "counterpart_url": "/wiki/site/zh/api/Scene.html",
-      "source": "docs/wiki/docs/en/api/Scene.md"
+      "source": "docs/wiki/docs/en/api/Scene.md",
+      "related_documents": [
+        {
+          "id": "en.manual.scenes-and-objects",
+          "title": "Scenes and Objects",
+          "url": "/wiki/site/en/manual/scenes-and-objects.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux:Space",
@@ -249,13 +291,15 @@
       "symbol": "Space",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Space.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Space.html",
       "counterpart_url": "/wiki/site/zh/api/Space.html",
-      "source": "docs/wiki/docs/en/api/Space.md"
+      "source": "docs/wiki/docs/en/api/Space.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux:Transform",
@@ -295,13 +339,26 @@
         "local_to_world_matrix() → List[float]",
         "world_to_local_matrix() → List[float]"
       ],
+      "example_status": "unavailable",
       "summary": "Transform component — position, rotation, scale, hierarchy.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Transform.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Transform.html",
       "counterpart_url": "/wiki/site/zh/api/Transform.html",
-      "source": "docs/wiki/docs/en/api/Transform.md"
+      "source": "docs/wiki/docs/en/api/Transform.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.scenes-and-objects",
+          "title": "Scenes and Objects",
+          "url": "/wiki/site/en/manual/scenes-and-objects.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.components:add_component_menu",
@@ -314,13 +371,15 @@
         "add_component_menu(path: str) → Callable",
         "str"
       ],
+      "example_status": "unavailable",
       "summary": "Specify where this component appears in the Add Component menu.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/add_component_menu.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/add_component_menu.html",
       "counterpart_url": "/wiki/site/zh/api/add_component_menu.html",
-      "source": "docs/wiki/docs/en/api/add_component_menu.md"
+      "source": "docs/wiki/docs/en/api/add_component_menu.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.components:disallow_multiple",
@@ -332,13 +391,15 @@
       "signatures": [
         "disallow_multiple() → Union[Type, Callable]"
       ],
+      "example_status": "unavailable",
       "summary": "Prevent multiple instances of this component on a GameObject.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/disallow_multiple.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/disallow_multiple.html",
       "counterpart_url": "/wiki/site/zh/api/disallow_multiple.html",
-      "source": "docs/wiki/docs/en/api/disallow_multiple.md"
+      "source": "docs/wiki/docs/en/api/disallow_multiple.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.components:execute_in_edit_mode",
@@ -350,13 +411,15 @@
       "signatures": [
         "execute_in_edit_mode() → Union[Type, Callable]"
       ],
+      "example_status": "unavailable",
       "summary": "Allow a component's update() to run in edit mode.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/execute_in_edit_mode.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/execute_in_edit_mode.html",
       "counterpart_url": "/wiki/site/zh/api/execute_in_edit_mode.html",
-      "source": "docs/wiki/docs/en/api/execute_in_edit_mode.md"
+      "source": "docs/wiki/docs/en/api/execute_in_edit_mode.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.components:InxComponent",
@@ -383,6 +446,7 @@
         "stop_coroutine(coroutine: Coroutine) → None",
         "stop_all_coroutines() → None",
         "compare_tag(tag: str) → bool",
+        "InxComponent.reserve_instances(count: int) → None",
         "awake() → None",
         "start() → None",
         "update(delta_time: float) → None",
@@ -399,13 +463,46 @@
         "on_draw_gizmos_selected() → None",
         "__repr__() → str"
       ],
+      "example_status": "curated",
       "summary": "Base class for Python-scripted game components (Unity-style lifecycle).",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/InxComponent.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/InxComponent.html",
       "counterpart_url": "/wiki/site/zh/api/InxComponent.html",
-      "source": "docs/wiki/docs/en/api/InxComponent.md"
+      "source": "docs/wiki/docs/en/api/InxComponent.md",
+      "related_documents": [
+        {
+          "id": "en.learn.first-component",
+          "title": "Your First Component",
+          "url": "/wiki/site/en/learn/first-component.html"
+        },
+        {
+          "id": "en.manual.debugging",
+          "title": "Debugging and the Console",
+          "url": "/wiki/site/en/manual/debugging.html"
+        },
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.input-and-time",
+          "title": "Input and Time",
+          "url": "/wiki/site/en/manual/input-and-time.html"
+        },
+        {
+          "id": "en.manual.physics",
+          "title": "Physics",
+          "url": "/wiki/site/en/manual/physics.html"
+        },
+        {
+          "id": "en.manual.scenes-and-objects",
+          "title": "Scenes and Objects",
+          "url": "/wiki/site/en/manual/scenes-and-objects.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.components:require_component",
@@ -417,13 +514,15 @@
       "signatures": [
         "require_component() → Callable"
       ],
+      "example_status": "unavailable",
       "summary": "Declare that a component requires other component types.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/require_component.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/require_component.html",
       "counterpart_url": "/wiki/site/zh/api/require_component.html",
-      "source": "docs/wiki/docs/en/api/require_component.md"
+      "source": "docs/wiki/docs/en/api/require_component.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.components:serialized_field",
@@ -445,13 +544,21 @@
         "Optional[float]",
         "Optional[Callable]"
       ],
+      "example_status": "curated",
       "summary": "Mark a field as serialized and inspector-visible.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/serialized_field.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/serialized_field.html",
       "counterpart_url": "/wiki/site/zh/api/serialized_field.html",
-      "source": "docs/wiki/docs/en/api/serialized_field.md"
+      "source": "docs/wiki/docs/en/api/serialized_field.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.components.builtin:AudioListener",
@@ -465,13 +572,21 @@
         "serialize() → str",
         "deserialize(json_str: str) → bool"
       ],
+      "example_status": "curated",
       "summary": "Represents the listener/ears for 3D audio in the scene.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/AudioListener.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/AudioListener.html",
       "counterpart_url": "/wiki/site/zh/api/AudioListener.html",
-      "source": "docs/wiki/docs/en/api/AudioListener.md"
+      "source": "docs/wiki/docs/en/api/AudioListener.md",
+      "related_documents": [
+        {
+          "id": "en.learn.audio-workflow",
+          "title": "Audio Workflow",
+          "url": "/wiki/site/en/learn/audio-workflow.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.components.builtin:AudioSource",
@@ -503,13 +618,21 @@
         "serialize() → str",
         "deserialize(json_str: str) → bool"
       ],
+      "example_status": "curated",
       "summary": "Multi-track audio playback component.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/AudioSource.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/AudioSource.html",
       "counterpart_url": "/wiki/site/zh/api/AudioSource.html",
-      "source": "docs/wiki/docs/en/api/AudioSource.md"
+      "source": "docs/wiki/docs/en/api/AudioSource.md",
+      "related_documents": [
+        {
+          "id": "en.learn.audio-workflow",
+          "title": "Audio Workflow",
+          "url": "/wiki/site/en/learn/audio-workflow.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.components.builtin:BoxCollider",
@@ -522,13 +645,21 @@
         "Any",
         "on_draw_gizmos_selected() → None"
       ],
+      "example_status": "unavailable",
       "summary": "A box-shaped collider primitive.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/BoxCollider.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/BoxCollider.html",
       "counterpart_url": "/wiki/site/zh/api/BoxCollider.html",
-      "source": "docs/wiki/docs/en/api/BoxCollider.md"
+      "source": "docs/wiki/docs/en/api/BoxCollider.md",
+      "related_documents": [
+        {
+          "id": "en.manual.physics",
+          "title": "Physics",
+          "url": "/wiki/site/en/manual/physics.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.components.builtin:Camera",
@@ -548,13 +679,26 @@
         "deserialize(json_str: str) → bool",
         "on_draw_gizmos_selected() → None"
       ],
+      "example_status": "curated",
       "summary": "A Camera component that renders a view of the scene.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Camera.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Camera.html",
       "counterpart_url": "/wiki/site/zh/api/Camera.html",
-      "source": "docs/wiki/docs/en/api/Camera.md"
+      "source": "docs/wiki/docs/en/api/Camera.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.input-and-time",
+          "title": "Input and Time",
+          "url": "/wiki/site/en/manual/input-and-time.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.components.builtin:CapsuleCollider",
@@ -568,13 +712,15 @@
         "int",
         "on_draw_gizmos_selected() → None"
       ],
+      "example_status": "unavailable",
       "summary": "A capsule-shaped collider primitive.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/CapsuleCollider.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/CapsuleCollider.html",
       "counterpart_url": "/wiki/site/zh/api/CapsuleCollider.html",
-      "source": "docs/wiki/docs/en/api/CapsuleCollider.md"
+      "source": "docs/wiki/docs/en/api/CapsuleCollider.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.components.builtin:Collider",
@@ -586,15 +732,23 @@
       "signatures": [
         "Any",
         "bool",
-        "float"
+        "PhysicMaterialRef"
       ],
+      "example_status": "unavailable",
       "summary": "Base class for all collider components.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Collider.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Collider.html",
       "counterpart_url": "/wiki/site/zh/api/Collider.html",
-      "source": "docs/wiki/docs/en/api/Collider.md"
+      "source": "docs/wiki/docs/en/api/Collider.md",
+      "related_documents": [
+        {
+          "id": "en.manual.physics",
+          "title": "Physics",
+          "url": "/wiki/site/en/manual/physics.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.components.builtin:CollisionDetectionMode",
@@ -604,13 +758,15 @@
       "symbol": "CollisionDetectionMode",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "Collision detection algorithm used by the rigidbody.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/CollisionDetectionMode.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/CollisionDetectionMode.html",
       "counterpart_url": "/wiki/site/zh/api/CollisionDetectionMode.html",
-      "source": "docs/wiki/docs/en/api/CollisionDetectionMode.md"
+      "source": "docs/wiki/docs/en/api/CollisionDetectionMode.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.components.builtin:Light",
@@ -628,13 +784,21 @@
         "serialize() → str",
         "on_draw_gizmos_selected() → None"
       ],
+      "example_status": "curated",
       "summary": "A Light component that illuminates the scene.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Light.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Light.html",
       "counterpart_url": "/wiki/site/zh/api/Light.html",
-      "source": "docs/wiki/docs/en/api/Light.md"
+      "source": "docs/wiki/docs/en/api/Light.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.components.builtin:MeshCollider",
@@ -644,15 +808,18 @@
       "symbol": "MeshCollider",
       "kind": "class",
       "signatures": [
-        "bool"
+        "bool",
+        "str"
       ],
+      "example_status": "unavailable",
       "summary": "A collider that uses a mesh shape.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/MeshCollider.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/MeshCollider.html",
       "counterpart_url": "/wiki/site/zh/api/MeshCollider.html",
-      "source": "docs/wiki/docs/en/api/MeshCollider.md"
+      "source": "docs/wiki/docs/en/api/MeshCollider.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.components.builtin:MeshRenderer",
@@ -668,7 +835,6 @@
         "has_render_material() → bool",
         "get_effective_material(slot: int = ...) → Any",
         "get_material(slot: int) → Any",
-        "set_material(slot: int, guid: str) → None",
         "get_material_guids() → List[str]",
         "set_materials(guids: List[str]) → None",
         "set_material_slot_count(count: int) → None",
@@ -685,13 +851,15 @@
         "clear_mesh_asset() → None",
         "serialize() → str"
       ],
+      "example_status": "curated",
       "summary": "Renders a mesh with assigned materials.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/MeshRenderer.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/MeshRenderer.html",
       "counterpart_url": "/wiki/site/zh/api/MeshRenderer.html",
-      "source": "docs/wiki/docs/en/api/MeshRenderer.md"
+      "source": "docs/wiki/docs/en/api/MeshRenderer.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.components.builtin:Rigidbody",
@@ -721,13 +889,26 @@
         "wake_up() → None",
         "sleep() → None"
       ],
+      "example_status": "curated",
       "summary": "Controls physics simulation for the GameObject.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Rigidbody.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Rigidbody.html",
       "counterpart_url": "/wiki/site/zh/api/Rigidbody.html",
-      "source": "docs/wiki/docs/en/api/Rigidbody.md"
+      "source": "docs/wiki/docs/en/api/Rigidbody.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.physics",
+          "title": "Physics",
+          "url": "/wiki/site/en/manual/physics.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.components.builtin:RigidbodyConstraints",
@@ -737,13 +918,15 @@
       "symbol": "RigidbodyConstraints",
       "kind": "class",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "Flags to constrain rigidbody motion.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/RigidbodyConstraints.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/RigidbodyConstraints.html",
       "counterpart_url": "/wiki/site/zh/api/RigidbodyConstraints.html",
-      "source": "docs/wiki/docs/en/api/RigidbodyConstraints.md"
+      "source": "docs/wiki/docs/en/api/RigidbodyConstraints.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.components.builtin:SphereCollider",
@@ -756,13 +939,21 @@
         "float",
         "on_draw_gizmos_selected() → None"
       ],
+      "example_status": "unavailable",
       "summary": "A sphere-shaped collider primitive.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/SphereCollider.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/SphereCollider.html",
       "counterpart_url": "/wiki/site/zh/api/SphereCollider.html",
-      "source": "docs/wiki/docs/en/api/SphereCollider.md"
+      "source": "docs/wiki/docs/en/api/SphereCollider.md",
+      "related_documents": [
+        {
+          "id": "en.manual.physics",
+          "title": "Physics",
+          "url": "/wiki/site/en/manual/physics.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.core:AudioClip",
@@ -783,13 +974,21 @@
         "static AudioClip.from_native(native: CppAudioClip) → AudioClip",
         "__repr__() → str"
       ],
+      "example_status": "curated",
       "summary": "Pythonic wrapper around C++ AudioClip.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/AudioClip.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/AudioClip.html",
       "counterpart_url": "/wiki/site/zh/api/AudioClip.html",
-      "source": "docs/wiki/docs/en/api/AudioClip.md"
+      "source": "docs/wiki/docs/en/api/AudioClip.md",
+      "related_documents": [
+        {
+          "id": "en.learn.audio-workflow",
+          "title": "Audio Workflow",
+          "url": "/wiki/site/en/learn/audio-workflow.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.core:Material",
@@ -805,6 +1004,8 @@
         "int",
         "bool",
         "float",
+        "to_dict() → dict",
+        "apply_dict(document: dict) → bool",
         "dispose() → None",
         "clone() → Material",
         "set_shader(shader_name: str) → None",
@@ -826,7 +1027,6 @@
         "has_property(name: str) → bool",
         "get_property(name: str) → Any",
         "get_all_properties() → dict",
-        "to_dict() → dict",
         "save(file_path: str) → bool",
         "set_param(name: str, value: Any) → None",
         "set_texture(name: str, value: Any) → None",
@@ -841,13 +1041,26 @@
         "__eq__(other: object) → bool",
         "__hash__() → int"
       ],
+      "example_status": "unavailable",
       "summary": "Pythonic wrapper around C++ InxMaterial.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Material.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Material.html",
       "counterpart_url": "/wiki/site/zh/api/Material.html",
-      "source": "docs/wiki/docs/en/api/Material.md"
+      "source": "docs/wiki/docs/en/api/Material.md",
+      "related_documents": [
+        {
+          "id": "en.manual.assets-and-meta",
+          "title": "Assets and `.meta` files",
+          "url": "/wiki/site/en/manual/assets-and-meta.html"
+        },
+        {
+          "id": "en.manual.rendering-and-renderstack",
+          "title": "Rendering and RenderStack",
+          "url": "/wiki/site/en/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.core:Shader",
@@ -863,13 +1076,15 @@
         "Shader.refresh_materials(shader_id: str, engine: Optional[object] = ...) → bool",
         "Shader.load_spirv(name: str, spirv_code: bytes, shader_type: str = ...) → None"
       ],
+      "example_status": "unavailable",
       "summary": "Static utility class for shader management.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Shader.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Shader.html",
       "counterpart_url": "/wiki/site/zh/api/Shader.html",
-      "source": "docs/wiki/docs/en/api/Shader.md"
+      "source": "docs/wiki/docs/en/api/Shader.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.core:Texture",
@@ -888,19 +1103,27 @@
         "pixels_as_list() → list",
         "to_numpy() → 'numpy.ndarray'",
         "static Texture.load(file_path: str) → Optional[Texture]",
-        "static Texture.from_memory(data: bytes, width: int, height: int, channels: int = ..., name: str = ...) → Optional[Texture]",
+        "static Texture.decode(data: bytes, name: str = ...) → Optional[Texture]",
         "static Texture.solid_color(width: int, height: int, r: int = ..., g: int = ..., b: int = ..., a: int = ...) → Optional[Texture]",
         "static Texture.checkerboard(width: int, height: int, cell_size: int = ...) → Optional[Texture]",
         "static Texture.from_native(native: TextureData) → Texture",
         "__repr__() → str"
       ],
+      "example_status": "unavailable",
       "summary": "Pythonic wrapper around C++ TextureData.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Texture.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Texture.html",
       "counterpart_url": "/wiki/site/zh/api/Texture.html",
-      "source": "docs/wiki/docs/en/api/Texture.md"
+      "source": "docs/wiki/docs/en/api/Texture.md",
+      "related_documents": [
+        {
+          "id": "en.manual.assets-and-meta",
+          "title": "Assets and `.meta` files",
+          "url": "/wiki/site/en/manual/assets-and-meta.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.coroutine:Coroutine",
@@ -913,13 +1136,21 @@
         "Coroutine.__init__(generator: Generator, owner: Any = ...) → None",
         "bool"
       ],
+      "example_status": "unavailable",
       "summary": "A handle to a running coroutine.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Coroutine.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Coroutine.html",
       "counterpart_url": "/wiki/site/zh/api/Coroutine.html",
-      "source": "docs/wiki/docs/en/api/Coroutine.md"
+      "source": "docs/wiki/docs/en/api/Coroutine.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.coroutine:WaitForEndOfFrame",
@@ -929,13 +1160,15 @@
       "symbol": "WaitForEndOfFrame",
       "kind": "class",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "Suspend a coroutine until the end of the current frame.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/WaitForEndOfFrame.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/WaitForEndOfFrame.html",
       "counterpart_url": "/wiki/site/zh/api/WaitForEndOfFrame.html",
-      "source": "docs/wiki/docs/en/api/WaitForEndOfFrame.md"
+      "source": "docs/wiki/docs/en/api/WaitForEndOfFrame.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.coroutine:WaitForFixedUpdate",
@@ -945,13 +1178,15 @@
       "symbol": "WaitForFixedUpdate",
       "kind": "class",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "Suspend a coroutine until the next fixed update.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/WaitForFixedUpdate.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/WaitForFixedUpdate.html",
       "counterpart_url": "/wiki/site/zh/api/WaitForFixedUpdate.html",
-      "source": "docs/wiki/docs/en/api/WaitForFixedUpdate.md"
+      "source": "docs/wiki/docs/en/api/WaitForFixedUpdate.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.coroutine:WaitForSeconds",
@@ -964,13 +1199,21 @@
         "WaitForSeconds.__init__(seconds: float) → None",
         "float"
       ],
+      "example_status": "unavailable",
       "summary": "Suspend a coroutine for a given number of seconds.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/WaitForSeconds.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/WaitForSeconds.html",
       "counterpart_url": "/wiki/site/zh/api/WaitForSeconds.html",
-      "source": "docs/wiki/docs/en/api/WaitForSeconds.md"
+      "source": "docs/wiki/docs/en/api/WaitForSeconds.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.coroutine:WaitForSecondsRealtime",
@@ -983,13 +1226,15 @@
         "WaitForSecondsRealtime.__init__(seconds: float) → None",
         "float"
       ],
+      "example_status": "unavailable",
       "summary": "Suspend a coroutine for a given number of real-time seconds.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/WaitForSecondsRealtime.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/WaitForSecondsRealtime.html",
       "counterpart_url": "/wiki/site/zh/api/WaitForSecondsRealtime.html",
-      "source": "docs/wiki/docs/en/api/WaitForSecondsRealtime.md"
+      "source": "docs/wiki/docs/en/api/WaitForSecondsRealtime.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.coroutine:WaitUntil",
@@ -1002,13 +1247,15 @@
         "WaitUntil.__init__(predicate: Callable[[], bool]) → None",
         "Callable[[], bool]"
       ],
+      "example_status": "unavailable",
       "summary": "Suspend a coroutine until the predicate returns True.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/WaitUntil.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/WaitUntil.html",
       "counterpart_url": "/wiki/site/zh/api/WaitUntil.html",
-      "source": "docs/wiki/docs/en/api/WaitUntil.md"
+      "source": "docs/wiki/docs/en/api/WaitUntil.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.coroutine:WaitWhile",
@@ -1021,13 +1268,15 @@
         "WaitWhile.__init__(predicate: Callable[[], bool]) → None",
         "Callable[[], bool]"
       ],
+      "example_status": "unavailable",
       "summary": "Suspend a coroutine while the predicate returns True.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/WaitWhile.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/WaitWhile.html",
       "counterpart_url": "/wiki/site/zh/api/WaitWhile.html",
-      "source": "docs/wiki/docs/en/api/WaitWhile.md"
+      "source": "docs/wiki/docs/en/api/WaitWhile.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.debug:Debug",
@@ -1046,13 +1295,26 @@
         "static Debug.clear_console() → None",
         "static Debug.log_internal(message: Any, context: Any = ...) → None"
       ],
+      "example_status": "unavailable",
       "summary": "Utility class for logging messages to the console.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Debug.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Debug.html",
       "counterpart_url": "/wiki/site/zh/api/Debug.html",
-      "source": "docs/wiki/docs/en/api/Debug.md"
+      "source": "docs/wiki/docs/en/api/Debug.md",
+      "related_documents": [
+        {
+          "id": "en.manual.debugging",
+          "title": "Debugging and the Console",
+          "url": "/wiki/site/en/manual/debugging.html"
+        },
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.gizmos:Gizmos",
@@ -1072,13 +1334,15 @@
         "Gizmos.draw_frustum(position: Vec3, fov_deg: float, aspect: float, near: float, far: float, forward: Vec3 = ..., up: Vec3 = ..., right: Vec3 = ...) → None",
         "Gizmos.draw_wire_arc(center: Vec3, normal: Vec3, radius: float, start_angle_deg: float = ..., arc_deg: float = ..., segments: int = ...) → None"
       ],
+      "example_status": "unavailable",
       "summary": "Draw visual debugging helpers in the Scene view.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Gizmos.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Gizmos.html",
       "counterpart_url": "/wiki/site/zh/api/Gizmos.html",
-      "source": "docs/wiki/docs/en/api/Gizmos.md"
+      "source": "docs/wiki/docs/en/api/Gizmos.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.input:Input",
@@ -1110,13 +1374,26 @@
         "static Input.get_axis_raw(axis_name: str) → float",
         "static Input.reset_input_axes() → None"
       ],
+      "example_status": "curated",
       "summary": "Interface for reading input from keyboard, mouse, and touch.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Input.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Input.html",
       "counterpart_url": "/wiki/site/zh/api/Input.html",
-      "source": "docs/wiki/docs/en/api/Input.md"
+      "source": "docs/wiki/docs/en/api/Input.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.input-and-time",
+          "title": "Input and Time",
+          "url": "/wiki/site/en/manual/input-and-time.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.input:KeyCode",
@@ -1128,13 +1405,26 @@
       "signatures": [
         "int"
       ],
+      "example_status": "unavailable",
       "summary": "Key code constants for keyboard input.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/KeyCode.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/KeyCode.html",
       "counterpart_url": "/wiki/site/zh/api/KeyCode.html",
-      "source": "docs/wiki/docs/en/api/KeyCode.md"
+      "source": "docs/wiki/docs/en/api/KeyCode.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.input-and-time",
+          "title": "Input and Time",
+          "url": "/wiki/site/en/manual/input-and-time.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.jit:njit",
@@ -1146,13 +1436,21 @@
       "signatures": [
         "njit() → Any"
       ],
+      "example_status": "unavailable",
       "summary": "Numba njit decorator, or a no-op fallback when Numba is unavailable.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/njit.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/njit.html",
       "counterpart_url": "/wiki/site/zh/api/njit.html",
-      "source": "docs/wiki/docs/en/api/njit.md"
+      "source": "docs/wiki/docs/en/api/njit.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.jit:warmup",
@@ -1165,13 +1463,15 @@
         "warmup(fn: Callable[..., Any]) → None",
         "Callable[..., Any]"
       ],
+      "example_status": "unavailable",
       "summary": "Pre-compile a @njit function by calling it with representative args.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/warmup.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/warmup.html",
       "counterpart_url": "/wiki/site/zh/api/warmup.html",
-      "source": "docs/wiki/docs/en/api/warmup.md"
+      "source": "docs/wiki/docs/en/api/warmup.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.math:quaternion",
@@ -1192,13 +1492,15 @@
         "static quaternion.inverse(q: quatf) → quatf",
         "static quaternion.rotate_towards(from_: quatf, to: quatf, max_degrees_delta: float) → quatf"
       ],
+      "example_status": "unavailable",
       "summary": "A representation of rotations using a quaternion.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/quaternion.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/quaternion.html",
       "counterpart_url": "/wiki/site/zh/api/quaternion.html",
-      "source": "docs/wiki/docs/en/api/quaternion.md"
+      "source": "docs/wiki/docs/en/api/quaternion.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.math:vector2",
@@ -1228,13 +1530,15 @@
         "static vector2.magnitude(v: Vector2) → float",
         "static vector2.sqr_magnitude(v: Vector2) → float"
       ],
+      "example_status": "unavailable",
       "summary": "A representation of 2D vectors and points.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/vector2.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/vector2.html",
       "counterpart_url": "/wiki/site/zh/api/vector2.html",
-      "source": "docs/wiki/docs/en/api/vector2.md"
+      "source": "docs/wiki/docs/en/api/vector2.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.math:vector3",
@@ -1269,13 +1573,15 @@
         "static vector3.magnitude(v: Vector3) → float",
         "static vector3.sqr_magnitude(v: Vector3) → float"
       ],
+      "example_status": "unavailable",
       "summary": "A representation of 3D vectors and points.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/vector3.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/vector3.html",
       "counterpart_url": "/wiki/site/zh/api/vector3.html",
-      "source": "docs/wiki/docs/en/api/vector3.md"
+      "source": "docs/wiki/docs/en/api/vector3.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.math:vector4",
@@ -1300,13 +1606,15 @@
         "static vector4.magnitude(v: vec4f) → float",
         "static vector4.sqr_magnitude(v: vec4f) → float"
       ],
+      "example_status": "unavailable",
       "summary": "A representation of 4D vectors.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/vector4.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/vector4.html",
       "counterpart_url": "/wiki/site/zh/api/vector4.html",
-      "source": "docs/wiki/docs/en/api/vector4.md"
+      "source": "docs/wiki/docs/en/api/vector4.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.mathf:Mathf",
@@ -1357,13 +1665,15 @@
         "static Mathf.next_power_of_two(value: int) → int",
         "static Mathf.closest_power_of_two(value: int) → int"
       ],
+      "example_status": "unavailable",
       "summary": "A collection of common math functions and constants.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Mathf.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Mathf.html",
       "counterpart_url": "/wiki/site/zh/api/Mathf.html",
-      "source": "docs/wiki/docs/en/api/Mathf.md"
+      "source": "docs/wiki/docs/en/api/Mathf.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.physics:Physics",
@@ -1373,25 +1683,41 @@
       "symbol": "Physics",
       "kind": "class",
       "signatures": [
+        "int",
         "Any",
         "static Physics.get_gravity() → Any",
         "static Physics.set_gravity(value: Any) → None",
         "static Physics.raycast(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
         "static Physics.raycast_all(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
         "static Physics.overlap_sphere(center: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
-        "static Physics.overlap_box(center: Any, half_extents: Any, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
+        "static Physics.overlap_box(center: Any, half_extents: Any, orientation: Any = ..., layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
+        "static Physics.overlap_capsule(point0: Any, point1: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
         "static Physics.sphere_cast(origin: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
-        "static Physics.box_cast(center: Any, half_extents: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
+        "static Physics.box_cast(center: Any, half_extents: Any, direction: Any, orientation: Any = ..., max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
+        "static Physics.capsule_cast(point0: Any, point1: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
         "static Physics.ignore_layer_collision(layer1: int, layer2: int, ignore: bool = ...) → None",
         "static Physics.get_ignore_layer_collision(layer1: int, layer2: int) → bool"
       ],
+      "example_status": "curated",
       "summary": "Global physics system for raycasting and spatial queries.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Physics.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Physics.html",
       "counterpart_url": "/wiki/site/zh/api/Physics.html",
-      "source": "docs/wiki/docs/en/api/Physics.md"
+      "source": "docs/wiki/docs/en/api/Physics.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.physics",
+          "title": "Physics",
+          "url": "/wiki/site/en/manual/physics.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.rendergraph:Format",
@@ -1403,13 +1729,15 @@
       "signatures": [
         "bool"
       ],
-      "summary": "Texture format for render targets.",
+      "example_status": "unavailable",
+      "summary": "Texture format for render targets. This public alias maps to the native PixelFormat enum.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Format.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Format.html",
       "counterpart_url": "/wiki/site/zh/api/Format.html",
-      "source": "docs/wiki/docs/en/api/Format.md"
+      "source": "docs/wiki/docs/en/api/Format.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.rendergraph:RenderGraph",
@@ -1439,13 +1767,26 @@
         "get_debug_string() → str",
         "build() → RenderGraphDescription"
       ],
+      "example_status": "unavailable",
       "summary": "A declarative render graph that defines texture resources and render passes.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/RenderGraph.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/RenderGraph.html",
       "counterpart_url": "/wiki/site/zh/api/RenderGraph.html",
-      "source": "docs/wiki/docs/en/api/RenderGraph.md"
+      "source": "docs/wiki/docs/en/api/RenderGraph.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.rendering-and-renderstack",
+          "title": "Rendering and RenderStack",
+          "url": "/wiki/site/en/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.rendergraph:RenderPassBuilder",
@@ -1471,13 +1812,15 @@
         "set_param(name: str, value: float) → RenderPassBuilder",
         "__repr__() → str"
       ],
+      "example_status": "unavailable",
       "summary": "Fluent builder for constructing a render pass.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/RenderPassBuilder.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/RenderPassBuilder.html",
       "counterpart_url": "/wiki/site/zh/api/RenderPassBuilder.html",
-      "source": "docs/wiki/docs/en/api/RenderPassBuilder.md"
+      "source": "docs/wiki/docs/en/api/RenderPassBuilder.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.rendergraph:TextureHandle",
@@ -1497,13 +1840,15 @@
         "__eq__(other: object) → bool",
         "__hash__() → int"
       ],
+      "example_status": "unavailable",
       "summary": "A handle to a transient texture resource in the render graph.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/TextureHandle.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/TextureHandle.html",
       "counterpart_url": "/wiki/site/zh/api/TextureHandle.html",
-      "source": "docs/wiki/docs/en/api/TextureHandle.md"
+      "source": "docs/wiki/docs/en/api/TextureHandle.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.renderstack:BloomEffect",
@@ -1519,13 +1864,21 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "Unity-aligned Bloom post-processing effect.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/BloomEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/BloomEffect.html",
       "counterpart_url": "/wiki/site/zh/api/BloomEffect.html",
-      "source": "docs/wiki/docs/en/api/BloomEffect.md"
+      "source": "docs/wiki/docs/en/api/BloomEffect.md",
+      "related_documents": [
+        {
+          "id": "en.manual.rendering-and-renderstack",
+          "title": "Rendering and RenderStack",
+          "url": "/wiki/site/en/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.renderstack:ChromaticAberrationEffect",
@@ -1541,13 +1894,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "URP-aligned Chromatic Aberration post-processing effect.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/ChromaticAberrationEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/ChromaticAberrationEffect.html",
       "counterpart_url": "/wiki/site/zh/api/ChromaticAberrationEffect.html",
-      "source": "docs/wiki/docs/en/api/ChromaticAberrationEffect.md"
+      "source": "docs/wiki/docs/en/api/ChromaticAberrationEffect.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.renderstack:ColorAdjustmentsEffect",
@@ -1563,13 +1918,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "URP-aligned Color Adjustments post-processing effect.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/ColorAdjustmentsEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/ColorAdjustmentsEffect.html",
       "counterpart_url": "/wiki/site/zh/api/ColorAdjustmentsEffect.html",
-      "source": "docs/wiki/docs/en/api/ColorAdjustmentsEffect.md"
+      "source": "docs/wiki/docs/en/api/ColorAdjustmentsEffect.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.renderstack:FilmGrainEffect",
@@ -1585,13 +1942,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "URP-aligned Film Grain post-processing effect.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/FilmGrainEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/FilmGrainEffect.html",
       "counterpart_url": "/wiki/site/zh/api/FilmGrainEffect.html",
-      "source": "docs/wiki/docs/en/api/FilmGrainEffect.md"
+      "source": "docs/wiki/docs/en/api/FilmGrainEffect.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.renderstack:FullScreenEffect",
@@ -1613,13 +1972,15 @@
         "static FullScreenEffect.get_or_create_texture(graph: RenderGraph, name: str, format: Any = ..., camera_target: bool = ..., size: Any = ..., size_divisor: int = ...) → Any",
         "__repr__() → str"
       ],
+      "example_status": "unavailable",
       "summary": "Base class for fullscreen post-processing effects.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/FullScreenEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/FullScreenEffect.html",
       "counterpart_url": "/wiki/site/zh/api/FullScreenEffect.html",
-      "source": "docs/wiki/docs/en/api/FullScreenEffect.md"
+      "source": "docs/wiki/docs/en/api/FullScreenEffect.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.renderstack:RenderPass",
@@ -1638,13 +1999,15 @@
         "validate(available_resources: Set[str]) → List[str]",
         "__repr__() → str"
       ],
+      "example_status": "unavailable",
       "summary": "Base class for custom render passes injected into the render stack.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/RenderPass.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/RenderPass.html",
       "counterpart_url": "/wiki/site/zh/api/RenderPass.html",
-      "source": "docs/wiki/docs/en/api/RenderPass.md"
+      "source": "docs/wiki/docs/en/api/RenderPass.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.renderstack:RenderPipeline",
@@ -1662,13 +2025,21 @@
         "define_topology(graph: RenderGraph) → None",
         "dispose() → None"
       ],
+      "example_status": "unavailable",
       "summary": "Base class for scriptable render pipelines.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/RenderPipeline.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/RenderPipeline.html",
       "counterpart_url": "/wiki/site/zh/api/RenderPipeline.html",
-      "source": "docs/wiki/docs/en/api/RenderPipeline.md"
+      "source": "docs/wiki/docs/en/api/RenderPipeline.md",
+      "related_documents": [
+        {
+          "id": "en.manual.rendering-and-renderstack",
+          "title": "Rendering and RenderStack",
+          "url": "/wiki/site/en/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.renderstack:RenderStack",
@@ -1702,13 +2073,26 @@
         "on_before_serialize() → None",
         "on_after_deserialize() → None"
       ],
+      "example_status": "unavailable",
       "summary": "Scene singleton component that manages render pipelines and injected passes.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/RenderStack.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/RenderStack.html",
       "counterpart_url": "/wiki/site/zh/api/RenderStack.html",
-      "source": "docs/wiki/docs/en/api/RenderStack.md"
+      "source": "docs/wiki/docs/en/api/RenderStack.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.rendering-and-renderstack",
+          "title": "Rendering and RenderStack",
+          "url": "/wiki/site/en/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.renderstack:SharpenEffect",
@@ -1724,13 +2108,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "Contrast Adaptive Sharpening (CAS) post-processing effect.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/SharpenEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/SharpenEffect.html",
       "counterpart_url": "/wiki/site/zh/api/SharpenEffect.html",
-      "source": "docs/wiki/docs/en/api/SharpenEffect.md"
+      "source": "docs/wiki/docs/en/api/SharpenEffect.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.renderstack:ToneMappingEffect",
@@ -1748,13 +2134,21 @@
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None",
         "set_params_dict(params: Dict[str, Any]) → None"
       ],
+      "example_status": "unavailable",
       "summary": "HDR-to-LDR tone mapping post-processing effect.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/ToneMappingEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/ToneMappingEffect.html",
       "counterpart_url": "/wiki/site/zh/api/ToneMappingEffect.html",
-      "source": "docs/wiki/docs/en/api/ToneMappingEffect.md"
+      "source": "docs/wiki/docs/en/api/ToneMappingEffect.md",
+      "related_documents": [
+        {
+          "id": "en.manual.rendering-and-renderstack",
+          "title": "Rendering and RenderStack",
+          "url": "/wiki/site/en/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.renderstack:VignetteEffect",
@@ -1771,13 +2165,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "URP-aligned Vignette post-processing effect.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/VignetteEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/VignetteEffect.html",
       "counterpart_url": "/wiki/site/zh/api/VignetteEffect.html",
-      "source": "docs/wiki/docs/en/api/VignetteEffect.md"
+      "source": "docs/wiki/docs/en/api/VignetteEffect.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.renderstack:WhiteBalanceEffect",
@@ -1793,13 +2189,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "URP-aligned White Balance post-processing effect.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/WhiteBalanceEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/WhiteBalanceEffect.html",
       "counterpart_url": "/wiki/site/zh/api/WhiteBalanceEffect.html",
-      "source": "docs/wiki/docs/en/api/WhiteBalanceEffect.md"
+      "source": "docs/wiki/docs/en/api/WhiteBalanceEffect.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.scene:SceneManager",
@@ -1823,13 +2221,26 @@
         "static SceneManager.get_all_scene_names() → List[str]",
         "static SceneManager.dont_destroy_on_load(game_object: object) → None"
       ],
+      "example_status": "unavailable",
       "summary": "Manages scene loading, unloading, and queries.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/SceneManager.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/SceneManager.html",
       "counterpart_url": "/wiki/site/zh/api/SceneManager.html",
-      "source": "docs/wiki/docs/en/api/SceneManager.md"
+      "source": "docs/wiki/docs/en/api/SceneManager.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.scenes-and-objects",
+          "title": "Scenes and Objects",
+          "url": "/wiki/site/en/manual/scenes-and-objects.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.timing:Time",
@@ -1842,13 +2253,26 @@
         "float",
         "int"
       ],
+      "example_status": "curated",
       "summary": "Provides access to time information for the current frame.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/Time.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Time.html",
       "counterpart_url": "/wiki/site/zh/api/Time.html",
-      "source": "docs/wiki/docs/en/api/Time.md"
+      "source": "docs/wiki/docs/en/api/Time.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.input-and-time",
+          "title": "Input and Time",
+          "url": "/wiki/site/en/manual/input-and-time.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.ui:InxUIComponent",
@@ -1858,13 +2282,15 @@
       "symbol": "InxUIComponent",
       "kind": "class",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "Base class for every UI component in Infernux.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/InxUIComponent.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/InxUIComponent.html",
       "counterpart_url": "/wiki/site/zh/api/InxUIComponent.html",
-      "source": "docs/wiki/docs/en/api/InxUIComponent.md"
+      "source": "docs/wiki/docs/en/api/InxUIComponent.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.ui:PointerEventData",
@@ -1883,13 +2309,15 @@
         "bool",
         "Use() → None"
       ],
+      "example_status": "unavailable",
       "summary": "Data container for a single pointer event.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/PointerEventData.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/PointerEventData.html",
       "counterpart_url": "/wiki/site/zh/api/PointerEventData.html",
-      "source": "docs/wiki/docs/en/api/PointerEventData.md"
+      "source": "docs/wiki/docs/en/api/PointerEventData.md",
+      "related_documents": []
     },
     {
       "id": "en:Infernux.ui:UIButton",
@@ -1909,13 +2337,26 @@
         "on_pointer_click(event_data: PointerEventData) → None",
         "awake() → None"
       ],
+      "example_status": "unavailable",
       "summary": "A clickable button with visual state feedback.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/UIButton.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/UIButton.html",
       "counterpart_url": "/wiki/site/zh/api/UIButton.html",
-      "source": "docs/wiki/docs/en/api/UIButton.md"
+      "source": "docs/wiki/docs/en/api/UIButton.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.ui",
+          "title": "Screen-space UI",
+          "url": "/wiki/site/en/manual/ui.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.ui:UICanvas",
@@ -1937,13 +2378,26 @@
         "raycast(canvas_x: float, canvas_y: float, tolerance: float = ...) → Optional[InxUIScreenComponent]",
         "raycast_all(canvas_x: float, canvas_y: float, tolerance: float = ...) → List[InxUIScreenComponent]"
       ],
+      "example_status": "curated",
       "summary": "Screen-space UI canvas — root container for all UI elements.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/UICanvas.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/UICanvas.html",
       "counterpart_url": "/wiki/site/zh/api/UICanvas.html",
-      "source": "docs/wiki/docs/en/api/UICanvas.md"
+      "source": "docs/wiki/docs/en/api/UICanvas.md",
+      "related_documents": [
+        {
+          "id": "en.manual.engine-map",
+          "title": "Engine Map",
+          "url": "/wiki/site/en/manual/engine-map.html"
+        },
+        {
+          "id": "en.manual.ui",
+          "title": "Screen-space UI",
+          "url": "/wiki/site/en/manual/ui.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.ui:UIImage",
@@ -1956,13 +2410,26 @@
         "str",
         "list"
       ],
+      "example_status": "unavailable",
       "summary": "Screen-space image element rendered from a texture asset.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/UIImage.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/UIImage.html",
       "counterpart_url": "/wiki/site/zh/api/UIImage.html",
-      "source": "docs/wiki/docs/en/api/UIImage.md"
+      "source": "docs/wiki/docs/en/api/UIImage.md",
+      "related_documents": [
+        {
+          "id": "en.manual.assets-and-meta",
+          "title": "Assets and `.meta` files",
+          "url": "/wiki/site/en/manual/assets-and-meta.html"
+        },
+        {
+          "id": "en.manual.ui",
+          "title": "Screen-space UI",
+          "url": "/wiki/site/en/manual/ui.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.ui:UISelectable",
@@ -1983,13 +2450,21 @@
         "on_pointer_up(event_data: PointerEventData) → None",
         "awake() → None"
       ],
+      "example_status": "unavailable",
       "summary": "Base class for interactive UI elements with visual state feedback.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/UISelectable.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/UISelectable.html",
       "counterpart_url": "/wiki/site/zh/api/UISelectable.html",
-      "source": "docs/wiki/docs/en/api/UISelectable.md"
+      "source": "docs/wiki/docs/en/api/UISelectable.md",
+      "related_documents": [
+        {
+          "id": "en.manual.ui",
+          "title": "Screen-space UI",
+          "url": "/wiki/site/en/manual/ui.html"
+        }
+      ]
     },
     {
       "id": "en:Infernux.ui:UIText",
@@ -2016,13 +2491,21 @@
         "is_width_editable() → bool",
         "is_height_editable() → bool"
       ],
+      "example_status": "unavailable",
       "summary": "Figma-style text label rendered with ImGui draw primitives.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/en/api/UIText.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/api/UIText.html",
       "counterpart_url": "/wiki/site/zh/api/UIText.html",
-      "source": "docs/wiki/docs/en/api/UIText.md"
+      "source": "docs/wiki/docs/en/api/UIText.md",
+      "related_documents": [
+        {
+          "id": "en.manual.ui",
+          "title": "Screen-space UI",
+          "url": "/wiki/site/en/manual/ui.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux:CameraClearFlags",
@@ -2032,13 +2515,15 @@
       "symbol": "CameraClearFlags",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/CameraClearFlags.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/CameraClearFlags.html",
       "counterpart_url": "/wiki/site/en/api/CameraClearFlags.html",
-      "source": "docs/wiki/docs/zh/api/CameraClearFlags.md"
+      "source": "docs/wiki/docs/zh/api/CameraClearFlags.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux:CameraProjection",
@@ -2048,13 +2533,15 @@
       "symbol": "CameraProjection",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/CameraProjection.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/CameraProjection.html",
       "counterpart_url": "/wiki/site/en/api/CameraProjection.html",
-      "source": "docs/wiki/docs/zh/api/CameraProjection.md"
+      "source": "docs/wiki/docs/zh/api/CameraProjection.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux:Component",
@@ -2066,20 +2553,23 @@
       "signatures": [
         "str",
         "int",
+        "ObjectHandle",
         "bool",
         "GameObject",
         "List[str]",
         "is_component_type(type_name: str) → bool",
         "serialize() → str",
-        "deserialize(json_str: str) → None"
+        "serialize_document() → Dict[str, Any]"
       ],
+      "example_status": "unavailable",
       "summary": "附加到 GameObject 的所有组件的基类。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Component.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Component.html",
       "counterpart_url": "/wiki/site/en/api/Component.html",
-      "source": "docs/wiki/docs/zh/api/Component.md"
+      "source": "docs/wiki/docs/zh/api/Component.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux:ForceMode",
@@ -2089,13 +2579,15 @@
       "symbol": "ForceMode",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/ForceMode.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/ForceMode.html",
       "counterpart_url": "/wiki/site/en/api/ForceMode.html",
-      "source": "docs/wiki/docs/zh/api/ForceMode.md"
+      "source": "docs/wiki/docs/zh/api/ForceMode.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux:GameObject",
@@ -2108,6 +2600,7 @@
         "str",
         "bool",
         "int",
+        "ObjectHandle",
         "Optional[GameObject]",
         "Transform",
         "Scene",
@@ -2136,20 +2629,35 @@
         "get_component_in_children(component_type: Any, include_inactive: bool = False) → Any",
         "get_component_in_parent(component_type: Any, include_inactive: bool = False) → Any",
         "serialize() → str",
-        "deserialize(json_str: str) → None",
+        "deserialize(json_str: str) → bool",
+        "serialize_document() → Dict[str, Any]",
+        "deserialize_document(document: Dict[str, Any]) → bool",
         "static GameObject.find(name: str) → Optional[GameObject]",
         "static GameObject.find_with_tag(tag: str) → Optional[GameObject]",
         "static GameObject.find_game_objects_with_tag(tag: str) → List[GameObject]",
         "static GameObject.instantiate(original: Any) → Optional[GameObject]",
         "static GameObject.destroy(game_object: GameObject) → None"
       ],
+      "example_status": "curated",
       "summary": "场景层级中具有组件的游戏对象。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/GameObject.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/GameObject.html",
       "counterpart_url": "/wiki/site/en/api/GameObject.html",
-      "source": "docs/wiki/docs/zh/api/GameObject.md"
+      "source": "docs/wiki/docs/zh/api/GameObject.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.scenes-and-objects",
+          "title": "场景与对象",
+          "url": "/wiki/site/zh/manual/scenes-and-objects.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux:LightShadows",
@@ -2159,13 +2667,15 @@
       "symbol": "LightShadows",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/LightShadows.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/LightShadows.html",
       "counterpart_url": "/wiki/site/en/api/LightShadows.html",
-      "source": "docs/wiki/docs/zh/api/LightShadows.md"
+      "source": "docs/wiki/docs/zh/api/LightShadows.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux:LightType",
@@ -2175,13 +2685,15 @@
       "symbol": "LightType",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/LightType.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/LightType.html",
       "counterpart_url": "/wiki/site/en/api/LightType.html",
-      "source": "docs/wiki/docs/zh/api/LightType.md"
+      "source": "docs/wiki/docs/zh/api/LightType.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux:LogLevel",
@@ -2191,13 +2703,15 @@
       "symbol": "LogLevel",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/LogLevel.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/LogLevel.html",
       "counterpart_url": "/wiki/site/en/api/LogLevel.html",
-      "source": "docs/wiki/docs/zh/api/LogLevel.md"
+      "source": "docs/wiki/docs/zh/api/LogLevel.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux:PrimitiveType",
@@ -2207,13 +2721,15 @@
       "symbol": "PrimitiveType",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/PrimitiveType.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/PrimitiveType.html",
       "counterpart_url": "/wiki/site/en/api/PrimitiveType.html",
-      "source": "docs/wiki/docs/zh/api/PrimitiveType.md"
+      "source": "docs/wiki/docs/zh/api/PrimitiveType.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux:Scene",
@@ -2235,31 +2751,39 @@
         "get_all_objects() → List[GameObject]",
         "find(name: str) → Optional[GameObject]",
         "find_by_id(id: int) → Optional[GameObject]",
+        "resolve_game_object(handle: ObjectHandle) → Optional[GameObject]",
+        "resolve_component(handle: ObjectHandle) → Optional[Component]",
         "find_object_by_id(id: int) → Optional[GameObject]",
         "find_with_tag(tag: str) → Optional[GameObject]",
         "find_game_objects_with_tag(tag: str) → List[GameObject]",
         "find_game_objects_in_layer(layer: int) → List[GameObject]",
         "destroy_game_object(game_object: GameObject) → None",
-        "instantiate_game_object(source: GameObject, parent: Optional[GameObject] = None) → Optional[GameObject]",
-        "instantiate_from_json(json_str: str, parent: Optional[GameObject] = None) → Optional[GameObject]",
         "process_pending_destroys() → None",
         "is_playing() → bool",
         "awake_object(game_object: GameObject) → None",
         "serialize() → str",
-        "deserialize(json_str: str) → None",
+        "serialize_document() → Dict[str, Any]",
         "save_to_file(path: str) → None",
-        "load_from_file(path: str) → None",
         "has_pending_py_components() → bool",
+        "get_pending_py_components() → List[PendingPyComponent]",
         "take_pending_py_components() → List[PendingPyComponent]",
         "start() → None"
       ],
+      "example_status": "unavailable",
       "summary": "运行时场景，包含 GameObject 层级。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Scene.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Scene.html",
       "counterpart_url": "/wiki/site/en/api/Scene.html",
-      "source": "docs/wiki/docs/zh/api/Scene.md"
+      "source": "docs/wiki/docs/zh/api/Scene.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.scenes-and-objects",
+          "title": "场景与对象",
+          "url": "/wiki/site/zh/manual/scenes-and-objects.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux:Space",
@@ -2269,13 +2793,15 @@
       "symbol": "Space",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Space.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Space.html",
       "counterpart_url": "/wiki/site/en/api/Space.html",
-      "source": "docs/wiki/docs/zh/api/Space.md"
+      "source": "docs/wiki/docs/zh/api/Space.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux:Transform",
@@ -2315,13 +2841,26 @@
         "local_to_world_matrix() → List[float]",
         "world_to_local_matrix() → List[float]"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: Component",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Transform.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Transform.html",
       "counterpart_url": "/wiki/site/en/api/Transform.html",
-      "source": "docs/wiki/docs/zh/api/Transform.md"
+      "source": "docs/wiki/docs/zh/api/Transform.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.scenes-and-objects",
+          "title": "场景与对象",
+          "url": "/wiki/site/zh/manual/scenes-and-objects.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.components:add_component_menu",
@@ -2334,13 +2873,15 @@
         "add_component_menu(path: str) → Callable",
         "str"
       ],
+      "example_status": "unavailable",
       "summary": "Specify where this component appears in the Add Component menu.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/add_component_menu.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/add_component_menu.html",
       "counterpart_url": "/wiki/site/en/api/add_component_menu.html",
-      "source": "docs/wiki/docs/zh/api/add_component_menu.md"
+      "source": "docs/wiki/docs/zh/api/add_component_menu.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.components:disallow_multiple",
@@ -2352,13 +2893,15 @@
       "signatures": [
         "disallow_multiple() → Union[Type, Callable]"
       ],
+      "example_status": "unavailable",
       "summary": "Prevent multiple instances of this component on a GameObject.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/disallow_multiple.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/disallow_multiple.html",
       "counterpart_url": "/wiki/site/en/api/disallow_multiple.html",
-      "source": "docs/wiki/docs/zh/api/disallow_multiple.md"
+      "source": "docs/wiki/docs/zh/api/disallow_multiple.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.components:execute_in_edit_mode",
@@ -2370,13 +2913,15 @@
       "signatures": [
         "execute_in_edit_mode() → Union[Type, Callable]"
       ],
+      "example_status": "unavailable",
       "summary": "Allow a component's update() to run in edit mode.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/execute_in_edit_mode.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/execute_in_edit_mode.html",
       "counterpart_url": "/wiki/site/en/api/execute_in_edit_mode.html",
-      "source": "docs/wiki/docs/zh/api/execute_in_edit_mode.md"
+      "source": "docs/wiki/docs/zh/api/execute_in_edit_mode.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.components:InxComponent",
@@ -2403,6 +2948,7 @@
         "stop_coroutine(coroutine: Coroutine) → None",
         "stop_all_coroutines() → None",
         "compare_tag(tag: str) → bool",
+        "InxComponent.reserve_instances(count: int) → None",
         "awake() → None",
         "start() → None",
         "update(delta_time: float) → None",
@@ -2419,13 +2965,46 @@
         "on_draw_gizmos_selected() → None",
         "__repr__() → str"
       ],
+      "example_status": "curated",
       "summary": "用户脚本组件的基类，类似于 Unity 的 MonoBehaviour。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/InxComponent.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/InxComponent.html",
       "counterpart_url": "/wiki/site/en/api/InxComponent.html",
-      "source": "docs/wiki/docs/zh/api/InxComponent.md"
+      "source": "docs/wiki/docs/zh/api/InxComponent.md",
+      "related_documents": [
+        {
+          "id": "zh.learn.first-component",
+          "title": "第一个组件",
+          "url": "/wiki/site/zh/learn/first-component.html"
+        },
+        {
+          "id": "zh.manual.debugging",
+          "title": "调试与 Console",
+          "url": "/wiki/site/zh/manual/debugging.html"
+        },
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.input-and-time",
+          "title": "输入与时间",
+          "url": "/wiki/site/zh/manual/input-and-time.html"
+        },
+        {
+          "id": "zh.manual.physics",
+          "title": "物理",
+          "url": "/wiki/site/zh/manual/physics.html"
+        },
+        {
+          "id": "zh.manual.scenes-and-objects",
+          "title": "场景与对象",
+          "url": "/wiki/site/zh/manual/scenes-and-objects.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.components:require_component",
@@ -2437,13 +3016,15 @@
       "signatures": [
         "require_component() → Callable"
       ],
+      "example_status": "unavailable",
       "summary": "Declare that a component requires other component types.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/require_component.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/require_component.html",
       "counterpart_url": "/wiki/site/en/api/require_component.html",
-      "source": "docs/wiki/docs/zh/api/require_component.md"
+      "source": "docs/wiki/docs/zh/api/require_component.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.components:serialized_field",
@@ -2465,13 +3046,21 @@
         "Optional[float]",
         "Optional[Callable]"
       ],
+      "example_status": "curated",
       "summary": "Mark a field as serialized and inspector-visible.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/serialized_field.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/serialized_field.html",
       "counterpart_url": "/wiki/site/en/api/serialized_field.html",
-      "source": "docs/wiki/docs/zh/api/serialized_field.md"
+      "source": "docs/wiki/docs/zh/api/serialized_field.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.components.builtin:AudioListener",
@@ -2485,13 +3074,21 @@
         "serialize() → str",
         "deserialize(json_str: str) → bool"
       ],
+      "example_status": "curated",
       "summary": "继承自: BuiltinComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/AudioListener.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/AudioListener.html",
       "counterpart_url": "/wiki/site/en/api/AudioListener.html",
-      "source": "docs/wiki/docs/zh/api/AudioListener.md"
+      "source": "docs/wiki/docs/zh/api/AudioListener.md",
+      "related_documents": [
+        {
+          "id": "zh.learn.audio-workflow",
+          "title": "音频工作流",
+          "url": "/wiki/site/zh/learn/audio-workflow.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.components.builtin:AudioSource",
@@ -2523,13 +3120,21 @@
         "serialize() → str",
         "deserialize(json_str: str) → bool"
       ],
+      "example_status": "curated",
       "summary": "继承自: BuiltinComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/AudioSource.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/AudioSource.html",
       "counterpart_url": "/wiki/site/en/api/AudioSource.html",
-      "source": "docs/wiki/docs/zh/api/AudioSource.md"
+      "source": "docs/wiki/docs/zh/api/AudioSource.md",
+      "related_documents": [
+        {
+          "id": "zh.learn.audio-workflow",
+          "title": "音频工作流",
+          "url": "/wiki/site/zh/learn/audio-workflow.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.components.builtin:BoxCollider",
@@ -2542,13 +3147,21 @@
         "Any",
         "on_draw_gizmos_selected() → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: Collider",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/BoxCollider.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/BoxCollider.html",
       "counterpart_url": "/wiki/site/en/api/BoxCollider.html",
-      "source": "docs/wiki/docs/zh/api/BoxCollider.md"
+      "source": "docs/wiki/docs/zh/api/BoxCollider.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.physics",
+          "title": "物理",
+          "url": "/wiki/site/zh/manual/physics.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.components.builtin:Camera",
@@ -2568,13 +3181,26 @@
         "deserialize(json_str: str) → bool",
         "on_draw_gizmos_selected() → None"
       ],
+      "example_status": "curated",
       "summary": "继承自: BuiltinComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Camera.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Camera.html",
       "counterpart_url": "/wiki/site/en/api/Camera.html",
-      "source": "docs/wiki/docs/zh/api/Camera.md"
+      "source": "docs/wiki/docs/zh/api/Camera.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.input-and-time",
+          "title": "输入与时间",
+          "url": "/wiki/site/zh/manual/input-and-time.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.components.builtin:CapsuleCollider",
@@ -2588,13 +3214,15 @@
         "int",
         "on_draw_gizmos_selected() → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: Collider",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/CapsuleCollider.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/CapsuleCollider.html",
       "counterpart_url": "/wiki/site/en/api/CapsuleCollider.html",
-      "source": "docs/wiki/docs/zh/api/CapsuleCollider.md"
+      "source": "docs/wiki/docs/zh/api/CapsuleCollider.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.components.builtin:Collider",
@@ -2606,15 +3234,23 @@
       "signatures": [
         "Any",
         "bool",
-        "float"
+        "PhysicMaterialRef"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: BuiltinComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Collider.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Collider.html",
       "counterpart_url": "/wiki/site/en/api/Collider.html",
-      "source": "docs/wiki/docs/zh/api/Collider.md"
+      "source": "docs/wiki/docs/zh/api/Collider.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.physics",
+          "title": "物理",
+          "url": "/wiki/site/zh/manual/physics.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.components.builtin:CollisionDetectionMode",
@@ -2624,13 +3260,15 @@
       "symbol": "CollisionDetectionMode",
       "kind": "enum",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "碰撞检测模式枚举。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/CollisionDetectionMode.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/CollisionDetectionMode.html",
       "counterpart_url": "/wiki/site/en/api/CollisionDetectionMode.html",
-      "source": "docs/wiki/docs/zh/api/CollisionDetectionMode.md"
+      "source": "docs/wiki/docs/zh/api/CollisionDetectionMode.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.components.builtin:Light",
@@ -2648,13 +3286,21 @@
         "serialize() → str",
         "on_draw_gizmos_selected() → None"
       ],
+      "example_status": "curated",
       "summary": "继承自: BuiltinComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Light.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Light.html",
       "counterpart_url": "/wiki/site/en/api/Light.html",
-      "source": "docs/wiki/docs/zh/api/Light.md"
+      "source": "docs/wiki/docs/zh/api/Light.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.components.builtin:MeshCollider",
@@ -2664,15 +3310,18 @@
       "symbol": "MeshCollider",
       "kind": "class",
       "signatures": [
-        "bool"
+        "bool",
+        "str"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: Collider",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/MeshCollider.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/MeshCollider.html",
       "counterpart_url": "/wiki/site/en/api/MeshCollider.html",
-      "source": "docs/wiki/docs/zh/api/MeshCollider.md"
+      "source": "docs/wiki/docs/zh/api/MeshCollider.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.components.builtin:MeshRenderer",
@@ -2688,7 +3337,6 @@
         "has_render_material() → bool",
         "get_effective_material(slot: int = ...) → Any",
         "get_material(slot: int) → Any",
-        "set_material(slot: int, guid: str) → None",
         "get_material_guids() → List[str]",
         "set_materials(guids: List[str]) → None",
         "set_material_slot_count(count: int) → None",
@@ -2705,13 +3353,15 @@
         "clear_mesh_asset() → None",
         "serialize() → str"
       ],
+      "example_status": "curated",
       "summary": "继承自: BuiltinComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/MeshRenderer.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/MeshRenderer.html",
       "counterpart_url": "/wiki/site/en/api/MeshRenderer.html",
-      "source": "docs/wiki/docs/zh/api/MeshRenderer.md"
+      "source": "docs/wiki/docs/zh/api/MeshRenderer.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.components.builtin:Rigidbody",
@@ -2741,13 +3391,26 @@
         "wake_up() → None",
         "sleep() → None"
       ],
+      "example_status": "curated",
       "summary": "继承自: BuiltinComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Rigidbody.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Rigidbody.html",
       "counterpart_url": "/wiki/site/en/api/Rigidbody.html",
-      "source": "docs/wiki/docs/zh/api/Rigidbody.md"
+      "source": "docs/wiki/docs/zh/api/Rigidbody.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.physics",
+          "title": "物理",
+          "url": "/wiki/site/zh/manual/physics.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.components.builtin:RigidbodyConstraints",
@@ -2757,13 +3420,15 @@
       "symbol": "RigidbodyConstraints",
       "kind": "class",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "继承自: IntFlag",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/RigidbodyConstraints.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/RigidbodyConstraints.html",
       "counterpart_url": "/wiki/site/en/api/RigidbodyConstraints.html",
-      "source": "docs/wiki/docs/zh/api/RigidbodyConstraints.md"
+      "source": "docs/wiki/docs/zh/api/RigidbodyConstraints.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.components.builtin:SphereCollider",
@@ -2776,13 +3441,21 @@
         "float",
         "on_draw_gizmos_selected() → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: Collider",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/SphereCollider.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/SphereCollider.html",
       "counterpart_url": "/wiki/site/en/api/SphereCollider.html",
-      "source": "docs/wiki/docs/zh/api/SphereCollider.md"
+      "source": "docs/wiki/docs/zh/api/SphereCollider.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.physics",
+          "title": "物理",
+          "url": "/wiki/site/zh/manual/physics.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.core:AudioClip",
@@ -2803,13 +3476,21 @@
         "static AudioClip.from_native(native: CppAudioClip) → AudioClip",
         "__repr__() → str"
       ],
+      "example_status": "curated",
       "summary": "音频剪辑资源。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/AudioClip.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/AudioClip.html",
       "counterpart_url": "/wiki/site/en/api/AudioClip.html",
-      "source": "docs/wiki/docs/zh/api/AudioClip.md"
+      "source": "docs/wiki/docs/zh/api/AudioClip.md",
+      "related_documents": [
+        {
+          "id": "zh.learn.audio-workflow",
+          "title": "音频工作流",
+          "url": "/wiki/site/zh/learn/audio-workflow.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.core:Material",
@@ -2825,6 +3506,8 @@
         "int",
         "bool",
         "float",
+        "to_dict() → dict",
+        "apply_dict(document: dict) → bool",
         "dispose() → None",
         "clone() → Material",
         "set_shader(shader_name: str) → None",
@@ -2846,7 +3529,6 @@
         "has_property(name: str) → bool",
         "get_property(name: str) → Any",
         "get_all_properties() → dict",
-        "to_dict() → dict",
         "save(file_path: str) → bool",
         "set_param(name: str, value: Any) → None",
         "set_texture(name: str, value: Any) → None",
@@ -2861,13 +3543,26 @@
         "__eq__(other: object) → bool",
         "__hash__() → int"
       ],
+      "example_status": "unavailable",
       "summary": "材质类。控制物体的视觉外观。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Material.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Material.html",
       "counterpart_url": "/wiki/site/en/api/Material.html",
-      "source": "docs/wiki/docs/zh/api/Material.md"
+      "source": "docs/wiki/docs/zh/api/Material.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.assets-and-meta",
+          "title": "资源与 `.meta` 文件",
+          "url": "/wiki/site/zh/manual/assets-and-meta.html"
+        },
+        {
+          "id": "zh.manual.rendering-and-renderstack",
+          "title": "渲染与 RenderStack",
+          "url": "/wiki/site/zh/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.core:Shader",
@@ -2883,13 +3578,15 @@
         "Shader.refresh_materials(shader_id: str, engine: Optional[object] = ...) → bool",
         "Shader.load_spirv(name: str, spirv_code: bytes, shader_type: str = ...) → None"
       ],
+      "example_status": "unavailable",
       "summary": "着色器程序资源。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Shader.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Shader.html",
       "counterpart_url": "/wiki/site/en/api/Shader.html",
-      "source": "docs/wiki/docs/zh/api/Shader.md"
+      "source": "docs/wiki/docs/zh/api/Shader.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.core:Texture",
@@ -2908,19 +3605,27 @@
         "pixels_as_list() → list",
         "to_numpy() → 'numpy.ndarray'",
         "static Texture.load(file_path: str) → Optional[Texture]",
-        "static Texture.from_memory(data: bytes, width: int, height: int, channels: int = ..., name: str = ...) → Optional[Texture]",
+        "static Texture.decode(data: bytes, name: str = ...) → Optional[Texture]",
         "static Texture.solid_color(width: int, height: int, r: int = ..., g: int = ..., b: int = ..., a: int = ...) → Optional[Texture]",
         "static Texture.checkerboard(width: int, height: int, cell_size: int = ...) → Optional[Texture]",
         "static Texture.from_native(native: TextureData) → Texture",
         "__repr__() → str"
       ],
+      "example_status": "unavailable",
       "summary": "纹理资源。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Texture.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Texture.html",
       "counterpart_url": "/wiki/site/en/api/Texture.html",
-      "source": "docs/wiki/docs/zh/api/Texture.md"
+      "source": "docs/wiki/docs/zh/api/Texture.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.assets-and-meta",
+          "title": "资源与 `.meta` 文件",
+          "url": "/wiki/site/zh/manual/assets-and-meta.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.coroutine:Coroutine",
@@ -2933,13 +3638,21 @@
         "Coroutine.__init__(generator: Generator, owner: Any = ...) → None",
         "bool"
       ],
+      "example_status": "unavailable",
       "summary": "协程句柄。代表一个正在运行的协程。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Coroutine.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Coroutine.html",
       "counterpart_url": "/wiki/site/en/api/Coroutine.html",
-      "source": "docs/wiki/docs/zh/api/Coroutine.md"
+      "source": "docs/wiki/docs/zh/api/Coroutine.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.coroutine:WaitForEndOfFrame",
@@ -2949,13 +3662,15 @@
       "symbol": "WaitForEndOfFrame",
       "kind": "class",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "等待到当前帧渲染结束。截屏用得上。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/WaitForEndOfFrame.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/WaitForEndOfFrame.html",
       "counterpart_url": "/wiki/site/en/api/WaitForEndOfFrame.html",
-      "source": "docs/wiki/docs/zh/api/WaitForEndOfFrame.md"
+      "source": "docs/wiki/docs/zh/api/WaitForEndOfFrame.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.coroutine:WaitForFixedUpdate",
@@ -2965,13 +3680,15 @@
       "symbol": "WaitForFixedUpdate",
       "kind": "class",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "等待到下一次 FixedUpdate。物理相关计算适合在这里等。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/WaitForFixedUpdate.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/WaitForFixedUpdate.html",
       "counterpart_url": "/wiki/site/en/api/WaitForFixedUpdate.html",
-      "source": "docs/wiki/docs/zh/api/WaitForFixedUpdate.md"
+      "source": "docs/wiki/docs/zh/api/WaitForFixedUpdate.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.coroutine:WaitForSeconds",
@@ -2984,13 +3701,21 @@
         "WaitForSeconds.__init__(seconds: float) → None",
         "float"
       ],
+      "example_status": "unavailable",
       "summary": "等待指定秒数（受 Time.timescale 影响）。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/WaitForSeconds.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/WaitForSeconds.html",
       "counterpart_url": "/wiki/site/en/api/WaitForSeconds.html",
-      "source": "docs/wiki/docs/zh/api/WaitForSeconds.md"
+      "source": "docs/wiki/docs/zh/api/WaitForSeconds.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.coroutine:WaitForSecondsRealtime",
@@ -3003,13 +3728,15 @@
         "WaitForSecondsRealtime.__init__(seconds: float) → None",
         "float"
       ],
+      "example_status": "unavailable",
       "summary": "等待指定真实秒数（不受 timescale 影响）。暂停菜单的好朋友。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/WaitForSecondsRealtime.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/WaitForSecondsRealtime.html",
       "counterpart_url": "/wiki/site/en/api/WaitForSecondsRealtime.html",
-      "source": "docs/wiki/docs/zh/api/WaitForSecondsRealtime.md"
+      "source": "docs/wiki/docs/zh/api/WaitForSecondsRealtime.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.coroutine:WaitUntil",
@@ -3022,13 +3749,15 @@
         "WaitUntil.__init__(predicate: Callable[[], bool]) → None",
         "Callable[[], bool]"
       ],
+      "example_status": "unavailable",
       "summary": "等待直到条件为 True。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/WaitUntil.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/WaitUntil.html",
       "counterpart_url": "/wiki/site/en/api/WaitUntil.html",
-      "source": "docs/wiki/docs/zh/api/WaitUntil.md"
+      "source": "docs/wiki/docs/zh/api/WaitUntil.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.coroutine:WaitWhile",
@@ -3041,13 +3770,15 @@
         "WaitWhile.__init__(predicate: Callable[[], bool]) → None",
         "Callable[[], bool]"
       ],
+      "example_status": "unavailable",
       "summary": "等待只要条件为 True 就继续等（条件变 False 时恢复）。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/WaitWhile.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/WaitWhile.html",
       "counterpart_url": "/wiki/site/en/api/WaitWhile.html",
-      "source": "docs/wiki/docs/zh/api/WaitWhile.md"
+      "source": "docs/wiki/docs/zh/api/WaitWhile.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.debug:Debug",
@@ -3066,13 +3797,26 @@
         "static Debug.clear_console() → None",
         "static Debug.log_internal(message: Any, context: Any = ...) → None"
       ],
+      "example_status": "unavailable",
       "summary": "调试工具类。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Debug.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Debug.html",
       "counterpart_url": "/wiki/site/en/api/Debug.html",
-      "source": "docs/wiki/docs/zh/api/Debug.md"
+      "source": "docs/wiki/docs/zh/api/Debug.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.debugging",
+          "title": "调试与 Console",
+          "url": "/wiki/site/zh/manual/debugging.html"
+        },
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.gizmos:Gizmos",
@@ -3092,13 +3836,15 @@
         "Gizmos.draw_frustum(position: Vec3, fov_deg: float, aspect: float, near: float, far: float, forward: Vec3 = ..., up: Vec3 = ..., right: Vec3 = ...) → None",
         "Gizmos.draw_wire_arc(center: Vec3, normal: Vec3, radius: float, start_angle_deg: float = ..., arc_deg: float = ..., segments: int = ...) → None"
       ],
+      "example_status": "unavailable",
       "summary": "在场景视图中绘制调试可视化图形的工具类。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Gizmos.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Gizmos.html",
       "counterpart_url": "/wiki/site/en/api/Gizmos.html",
-      "source": "docs/wiki/docs/zh/api/Gizmos.md"
+      "source": "docs/wiki/docs/zh/api/Gizmos.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.input:Input",
@@ -3130,13 +3876,26 @@
         "static Input.get_axis_raw(axis_name: str) → float",
         "static Input.reset_input_axes() → None"
       ],
+      "example_status": "curated",
       "summary": "用于读取键盘、鼠标和触摸输入的接口。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Input.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Input.html",
       "counterpart_url": "/wiki/site/en/api/Input.html",
-      "source": "docs/wiki/docs/zh/api/Input.md"
+      "source": "docs/wiki/docs/zh/api/Input.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.input-and-time",
+          "title": "输入与时间",
+          "url": "/wiki/site/zh/manual/input-and-time.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.input:KeyCode",
@@ -3148,13 +3907,26 @@
       "signatures": [
         "int"
       ],
+      "example_status": "unavailable",
       "summary": "按键代码枚举，用于标识键盘和鼠标按键。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/KeyCode.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/KeyCode.html",
       "counterpart_url": "/wiki/site/en/api/KeyCode.html",
-      "source": "docs/wiki/docs/zh/api/KeyCode.md"
+      "source": "docs/wiki/docs/zh/api/KeyCode.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.input-and-time",
+          "title": "输入与时间",
+          "url": "/wiki/site/zh/manual/input-and-time.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.jit:njit",
@@ -3166,13 +3938,21 @@
       "signatures": [
         "njit() → Any"
       ],
+      "example_status": "unavailable",
       "summary": "Numba njit decorator, or a no-op fallback when Numba is unavailable.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/njit.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/njit.html",
       "counterpart_url": "/wiki/site/en/api/njit.html",
-      "source": "docs/wiki/docs/zh/api/njit.md"
+      "source": "docs/wiki/docs/zh/api/njit.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.jit:warmup",
@@ -3185,13 +3965,15 @@
         "warmup(fn: Callable[..., Any]) → None",
         "Callable[..., Any]"
       ],
+      "example_status": "unavailable",
       "summary": "Pre-compile a @njit function by calling it with representative args.",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/warmup.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/warmup.html",
       "counterpart_url": "/wiki/site/en/api/warmup.html",
-      "source": "docs/wiki/docs/zh/api/warmup.md"
+      "source": "docs/wiki/docs/zh/api/warmup.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.math:quaternion",
@@ -3212,13 +3994,15 @@
         "static quaternion.inverse(q: quatf) → quatf",
         "static quaternion.rotate_towards(from_: quatf, to: quatf, max_degrees_delta: float) → quatf"
       ],
+      "example_status": "unavailable",
       "summary": "四元数，表示三维旋转。比欧拉角靠谱，不会万向锁。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/quaternion.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/quaternion.html",
       "counterpart_url": "/wiki/site/en/api/quaternion.html",
-      "source": "docs/wiki/docs/zh/api/quaternion.md"
+      "source": "docs/wiki/docs/zh/api/quaternion.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.math:vector2",
@@ -3248,13 +4032,15 @@
         "static vector2.magnitude(v: Vector2) → float",
         "static vector2.sqr_magnitude(v: Vector2) → float"
       ],
+      "example_status": "unavailable",
       "summary": "二维向量，包含 x 和 y 分量。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/vector2.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/vector2.html",
       "counterpart_url": "/wiki/site/en/api/vector2.html",
-      "source": "docs/wiki/docs/zh/api/vector2.md"
+      "source": "docs/wiki/docs/zh/api/vector2.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.math:vector3",
@@ -3289,13 +4075,15 @@
         "static vector3.magnitude(v: Vector3) → float",
         "static vector3.sqr_magnitude(v: Vector3) → float"
       ],
+      "example_status": "unavailable",
       "summary": "三维向量，包含 x、y 和 z 分量。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/vector3.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/vector3.html",
       "counterpart_url": "/wiki/site/en/api/vector3.html",
-      "source": "docs/wiki/docs/zh/api/vector3.md"
+      "source": "docs/wiki/docs/zh/api/vector3.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.math:vector4",
@@ -3320,13 +4108,15 @@
         "static vector4.magnitude(v: vec4f) → float",
         "static vector4.sqr_magnitude(v: vec4f) → float"
       ],
+      "example_status": "unavailable",
       "summary": "四维向量，包含 x、y、z 和 w 分量。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/vector4.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/vector4.html",
       "counterpart_url": "/wiki/site/en/api/vector4.html",
-      "source": "docs/wiki/docs/zh/api/vector4.md"
+      "source": "docs/wiki/docs/zh/api/vector4.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.mathf:Mathf",
@@ -3377,13 +4167,15 @@
         "static Mathf.next_power_of_two(value: int) → int",
         "static Mathf.closest_power_of_two(value: int) → int"
       ],
+      "example_status": "unavailable",
       "summary": "数学工具类。常用数学函数大全。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Mathf.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Mathf.html",
       "counterpart_url": "/wiki/site/en/api/Mathf.html",
-      "source": "docs/wiki/docs/zh/api/Mathf.md"
+      "source": "docs/wiki/docs/zh/api/Mathf.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.physics:Physics",
@@ -3393,25 +4185,41 @@
       "symbol": "Physics",
       "kind": "class",
       "signatures": [
+        "int",
         "Any",
         "static Physics.get_gravity() → Any",
         "static Physics.set_gravity(value: Any) → None",
         "static Physics.raycast(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
         "static Physics.raycast_all(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
         "static Physics.overlap_sphere(center: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
-        "static Physics.overlap_box(center: Any, half_extents: Any, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
+        "static Physics.overlap_box(center: Any, half_extents: Any, orientation: Any = ..., layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
+        "static Physics.overlap_capsule(point0: Any, point1: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
         "static Physics.sphere_cast(origin: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
-        "static Physics.box_cast(center: Any, half_extents: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
+        "static Physics.box_cast(center: Any, half_extents: Any, direction: Any, orientation: Any = ..., max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
+        "static Physics.capsule_cast(point0: Any, point1: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
         "static Physics.ignore_layer_collision(layer1: int, layer2: int, ignore: bool = ...) → None",
         "static Physics.get_ignore_layer_collision(layer1: int, layer2: int) → bool"
       ],
+      "example_status": "curated",
       "summary": "物理系统的静态工具类。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Physics.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Physics.html",
       "counterpart_url": "/wiki/site/en/api/Physics.html",
-      "source": "docs/wiki/docs/zh/api/Physics.md"
+      "source": "docs/wiki/docs/zh/api/Physics.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.physics",
+          "title": "物理",
+          "url": "/wiki/site/zh/manual/physics.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.rendergraph:Format",
@@ -3423,13 +4231,15 @@
       "signatures": [
         "bool"
       ],
-      "summary": "纹理格式枚举。",
+      "example_status": "unavailable",
+      "summary": "渲染目标使用的纹理格式。这个公共别名映射到原生 PixelFormat 枚举。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Format.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Format.html",
       "counterpart_url": "/wiki/site/en/api/Format.html",
-      "source": "docs/wiki/docs/zh/api/Format.md"
+      "source": "docs/wiki/docs/zh/api/Format.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.rendergraph:RenderGraph",
@@ -3459,13 +4269,26 @@
         "get_debug_string() → str",
         "build() → RenderGraphDescription"
       ],
+      "example_status": "unavailable",
       "summary": "声明式渲染图。用 Pass 描述你想怎么画，引擎帮你调度。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/RenderGraph.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/RenderGraph.html",
       "counterpart_url": "/wiki/site/en/api/RenderGraph.html",
-      "source": "docs/wiki/docs/zh/api/RenderGraph.md"
+      "source": "docs/wiki/docs/zh/api/RenderGraph.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.rendering-and-renderstack",
+          "title": "渲染与 RenderStack",
+          "url": "/wiki/site/zh/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.rendergraph:RenderPassBuilder",
@@ -3491,13 +4314,15 @@
         "set_param(name: str, value: float) → RenderPassBuilder",
         "__repr__() → str"
       ],
+      "example_status": "unavailable",
       "summary": "渲染 Pass 构建器。链式 API 定义输入输出。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/RenderPassBuilder.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/RenderPassBuilder.html",
       "counterpart_url": "/wiki/site/en/api/RenderPassBuilder.html",
-      "source": "docs/wiki/docs/zh/api/RenderPassBuilder.md"
+      "source": "docs/wiki/docs/zh/api/RenderPassBuilder.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.rendergraph:TextureHandle",
@@ -3517,13 +4342,15 @@
         "__eq__(other: object) → bool",
         "__hash__() → int"
       ],
+      "example_status": "unavailable",
       "summary": "渲染图中的临时纹理句柄。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/TextureHandle.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/TextureHandle.html",
       "counterpart_url": "/wiki/site/en/api/TextureHandle.html",
-      "source": "docs/wiki/docs/zh/api/TextureHandle.md"
+      "source": "docs/wiki/docs/zh/api/TextureHandle.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.renderstack:BloomEffect",
@@ -3539,13 +4366,21 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: FullScreenEffect",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/BloomEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/BloomEffect.html",
       "counterpart_url": "/wiki/site/en/api/BloomEffect.html",
-      "source": "docs/wiki/docs/zh/api/BloomEffect.md"
+      "source": "docs/wiki/docs/zh/api/BloomEffect.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.rendering-and-renderstack",
+          "title": "渲染与 RenderStack",
+          "url": "/wiki/site/zh/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.renderstack:ChromaticAberrationEffect",
@@ -3561,13 +4396,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: FullScreenEffect",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/ChromaticAberrationEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/ChromaticAberrationEffect.html",
       "counterpart_url": "/wiki/site/en/api/ChromaticAberrationEffect.html",
-      "source": "docs/wiki/docs/zh/api/ChromaticAberrationEffect.md"
+      "source": "docs/wiki/docs/zh/api/ChromaticAberrationEffect.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.renderstack:ColorAdjustmentsEffect",
@@ -3583,13 +4420,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: FullScreenEffect",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/ColorAdjustmentsEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/ColorAdjustmentsEffect.html",
       "counterpart_url": "/wiki/site/en/api/ColorAdjustmentsEffect.html",
-      "source": "docs/wiki/docs/zh/api/ColorAdjustmentsEffect.md"
+      "source": "docs/wiki/docs/zh/api/ColorAdjustmentsEffect.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.renderstack:FilmGrainEffect",
@@ -3605,13 +4444,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: FullScreenEffect",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/FilmGrainEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/FilmGrainEffect.html",
       "counterpart_url": "/wiki/site/en/api/FilmGrainEffect.html",
-      "source": "docs/wiki/docs/zh/api/FilmGrainEffect.md"
+      "source": "docs/wiki/docs/zh/api/FilmGrainEffect.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.renderstack:FullScreenEffect",
@@ -3633,13 +4474,15 @@
         "static FullScreenEffect.get_or_create_texture(graph: RenderGraph, name: str, format: Any = ..., camera_target: bool = ..., size: Any = ..., size_divisor: int = ...) → Any",
         "__repr__() → str"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: RenderPass",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/FullScreenEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/FullScreenEffect.html",
       "counterpart_url": "/wiki/site/en/api/FullScreenEffect.html",
-      "source": "docs/wiki/docs/zh/api/FullScreenEffect.md"
+      "source": "docs/wiki/docs/zh/api/FullScreenEffect.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.renderstack:RenderPass",
@@ -3658,13 +4501,15 @@
         "validate(available_resources: Set[str]) → List[str]",
         "__repr__() → str"
       ],
+      "example_status": "unavailable",
       "summary": "自定义渲染 Pass 的基类。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/RenderPass.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/RenderPass.html",
       "counterpart_url": "/wiki/site/en/api/RenderPass.html",
-      "source": "docs/wiki/docs/zh/api/RenderPass.md"
+      "source": "docs/wiki/docs/zh/api/RenderPass.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.renderstack:RenderPipeline",
@@ -3682,13 +4527,21 @@
         "define_topology(graph: RenderGraph) → None",
         "dispose() → None"
       ],
+      "example_status": "unavailable",
       "summary": "可编程渲染管线基类。继承它来定制整个渲染流程。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/RenderPipeline.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/RenderPipeline.html",
       "counterpart_url": "/wiki/site/en/api/RenderPipeline.html",
-      "source": "docs/wiki/docs/zh/api/RenderPipeline.md"
+      "source": "docs/wiki/docs/zh/api/RenderPipeline.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.rendering-and-renderstack",
+          "title": "渲染与 RenderStack",
+          "url": "/wiki/site/zh/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.renderstack:RenderStack",
@@ -3722,13 +4575,26 @@
         "on_before_serialize() → None",
         "on_after_deserialize() → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: InxComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/RenderStack.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/RenderStack.html",
       "counterpart_url": "/wiki/site/en/api/RenderStack.html",
-      "source": "docs/wiki/docs/zh/api/RenderStack.md"
+      "source": "docs/wiki/docs/zh/api/RenderStack.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.rendering-and-renderstack",
+          "title": "渲染与 RenderStack",
+          "url": "/wiki/site/zh/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.renderstack:SharpenEffect",
@@ -3744,13 +4610,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: FullScreenEffect",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/SharpenEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/SharpenEffect.html",
       "counterpart_url": "/wiki/site/en/api/SharpenEffect.html",
-      "source": "docs/wiki/docs/zh/api/SharpenEffect.md"
+      "source": "docs/wiki/docs/zh/api/SharpenEffect.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.renderstack:ToneMappingEffect",
@@ -3768,13 +4636,21 @@
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None",
         "set_params_dict(params: Dict[str, Any]) → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: FullScreenEffect",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/ToneMappingEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/ToneMappingEffect.html",
       "counterpart_url": "/wiki/site/en/api/ToneMappingEffect.html",
-      "source": "docs/wiki/docs/zh/api/ToneMappingEffect.md"
+      "source": "docs/wiki/docs/zh/api/ToneMappingEffect.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.rendering-and-renderstack",
+          "title": "渲染与 RenderStack",
+          "url": "/wiki/site/zh/manual/rendering-and-renderstack.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.renderstack:VignetteEffect",
@@ -3791,13 +4667,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: FullScreenEffect",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/VignetteEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/VignetteEffect.html",
       "counterpart_url": "/wiki/site/en/api/VignetteEffect.html",
-      "source": "docs/wiki/docs/zh/api/VignetteEffect.md"
+      "source": "docs/wiki/docs/zh/api/VignetteEffect.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.renderstack:WhiteBalanceEffect",
@@ -3813,13 +4691,15 @@
         "get_shader_list() → List[str]",
         "setup_passes(graph: RenderGraph, bus: ResourceBus) → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: FullScreenEffect",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/WhiteBalanceEffect.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/WhiteBalanceEffect.html",
       "counterpart_url": "/wiki/site/en/api/WhiteBalanceEffect.html",
-      "source": "docs/wiki/docs/zh/api/WhiteBalanceEffect.md"
+      "source": "docs/wiki/docs/zh/api/WhiteBalanceEffect.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.scene:SceneManager",
@@ -3843,13 +4723,26 @@
         "static SceneManager.get_all_scene_names() → List[str]",
         "static SceneManager.dont_destroy_on_load(game_object: object) → None"
       ],
+      "example_status": "unavailable",
       "summary": "运行时场景加载与卸载管理器。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/SceneManager.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/SceneManager.html",
       "counterpart_url": "/wiki/site/en/api/SceneManager.html",
-      "source": "docs/wiki/docs/zh/api/SceneManager.md"
+      "source": "docs/wiki/docs/zh/api/SceneManager.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.scenes-and-objects",
+          "title": "场景与对象",
+          "url": "/wiki/site/zh/manual/scenes-and-objects.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.timing:Time",
@@ -3862,13 +4755,26 @@
         "float",
         "int"
       ],
+      "example_status": "curated",
       "summary": "时间管理器。掌管每一帧的时间节奏——引擎的心跳。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/Time.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/Time.html",
       "counterpart_url": "/wiki/site/en/api/Time.html",
-      "source": "docs/wiki/docs/zh/api/Time.md"
+      "source": "docs/wiki/docs/zh/api/Time.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.input-and-time",
+          "title": "输入与时间",
+          "url": "/wiki/site/zh/manual/input-and-time.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.ui:InxUIComponent",
@@ -3878,13 +4784,15 @@
       "symbol": "InxUIComponent",
       "kind": "class",
       "signatures": [],
+      "example_status": "unavailable",
       "summary": "继承自: InxComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/InxUIComponent.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/InxUIComponent.html",
       "counterpart_url": "/wiki/site/en/api/InxUIComponent.html",
-      "source": "docs/wiki/docs/zh/api/InxUIComponent.md"
+      "source": "docs/wiki/docs/zh/api/InxUIComponent.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.ui:PointerEventData",
@@ -3903,13 +4811,15 @@
         "bool",
         "Use() → None"
       ],
+      "example_status": "unavailable",
       "summary": "指针事件数据。包含点击位置和来源信息。",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/PointerEventData.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/PointerEventData.html",
       "counterpart_url": "/wiki/site/en/api/PointerEventData.html",
-      "source": "docs/wiki/docs/zh/api/PointerEventData.md"
+      "source": "docs/wiki/docs/zh/api/PointerEventData.md",
+      "related_documents": []
     },
     {
       "id": "zh:Infernux.ui:UIButton",
@@ -3929,13 +4839,26 @@
         "on_pointer_click(event_data: PointerEventData) → None",
         "awake() → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: UISelectable",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/UIButton.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/UIButton.html",
       "counterpart_url": "/wiki/site/en/api/UIButton.html",
-      "source": "docs/wiki/docs/zh/api/UIButton.md"
+      "source": "docs/wiki/docs/zh/api/UIButton.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.ui",
+          "title": "屏幕空间 UI",
+          "url": "/wiki/site/zh/manual/ui.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.ui:UICanvas",
@@ -3957,13 +4880,26 @@
         "raycast(canvas_x: float, canvas_y: float, tolerance: float = ...) → Optional[InxUIScreenComponent]",
         "raycast_all(canvas_x: float, canvas_y: float, tolerance: float = ...) → List[InxUIScreenComponent]"
       ],
+      "example_status": "curated",
       "summary": "继承自: InxUIComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/UICanvas.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/UICanvas.html",
       "counterpart_url": "/wiki/site/en/api/UICanvas.html",
-      "source": "docs/wiki/docs/zh/api/UICanvas.md"
+      "source": "docs/wiki/docs/zh/api/UICanvas.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.engine-map",
+          "title": "引擎地图",
+          "url": "/wiki/site/zh/manual/engine-map.html"
+        },
+        {
+          "id": "zh.manual.ui",
+          "title": "屏幕空间 UI",
+          "url": "/wiki/site/zh/manual/ui.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.ui:UIImage",
@@ -3976,13 +4912,26 @@
         "str",
         "list"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: InxUIScreenComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/UIImage.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/UIImage.html",
       "counterpart_url": "/wiki/site/en/api/UIImage.html",
-      "source": "docs/wiki/docs/zh/api/UIImage.md"
+      "source": "docs/wiki/docs/zh/api/UIImage.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.assets-and-meta",
+          "title": "资源与 `.meta` 文件",
+          "url": "/wiki/site/zh/manual/assets-and-meta.html"
+        },
+        {
+          "id": "zh.manual.ui",
+          "title": "屏幕空间 UI",
+          "url": "/wiki/site/zh/manual/ui.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.ui:UISelectable",
@@ -4003,13 +4952,21 @@
         "on_pointer_up(event_data: PointerEventData) → None",
         "awake() → None"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: InxUIScreenComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/UISelectable.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/UISelectable.html",
       "counterpart_url": "/wiki/site/en/api/UISelectable.html",
-      "source": "docs/wiki/docs/zh/api/UISelectable.md"
+      "source": "docs/wiki/docs/zh/api/UISelectable.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.ui",
+          "title": "屏幕空间 UI",
+          "url": "/wiki/site/zh/manual/ui.html"
+        }
+      ]
     },
     {
       "id": "zh:Infernux.ui:UIText",
@@ -4036,13 +4993,21 @@
         "is_width_editable() → bool",
         "is_height_editable() → bool"
       ],
+      "example_status": "unavailable",
       "summary": "继承自: InxUIScreenComponent",
       "status": "preview",
       "since": null,
       "url": "/wiki/site/zh/api/UIText.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/api/UIText.html",
       "counterpart_url": "/wiki/site/en/api/UIText.html",
-      "source": "docs/wiki/docs/zh/api/UIText.md"
+      "source": "docs/wiki/docs/zh/api/UIText.md",
+      "related_documents": [
+        {
+          "id": "zh.manual.ui",
+          "title": "屏幕空间 UI",
+          "url": "/wiki/site/zh/manual/ui.html"
+        }
+      ]
     }
   ]
 }

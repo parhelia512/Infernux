@@ -302,6 +302,7 @@
   "build.debug_mode": "调试模式",
   "build.lto": "LTO（编译更慢，性能更好）",
   "build.enable_jit": "JIT（Numba 加速）",
+  "build.debug_player_mcp": "导出 Debug Player MCP 服务",
   "build.output_directory": "输出目录",
   "build.output_directory_hint": "请使用空文件夹，或复用包含旧 Infernux 构建标记文件 {marker} 的目录。",
   "build.output_directory_error_title": "无效的构建输出目录",

@@ -1,10 +1,13 @@
 ---
+title: "2D 基础"
+description: "使用正交 Camera、SpriteRenderer、导入纹理、明确世界尺度和帧率无关移动检查构建最小 2D 场景。"
 category: 学习
 tags: ["2D", "Sprite", "相机", "入门"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["new-user", "agent"]
+related_api: []
 agent_summary: "使用正交 Camera、SpriteRenderer、导入纹理、明确世界尺度和帧率无关移动检查构建最小 2D 场景。"
 source_paths: ["python/Infernux/components/builtin/sprite_renderer.py", "python/Infernux/components/builtin/camera.pyi", "python/Infernux/core/asset_types.py"]
 ---

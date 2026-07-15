@@ -1,10 +1,13 @@
 ---
+title: "构建并分享项目"
+description: "把已保存场景加入 Build Settings，配置 Windows 独立播放器，执行构建，并在编辑器之外验证产物。"
 category: 学习
 tags: ["入门", "构建", "windows", "发布"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["new-user", "agent"]
+related_api: []
 agent_summary: "把已保存场景加入 Build Settings，配置 Windows 独立播放器，执行构建，并在编辑器之外验证产物。"
 source_paths: ["python/Infernux/engine/ui/build_settings_panel.py", "python/Infernux/engine/game_builder.py"]
 ---

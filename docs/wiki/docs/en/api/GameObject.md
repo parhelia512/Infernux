@@ -28,6 +28,7 @@ A GameObject owns a Transform and a set of components. Distinguish `active_self`
 | active_self | `bool` |  *(read-only)* |
 | active_in_hierarchy | `bool` |  *(read-only)* |
 | id | `int` |  *(read-only)* |
+| handle | `ObjectHandle` |  *(read-only)* |
 | is_prefab_instance | `bool` |  *(read-only)* |
 | game_object | `Optional[GameObject]` |  *(read-only)* |
 | transform | `Transform` |  *(read-only)* |
@@ -66,7 +67,9 @@ A GameObject owns a Transform and a set of components. Distinguish `active_self`
 | `get_component_in_children(component_type: Any, include_inactive: bool = False) → Any` |  |
 | `get_component_in_parent(component_type: Any, include_inactive: bool = False) → Any` |  |
 | `serialize() → str` |  |
-| `deserialize(json_str: str) → None` |  |
+| `deserialize(json_str: str) → bool` |  |
+| `serialize_document() → Dict[str, Any]` |  |
+| `deserialize_document(document: Dict[str, Any]) → bool` |  |
 
 <!-- USER CONTENT START --> public_methods
 

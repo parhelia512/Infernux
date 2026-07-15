@@ -1230,6 +1230,51 @@ class AnimFSMEditorPanel(EditorPanel):
             return True
         return False
 
+    @staticmethod
+    def _embedded_clip3d_picker_items(filter_text: str) -> List[Tuple[str, str]]:
+        """List model-embedded takes alongside standalone ``.animclip3d`` assets.
+
+        The Project panel exposes an embedded take as ``<model-guid>::subanim:<n>``.
+        Returning that same public virtual reference keeps object-picker assignment,
+        drag-and-drop assignment, and runtime loading on one contract.
+        """
+        from Infernux.core.asset_types import MESH_EXTENSIONS, read_meta_file, read_meta_guid
+        from Infernux.core.assets import AssetManager
+
+        filt = (filter_text or "").strip().lower()
+        items: List[Tuple[str, str]] = []
+        seen: set[str] = set()
+        for ext in sorted(MESH_EXTENSIONS):
+            for model_path in AssetManager.find_assets(f"*{ext}"):
+                normalized = os.path.normpath(model_path)
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                meta = read_meta_file(model_path) or {}
+                names_csv = meta.get("animation_names_csv") or ""
+                if not isinstance(names_csv, str):
+                    continue
+                take_names = [name.strip() for name in names_csv.split(",") if name.strip()]
+                if not take_names:
+                    continue
+                model_name = os.path.splitext(os.path.basename(model_path))[0]
+                base = read_meta_guid(model_path) or model_path
+                for index, take_name in enumerate(take_names):
+                    display = f"{model_name} | {take_name}"
+                    if filt and filt not in display.lower():
+                        continue
+                    items.append((display, f"{base}::subanim:{index}"))
+        return items
+
+    def _clip_picker_items(self, filter_text: str, extensions) -> List[Tuple[str, str]]:
+        """Return compatible standalone clips and, for 3D FSMs, embedded takes."""
+        result: List[Tuple[str, str]] = []
+        for pattern in extensions:
+            result.extend(_picker_assets(filter_text, pattern, assets_only=False))
+        if self._fsm_clip_asset_type() == "AnimationClip3D":
+            result.extend(self._embedded_clip3d_picker_items(filter_text))
+        return result
+
     def _clip_ref_for_state(self, state: AnimState):
         """Build a clip ref (2D/3D) with path hint resolved for Inspector-style labels."""
         path = (state.clip_path or "").strip()
@@ -1339,10 +1384,7 @@ class AnimFSMEditorPanel(EditorPanel):
         display = self._clip_b_display_name(state, ref)
 
         def _picker(filt: str):
-            result = []
-            for g in extensions:
-                result += _picker_assets(filt, g, assets_only=False)
-            return result
+            return self._clip_picker_items(filt, extensions)
 
         field_label(ctx, t("animfsm_editor.clip_b"), lw)
         render_object_field(
@@ -1425,10 +1467,7 @@ class AnimFSMEditorPanel(EditorPanel):
         display = self._clip_display_name(state, ref)
 
         def _picker(filt: str):
-            result = []
-            for g in extensions:
-                result += _picker_assets(filt, g, assets_only=False)
-            return result
+            return self._clip_picker_items(filt, extensions)
 
         def _on_pick(path: str, _st=state, _nd=node):
             self._assign_clip_to_state(_st, path, _nd)

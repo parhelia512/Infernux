@@ -417,7 +417,177 @@ function replaceSection(text, section, content, file) {
   return text.replace(pattern, `$1${localized}$2`);
 }
 
-const stale = [];
+const stale = new Set();
+
+const generatedAliasPages = {
+  en: `# Format
+
+<div class="class-info">
+enum in <b>Infernux.rendergraph</b>
+</div>
+
+## Description
+
+Texture format for render targets. This public alias maps to the native \`PixelFormat\` enum.
+
+<!-- USER CONTENT START --> description
+
+<!-- USER CONTENT END -->
+
+## Values
+
+| Name | Description |
+|------|------|
+| RGBA8_UNORM |  |
+| RGBA8_SRGB |  |
+| BGRA8_UNORM |  |
+| RGBA16_SFLOAT |  |
+| RGBA32_SFLOAT |  |
+| R32_SFLOAT |  |
+| R8_UNORM |  |
+| R8G8_UNORM |  |
+| RG16_SFLOAT |  |
+| A2R10G10B10_UNORM |  |
+| R16_SFLOAT |  |
+| D32_SFLOAT |  |
+| D24_UNORM_S8_UINT |  |
+
+<!-- USER CONTENT START --> enum_values
+
+<!-- USER CONTENT END -->
+
+## Properties
+
+| Name | Type | Description |
+|------|------|------|
+| is_depth | \`bool\` | Returns True if this format is a depth format. *(read-only)* |
+
+<!-- USER CONTENT START --> properties
+
+<!-- USER CONTENT END -->
+
+## Example
+
+<!-- USER CONTENT START --> example
+> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
+<!-- USER CONTENT END -->
+
+## See Also
+
+<!-- USER CONTENT START --> see_also
+- [RenderGraph](RenderGraph.md)
+- [Rendering and RenderStack](../manual/rendering-and-renderstack.md)
+<!-- USER CONTENT END -->
+`,
+  zh: `# Format
+
+<div class="class-info">
+枚举位于 <b>Infernux.rendergraph</b>
+</div>
+
+## 描述
+
+渲染目标使用的纹理格式。这个公共别名映射到原生 \`PixelFormat\` 枚举。
+
+<!-- USER CONTENT START --> description
+
+<!-- USER CONTENT END -->
+
+## 枚举值
+
+| 名称 | 描述 |
+|------|------|
+| RGBA8_UNORM |  |
+| RGBA8_SRGB |  |
+| BGRA8_UNORM |  |
+| RGBA16_SFLOAT |  |
+| RGBA32_SFLOAT |  |
+| R32_SFLOAT |  |
+| R8_UNORM |  |
+| R8G8_UNORM |  |
+| RG16_SFLOAT |  |
+| A2R10G10B10_UNORM |  |
+| R16_SFLOAT |  |
+| D32_SFLOAT |  |
+| D24_UNORM_S8_UINT |  |
+
+<!-- USER CONTENT START --> enum_values
+
+<!-- USER CONTENT END -->
+
+## 属性
+
+| 名称 | 类型 | 描述 |
+|------|------|------|
+| is_depth | \`bool\` | 如果该格式为深度格式则返回 True。*（只读）* |
+
+<!-- USER CONTENT START --> properties
+
+<!-- USER CONTENT END -->
+
+## 示例
+
+<!-- USER CONTENT START --> example
+> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。
+<!-- USER CONTENT END -->
+
+## 另请参阅
+
+<!-- USER CONTENT START --> see_also
+- [RenderGraph](RenderGraph.md)
+- [渲染与 RenderStack](../manual/rendering-and-renderstack.md)
+<!-- USER CONTENT END -->
+`,
+};
+
+function ensureGeneratedAliasPages() {
+  for (const [language, content] of Object.entries(generatedAliasPages)) {
+    const relative = path.join("docs", "wiki", "docs", language, "api", "Format.md");
+    const file = path.join(ROOT, relative);
+    const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n") : "";
+    if (current === content) continue;
+    if (CHECK) stale.add(relative);
+    else fs.writeFileSync(file, content, "utf8");
+  }
+}
+
+function insertBefore(text, anchor, line, relative) {
+  if (text.includes(line)) return text;
+  if (!text.includes(anchor)) throw new Error(`${relative}: missing API navigation anchor '${anchor.trim()}'`);
+  return text.replace(anchor, `${line}\n${anchor}`);
+}
+
+function ensureGeneratedAliasNavigation() {
+  const files = [
+    {
+      relative: path.join("docs", "wiki", "mkdocs.yml"),
+      entries: [
+        ["      - RenderGraph: en/api/RenderGraph.md", "      - Format: en/api/Format.md"],
+        ["      - RenderGraph: zh/api/RenderGraph.md", "      - Format: zh/api/Format.md"],
+      ],
+    },
+    {
+      relative: path.join("docs", "wiki", "mkdocs_api_nav.yml"),
+      entries: [
+        ["#     - RenderGraph: en/api/RenderGraph.md", "#     - Format: en/api/Format.md"],
+        ["#     - RenderGraph: zh/api/RenderGraph.md", "#     - Format: zh/api/Format.md"],
+      ],
+    },
+  ];
+
+  for (const item of files) {
+    const file = path.join(ROOT, item.relative);
+    const original = fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n");
+    let updated = original;
+    for (const [anchor, line] of item.entries) updated = insertBefore(updated, anchor, line, item.relative);
+    if (updated === original) continue;
+    if (CHECK) stale.add(item.relative);
+    else fs.writeFileSync(file, updated, "utf8");
+  }
+}
+
+ensureGeneratedAliasPages();
+ensureGeneratedAliasNavigation();
 
 for (const [language, entries] of Object.entries({ en: english, zh: chinese })) {
   for (const [symbol, sections] of Object.entries(entries)) {
@@ -437,7 +607,7 @@ for (const [language, entries] of Object.entries({ en: english, zh: chinese })) 
 
     if (updated !== original) {
       if (CHECK) {
-        stale.push(relative);
+        stale.add(relative);
       } else {
         fs.writeFileSync(file, updated, "utf8");
       }
@@ -445,7 +615,26 @@ for (const [language, entries] of Object.entries({ en: english, zh: chinese })) 
   }
 }
 
-if (stale.length > 0) {
+for (const language of ["en", "zh"]) {
+  const apiRoot = path.join(ROOT, "docs", "wiki", "docs", language, "api");
+  const fallback = language === "en"
+    ? "> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines."
+    : "> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。";
+
+  for (const name of fs.readdirSync(apiRoot).filter((entry) => entry.endsWith(".md") && entry !== "index.md")) {
+    const file = path.join(apiRoot, name);
+    const relative = path.relative(ROOT, file);
+    const original = fs.readFileSync(file, "utf8");
+    if (!original.includes("TODO: Add example")) continue;
+    const updated = replaceSection(original, "example", fallback, relative);
+    if (updated !== original) {
+      if (CHECK) stale.add(relative);
+      else fs.writeFileSync(file, updated, "utf8");
+    }
+  }
+}
+
+if (stale.size > 0) {
   console.error("Curated API sections are stale:");
   for (const file of stale) console.error(`- ${file}`);
   process.exitCode = 1;

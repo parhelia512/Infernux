@@ -258,12 +258,11 @@ def test_editor_ui_snapshot_exposes_read_only_string_status(tmp_path, monkeypatc
     }
 
 
-def test_editor_ui_snapshot_rejects_stale_targets_while_window_is_minimized(tmp_path, monkeypatch):
+def test_editor_ui_snapshot_does_not_expose_or_depend_on_window_presentation(tmp_path, monkeypatch):
     session.configure(str(tmp_path), {"profile": "global_validation", "session": {"build_profile": "debug_feedback"}})
     _install_main_queue(monkeypatch)
     monkeypatch.setattr(editor_ui, "set_semantic_capture_enabled", lambda enabled: True)
     monkeypatch.setattr(editor_ui, "_read_native_snapshot", lambda: _snapshot())
-    monkeypatch.setattr(editor_ui, "_read_editor_window_state", lambda: {"minimized": True})
 
     fake = _FakeMcp()
     editor_ui.register_editor_ui_tools(fake)
@@ -271,31 +270,22 @@ def test_editor_ui_snapshot_rejects_stale_targets_while_window_is_minimized(tmp_
     response = fake.tools["editor_ui_snapshot"]()
 
     assert response["ok"] is True
-    assert response["data"]["ready"] is False
-    assert response["data"]["window_state"] == {
-        "available": True,
-        "control_owner": "developer",
-        "agent_mutation_allowed": False,
-        "minimized": True,
-    }
-    assert response["data"]["targets"] == []
-    assert response["data"]["rendered_target_count"] == 0
-    assert response["data"]["stale_rendered_target_count"] == 2
-    assert response["data"]["recovery"] == [
-        "Do not alter the window state. Wait for the Developer to present the Editor again, or stop the attempt as an external-state interruption."
-    ]
+    assert response["data"]["ready"] is True
+    assert "window_state" not in response["data"]
+    assert len(response["data"]["targets"]) == 2
+    assert response["data"]["rendered_target_count"] == 2
 
 
-def test_editor_ui_click_reports_minimized_window_before_queuing_input(tmp_path, monkeypatch):
+def test_editor_ui_click_routes_through_internal_input_without_window_state(tmp_path, monkeypatch):
     session.configure(str(tmp_path), {"profile": "global_validation", "session": {"build_profile": "debug_feedback"}})
     _install_main_queue(monkeypatch)
     monkeypatch.setattr(editor_ui, "set_semantic_capture_enabled", lambda enabled: True)
     monkeypatch.setattr(editor_ui, "_read_native_snapshot", lambda: _snapshot())
-    monkeypatch.setattr(editor_ui, "_read_editor_window_state", lambda: {"minimized": True})
+    clicks = []
     monkeypatch.setattr(
         input_tools,
         "perform_pointer_click",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("input must not be queued")),
+        lambda *args, **kwargs: clicks.append((args, kwargs)) or ok({"delivered": True}),
     )
 
     fake = _FakeMcp()
@@ -305,15 +295,8 @@ def test_editor_ui_click_reports_minimized_window_before_queuing_input(tmp_path,
         "42",
     )
 
-    assert response["ok"] is False
-    assert response["error"]["code"] == "error.window_not_presented"
-    assert "belongs to the Developer" in response["error"]["hint"]
-    assert response["data"]["window_state"] == {
-        "available": True,
-        "control_owner": "developer",
-        "agent_mutation_allowed": False,
-        "minimized": True,
-    }
+    assert response["ok"] is True
+    assert len(clicks) == 1
 
 
 def test_editor_ui_snapshot_explains_when_optional_filters_remove_every_target(tmp_path, monkeypatch):

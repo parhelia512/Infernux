@@ -226,20 +226,22 @@ def test_build_settings_output_controls_expose_stable_semantic_ids(monkeypatch):
     semantic_ids = {item[3] for item in ctx.semantic_items}
     assert {
         "build_settings.game_name",
-        "build_settings.debug_mode",
-        "build_settings.lto",
-        "build_settings.enable_jit",
-        "build_settings.output_dir",
+            "build_settings.debug_mode",
+            "build_settings.lto",
+            "build_settings.enable_jit",
+            "build_settings.debug_player_mcp",
+            "build_settings.output_dir",
         "build_settings.output_dir.browse",
         "build_settings.icon",
         "build_settings.icon.browse",
     } <= semantic_ids
     assert ctx.semantic_values == {
         "build_settings.game_name": "RacingPilot",
-        "build_settings.debug_mode": False,
-        "build_settings.lto": True,
-        "build_settings.enable_jit": False,
-        "build_settings.output_dir": "C:/Builds/RacingPilot",
+            "build_settings.debug_mode": False,
+            "build_settings.lto": True,
+            "build_settings.enable_jit": False,
+            "build_settings.debug_player_mcp": False,
+            "build_settings.output_dir": "C:/Builds/RacingPilot",
         "build_settings.icon": "",
     }
 

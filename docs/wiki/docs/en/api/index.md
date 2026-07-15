@@ -29,7 +29,7 @@ Welcome to the Infernux Scripting API Reference. Browse packages from the sideba
 | Infernux.math | vector3, vector2, vector4, quaternion |
 | Infernux.mathf | Mathf |
 | Infernux.physics | Physics |
-| Infernux.rendergraph | Format, TextureHandle, RenderPassBuilder, RenderGraph |
+| Infernux.rendergraph | TextureHandle, RenderPassBuilder, RenderGraph |
 | Infernux.renderstack | BloomEffect, ChromaticAberrationEffect, ColorAdjustmentsEffect, FilmGrainEffect, FullScreenEffect, RenderPass, ... |
 | Infernux.scene | SceneManager |
 | Infernux.timing | Time |

@@ -9,6 +9,7 @@ License: MIT
 
 ## Start here
 
+- [First Flight learning path](https://infernux-engine.com/learning-paths.json): ordered bilingual route from installation and Play mode through the first Python component and a verified standalone build.
 - [Documentation home](https://infernux-engine.com/wiki/site/index.html): Learn, Manual, Architecture, and generated API entry point.
 - [Getting started (English)](https://infernux-engine.com/wiki/site/en/learn/getting-started.html): install, project, editor panels, scene, Play mode.
 - [快速开始（中文）](https://infernux-engine.com/wiki/site/zh/learn/getting-started.html): 安装、项目、编辑器面板、场景与 Play 模式。
@@ -65,9 +66,14 @@ License: MIT
 
 ## Machine-readable indexes
 
+- [Full documentation corpus](https://infernux-engine.com/llms-full.txt): deterministic bilingual Learn, Manual, and Architecture bodies plus a compact localized API catalog for offline or long-context retrieval.
 - [Documentation index](https://infernux-engine.com/docs-index.json): curated page inventory and agent summaries.
+- [Documentation health](https://infernux-engine.com/docs-health.json): deterministic coverage, maturity, example evidence, relationship, freshness, and build-provenance summary.
+- [Learning paths](https://infernux-engine.com/learning-paths.json): ordered steps, localized completion criteria, estimated time, and canonical documents for task-oriented onboarding.
 - [API index](https://infernux-engine.com/api-index.json): localized symbols, modules, kinds, signatures, status, and canonical URLs.
 - [API changes](https://infernux-engine.com/api-changes.json): current-versus-previous release additions, removals, and structural changes; 0.2.1 is the first baseline.
+- [Release manifest](https://infernux-engine.com/release.json): current tag, publication time, platform, official assets, sizes, SHA-256 digests, and GitHub download URLs.
+- [Release notes](https://infernux-engine.com/release-notes.json): structured current-release summary, comparison baseline, change groups, and upgrade notes sourced from UpdateLog.md.
 - [Documentation manifest](https://infernux-engine.com/docs-manifest.json): schema, languages, version, and trust rules.
 - [Wiki search catalog](https://infernux-engine.com/assets/wiki-docs.json): searchable handwritten documentation content.
 

@@ -124,7 +124,11 @@
     box-sizing: border-box;
 }
 
-html { scroll-behavior: smooth; }
+html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
 
 body {
     background: var(--bg);
@@ -189,6 +193,14 @@ button, input, textarea, select { font: inherit; }
 code, pre { font-family: var(--font-mono); }
 
 img { max-width: 100%; display: block; }
+
+main :where(h1, h2, h3, h4, p, li, dd, dt, td, th),
+.api-main :where(a, code) {
+    overflow-wrap: anywhere;
+}
+
+pre,
+table { max-width: 100%; }
 
 .skip-link {
     position: fixed;
@@ -381,6 +393,24 @@ img { max-width: 100%; display: block; }
 .nav-links a:hover::after,
 .nav-links a.active::after {
     transform: scaleX(1);
+}
+
+.nav-links a.nav-priority {
+    padding-left: 12px;
+    color: var(--text);
+}
+
+.nav-links a.nav-priority::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+    transform: translateY(-50%);
 }
 
 .nav-right {
@@ -581,6 +611,62 @@ img { max-width: 100%; display: block; }
     gap: 14px;
     margin-top: 28px;
 }
+
+.hero-platform-note {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    margin-top: 13px;
+    max-width: 650px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    line-height: 1.55;
+    letter-spacing: 0.08em;
+}
+
+.hero-platform-note::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    margin-top: 0.36em;
+    border: 1px solid var(--signal);
+    border-radius: 50%;
+    background: var(--signal-soft);
+    box-shadow: 0 0 10px var(--signal);
+}
+
+.hero-text-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: center;
+    margin-top: 16px;
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+}
+
+.hero-text-links a {
+    display: inline-flex;
+    gap: 7px;
+    align-items: center;
+    min-height: 44px;
+    color: var(--info);
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 4px;
+    transition: color 0.18s ease, text-decoration-color 0.18s ease;
+}
+
+.hero-text-links a:hover {
+    color: var(--text);
+    text-decoration-color: currentColor;
+}
+
+#runtime-capture { scroll-margin-top: calc(var(--nav-height) + var(--ribbon-height) + 24px); }
 
 .btn {
     display: inline-flex;
@@ -1327,13 +1413,35 @@ img { max-width: 100%; display: block; }
     left: var(--page-padding);
     right: var(--page-padding);
     flex-direction: column;
+    align-items: stretch;
     gap: 14px;
     padding: 18px;
+    max-height: calc(100vh - 120px);
+    max-height: calc(100dvh - 120px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--bg-panel);
     box-shadow: var(--shadow);
 }
+
+.nav-links.mobile-open a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 7px 4px;
+}
+
+.nav-links.mobile-open a.nav-priority {
+    padding: 7px 10px 7px 20px;
+    border-left: 2px solid var(--accent);
+    border-radius: var(--radius-xs);
+    background: var(--accent-soft);
+}
+
+.nav-links.mobile-open a.nav-priority::before { left: 9px; }
 
 /* ── Telemetry table (replaces missing demo image) ──────────────── */
 .telemetry-frame {
@@ -1407,6 +1515,12 @@ img { max-width: 100%; display: block; }
 }
 
 /* ── Responsive ──────────────────────────────────────────────────── */
+@media (max-width: 1180px) {
+    body.mobile-menu-open { overflow: hidden; }
+    .nav-links { display: none; }
+    .mobile-menu-btn { display: inline-flex; }
+}
+
 @media (max-width: 1080px) {
     .nav-links {
         gap: 14px;
@@ -1443,9 +1557,6 @@ img { max-width: 100%; display: block; }
     .mission-kicker { display: none; }
 
     .navbar { height: auto; min-height: 68px; padding: 12px 0; }
-    .nav-links { display: none; }
-    .mobile-menu-btn { display: inline-flex; }
-
     .hero-grid,
     .grid-2,
     .grid-3,
@@ -1517,6 +1628,10 @@ img { max-width: 100%; display: block; }
     }
 
     .btn { width: 100%; justify-content: center; }
+    .hero-text-links {
+        align-items: flex-start;
+        gap: 2px 10px;
+    }
     .code-preview pre { font-size: 0.74rem; }
     .section-title { font-size: clamp(1.75rem, 9vw, 2.3rem); }
     .pillar-card,
@@ -1536,5 +1651,49 @@ img { max-width: 100%; display: block; }
         animation-iteration-count: 1 !important;
         scroll-behavior: auto !important;
         transition-duration: 0.01ms !important;
+    }
+}
+
+@media (prefers-contrast: more) {
+    :where(a, button, input, textarea, select, summary):focus-visible {
+        outline-width: 4px;
+        outline-offset: 4px;
+    }
+
+    main a:not(.btn) { text-decoration: underline; }
+}
+
+@media (forced-colors: active) {
+    *, *::before, *::after {
+        box-shadow: none !important;
+        text-shadow: none !important;
+    }
+
+    body::before,
+    body::after { display: none !important; }
+
+    :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible {
+        outline: 3px solid Highlight !important;
+        outline-offset: 3px !important;
+    }
+
+    :where([aria-current], [aria-pressed="true"], .active) {
+        outline: 2px solid Highlight;
+        outline-offset: 1px;
+    }
+
+    :where(.btn, button, input, textarea, select, .card, article, aside, nav) {
+        border-color: CanvasText;
+    }
+
+    :where(.docs-health-signal, .status-indicator, .status-dot)::before {
+        forced-color-adjust: none;
+        border: 1px solid HighlightText;
+        background: Highlight !important;
+    }
+
+    .skip-link {
+        background: CanvasText;
+        color: Canvas;
     }
 }

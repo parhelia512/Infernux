@@ -22,7 +22,6 @@ add_custom_target(infernux_hub
         --build-dir "${CMAKE_BINARY_DIR}/hub_build"
         --dist-dir "${CMAKE_SOURCE_DIR}/dist"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/packaging"
-    DEPENDS prepare_bundled_python_runtime
     COMMENT "Build native-compiled Infernux Hub → dist/Infernux Hub/"
 )
 

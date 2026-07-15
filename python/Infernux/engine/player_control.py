@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import math
 import os
 import tempfile
 import time
@@ -16,7 +17,27 @@ _MAX_OBJECT_NAMES = 32
 _MAX_COMPONENT_PROBES = 16
 _MAX_DISCOVERY_COMPONENT_TYPES = 16
 _MAX_DISCOVERED_OBJECTS = 64
-_MOTION_CAPTURE_TERMINAL_STATES = {"completed", "cancelled", "failed"}
+_MAX_HELD_INPUTS = 8
+_MAX_CAPTURE_FRAMES = 120_000
+_MAX_STOP_ASSERTIONS = 16
+_MOTION_CAPTURE_TERMINAL_STATES = {"completed", "condition_met", "cancelled", "failed"}
+_STOP_ASSERTION_KINDS = frozenset({"scene_name", "transform_axis", "component_field"})
+_COMPARISON_ALIASES = {
+    "equals": "equals",
+    "equal": "equals",
+    "==": "equals",
+    "not_equals": "not_equals",
+    "not equal": "not_equals",
+    "!=": "not_equals",
+    "greater_than": "greater_than",
+    ">": "greater_than",
+    "greater_or_equal": "greater_or_equal",
+    ">=": "greater_or_equal",
+    "less_than": "less_than",
+    "<": "less_than",
+    "less_or_equal": "less_or_equal",
+    "<=": "less_or_equal",
+}
 
 
 class PlayerControlChannel:
@@ -45,6 +66,37 @@ class PlayerControlChannel:
     def enabled(self) -> bool:
         return bool(self.request_path and self.response_path and self._token)
 
+    @property
+    def access_token(self) -> str:
+        return self._token
+
+    def call_gateway(self, action: str, arguments: dict[str, Any], *, timeout_seconds: float = 15.0) -> dict[str, Any]:
+        """Route an embedded loopback MCP request through this main-thread channel."""
+        if not self.enabled:
+            raise RuntimeError("Player control channel is unavailable.")
+        command_id = f"player-mcp-{uuid.uuid4().hex}"
+        _write_json_atomic(self.request_path, {
+            "schema_version": 1,
+            "command_id": command_id,
+            "token": self._token,
+            "action": str(action),
+            **dict(arguments or {}),
+        })
+        deadline = time.monotonic() + max(0.1, min(float(timeout_seconds), 30.0))
+        while time.monotonic() < deadline:
+            try:
+                with open(self.response_path, "r", encoding="utf-8") as stream:
+                    response = json.load(stream)
+            except (OSError, json.JSONDecodeError):
+                time.sleep(0.01)
+                continue
+            if str(response.get("command_id", "")) == command_id:
+                if response.get("ok"):
+                    return dict(response.get("data") or {})
+                raise RuntimeError(str(response.get("error", "Player command failed")))
+            time.sleep(0.01)
+        raise TimeoutError(f"Player MCP command timed out: {action}")
+
     def poll(self, engine) -> str | None:
         """Process at most one command and return an engine-owned action."""
         if not self.enabled:
@@ -59,12 +111,6 @@ class PlayerControlChannel:
             pending = self._pending_input
             sequence = int(pending["sequence"])
             if pending.get("kind") == "press":
-                names = pending.get("object_names", [])
-                if names:
-                    observation = _observe_motion_state(engine, names, pending.get("component_probes", []))
-                    pending["final_observation"] = observation
-                    if observation.get("scene_name") == pending.get("initial_scene_name"):
-                        pending["last_same_scene_observation"] = observation
                 phase = str(pending.get("phase", "down"))
                 if phase == "down":
                     if int(native.last_processed_synthetic_input_sequence) >= sequence:
@@ -76,6 +122,7 @@ class PlayerControlChannel:
                 if phase == "hold":
                     now = time.monotonic()
                     if now >= float(pending["release_at"]):
+                        _sample_press_observation(engine, pending)
                         release_sequence = int(native.queue_synthetic_key_input(
                             int(pending["scancode"]),
                             False,
@@ -112,6 +159,7 @@ class PlayerControlChannel:
                         ),
                     })
                     if pending.get("object_names"):
+                        _sample_press_observation(engine, pending)
                         response.update({
                             "initial_observation": pending["initial_observation"],
                             "final_observation": pending["final_observation"],
@@ -160,9 +208,9 @@ class PlayerControlChannel:
                 scancode = int(command.get("scancode", 0) or 0)
                 if scancode <= 0:
                     raise ValueError("scancode must be positive")
-                duration_seconds = float(command.get("duration_seconds", 0.0) or 0.0)
-                if duration_seconds < 0.02 or duration_seconds > 10.0:
-                    raise ValueError("duration_seconds must be between 0.02 and 10.0")
+                duration_seconds = _bounded_finite_float(
+                    command.get("duration_seconds", 0.0), "duration_seconds", minimum=0.02, maximum=10.0
+                )
                 object_names = _bounded_names(command.get("object_names", []))
                 component_probes = _bounded_component_probes(command.get("component_probes", []), object_names)
                 initial_observation = (
@@ -194,19 +242,38 @@ class PlayerControlChannel:
                 if not object_names:
                     raise ValueError("object_names must contain at least one public object name")
                 component_probes = _bounded_component_probes(command.get("component_probes", []), object_names)
-                seconds = float(command.get("seconds", 2.0) or 0.0)
-                sample_interval = float(command.get("sample_interval", 0.1) or 0.0)
-                trigger_timeout = float(command.get("trigger_timeout", 60.0) or 0.0)
-                if seconds < 0.1 or seconds > 10.0:
-                    raise ValueError("seconds must be between 0.1 and 10.0")
-                if sample_interval < 0.02 or sample_interval > 1.0:
-                    raise ValueError("sample_interval must be between 0.02 and 1.0")
-                if trigger_timeout < 0.5 or trigger_timeout > 120.0:
-                    raise ValueError("trigger_timeout must be between 0.5 and 120.0")
+                seconds = _bounded_finite_float(command.get("seconds", 2.0), "seconds", minimum=0.1, maximum=10.0)
+                sample_interval = _bounded_finite_float(
+                    command.get("sample_interval", 0.1), "sample_interval", minimum=0.02, maximum=1.0
+                )
+                trigger_timeout = _bounded_finite_float(
+                    command.get("trigger_timeout", 60.0), "trigger_timeout", minimum=0.5, maximum=120.0
+                )
                 trigger_scene_name = str(command.get("trigger_scene_name", "") or "").strip()
                 initial_scene_name = _active_scene_name()
                 if trigger_scene_name and initial_scene_name.casefold() == trigger_scene_name.casefold():
                     raise ValueError("motion capture must be armed before the target scene becomes active")
+                hold_scancodes = _bounded_scancodes(command.get("hold_scancodes", []))
+                frame_count = _bounded_positive_frame_count(command.get("frame_count"), "frame_count")
+                hold_frame_count = _bounded_positive_frame_count(
+                    command.get("hold_frame_count"), "hold_frame_count"
+                )
+                wait_frame_count = _bounded_wait_frame_count(command.get("wait_frame_count"))
+                hold_frame_count, wait_frame_count, total_frame_count = _normalize_frame_plan(
+                    frame_count,
+                    hold_frame_count,
+                    wait_frame_count,
+                    hold_scancodes,
+                )
+                wait_seconds = _bounded_finite_float(
+                    command.get("wait_seconds", 0.0), "wait_seconds", minimum=0.0, maximum=30.0
+                )
+                if wait_seconds and not hold_frame_count:
+                    raise ValueError("wait_seconds requires hold_frame_count")
+                stop_assertions = _bounded_stop_assertions(
+                    command.get("stop_assertions", []), object_names, component_probes
+                )
+                stop_mode = _bounded_stop_mode(command.get("stop_mode", "all"))
                 now = time.monotonic()
                 self._motion_capture = {
                     "capture_id": f"player-motion-{uuid.uuid4().hex[:12]}",
@@ -215,15 +282,37 @@ class PlayerControlChannel:
                     "component_probes": component_probes,
                     "seconds": seconds,
                     "sample_interval": sample_interval,
+                    "hold_scancodes": hold_scancodes,
+                    "frame_count": total_frame_count,
+                    "hold_frame_count": hold_frame_count,
+                    "wait_frame_count": wait_frame_count,
+                    "wait_seconds": wait_seconds,
+                    "pause_on_complete": bool(command.get("pause_on_complete", False)),
+                    "stop_assertions": stop_assertions,
+                    "stop_mode": stop_mode,
+                    "pause_on_condition": bool(command.get("pause_on_condition", True)),
+                    "stop_condition": {},
+                    "condition_met_at_frame": 0,
+                    "condition_settle_until_frame": 0,
+                    "condition_settle_until_time": 0.0,
                     "trigger_scene_name": trigger_scene_name,
                     "initial_scene_name": initial_scene_name,
                     "actual_scene_name": "",
                     "armed_at": now,
                     "trigger_deadline": now + trigger_timeout,
                     "started_at": 0.0,
+                    "start_time_frame": 0,
+                    "elapsed_frame_count": 0,
+                    "frame_budget_completed_at": 0.0,
+                    "frame_deadline": 0.0,
                     "next_sample_at": 0.0,
                     "trajectory": [],
                     "missing_object_names": list(object_names),
+                    "input_presses": [],
+                    "input_releases": [],
+                    "input_released_after_hold_frame": 0,
+                    "release_sequence": 0,
+                    "paused_on_complete": False,
                     "error": "",
                 }
                 self._write_response(command_id, True, _public_motion_capture(self._motion_capture))
@@ -236,6 +325,7 @@ class PlayerControlChannel:
                 capture = self._require_motion_capture(command.get("capture_id", ""))
                 cancelled = str(capture.get("status")) not in _MOTION_CAPTURE_TERMINAL_STATES
                 if cancelled:
+                    _release_motion_capture_input(native, capture)
                     capture["status"] = "cancelled"
                 self._write_response(
                     command_id,
@@ -282,6 +372,9 @@ class PlayerControlChannel:
         if capture is None or str(capture.get("status")) in _MOTION_CAPTURE_TERMINAL_STATES:
             return
         try:
+            native = engine.get_native_engine()
+            if native is None:
+                raise RuntimeError("Player native engine is unavailable")
             now = time.monotonic()
             if str(capture.get("status")) == "armed":
                 if now >= float(capture["trigger_deadline"]):
@@ -314,25 +407,97 @@ class PlayerControlChannel:
                 capture["actual_scene_name"] = scene_name
                 capture["started_at"] = now
                 capture["next_sample_at"] = now + float(capture["sample_interval"])
+                capture["start_time_frame"] = _time_frame_count()
+                capture["elapsed_frame_count"] = 0
+                total_frames = int(capture.get("frame_count", 0) or 0)
+                if total_frames:
+                    capture["frame_deadline"] = now + max(
+                        10.0,
+                        float(capture["seconds"]) + float(capture.get("wait_seconds", 0.0)) + 2.0,
+                        float(total_frames) / 5.0,
+                    )
+                _press_motion_capture_input(native, capture)
                 capture["trajectory"].append({"time": 0.0, **first_sample})
                 return
 
             started_at = float(capture["started_at"])
             elapsed = max(0.0, now - started_at)
             duration = float(capture["seconds"])
-            if now < float(capture["next_sample_at"]) and elapsed < duration:
+            frame_count = int(capture.get("frame_count", 0) or 0)
+            if frame_count:
+                elapsed_frames = max(0, _time_frame_count() - int(capture["start_time_frame"]))
+                capture["elapsed_frame_count"] = elapsed_frames
+                hold_frames = int(capture.get("hold_frame_count", 0) or 0)
+                if hold_frames and elapsed_frames >= hold_frames:
+                    _release_motion_capture_input(native, capture, hold_frame_count=hold_frames)
+                if now >= float(capture.get("frame_deadline", 0.0) or 0.0):
+                    raise TimeoutError("frame-bounded Player action did not complete before its safety timeout")
+
+            if str(capture.get("status")) == "condition_settling":
+                if int(native.last_processed_synthetic_input_sequence) < int(capture.get("release_sequence", 0)):
+                    return
+                if frame_count and int(capture.get("elapsed_frame_count", 0) or 0) < int(
+                    capture.get("condition_settle_until_frame", 0) or 0
+                ):
+                    return
+                if now < float(capture.get("condition_settle_until_time", 0.0) or 0.0):
+                    return
+                if bool(capture.get("pause_on_condition")):
+                    capture["paused_on_complete"] = _pause_player_scene()
+                capture["status"] = "condition_met"
                 return
-            sample = _observe_motion_state(
-                engine,
-                list(capture["object_names"]),
-                list(capture["component_probes"]),
-            )
-            capture["trajectory"].append({"time": min(elapsed, duration), **sample})
-            interval = float(capture["sample_interval"])
-            capture["next_sample_at"] = now + interval
-            if elapsed >= duration:
+
+            complete_by_frame = frame_count and int(capture["elapsed_frame_count"]) >= frame_count
+            should_sample = now >= float(capture["next_sample_at"]) or bool(complete_by_frame)
+            if should_sample:
+                sample = _observe_motion_state(
+                    engine,
+                    list(capture["object_names"]),
+                    list(capture["component_probes"]),
+                )
+                capture["trajectory"].append({"time": min(elapsed, duration), **sample})
+                capture["next_sample_at"] = now + float(capture["sample_interval"])
+                if str(capture.get("status")) == "active" and capture.get("stop_assertions"):
+                    condition = _evaluate_stop_assertions(
+                        sample,
+                        list(capture["stop_assertions"]),
+                        str(capture.get("stop_mode") or "all"),
+                    )
+                    capture["stop_condition"] = condition
+                    if condition["passed"]:
+                        elapsed_frames = int(capture.get("elapsed_frame_count", 0) or 0)
+                        _release_motion_capture_input(
+                            native,
+                            capture,
+                            hold_frame_count=elapsed_frames,
+                        )
+                        capture["condition_met_at_frame"] = elapsed_frames
+                        capture["condition_settle_until_frame"] = elapsed_frames + int(
+                            capture.get("wait_frame_count", 0) or 0
+                        )
+                        capture["condition_settle_until_time"] = now + float(capture.get("wait_seconds", 0.0) or 0.0)
+                        capture["status"] = "condition_settling"
+
+            if frame_count:
+                if not complete_by_frame:
+                    return
+                if int(native.last_processed_synthetic_input_sequence) < int(capture.get("release_sequence", 0)):
+                    return
+                completed_at = float(capture.get("frame_budget_completed_at", 0.0) or 0.0)
+                if not completed_at:
+                    capture["frame_budget_completed_at"] = now
+                    completed_at = now
+                if now - completed_at < float(capture.get("wait_seconds", 0.0)):
+                    return
+                if bool(capture.get("pause_on_complete")):
+                    capture["paused_on_complete"] = _pause_player_scene()
+                capture["status"] = "completed"
+            elif elapsed >= duration:
                 capture["status"] = "completed"
         except Exception as exc:
+            native = engine.get_native_engine() if engine is not None else None
+            if native is not None:
+                _release_motion_capture_input(native, capture)
             capture["status"] = "failed"
             capture["error"] = f"{type(exc).__name__}: {exc}"
 
@@ -345,8 +510,14 @@ class PlayerControlChannel:
                 return None
             with open(self.request_path, "r", encoding="utf-8") as stream:
                 value = json.load(stream)
-            return value if isinstance(value, dict) else None
-        except (OSError, json.JSONDecodeError):
+            if isinstance(value, dict):
+                return value
+            self._remove_request()
+            return None
+        except json.JSONDecodeError:
+            self._remove_request()
+            return None
+        except OSError:
             return None
 
     def _remove_request(self) -> None:
@@ -382,6 +553,283 @@ def _bounded_names(value: Any) -> list[str]:
     if len(names) > _MAX_OBJECT_NAMES:
         raise ValueError(f"object_names cannot contain more than {_MAX_OBJECT_NAMES} entries")
     return names
+
+
+def _bounded_finite_float(value: Any, name: str, *, minimum: float, maximum: float) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number")
+    result = float(value)
+    if not math.isfinite(result) or result < minimum or result > maximum:
+        raise ValueError(f"{name} must be between {minimum:g} and {maximum:g}")
+    return result
+
+
+def _bounded_scancodes(value: Any) -> list[int]:
+    if not isinstance(value, list):
+        raise ValueError("hold_scancodes must be a list")
+    if len(value) > _MAX_HELD_INPUTS:
+        raise ValueError(f"hold_scancodes cannot contain more than {_MAX_HELD_INPUTS} entries")
+    scancodes = []
+    for raw in value:
+        if isinstance(raw, bool):
+            raise ValueError("hold_scancodes entries must be positive integers")
+        scancode = int(raw)
+        if scancode <= 0:
+            raise ValueError("hold_scancodes entries must be positive integers")
+        scancodes.append(scancode)
+    if len(set(scancodes)) != len(scancodes):
+        raise ValueError("hold_scancodes must not contain duplicates")
+    return scancodes
+
+
+def _bounded_positive_frame_count(value: Any, field: str) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be an integer")
+    count = int(value)
+    if count < 1 or count > _MAX_CAPTURE_FRAMES:
+        raise ValueError(f"{field} must be between 1 and {_MAX_CAPTURE_FRAMES}")
+    return count
+
+
+def _bounded_wait_frame_count(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        raise ValueError("wait_frame_count must be an integer")
+    count = int(value)
+    if count < 0 or count > _MAX_CAPTURE_FRAMES:
+        raise ValueError(f"wait_frame_count must be between 0 and {_MAX_CAPTURE_FRAMES}")
+    return count
+
+
+def _normalize_frame_plan(
+    frame_count: int,
+    hold_frame_count: int,
+    wait_frame_count: int,
+    hold_scancodes: list[int],
+) -> tuple[int, int, int]:
+    if wait_frame_count and not hold_frame_count:
+        raise ValueError("wait_frame_count requires hold_frame_count")
+    if hold_frame_count and not hold_scancodes:
+        raise ValueError("hold_frame_count requires hold_key or hold_keys")
+    if frame_count and wait_frame_count:
+        raise ValueError("Use frame_count as the total budget, or use hold_frame_count with wait_frame_count")
+    if frame_count:
+        if hold_frame_count > frame_count:
+            raise ValueError("hold_frame_count must not exceed frame_count")
+        if hold_scancodes and not hold_frame_count:
+            hold_frame_count = frame_count
+        return hold_frame_count, frame_count - hold_frame_count, frame_count
+    if hold_frame_count:
+        total = hold_frame_count + wait_frame_count
+        if total > _MAX_CAPTURE_FRAMES:
+            raise ValueError(f"hold_frame_count plus wait_frame_count must not exceed {_MAX_CAPTURE_FRAMES}")
+        return hold_frame_count, wait_frame_count, total
+    if hold_scancodes:
+        raise ValueError("hold_key or hold_keys requires frame_count or hold_frame_count")
+    return 0, 0, 0
+
+
+def _bounded_stop_assertions(
+    value: Any,
+    object_names: list[str],
+    component_probes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("stop_assertions must be a list")
+    if len(value) > _MAX_STOP_ASSERTIONS:
+        raise ValueError(f"stop_assertions cannot contain more than {_MAX_STOP_ASSERTIONS} items")
+    probes = {
+        (probe["object_name"], probe["component_type"], int(probe["ordinal"])): set(probe["fields"])
+        for probe in component_probes
+    }
+    normalized = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            raise ValueError("stop_assertions entries must be objects")
+        item = dict(raw)
+        kind = str(item.get("kind", "") or "").strip()
+        if kind not in _STOP_ASSERTION_KINDS:
+            supported = ", ".join(sorted(_STOP_ASSERTION_KINDS))
+            raise ValueError(f"Player stop assertions support only: {supported}")
+        _validate_comparison(item)
+        if kind == "scene_name":
+            normalized.append(item)
+            continue
+        object_name = str(item.get("object_name", "") or "").strip()
+        if object_name not in object_names:
+            raise ValueError("stop assertion object_name must also be present in object_names")
+        item["object_name"] = object_name
+        axis = str(item.get("axis", "") or "").lower()
+        if kind == "transform_axis":
+            if str(item.get("field", "position") or "position") != "position" or axis not in {"x", "y", "z"}:
+                raise ValueError("transform_axis requires field 'position' and axis x, y, or z")
+        else:
+            component_type = str(item.get("component_type", "") or "").strip()
+            field = str(item.get("field", "") or "").strip()
+            ordinal = int(item.get("ordinal", 0) or 0)
+            if not component_type or not field or field.startswith("_") or ordinal < 0:
+                raise ValueError("component_field requires a public component_type, field, and ordinal")
+            probe_fields = probes.get((object_name, component_type, ordinal))
+            if probe_fields is None or field not in probe_fields:
+                raise ValueError("component_field stop assertions require the same field in component_probes")
+            item.update({"component_type": component_type, "field": field, "ordinal": ordinal})
+        normalized.append(item)
+    return normalized
+
+
+def _bounded_stop_mode(value: Any) -> str:
+    mode = str(value or "all").strip().lower()
+    if mode not in {"all", "any"}:
+        raise ValueError("stop_mode must be 'all' or 'any'")
+    return mode
+
+
+def _validate_comparison(item: dict[str, Any]) -> None:
+    operator = str(item.get("operator", item.get("op", "equals")) or "equals").lower()
+    if operator not in _COMPARISON_ALIASES:
+        raise ValueError(f"unknown comparison operator: {operator!r}")
+    if "value" not in item and "equals" not in item:
+        raise ValueError("stop assertions require value or equals")
+    tolerance = item.get("tolerance", 0.0)
+    if isinstance(tolerance, bool) or float(tolerance) < 0.0:
+        raise ValueError("stop assertion tolerance must be non-negative")
+
+
+def _evaluate_stop_assertions(sample: dict[str, Any], assertions: list[dict[str, Any]], mode: str) -> dict[str, Any]:
+    results = [_evaluate_stop_assertion(sample, item) for item in assertions]
+    passed = any(result["passed"] for result in results) if mode == "any" else all(result["passed"] for result in results)
+    return {"passed": passed, "mode": mode, "sample_renderer_frame": sample.get("renderer_frame", 0), "results": results}
+
+
+def _evaluate_stop_assertion(sample: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    kind = str(item.get("kind", "") or "")
+    actual: Any = None
+    label = kind
+    if kind == "scene_name":
+        actual = sample.get("scene_name", "")
+    else:
+        object_name = str(item.get("object_name", "") or "")
+        obj = dict(sample.get("objects", {}) or {}).get(object_name)
+        if not isinstance(obj, dict):
+            return _stop_assertion_result(item, False, f"object {object_name!r} was not found")
+        if kind == "transform_axis":
+            axis = {"x": 0, "y": 1, "z": 2}[str(item.get("axis", "") or "").lower()]
+            position = obj.get("position", [])
+            if not isinstance(position, list) or len(position) != 3:
+                return _stop_assertion_result(item, False, f"object {object_name!r} has no position sample")
+            actual = position[axis]
+            label = f"transform.position.{item.get('axis')}"
+        elif kind == "component_field":
+            component_key = f"{item['component_type']}[{int(item.get('ordinal', 0) or 0)}]"
+            fields = dict(obj.get("component_fields", {}) or {}).get(component_key)
+            if not isinstance(fields, dict) or item["field"] not in fields:
+                return _stop_assertion_result(item, False, f"component field {component_key}.{item['field']} was not sampled")
+            actual = fields[item["field"]]
+            label = f"component.{component_key}.{item['field']}"
+    passed, operator, expected, detail = _compare_stop_value(actual, item)
+    return _stop_assertion_result(item, passed, f"{label} is {actual!r}; {detail}", actual=actual, expected=expected, operator=operator)
+
+
+def _compare_stop_value(actual: Any, item: dict[str, Any]) -> tuple[bool, str, Any, str]:
+    raw_operator = str(item.get("operator", item.get("op", "equals")) or "equals").lower()
+    operator = _COMPARISON_ALIASES[raw_operator]
+    expected = item["value"] if "value" in item else item["equals"]
+    numeric = _is_number(actual) and _is_number(expected)
+    if operator in {"equals", "not_equals"}:
+        equals = abs(float(actual) - float(expected)) <= float(item.get("tolerance", 0.0) or 0.0) if numeric else actual == expected
+        return (equals if operator == "equals" else not equals), operator, expected, f"expected {operator} {expected!r}"
+    if not numeric:
+        return False, operator, expected, f"operator {operator!r} requires numeric actual and expected values"
+    comparisons = {
+        "greater_than": float(actual) > float(expected),
+        "greater_or_equal": float(actual) >= float(expected),
+        "less_than": float(actual) < float(expected),
+        "less_or_equal": float(actual) <= float(expected),
+    }
+    return comparisons[operator], operator, expected, f"expected {operator} {expected!r}"
+
+
+def _stop_assertion_result(
+    assertion: dict[str, Any], passed: bool, message: str, *, actual: Any = None, expected: Any = None, operator: str = ""
+) -> dict[str, Any]:
+    result = {"assertion": assertion, "passed": bool(passed), "message": message}
+    if actual is not None:
+        result["actual"] = actual
+    if expected is not None:
+        result["expected"] = expected
+    if operator:
+        result["operator"] = operator
+    return result
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _time_frame_count() -> int:
+    from Infernux.timing import Time
+
+    return int(Time.frame_count)
+
+
+def _press_motion_capture_input(native, capture: dict[str, Any]) -> None:
+    if capture.get("input_presses"):
+        return
+    presses = []
+    for scancode in list(capture.get("hold_scancodes") or []):
+        sequence = int(native.queue_synthetic_key_input(int(scancode), True, False))
+        presses.append({
+            "scancode": int(scancode),
+            "pressed": True,
+            "sequence": sequence,
+            "queued_at_capture_frame": 0,
+        })
+    capture["input_presses"] = presses
+
+
+def _release_motion_capture_input(native, capture: dict[str, Any], *, hold_frame_count: int = 0) -> None:
+    if capture.get("input_releases"):
+        return
+    releases = []
+    for scancode in reversed(list(capture.get("hold_scancodes") or [])):
+        sequence = int(native.queue_synthetic_key_input(int(scancode), False, False))
+        releases.append({
+            "scancode": int(scancode),
+            "pressed": False,
+            "sequence": sequence,
+            "queued_at_hold_frame": int(hold_frame_count),
+        })
+    if releases:
+        capture["input_releases"] = releases
+        capture["release_sequence"] = max(int(item["sequence"]) for item in releases)
+        capture["input_released_after_hold_frame"] = int(hold_frame_count)
+
+
+def _pause_player_scene() -> bool:
+    from Infernux.lib import SceneManager
+
+    manager = SceneManager.instance()
+    if not manager.is_playing():
+        return False
+    if manager.is_paused():
+        return True
+    manager.pause()
+    return bool(manager.is_paused())
+
+
+def _sample_press_observation(engine, pending: dict[str, Any]) -> None:
+    names = list(pending.get("object_names") or [])
+    if not names:
+        return
+    observation = _observe_motion_state(engine, names, list(pending.get("component_probes") or []))
+    pending["final_observation"] = observation
+    if observation.get("scene_name") == pending.get("initial_scene_name"):
+        pending["last_same_scene_observation"] = observation
 
 
 def _bounded_component_probes(value: Any, object_names: list[str]) -> list[dict[str, Any]]:
@@ -452,12 +900,31 @@ def _public_motion_capture(capture: dict[str, Any]) -> dict[str, Any]:
         "object_names": list(capture.get("object_names") or []),
         "seconds": float(capture.get("seconds") or 0.0),
         "sample_interval": float(capture.get("sample_interval") or 0.0),
+        "hold_scancodes": list(capture.get("hold_scancodes") or []),
+        "frame_count": int(capture.get("frame_count") or 0),
+        "hold_frame_count": int(capture.get("hold_frame_count") or 0),
+        "wait_frame_count": int(capture.get("wait_frame_count") or 0),
+        "wait_seconds": float(capture.get("wait_seconds") or 0.0),
+        "pause_on_complete": bool(capture.get("pause_on_complete")),
+        "stop_assertions": list(capture.get("stop_assertions") or []),
+        "stop_mode": str(capture.get("stop_mode") or "all"),
+        "pause_on_condition": bool(capture.get("pause_on_condition")),
+        "stop_condition": dict(capture.get("stop_condition") or {}),
+        "condition_met_at_frame": int(capture.get("condition_met_at_frame") or 0),
+        "condition_settle_until_frame": int(capture.get("condition_settle_until_frame") or 0),
+        "condition_settle_until_time": float(capture.get("condition_settle_until_time") or 0.0),
+        "start_time_frame": int(capture.get("start_time_frame") or 0),
+        "elapsed_frame_count": int(capture.get("elapsed_frame_count") or 0),
         "trigger_scene_name": str(capture.get("trigger_scene_name") or ""),
         "initial_scene_name": str(capture.get("initial_scene_name") or ""),
         "actual_scene_name": str(capture.get("actual_scene_name") or ""),
         "missing_object_names": list(capture.get("missing_object_names") or []),
         "sample_count": len(trajectory),
         "trajectory": trajectory,
+        "input_presses": list(capture.get("input_presses") or []),
+        "input_releases": list(capture.get("input_releases") or []),
+        "input_released_after_hold_frame": int(capture.get("input_released_after_hold_frame") or 0),
+        "paused_on_complete": bool(capture.get("paused_on_complete")),
         "error": str(capture.get("error") or ""),
     }
 
@@ -480,7 +947,14 @@ def _observe_player(
     native_scene_manager = SceneManager.instance()
     scene = native_scene_manager.get_active_scene()
     play_manager = engine.get_play_mode_manager()
-    state = getattr(getattr(play_manager, "state", None), "name", "unknown")
+    if native_scene_manager.is_paused():
+        state = "paused"
+    elif play_manager is not None:
+        state = getattr(getattr(play_manager, "state", None), "name", "unknown")
+    elif native_scene_manager.is_playing():
+        state = "playing"
+    else:
+        state = "stopped"
     objects: dict[str, Any] = {}
     for name in object_names:
         obj = GameObjectQuery.find(name)
@@ -709,7 +1183,6 @@ def _write_json_atomic(path: str, payload: dict[str, Any]) -> None:
             json.dump(payload, stream, ensure_ascii=False)
             stream.write("\n")
             stream.flush()
-            os.fsync(stream.fileno())
         os.replace(temporary_path, path)
     except Exception:
         try:

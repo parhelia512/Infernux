@@ -24,7 +24,5 @@ Example::
 ## Example
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for execute_in_edit_mode
-```
+> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
 <!-- USER CONTENT END -->

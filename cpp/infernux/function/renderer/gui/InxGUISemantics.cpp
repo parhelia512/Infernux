@@ -241,6 +241,13 @@ bool InxGUISemantics::IsCaptureEnabled()
     return g_captureEnabled.load(std::memory_order_acquire);
 }
 
+bool InxGUISemantics::HasPendingCaptureRequest()
+{
+    return g_continuousCapture.load(std::memory_order_acquire) ||
+           g_captureRequestSequence.load(std::memory_order_acquire) !=
+               g_completedRequestSequence.load(std::memory_order_acquire);
+}
+
 uint64_t InxGUISemantics::RequestSnapshot(uint64_t inputSequence)
 {
     uint64_t pending = g_pendingInputSequence.load(std::memory_order_acquire);

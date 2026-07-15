@@ -47,7 +47,7 @@ class CustomProgressDialog(QDialog):
     def set_status(self, message: str):
         if self.timer.isActive():
             self.timer.stop()
-        self.label.setText(message)
+        self.label.setText(tr(message))
 
     def _rotate_message(self):
         self.label.setText(random.choice(self.messages))
@@ -128,7 +128,7 @@ class ControlPaneViewModel:
                 parent,
                 tr("Project Path Missing"),
                 f"The project folder could not be found:\n{project_path}\n\n"
-                "Use Relocate to select its new location.",
+                "Remove this entry from Hub, then use Open Existing to register its new location.",
             )
             return
 
@@ -357,9 +357,8 @@ class ControlPaneViewModel:
         if is_frozen() and self.runtime_manager is not None and not self.runtime_manager.has_runtime():
             QMessageBox.warning(
                 parent,
-                "Python 3.12 Required",
-                "Python 3.12 is not installed yet.\n"
-                "Open the Installs page or restart the Hub and let it finish runtime setup first.",
+                tr("Python 3.12 Required"),
+                tr("Python 3.12 is not installed yet. Open the Installs page or restart the Hub and let it finish runtime setup first."),
             )
             return
 
@@ -369,13 +368,13 @@ class ControlPaneViewModel:
 
         new_name, project_path, engine_version = dialog.get_data()
         if not new_name:
-            QMessageBox.warning(parent, "Missing Name", "Please enter a project name.")
+            QMessageBox.warning(parent, tr("Missing Name"), tr("Please enter a project name."))
             return
         if not project_path:
-            QMessageBox.warning(parent, "Missing Location", "Please choose a project location.")
+            QMessageBox.warning(parent, tr("Missing Location"), tr("Please choose a project location."))
             return
         if is_frozen() and not engine_version:
-            QMessageBox.warning(parent, "Missing Version", "Please select an installed engine version.")
+            QMessageBox.warning(parent, tr("Missing Version"), tr("Please select an installed engine version."))
             return
 
         progress_dialog = CustomProgressDialog(parent)
@@ -399,14 +398,14 @@ class ControlPaneViewModel:
             self._init_error = ""
             if error_message:
                 QMessageBox.critical(
-                    parent, "Project Creation Failed", error_message,
+                    parent, tr("Project Creation Failed"), error_message,
                 )
             elif self.worker.project_dir:
                 record = self.model.add_project(new_name, self.worker.project_dir)
                 if record is None:
                     QMessageBox.warning(
                         parent,
-                        "Project Created",
+                        tr("Project Created"),
                         "The project was created successfully, but it is already registered in Hub.\n\n"
                         f"{self.worker.project_dir}",
                     )

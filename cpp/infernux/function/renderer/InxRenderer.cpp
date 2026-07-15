@@ -531,10 +531,18 @@ void InxRenderer::DrawFrame()
         m_preGuiCallback();
     }
 
-    // Skip rendering while the window is minimized.
-    // This avoids a deadlock in vkAcquireNextImageKHR when the
-    // swapchain extent is zero.
+    // A minimized swapchain has no presentable images, but Agent UI work must
+    // remain independent from desktop presentation. Build an ImGui-only frame
+    // when an on-demand semantic snapshot is pending; it consumes synthetic
+    // input and publishes targets without touching Vulkan acquire/present.
     if (m_view->IsMinimized()) {
+        if (!m_guiPlayerMode && InxGUISemantics::HasPendingCaptureRequest()) {
+            const auto guiBuildStart = std::chrono::high_resolution_clock::now();
+            m_gui->BuildFrame();
+            m_guiBuildMs =
+                std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - guiBuildStart)
+                    .count();
+        }
         SDL_Delay(16);
         return;
     }
@@ -2080,7 +2088,7 @@ void InxRenderer::SubmitPendingCaptureReadbacks()
     for (const PendingCapture &capture : pending) {
         try {
             const bool gameView = capture.source == CaptureSource::Game;
-            (void)m_captureService->AttachReadback(capture.id, RequestRenderTargetReadback(gameView));
+            (void)m_captureService->AttachReadback(capture.id, RequestRenderTargetReadback(gameView), m_frameCount);
         } catch (const std::exception &exc) {
             const std::string error = std::string("Capture readback submission failed: ") + exc.what();
             INXLOG_ERROR(error);

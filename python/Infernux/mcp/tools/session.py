@@ -33,6 +33,11 @@ def register_session_tools(mcp, project_path: str) -> None:
         """Verify a Supervisor-managed checkpoint and compare it with current project files."""
         return ok(session.checkpoint_status(checkpoint))
 
+    @mcp.tool(name="mcp_checkpoint_list")
+    def mcp_checkpoint_list() -> dict:
+        """List payload-verified managed checkpoints before selecting one for an attempt."""
+        return ok({"checkpoints": session.list_checkpoints()})
+
     @mcp.tool(name="mcp_supervisor_shutdown")
     def mcp_supervisor_shutdown(lease_token: str) -> dict:
         """Ask the leased Supervisor-owned Editor to close through its normal Editor lifecycle."""
@@ -143,6 +148,12 @@ def _register_metadata() -> None:
         (
             "mcp_checkpoint_status",
             "Verify a Supervisor-managed checkpoint and compare its Scene/Asset ledger with the current project.",
+            "session/checkpoint",
+            [],
+        ),
+        (
+            "mcp_checkpoint_list",
+            "List payload-verified managed checkpoints without scanning current project files.",
             "session/checkpoint",
             [],
         ),

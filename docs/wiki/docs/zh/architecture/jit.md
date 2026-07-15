@@ -1,6 +1,15 @@
 ---
+title: "深入理解：Infernux 的 JIT 加速脚本系统"
+description: "解释批量读写、ComponentDataStore、NumPy 缓冲区与 Numba JIT 如何降低数据并行玩法逻辑的 Python/原生边界开销。"
 category: 架构
 tags: ["jit", "性能", "python", "numba", "并行"]
+status: experimental
+since: "0.2.1"
+last_verified: "2026-07-15"
+audience: ["advanced-user", "contributor", "agent"]
+related_api: []
+agent_summary: "解释批量读写、ComponentDataStore、NumPy 缓冲区与 Numba JIT 如何降低数据并行玩法逻辑的 Python/原生边界开销。"
+source_paths: ["python/Infernux/jit.py", "python/Infernux/batch.py", "cpp/infernux/tools/pybinding/BindingBatch.cpp", "cpp/infernux/function/scene/ComponentDataStore.cpp", "cpp/infernux/function/scene/TransformECSStore.cpp"]
 date: "2026-04-16"
 ---
 

@@ -1,10 +1,13 @@
 ---
+title: "Rendering and RenderStack"
+description: "Explain the scene RenderStack singleton, forward/deferred pipelines, injection points, pass ordering, graph invalidation, post-processing effects, and safe extension boundaries."
 category: Manual
 tags: ["rendering", "renderstack", "pipeline", "rendergraph", "post-processing"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.renderstack.RenderStack","Infernux.renderstack.RenderPipeline","Infernux.rendergraph.RenderGraph","Infernux.renderstack.BloomEffect","Infernux.renderstack.ToneMappingEffect","Infernux.core.Material"]
 agent_summary: "Explain the scene RenderStack singleton, forward/deferred pipelines, injection points, pass ordering, graph invalidation, post-processing effects, and safe extension boundaries."
 source_paths: ["python/Infernux/renderstack", "python/Infernux/rendergraph", "python/Infernux/core/material.py"]
 ---
@@ -25,6 +28,16 @@ The built-in choices serve different constraints:
 | Default Deferred | G-buffer/deferred lighting topology | shadow resolution, screen UI; deferred MSAA is off |
 
 Choose a pipeline for the whole scene based on lighting, material, transparency, and antialiasing needs. Do not switch pipelines every frame.
+
+```text
+[INX-DIAGRAM:pipeline:Scene data to final frame through RenderStack]
+Scene content        RenderStack               RenderGraph                 Frame
+Camera ────────┐     ┌ pipeline choice ┐       ┌ stable topology ┐
+Lights ────────┼───▶ │ mounted passes  │ ───▶  │ resource edges  │ ───▶  screen target
+Materials ─────┤     └ injection order ┘       └ pass execution  ┘
+Renderables ───┘             ▲
+                             └── configuration change → invalidate → rebuild
+```
 
 ## Injection points and effects
 
@@ -77,4 +90,3 @@ A material property only has an effect when its shader exposes the corresponding
 - [BloomEffect](../api/BloomEffect.md)
 - [ToneMappingEffect](../api/ToneMappingEffect.md)
 - [Material](../api/Material.md)
-

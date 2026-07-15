@@ -6,47 +6,64 @@ class StyleManager:
     @staticmethod
     def get_stylesheet(is_dark: bool) -> str:
         if is_dark:
-            bg_base = "#0d0f14"
-            bg_surface = "#161923"
-            bg_surface_hover = "#1d2230"
-            bg_surface_selected = "#242b3b"
-            bg_input = "#12151d"
-            text_primary = "#f2f4f8"
-            text_secondary = "#a7b0c2"
-            text_muted = "#6f7a90"
-            border = "#282f3d"
-            accent = "#6877ff"
-            accent_hover = "#7d89ff"
+            # Keep the dark product surface strictly neutral.  Red is reserved
+            # for brand emphasis and an explicit action/state, never for a
+            # tinted background behind ordinary navigation.
+            bg_base = "#191919"             # 25, 25, 25
+            bg_surface = "#252525"
+            bg_surface_hover = "#2d2d2d"
+            bg_surface_selected = "#353535"
+            bg_input = "#191919"
+            text_primary = "#f2f2f2"
+            text_secondary = "#bdbdbd"
+            text_muted = "#8f8f8f"
+            border = "#363636"
+            accent = "#eb5757"
+            accent_hover = "#f26a6a"
+            accent_pressed = "#b83f3f"
             accent_text = "#ffffff"
-            danger = "#ff647c"
-            sidebar_bg = "#090b10"
-            sidebar_border = "#1e2430"
-            nav_hover = "#121620"
-            nav_active = "#191e2a"
-            nav_indicator = accent
+            danger = "#eb5757"
+            sidebar_bg = "#232323"
+            sidebar_border = "#303030"
+            nav_hover = "#2c2c2c"
+            nav_active = "#414141"
+            border_hover = "#4a4a4a"
+            button_surface = "#3a3a3a"
+            button_hover = "#454545"
+            button_pressed = "#303030"
+            disabled_surface = "#212121"
+            disabled_text = "#666666"
         else:
-            bg_base = "#f5f7fb"
-            bg_surface = "#ffffff"
-            bg_surface_hover = "#f0f3f9"
-            bg_surface_selected = "#e8ecf8"
-            bg_input = "#ffffff"
-            text_primary = "#151a25"
-            text_secondary = "#59657a"
-            text_muted = "#8a95a8"
-            border = "#dce2ec"
-            accent = "#5865f2"
-            accent_hover = "#4855df"
+            bg_base = "#eeeeee"
+            bg_surface = "#f2f2f2"
+            bg_surface_hover = "#e6e6e6"
+            bg_surface_selected = "#dcdcdc"
+            bg_input = "#f2f2f2"
+            text_primary = "#202020"
+            text_secondary = "#5f5f5f"
+            text_muted = "#858585"
+            border = "#cfcfcf"
+            accent = "#eb5757"
+            accent_hover = "#d83b46"
+            accent_pressed = "#b8313b"
             accent_text = "#ffffff"
-            danger = "#e54861"
-            sidebar_bg = "#edf1f7"
-            sidebar_border = "#d9e0eb"
-            nav_hover = "#e5eaf3"
-            nav_active = "#dce3f0"
-            nav_indicator = accent
+            danger = "#b8313b"
+            sidebar_bg = "#e8e8e8"
+            sidebar_border = "#cfcfcf"
+            nav_hover = "#dedede"
+            nav_active = "#d5d5d5"
+            border_hover = "#999999"
+            button_surface = "#dddddd"
+            button_hover = "#d2d2d2"
+            button_pressed = "#c8c8c8"
+            disabled_surface = "#e4e4e4"
+            disabled_text = "#999999"
 
         return f"""
             * {{
-                font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+                font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+                font-size: 13px;
+                font-weight: 400;
                 color: {text_primary};
             }}
             QMainWindow, QWidget#central, QDialog {{
@@ -55,9 +72,25 @@ class StyleManager:
             QToolTip {{
                 background-color: {bg_surface};
                 color: {text_primary};
-                border: 1px solid {border};
+                border: none;
                 padding: 4px 8px;
-                border-radius: 7px;
+                border-radius: 1px;
+            }}
+            QMenu {{
+                background-color: {bg_surface};
+                color: {text_primary};
+                border: 1px solid {border};
+                padding: 5px;
+            }}
+            QMenu::item {{
+                background: transparent;
+                border-radius: 3px;
+                padding: 7px 22px 7px 10px;
+                margin: 1px;
+            }}
+            QMenu::item:selected {{
+                background-color: {bg_surface_selected};
+                color: {text_primary};
             }}
 
             /* ── Sidebar ── */
@@ -70,7 +103,7 @@ class StyleManager:
             }}
             QLabel#sidebarTitle {{
                 font-size: 23px;
-                font-weight: 650;
+                font-weight: 600;
                 color: {text_primary};
             }}
             QLabel#sidebarSubtitle {{
@@ -81,21 +114,20 @@ class StyleManager:
             QPushButton#navItem {{
                 background: transparent;
                 border: none;
-                border-left: 3px solid transparent;
-                border-radius: 0;
+                border-radius: 4px;
+                margin: 2px 12px;
                 text-align: left;
-                padding: 0 22px;
+                padding: 0 14px;
                 font-size: 14px;
                 font-weight: 500;
                 color: {text_secondary};
             }}
             QPushButton#navItem:hover {{
-                background-color: {nav_hover};
-                color: {text_primary};
+                background-color: transparent;
+                color: {text_secondary};
             }}
             QPushButton#navItem[active="true"] {{
                 background-color: {nav_active};
-                border-left: 3px solid {nav_indicator};
                 color: {text_primary};
                 font-weight: 600;
             }}
@@ -105,12 +137,12 @@ class StyleManager:
                 background: transparent;
                 width: 8px;
                 margin: 0;
-                border-radius: 4px;
+                border-radius: 0;
             }}
             QScrollBar::handle:vertical {{
                 background: {border};
                 min-height: 30px;
-                border-radius: 4px;
+                border-radius: 2px;
             }}
             QScrollBar::handle:vertical:hover {{
                 background: {text_muted};
@@ -118,22 +150,38 @@ class StyleManager:
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
             QScrollArea {{ border: none; background: transparent; }}
+            QScrollArea#projectScrollArea,
+            QWidget#projectViewport,
+            QWidget#projectListContainer,
+            QScrollArea#installScrollArea,
+            QWidget#installViewport,
+            QWidget#installListContainer {{
+                background-color: {bg_base};
+            }}
 
             /* ── Buttons ── */
             QPushButton {{
-                background-color: {bg_surface};
+                background-color: {button_surface};
                 color: {text_primary};
-                border: 1px solid {border};
-                border-radius: 8px;
-                padding: 7px 16px;
+                border: none;
+                border-radius: 3px;
+                padding: 0 14px;
                 font-size: 13px;
-                font-weight: 550;
+                font-weight: 500;
             }}
             QPushButton:hover {{
-                background-color: {bg_surface_hover};
+                background-color: {button_surface};
             }}
             QPushButton:pressed {{
-                background-color: {bg_surface_selected};
+                background-color: {button_pressed};
+            }}
+            QPushButton:focus {{
+                border: none;
+            }}
+            QPushButton:disabled {{
+                background-color: {disabled_surface};
+                color: {disabled_text};
+                border: none;
             }}
             QPushButton#primaryBtn, QPushButton#createBtn {{
                 background-color: {accent};
@@ -142,15 +190,24 @@ class StyleManager:
                 font-weight: 600;
             }}
             QPushButton#primaryBtn:hover, QPushButton#createBtn:hover {{
-                background-color: {accent_hover};
+                background-color: {accent};
+                border: none;
+            }}
+            QPushButton#primaryBtn:pressed, QPushButton#createBtn:pressed {{
+                background-color: {accent_pressed};
+                border: none;
             }}
             QPushButton#dangerBtn {{
                 color: {danger};
-                border: 1px solid {danger};
-                background: transparent;
+                border: none;
+                background-color: {button_surface};
             }}
             QPushButton#dangerBtn:hover {{
-                background-color: {danger};
+                background-color: {button_surface};
+                color: {danger};
+            }}
+            QPushButton#dangerBtn:pressed {{
+                background-color: {accent_pressed};
                 color: #ffffff;
             }}
             QPushButton#iconBtn {{
@@ -174,13 +231,17 @@ class StyleManager:
                 background-color: {bg_input};
                 color: {text_primary};
                 border: 1px solid {border};
-                border-radius: 9px;
+                border-radius: 2px;
                 padding: 9px 13px;
                 font-size: 14px;
             }}
             QLineEdit:focus {{
                 border-color: {accent};
                 background-color: {bg_surface};
+            }}
+            QLineEdit:disabled {{
+                background-color: {disabled_surface};
+                color: {disabled_text};
             }}
             QLineEdit::placeholder {{
                 color: {text_muted};
@@ -191,12 +252,15 @@ class StyleManager:
                 background-color: {bg_input};
                 color: {text_primary};
                 border: 1px solid {border};
-                border-radius: 8px;
+                border-radius: 2px;
                 padding: 8px 12px;
                 font-size: 14px;
             }}
             QComboBox:hover {{
-                border-color: {text_muted};
+                border-color: {border};
+            }}
+            QComboBox:focus {{
+                border-color: {accent};
             }}
             QComboBox::drop-down {{
                 border: none;
@@ -211,30 +275,30 @@ class StyleManager:
 
             /* ── Project Card ── */
             QFrame#projectCard {{
-                background-color: {bg_surface};
-                border: 1px solid {border};
-                border-radius: 12px;
+                background: transparent;
+                border: none;
+                border-radius: 4px;
             }}
             QFrame#projectCard:hover {{
-                background-color: {bg_surface_hover};
+                background: transparent;
             }}
             QFrame#projectCard[selected="true"] {{
-                background-color: {bg_surface_selected};
-                border: 2px solid {accent};
+                background: transparent;
+                border: none;
             }}
             QPushButton#cardAvatar {{
-                background-color: {accent};
-                color: {accent_text};
-                border-radius: 10px;
-                font-size: 16px;
+                background-color: {bg_surface_selected};
+                color: {accent};
+                border-radius: 3px;
+                font-size: 13px;
                 font-weight: bold;
-                border: 1px solid {accent};
+                border: none;
                 padding: 0;
                 margin: 0;
             }}
             QLabel#cardName {{
                 font-size: 15px;
-                font-weight: 600;
+                font-weight: 700;
             }}
             QLabel#cardPath {{
                 font-size: 12px;
@@ -244,43 +308,56 @@ class StyleManager:
                 font-size: 11px;
                 color: {text_muted};
             }}
+            QLabel#sidebarLogo {{
+                background: transparent;
+            }}
             QLabel#cardDate {{
                 font-size: 12px;
                 color: {text_muted};
             }}
             QPushButton#cardOpenBtn {{
-                background: transparent;
+                background-color: {button_surface};
                 color: {text_secondary};
-                border: 1px solid {border};
-                border-radius: 6px;
-                font-size: 16px;
+                border: none;
+                border-radius: 3px;
+                font-size: 12px;
                 padding: 0;
             }}
             QPushButton#cardOpenBtn:hover {{
-                background: {bg_surface_hover};
+                background-color: {button_hover};
                 color: {text_primary};
             }}
             QLabel#projectStatus {{
                 padding: 4px 9px;
-                border-radius: 9px;
+                border-radius: 1px;
                 font-size: 11px;
                 font-weight: 600;
                 color: {text_secondary};
                 background-color: {bg_surface_selected};
             }}
-            QLabel#projectStatus[kind="ready"] {{ color: #68d391; background-color: rgba(44, 122, 83, 0.25); }}
-            QLabel#projectStatus[kind="warning"] {{ color: #f6c85f; background-color: rgba(154, 107, 19, 0.24); }}
+            QLabel#projectStatus[kind="ready"] {{ color: {text_secondary}; background-color: rgba(130, 130, 130, 0.20); }}
+            QLabel#projectStatus[kind="warning"] {{ color: {text_secondary}; background-color: rgba(130, 130, 130, 0.20); }}
             QLabel#projectStatus[kind="error"] {{ color: {danger}; background-color: rgba(160, 42, 62, 0.22); }}
-            QLabel#projectStatus[kind="active"] {{ color: #7dd3fc; background-color: rgba(21, 94, 117, 0.28); }}
+            QLabel#projectStatus[kind="active"] {{ color: {accent_hover}; background-color: rgba(184, 49, 59, 0.24); }}
+            QLabel#projectVersion {{
+                padding: 6px 10px;
+                border-radius: 3px;
+                font-size: 12px;
+                font-weight: 500;
+                color: {text_secondary};
+                background-color: {bg_surface_selected};
+            }}
+            QLabel#projectVersion[kind="warning"] {{ color: {accent_hover}; }}
+            QLabel#projectVersion[kind="active"] {{ color: {accent}; }}
 
             /* ── Version Card (Installs page) ── */
             QFrame#versionCard {{
-                background-color: {bg_surface};
-                border: 1px solid {border};
-                border-radius: 12px;
+                background: transparent;
+                border: none;
+                border-radius: 4px;
             }}
             QFrame#versionCard:hover {{
-                background-color: {bg_surface_hover};
+                background: transparent;
             }}
             QLabel#versionBadge {{
                 font-size: 16px;
@@ -288,21 +365,21 @@ class StyleManager:
                 color: {text_primary};
                 padding: 2px 10px;
                 background-color: {bg_surface_selected};
-                border-radius: 4px;
+                border-radius: 1px;
             }}
 
             /* ── Version Row (Install Editor dialog) ── */
             QFrame#versionRow {{
-                background-color: {bg_surface};
-                border: 1px solid transparent;
-                border-radius: 6px;
+                background: transparent;
+                border: none;
+                border-radius: 3px;
             }}
             QFrame#versionRow:hover {{
-                background-color: {bg_surface_hover};
+                background: transparent;
             }}
             QFrame#versionRow[selected="true"] {{
-                background-color: {bg_surface_selected};
-                border: 1px solid {accent};
+                background: transparent;
+                border: none;
             }}
             QLabel#installedBadge {{
                 font-size: 12px;
@@ -313,7 +390,7 @@ class StyleManager:
             /* ── Page Title ── */
             QLabel#pageTitle {{
                 font-size: 27px;
-                font-weight: 650;
+                font-weight: 600;
             }}
             QLabel#pageSubtitle {{
                 font-size: 13px;
@@ -328,8 +405,8 @@ class StyleManager:
             }}
             QFrame#emptyState {{
                 background-color: {bg_surface};
-                border: 1px dashed {border};
-                border-radius: 14px;
+                border: none;
+                border-radius: 4px;
                 min-height: 210px;
             }}
             QLabel#emptyTitle {{
@@ -337,9 +414,9 @@ class StyleManager:
                 font-weight: 600;
             }}
             QFrame#settingsCard {{
-                background-color: {bg_surface};
-                border: 1px solid {border};
-                border-radius: 12px;
+                background: transparent;
+                border: none;
+                border-radius: 4px;
             }}
             QLabel#settingsLabel {{
                 font-size: 15px;
@@ -348,6 +425,31 @@ class StyleManager:
             QLabel#settingsDescription {{
                 font-size: 12px;
                 color: {text_secondary};
+            }}
+
+            /* ── Discussion ── */
+            QFrame#discussionHero {{
+                background: transparent;
+                border: none;
+                border-radius: 4px;
+            }}
+            QLabel#discussionEyebrow {{
+                color: {accent};
+                font-size: 11px;
+                font-weight: 600;
+            }}
+            QLabel#discussionHeading {{
+                color: {text_primary};
+                font-size: 22px;
+                font-weight: 600;
+            }}
+            QLabel#discussionDescription {{
+                color: {text_secondary};
+                font-size: 13px;
+            }}
+            QLabel#discussionAddress {{
+                color: {text_muted};
+                font-size: 12px;
             }}
 
             /* ── Header (legacy) ── */
@@ -362,13 +464,13 @@ class StyleManager:
 
             /* ── Progress ── */
             QProgressBar {{
-                background-color: {bg_surface};
-                border: 1px solid {border};
-                border-radius: 4px;
+                background-color: {button_surface};
+                border: none;
+                border-radius: 0;
                 height: 6px;
             }}
             QProgressBar::chunk {{
                 background-color: {accent};
-                border-radius: 3px;
+                border-radius: 0;
             }}
         """

@@ -144,6 +144,11 @@ def checkpoint_status(checkpoint: str) -> dict[str, Any]:
     )
 
 
+def list_checkpoints() -> list[dict[str, Any]]:
+    active = current()
+    return checkpoint_store.list_checkpoints(active.project_root, active.artifact_root, session_id=active.session_id)
+
+
 def require_mode(*allowed: str) -> McpSession:
     session = current()
     if session.mode not in {str(item) for item in allowed}:

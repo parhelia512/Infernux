@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "version": "0.2.1",
+  "tag": "v0.2.1",
+  "title": "Infernux v0.2.1 · 熔炉",
+  "codename": "熔炉",
+  "language": "en",
+  "published_at": "2026-07-10T15:33:55Z",
+  "release_url": "https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.1",
+  "source": "UpdateLog.md",
+  "summary": "This is a focused stability and release-pipeline update after v0.2.0. It fixes the inline material preview path that could break when inspecting or creating SpriteRenderer materials, reduces noisy MeshCollider diagnostics, and makes the GitHub release workflow produce the Windows wheel and Hub installer from the same tagged version line.",
+  "comparison": {
+    "from": "0.2.0",
+    "to": "0.2.1",
+    "url": "https://github.com/ChenlizheMe/Infernux/compare/v0.2.0...v0.2.1"
+  },
+  "section_count": 5,
+  "item_count": 15,
+  "sections": [
+    {
+      "id": "editor-and-material-preview-fixes",
+      "title": "Editor and material preview fixes",
+      "kind": "changes",
+      "items": [
+        {
+          "title": "Fixed inline material preview crashes",
+          "detail": "when the Inspector needed to render an unsaved or scene-local material preview from JSON instead of a .mat file on disk.",
+          "text": "Fixed inline material preview crashes when the Inspector needed to render an unsaved or scene-local material preview from JSON instead of a .mat file on disk."
+        },
+        {
+          "title": "Updated the Python preview callsite",
+          "detail": "to match the unified C++ material-preview bridge, removing a stale resource_key argument that no longer belonged in the inline preview API.",
+          "text": "Updated the Python preview callsite to match the unified C++ material-preview bridge, removing a stale resource_key argument that no longer belonged in the inline preview API."
+        },
+        {
+          "title": "Improved SpriteRenderer material inspection stability",
+          "detail": "by letting inline previews resolve through the current path-hint based preview flow instead of an older mixed key/path call.",
+          "text": "Improved SpriteRenderer material inspection stability by letting inline previews resolve through the current path-hint based preview flow instead of an older mixed key/path call."
+        }
+      ]
+    },
+    {
+      "id": "physics-and-runtime-cleanup",
+      "title": "Physics and runtime cleanup",
+      "kind": "changes",
+      "items": [
+        {
+          "title": "Reduced MeshCollider log noise",
+          "detail": "by silencing high-frequency shape/cooking info logs that were useful while debugging collision generation but too chatty for normal editor and runtime sessions.",
+          "text": "Reduced MeshCollider log noise by silencing high-frequency shape/cooking info logs that were useful while debugging collision generation but too chatty for normal editor and runtime sessions."
+        }
+      ]
+    },
+    {
+      "id": "github-release-and-packaging-automation",
+      "title": "GitHub Release and packaging automation",
+      "kind": "changes",
+      "items": [
+        {
+          "title": "GitHub Releases now use UpdateLog.md as the release body",
+          "detail": ", so the release notes are authored intentionally instead of relying only on auto-generated PR summaries.",
+          "text": "GitHub Releases now use UpdateLog.md as the release body, so the release notes are authored intentionally instead of relying only on auto-generated PR summaries."
+        },
+        {
+          "title": "The version workflow now rebuilds when UpdateLog.md changes",
+          "detail": "or when the target release is missing, making patch-release publishing less fragile.",
+          "text": "The version workflow now rebuilds when UpdateLog.md changes or when the target release is missing, making patch-release publishing less fragile."
+        },
+        {
+          "title": "Windows release assets now include both artifacts from CI:",
+          "detail": "the CPython 3.12 Windows wheel and InfernuxHubInstaller.exe.",
+          "text": "Windows release assets now include both artifacts from CI: the CPython 3.12 Windows wheel and InfernuxHubInstaller.exe."
+        },
+        {
+          "title": "The publish job verifies required assets before editing or creating the release",
+          "detail": ", preventing an incomplete release from being marked latest.",
+          "text": "The publish job verifies required assets before editing or creating the release, preventing an incomplete release from being marked latest."
+        },
+        {
+          "title": "Hub installer CI dependencies were fixed",
+          "detail": "by installing the PyInstaller/PySide6/Pillow build requirements in the Windows workflow and removing a stale hidden import from the Hub spec.",
+          "text": "Hub installer CI dependencies were fixed by installing the PyInstaller/PySide6/Pillow build requirements in the Windows workflow and removing a stale hidden import from the Hub spec."
+        }
+      ]
+    },
+    {
+      "id": "version-docs-and-metadata",
+      "title": "Version, docs, and metadata",
+      "kind": "changes",
+      "items": [
+        {
+          "title": "Bumped project metadata to 0.2.1",
+          "detail": "in pyproject.toml, Windows version resources, README badges, docs pages, MCP project metadata, and generated API index pages.",
+          "text": "Bumped project metadata to 0.2.1 in pyproject.toml, Windows version resources, README badges, docs pages, MCP project metadata, and generated API index pages."
+        },
+        {
+          "title": "Updated Hub version-manager examples",
+          "detail": "so downloaded engine wheels are documented under the 0.2.1 cache layout.",
+          "text": "Updated Hub version-manager examples so downloaded engine wheels are documented under the 0.2.1 cache layout."
+        },
+        {
+          "title": "Refreshed website and roadmap text",
+          "detail": "so public project pages point at the current release line instead of 0.2.0.",
+          "text": "Refreshed website and roadmap text so public project pages point at the current release line instead of 0.2.0."
+        }
+      ]
+    },
+    {
+      "id": "upgrade-notes",
+      "title": "Upgrade notes",
+      "kind": "upgrade",
+      "items": [
+        {
+          "title": "Install the new Windows wheel or Hub installer from this release if you hit Inspector material-preview failures in v0.2.0.",
+          "detail": "",
+          "text": "Install the new Windows wheel or Hub installer from this release if you hit Inspector material-preview failures in v0.2.0."
+        },
+        {
+          "title": "Restart the editor after upgrading so the native preview bridge, Python UI layer, and MCP version metadata are all loaded from the same 0.2.1 package.",
+          "detail": "",
+          "text": "Restart the editor after upgrading so the native preview bridge, Python UI layer, and MCP version metadata are all loaded from the same 0.2.1 package."
+        },
+        {
+          "title": "If you maintain release automation for a fork, keep UpdateLog.md present and non-empty; the workflow now treats it as the canonical GitHub Release body.",
+          "detail": "",
+          "text": "If you maintain release automation for a fork, keep UpdateLog.md present and non-empty; the workflow now treats it as the canonical GitHub Release body."
+        }
+      ]
+    }
+  ]
+}

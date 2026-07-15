@@ -1,10 +1,13 @@
 ---
+title: "3D Foundations"
+description: "Build and validate a minimal lit 3D scene using a perspective Camera, MeshRenderer, material, Light, shadows, and RenderStack."
 category: Learn
 tags: ["3d", "mesh", "material", "light", "camera"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["new-user", "agent"]
+related_api: []
 agent_summary: "Build and validate a minimal lit 3D scene using a perspective Camera, MeshRenderer, material, Light, shadows, and RenderStack."
 source_paths: ["python/Infernux/components/builtin/mesh_renderer.pyi", "python/Infernux/components/builtin/camera.pyi", "python/Infernux/components/builtin/light.pyi", "python/Infernux/core/material.pyi", "python/Infernux/renderstack"]
 ---

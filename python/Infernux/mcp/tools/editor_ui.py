@@ -859,8 +859,6 @@ def _snapshot_payload(
     if not bool(raw.get("capture_enabled")):
         raise RuntimeError("Editor UI semantic capture is unavailable. Build the current native Editor and restart the session.")
 
-    window_state = _safe_editor_window_state()
-    minimized = bool(window_state.get("minimized"))
     safe_limit = max(1, min(int(limit), 2000))
     all_targets = _coalesce_targets(_normalize_target(item) for item in raw.get("targets") or [])
     matching_targets = [
@@ -875,7 +873,7 @@ def _snapshot_payload(
             visible_only=visible_only,
         )
     ]
-    targets = [] if minimized else matching_targets
+    targets = matching_targets
     filters = {
         "label_contains": str(label or "").strip(),
         "kind_equals": str(kind or "").strip(),
@@ -884,16 +882,15 @@ def _snapshot_payload(
         "visible_only": bool(visible_only),
     }
     payload = {
-        "ready": int(raw.get("frame", 0) or 0) > 0 and not minimized,
+        "ready": int(raw.get("frame", 0) or 0) > 0,
         "capture_enabled": True,
-        "window_state": window_state,
         "snapshot_id": str(raw.get("snapshot_id", raw.get("frame", 0))),
         "frame": int(raw.get("frame", 0) or 0),
         "mouse": list(raw.get("mouse") or [0.0, 0.0]),
         "wants_text_input": bool(raw.get("wants_text_input")),
         "focused_window": str(raw.get("focused_window") or ""),
         "focused_window_id": str(raw.get("focused_window_id") or ""),
-        "rendered_target_count": 0 if minimized else len(all_targets),
+        "rendered_target_count": len(all_targets),
         "matching_target_count": len(targets),
         "filters": filters,
         "targets": targets[:safe_limit],
@@ -902,21 +899,12 @@ def _snapshot_payload(
             "capture; report them as blockers instead of using external UI automation."
         ),
     }
-    if minimized:
-        payload["stale_rendered_target_count"] = len(all_targets)
-        payload["unavailable_reason"] = (
-            "The Editor window is minimized, so the last semantic frame is stale and cannot be interacted with."
-        )
-        payload["recovery"] = [
-            "Do not alter the window state. Wait for the Developer to present the Editor again, or stop the attempt as an external-state interruption."
-        ]
     if all_targets and not targets:
-        if not minimized:
-            payload["empty_match_hint"] = (
-                "The Editor rendered semantic targets, but none matched the requested filters. "
-                "Call editor_ui_snapshot with label='', kind='', window='', and semantic_id='' to inspect all targets; "
-                "the label argument filters target labels and is not a snapshot title."
-            )
+        payload["empty_match_hint"] = (
+            "The Editor rendered semantic targets, but none matched the requested filters. "
+            "Call editor_ui_snapshot with label='', kind='', window='', and semantic_id='' to inspect all targets; "
+            "the label argument filters target labels and is not a snapshot title."
+        )
     return payload
 
 
@@ -927,14 +915,6 @@ def _resolve_target(target_id: str, snapshot_id: str) -> dict[str, Any]:
         return {"found": False, "reason": "target_id and snapshot_id are both required."}
 
     def _read():
-        window_state = _safe_editor_window_state()
-        if bool(window_state.get("minimized")):
-            return {
-                "found": False,
-                "error_code": "error.window_not_presented",
-                "reason": "The Developer-controlled Editor window is minimized, so its last rendered UI target is stale.",
-                "window_state": window_state,
-            }
         raw = _read_native_snapshot()
         if not bool(raw.get("capture_enabled")):
             return {"found": False, "reason": "Editor UI semantic capture is unavailable."}
@@ -1000,11 +980,6 @@ def _target_resolution_failure(
 ) -> dict[str, Any]:
     code = str(resolved.get("error_code") or "error.stale_ui_target")
     hint = refresh_hint
-    if code == "error.window_not_presented":
-        hint = (
-            "The window state belongs to the Developer. Do not restore, resize, or foreground it; "
-            "wait for it to become presented or stop the attempt as an external-state interruption."
-        )
     return fail(
         code,
         str(resolved.get("reason") or fallback),
@@ -1371,41 +1346,6 @@ def _read_native_snapshot() -> dict[str, Any]:
     return dict(value or {})
 
 
-def _read_editor_window_state() -> dict[str, Any]:
-    """Read the public native window state on the Editor main thread."""
-    native = _native_editor_engine()
-    return {"minimized": bool(native.is_window_minimized())}
-
-
-def _safe_editor_window_state() -> dict[str, Any]:
-    """Read window visibility without making semantic capture unavailable during startup."""
-    try:
-        return {
-            "available": True,
-            "control_owner": "developer",
-            "agent_mutation_allowed": False,
-            **_read_editor_window_state(),
-        }
-    except (AttributeError, ImportError, RuntimeError):
-        return {
-            "available": False,
-            "control_owner": "developer",
-            "agent_mutation_allowed": False,
-            "minimized": False,
-        }
-
-
-def _native_editor_engine():
-    from Infernux.engine.bootstrap import EditorBootstrap
-
-    bootstrap = EditorBootstrap.instance()
-    engine = bootstrap.engine if bootstrap is not None else None
-    native = engine.get_native_engine() if engine is not None else None
-    if native is None:
-        raise RuntimeError("Editor window control requires a running graphical Editor session.")
-    return native
-
-
 def _pointer_button(value: str | int) -> int:
     if isinstance(value, bool):
         raise ValueError("button must be a button name or integer index, not a boolean.")
@@ -1508,9 +1448,6 @@ def _register_metadata() -> None:
             category="global_validation/editor_ui",
             side_effects=side_effects,
             preconditions=["Requires global_validation mode and a running graphical Editor."],
-            recovery=[
-                "Refresh editor_ui_snapshot after any action before choosing the next target.",
-                "Window state belongs to the Developer; wait for a presented frame or stop as an external-state interruption.",
-            ],
+            recovery=["Refresh editor_ui_snapshot after any action before choosing the next target."],
             risk_level=risk_level,
         )

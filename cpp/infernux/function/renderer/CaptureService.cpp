@@ -226,7 +226,8 @@ uint64_t CaptureService::Request(CaptureSource source, uint64_t sourceGeneration
     return id;
 }
 
-bool CaptureService::AttachReadback(uint64_t captureId, std::shared_ptr<vk::ImageReadbackTicket> ticket)
+bool CaptureService::AttachReadback(uint64_t captureId, std::shared_ptr<vk::ImageReadbackTicket> ticket,
+                                    uint64_t engineFrame)
 {
     if (!ticket)
         throw std::invalid_argument("Capture requires a valid GPU readback ticket");
@@ -237,6 +238,7 @@ bool CaptureService::AttachReadback(uint64_t captureId, std::shared_ptr<vk::Imag
     auto &record = it->second;
     if (record.ticket)
         throw std::logic_error("Capture already has an attached GPU readback ticket");
+    record.snapshot.engineFrame = engineFrame;
     record.snapshot.width = ticket->GetWidth();
     record.snapshot.height = ticket->GetHeight();
     record.ticket = std::move(ticket);

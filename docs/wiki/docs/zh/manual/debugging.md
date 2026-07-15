@@ -1,10 +1,13 @@
 ---
+title: "调试与 Console"
+description: "使用 Console、Debug 日志、生命周期检查、最小复现与 GitHub Issue 证据进行可重复的 Infernux 调试。"
 category: 手册
 tags: ["调试", "console", "日志", "故障排查"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.debug.Debug","Infernux.components.InxComponent"]
 agent_summary: "使用 Console、Debug 日志、生命周期检查、最小复现与 GitHub Issue 证据进行可重复的 Infernux 调试。"
 source_paths: ["python/Infernux/debug.py", "python/Infernux/engine/ui/console_utils.py", "python/Infernux/components/component.py"]
 ---

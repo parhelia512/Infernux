@@ -12,8 +12,14 @@ on:
       - "docs/wiki/generate_api_docs.py"
       - "docs/wiki/mkdocs.yml"
       - "docs/wiki/requirements.txt"
+      - "docs/*.html"
+      - "docs/*.json"
+      - "docs/css/**"
+      - "docs/js/**"
       - "docs/tools/**"
       - "docs/docs-manifest.json"
+      - "docs/learning-paths.json"
+      - "UpdateLog.md"
       - "python/Infernux/**"
   workflow_dispatch:
 
@@ -53,14 +59,34 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: python docs/wiki/generate_api_docs.py
 
+      - name: Generate content-hashed Wiki catalog
+        run: node docs/tools/build-wiki-catalog.mjs
+
       - name: Apply curated core API guidance
         run: node docs/tools/apply-api-curation.mjs
+
+      - name: Stamp documentation build provenance
+        env:
+          DOCS_SOURCE_COMMIT: ${{ github.sha }}
+        run: node docs/tools/stamp-docs-manifest.mjs
 
       - name: Generate machine-readable documentation indexes
         run: node docs/tools/build-doc-index.mjs
 
+      - name: Verify curated front matter is synchronized
+        run: node docs/tools/sync-curated-frontmatter.mjs --check
+
+      - name: Generate documentation health report
+        run: node docs/tools/build-doc-health.mjs
+
+      - name: Generate structured release notes
+        run: node docs/tools/build-release-notes.mjs
+
       - name: Generate API version comparison
         run: node docs/tools/build-api-diff.mjs
+
+      - name: Generate full Agent documentation corpus
+        run: node docs/tools/build-agent-corpus.mjs
 
       - name: Build static wiki
         env:
@@ -70,16 +96,39 @@ jobs:
       - name: Optimize static Wiki output
         run: node docs/tools/optimize-static-site.mjs
 
+      - name: Generate unified sitemap
+        run: node docs/tools/build-sitemap.mjs
+
+      - name: Generate deterministic Service Worker
+        run: node docs/tools/build-service-worker.mjs
+
       - name: Enforce static performance budget
         run: node docs/tools/check-static-budget.mjs
 
       - name: Verify website contracts
         run: node docs/tools/verify-site.mjs
 
+      - name: Test community client
+        run: node docs/tools/test-community-client.mjs
+
+      - name: Test generated documentation context
+        run: node docs/tools/test-doc-context.mjs
+
+      - name: Test documentation health client
+        run: node docs/tools/test-doc-health.mjs
+
+      - name: Test offline caching strategy
+        run: node docs/tools/test-service-worker.mjs
+
+      - name: Test mobile navigation focus management
+        run: node docs/tools/test-mobile-navigation.mjs
+
       - name: Commit generated wiki output
         shell: bash
         run: |
-          git add docs/wiki/docs docs/wiki/site docs/wiki/mkdocs.yml docs/wiki/mkdocs_api_nav.yml docs/assets/wiki-docs.json docs/docs-index.json docs/api-index.json
+          git add docs/wiki/docs docs/wiki/site docs/wiki/mkdocs.yml docs/wiki/mkdocs_api_nav.yml docs/assets/wiki-docs*.json docs/docs-manifest.json docs/docs-index.json docs/docs-health.json docs/api-index.json docs/release-notes.json docs/llms-full.txt docs/wiki.html
+          git add -A -- ':(glob)docs/css/wiki-template.*.css'
+          git add docs/sw.js docs/sitemap.xml
 
           if git diff --cached --quiet; then
             echo "No generated wiki changes to commit."

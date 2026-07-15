@@ -18,6 +18,7 @@ Base class for all components attached to GameObjects.
 |------|------|------|
 | type_name | `str` |  *(read-only)* |
 | component_id | `int` |  *(read-only)* |
+| handle | `ObjectHandle` |  *(read-only)* |
 | enabled | `bool` |  |
 | execution_order | `int` |  |
 | game_object | `GameObject` |  *(read-only)* |
@@ -33,7 +34,7 @@ Base class for all components attached to GameObjects.
 |------|------|
 | `is_component_type(type_name: str) → bool` |  |
 | `serialize() → str` |  |
-| `deserialize(json_str: str) → None` |  |
+| `serialize_document() → Dict[str, Any]` |  |
 
 <!-- USER CONTENT START --> public_methods
 
@@ -42,9 +43,7 @@ Base class for all components attached to GameObjects.
 ## Example
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for Component
-```
+> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
 <!-- USER CONTENT END -->
 
 ## See Also

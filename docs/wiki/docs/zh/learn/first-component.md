@@ -1,10 +1,13 @@
 ---
+title: "第一个组件"
+description: "创建 InxComponent Python 脚本，暴露可序列化速度字段，把它挂到 GameObject，并在 Play 模式验证生命周期。"
 category: 学习
 tags: ["入门", "python", "组件", "inspector"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["new-user", "agent"]
+related_api: ["Infernux.components.InxComponent"]
 agent_summary: "创建 InxComponent Python 脚本，暴露可序列化速度字段，把它挂到 GameObject，并在 Play 模式验证生命周期。"
 source_paths: ["python/Infernux/components", "python/Infernux/__init__.pyi"]
 ---
@@ -12,6 +15,8 @@ source_paths: ["python/Infernux/components", "python/Infernux/__init__.pyi"]
 # 第一个组件
 
 Infernux 的玩法脚本是继承 `InxComponent` 的 Python 类。本教程会制作一个持续旋转所属对象的组件，并把旋转速度暴露到 Inspector。
+
+**预计时间：** 10 分钟。
 
 ## 开始之前
 
@@ -99,7 +104,10 @@ class SpinComponent(InxComponent):
 
 使用 `speed * delta_time`，不要每帧增加固定角度。
 
+## 完成标准
+
+当 `SpinComponent` 能出现在 Inspector 中并暴露 **Speed**、在 Play 模式旋转所属 GameObject、只记录一次启动日志，并且停止时 Console 没有重复错误，就完成了本步骤。
+
 ## 下一步
 
 打开[引擎地图](../manual/engine-map.md)，选择输入、物理、场景、UI、协程或渲染等下一个系统，再进入对应的精确 API 页面。
-

@@ -13,18 +13,24 @@
     <meta property="og:description" content="A lightweight community forum backed by GitHub Discussions and Issues.">
     <meta property="og:url" content="https://infernux-engine.com/community.html">
     <meta property="og:image" content="https://infernux-engine.com/assets/demo.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1245">
+    <meta property="og:image:height" content="653">
+    <meta property="og:image:alt" content="Infernux editor running a voxel scene">
     <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Infernux Community">
+    <meta name="twitter:description" content="A lightweight community forum backed by GitHub Discussions and Issues.">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/demo.png">
+    <meta name="twitter:image:alt" content="Infernux editor running a voxel scene">
     <title>Infernux · 熔炉 — Community</title>
     <link rel="icon" type="image/png" href="assets/logo.png">
     <link rel="apple-touch-icon" href="assets/logo.png">
     <link rel="manifest" href="site.webmanifest">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
-    <link rel="stylesheet" href="css/style.css?v=7">
+    <link rel="stylesheet" href="css/fonts.css?v=1">
+    <link rel="stylesheet" href="css/style.css?v=12">
     <link rel="stylesheet" href="css/mission.css?v=2">
-    <link rel="stylesheet" href="css/community.css?v=1">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/community.css?v=3">
+    <link rel="stylesheet" href="css/fontawesome-subset.css?v=6.4.0">
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -39,17 +45,18 @@
         <nav class="navbar" aria-label="Primary navigation">
             <div class="nav-container">
                 <a href="index.html" class="nav-logo">
-                    <span class="logo-icon"><img src="assets/logo.png" alt="Infernux logo"></span>
+                    <span class="logo-icon"><img src="assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
                     <span class="logo-text" data-i18n="brand.navShort">熔炉 · INFERNUX</span>
                 </a>
                 <div class="nav-links" id="primary-navigation">
-                    <a href="index.html" data-i18n="nav.home">Home</a>
-                    <a href="index.html#system" data-i18n="nav.features">Principles</a>
-                    <a href="index.html#capabilities" data-i18n="nav.showcase">Capabilities</a>
+                    <a href="wiki/site/en/learn/getting-started.html" data-href-en="wiki/site/en/learn/getting-started.html" data-href-zh="wiki/site/zh/learn/getting-started.html" class="nav-priority" data-i18n="nav.start">Start</a>
+                    <a href="wiki.html#start-here" data-i18n="nav.learn">Learn</a>
+                    <a href="wiki.html?layer=manual#written-guides" data-i18n="nav.manual">Manual</a>
+                    <a href="wiki/site/en/api/index.html" data-href-en="wiki/site/en/api/index.html" data-href-zh="wiki/site/zh/api/index.html" data-i18n="nav.api">API</a>
                     <a href="roadmap.html" data-i18n="nav.roadmap">Roadmap</a>
-                    <a href="wiki.html" data-i18n="nav.learn">Learn &amp; Docs</a>
-                    <a href="community.html" class="active" data-i18n="nav.community">Community</a>
-                    <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener"><i class="fab fa-github"></i> GitHub</a>
+                    <a href="community.html" class="active nav-priority" aria-current="page" data-i18n="nav.community">Community</a>
+                    <a href="download.html" data-i18n="nav.download">Download</a>
+                    <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener"><i class="fab fa-github" aria-hidden="true"></i> GitHub</a>
                 </div>
                 <div class="nav-right">
                     <button class="theme-toggle" type="button" onclick="toggleTheme()" title="Toggle theme" aria-label="Switch color theme" aria-pressed="false"><i class="fas fa-moon" id="theme-icon" aria-hidden="true"></i></button>
@@ -98,7 +105,31 @@
                         <div class="section-kicker" data-i18n="community.feed.kicker">Live relay</div>
                         <h2 class="section-title" id="latest-topics-title" data-i18n="community.feed.title">Latest public discussions.</h2>
                     </div>
-                    <p class="section-intro" data-i18n="community.feed.intro">Loaded directly from GitHub's public API. No access token or private profile data is stored in this page.</p>
+                    <p class="section-intro" data-i18n="community.feed.intro">Loaded from GitHub's public API and cached in this tab for five minutes. No access token or private profile data is stored.</p>
+                </div>
+                <form class="forum-controls" id="community-filters" role="search" aria-labelledby="community-filters-title">
+                    <span class="visually-hidden" id="community-filters-title" data-i18n="community.feed.filtersTitle">Filter public discussions</span>
+                    <div class="forum-field forum-search-field">
+                        <label for="community-search" data-i18n="community.feed.searchLabel">Search topics</label>
+                        <div class="forum-input-shell">
+                            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                            <input id="community-search" name="q" type="search" autocomplete="off" data-i18n="community.feed.searchPlaceholder" placeholder="Title, author, or category">
+                        </div>
+                    </div>
+                    <div class="forum-field forum-category-field">
+                        <label for="community-category" data-i18n="community.feed.categoryLabel">Category</label>
+                        <select id="community-category" name="category">
+                            <option value="" data-i18n="community.feed.allCategories">All categories</option>
+                        </select>
+                    </div>
+                    <button class="forum-control-button" id="community-refresh" type="button" aria-controls="community-feed">
+                        <i class="fas fa-rotate" aria-hidden="true"></i>
+                        <span data-i18n="community.feed.refresh">Refresh</span>
+                    </button>
+                </form>
+                <div class="forum-feedback">
+                    <p id="community-filter-status" role="status" aria-live="polite" data-i18n="community.feed.loading">Contacting the GitHub relay…</p>
+                    <button id="community-reset" type="button" hidden data-i18n="community.feed.clearFilters">Clear filters</button>
                 </div>
                 <div id="community-feed" class="topic-list" aria-live="polite" aria-busy="true">
                     <div class="topic-status" data-i18n="community.feed.loading">Contacting the GitHub relay…</div>
@@ -120,6 +151,47 @@
                 </div>
             </section>
 
+            <section class="section community-data" aria-labelledby="community-data-title">
+                <div class="section-head">
+                    <div>
+                        <div class="section-kicker" data-i18n="community.data.kicker">Data &amp; privacy</div>
+                        <h2 class="section-title" id="community-data-title" data-i18n="community.data.title">Know what leaves this page.</h2>
+                    </div>
+                    <p class="section-intro" data-i18n="community.data.intro">Infernux has no forum account or post database. The page uses a few named external services, and GitHub remains the public record.</p>
+                </div>
+                <div class="community-data-grid">
+                    <article class="community-data-card">
+                        <span class="data-code">LOCAL-01</span>
+                        <i class="fas fa-sliders" aria-hidden="true"></i>
+                        <h3 data-i18n="community.data.local.title">Local preferences</h3>
+                        <p data-i18n="community.data.local.body">This site stores language, theme, and optional learning-path progress in localStorage, plus a five-minute copy of public topic metadata in sessionStorage. It sets no first-party account cookie and keeps no user profile.</p>
+                    </article>
+                    <article class="community-data-card">
+                        <span class="data-code">PUBLIC-02</span>
+                        <i class="fab fa-github" aria-hidden="true"></i>
+                        <h3 data-i18n="community.data.public.title">Public GitHub content</h3>
+                        <p data-i18n="community.data.public.body">The topic relay reads public Discussion metadata from GitHub without a token. Posts, replies, Issues, authors, and timestamps remain public and are stored on GitHub.</p>
+                    </article>
+                    <article class="community-data-card">
+                        <span class="data-code">AUTH-03</span>
+                        <i class="fas fa-shield-halved" aria-hidden="true"></i>
+                        <h3 data-i18n="community.data.auth.title">Sign-in boundary</h3>
+                        <p data-i18n="community.data.auth.body">Giscus uses GitHub OAuth for comments and may keep a server-encrypted sign-in token in giscus.app localStorage. Infernux receives neither your password nor that access token.</p>
+                    </article>
+                    <article class="community-data-card">
+                        <span class="data-code">NET-04</span>
+                        <i class="fas fa-satellite-dish" aria-hidden="true"></i>
+                        <h3 data-i18n="community.data.network.title">External requests</h3>
+                        <p data-i18n="community.data.network.body">The community page may contact GitHub's public API and giscus.app for public topics and comments. Fonts and icons are served from the Infernux origin.</p>
+                    </article>
+                </div>
+                <div class="community-data-actions">
+                    <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener"><span data-i18n="community.data.githubPrivacy">GitHub privacy statement</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                    <a href="https://github.com/settings/applications" target="_blank" rel="noopener"><span data-i18n="community.data.manageApps">Manage authorized applications</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                    <a href="https://github.com/giscus/giscus/blob/main/PRIVACY-POLICY.md" target="_blank" rel="noopener"><span data-i18n="community.data.giscusPrivacy">Giscus privacy policy</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                </div>
+            </section>
+
             <section class="community-contract" aria-labelledby="community-contract-title">
                 <div>
                     <span class="mini-tag">DATA CONTRACT</span>
@@ -138,7 +210,7 @@
         <div class="container">
             <div class="footer-content">
                 <div class="footer-brand">
-                    <div class="nav-logo"><span class="logo-icon"><img src="assets/logo.png" alt="Infernux logo"></span><span class="logo-text" data-i18n="brand.footerTitle">熔炉 · INFERNUX</span></div>
+                    <div class="nav-logo"><span class="logo-icon"><img src="assets/logo.png" width="256" height="256" alt="Infernux logo"></span><span class="logo-text" data-i18n="brand.footerTitle">熔炉 · INFERNUX</span></div>
                     <p data-i18n="footer.tagline">Open code, explicit architecture, and a render stack you can actually reason about.</p>
                 </div>
                 <div class="footer-links">
@@ -150,9 +222,9 @@
         </div>
     </footer>
 
-    <script src="js/i18n.js?v=7"></script>
-    <script src="js/main.js?v=6"></script>
-    <script src="js/community.js?v=1"></script>
+    <script src="js/i18n.js?v=11"></script>
+    <script src="js/main.js?v=9"></script>
+    <script src="js/community.js?v=2"></script>
     <script src="https://giscus.app/client.js"
             data-repo="ChenlizheMe/Infernux"
             data-repo-id="R_kgDOO_wV3A"
@@ -168,6 +240,23 @@
             data-lang="en"
             crossorigin="anonymous"
             async></script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      "@id": "https://infernux-engine.com/community.html#page",
+      "name": "Infernux Community",
+      "description": "A lightweight community forum backed by GitHub Discussions and Issues.",
+      "url": "https://infernux-engine.com/community.html",
+      "inLanguage": ["en", "zh-CN"],
+      "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+      "about": { "@id": "https://infernux-engine.com/#software" },
+      "discussionUrl": "https://github.com/ChenlizheMe/Infernux/discussions",
+      "significantLink": [
+        "https://github.com/ChenlizheMe/Infernux/discussions",
+        "https://github.com/ChenlizheMe/Infernux/issues"
+      ]
+    }
+    </script>
 </body>
 </html>
-

@@ -1,10 +1,13 @@
 ---
+title: "Build and Share a Project"
+description: "Add saved scenes to Build Settings, configure a Windows standalone player, build it, and verify the result outside the editor."
 category: Learn
 tags: ["beginner", "build", "windows", "release"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["new-user", "agent"]
+related_api: []
 agent_summary: "Add saved scenes to Build Settings, configure a Windows standalone player, build it, and verify the result outside the editor."
 source_paths: ["python/Infernux/engine/ui/build_settings_panel.py", "python/Infernux/engine/game_builder.py"]
 ---

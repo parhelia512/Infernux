@@ -79,6 +79,16 @@ Use this base for project gameplay components. Read [Your First Component](../le
 
 <!-- USER CONTENT END -->
 
+## Static Methods
+
+| Method | Description |
+|------|------|
+| `InxComponent.reserve_instances(count: int) → None` | Preallocate numeric-field storage for bulk component creation. |
+
+<!-- USER CONTENT START --> static_methods
+
+<!-- USER CONTENT END -->
+
 ## Lifecycle Methods
 
 | Method | Description |

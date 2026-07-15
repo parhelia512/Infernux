@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "docs/**"
+      - "UpdateLog.md"
       - ".github/workflows/website-quality.yml"
       - ".github/workflows/build-wiki.yml"
   push:
@@ -12,6 +13,7 @@ on:
       - master
     paths:
       - "docs/**"
+      - "UpdateLog.md"
       - ".github/workflows/website-quality.yml"
       - ".github/workflows/build-wiki.yml"
   workflow_dispatch:
@@ -37,14 +39,32 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Verify content-hashed Wiki catalog
+        run: node docs/tools/build-wiki-catalog.mjs --check
+
+      - name: Verify documentation build provenance schema
+        run: node docs/tools/stamp-docs-manifest.mjs --check
+
       - name: Verify generated indexes are current
         run: node docs/tools/build-doc-index.mjs --check
+
+      - name: Verify curated front matter is synchronized
+        run: node docs/tools/sync-curated-frontmatter.mjs --check
+
+      - name: Verify documentation health report
+        run: node docs/tools/build-doc-health.mjs --check
 
       - name: Verify curated core API guidance is current
         run: node docs/tools/apply-api-curation.mjs --check
 
       - name: Verify API release snapshot and comparison
         run: node docs/tools/build-api-diff.mjs --check
+
+      - name: Verify structured release notes
+        run: node docs/tools/build-release-notes.mjs --check
+
+      - name: Verify full Agent documentation corpus
+        run: node docs/tools/build-agent-corpus.mjs --check
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -64,11 +84,38 @@ jobs:
       - name: Optimize static Wiki output
         run: node docs/tools/optimize-static-site.mjs
 
+      - name: Verify unified sitemap
+        run: node docs/tools/build-sitemap.mjs --check
+
+      - name: Verify deterministic Service Worker
+        run: node docs/tools/build-service-worker.mjs --check
+
       - name: Enforce static performance budget
         run: node docs/tools/check-static-budget.mjs
 
       - name: Verify website contracts
         run: node docs/tools/verify-site.mjs
 
+      - name: Test community client
+        run: node docs/tools/test-community-client.mjs
+
+      - name: Test generated documentation context
+        run: node docs/tools/test-doc-context.mjs
+
+      - name: Test documentation health client
+        run: node docs/tools/test-doc-health.mjs
+
+      - name: Test offline caching strategy
+        run: node docs/tools/test-service-worker.mjs
+
+      - name: Test mobile navigation focus management
+        run: node docs/tools/test-mobile-navigation.mjs
+
       - name: Verify committed Wiki output is current
-        run: git diff --exit-code -- docs/wiki/site
+        shell: bash
+        run: |
+          changes="$(git status --short --untracked-files=all -- docs/wiki/site docs/sitemap.xml ':(glob)docs/css/wiki-template.*.css')"
+          if [ -n "$changes" ]; then
+            printf '%s\n' "$changes"
+            exit 1
+          fi

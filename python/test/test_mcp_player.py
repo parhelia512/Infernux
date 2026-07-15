@@ -101,11 +101,25 @@ def test_player_validation_tools_proxy_only_constrained_operations(tmp_path, mon
         ["PlayerCar"],
         seconds=1.5,
         trigger_scene_name="racetrack",
+        hold_keys=["W", "A"],
+        hold_frame_count=90,
+        wait_frame_count=30,
+        pause_on_complete=True,
         component_probes=[{
             "object_name": "PlayerCar",
             "component_type": "RaceHUDController",
             "fields": ["current_speed_kph"],
         }],
+        stop_assertions=[{
+            "kind": "component_field",
+            "object_name": "PlayerCar",
+            "component_type": "RaceHUDController",
+            "field": "current_speed_kph",
+            "operator": "greater_or_equal",
+            "value": 40.0,
+        }],
+        stop_mode="any",
+        pause_on_condition=True,
     )
     captured = mcp.tools["player_validation_motion_capture_status"]("player-motion-test")
     cancelled = mcp.tools["player_validation_motion_capture_cancel"]("player-motion-test")
@@ -124,6 +138,13 @@ def test_player_validation_tools_proxy_only_constrained_operations(tmp_path, mon
     assert supervisor.calls[4][0:2] == ("motion_capture_arm", ["PlayerCar"])
     assert supervisor.calls[4][2]["trigger_scene_name"] == "racetrack"
     assert supervisor.calls[4][2]["component_probes"][0]["fields"] == ["current_speed_kph"]
+    assert supervisor.calls[4][2]["hold_keys"] == ["W", "A"]
+    assert supervisor.calls[4][2]["hold_frame_count"] == 90
+    assert supervisor.calls[4][2]["wait_frame_count"] == 30
+    assert supervisor.calls[4][2]["pause_on_complete"] is True
+    assert supervisor.calls[4][2]["stop_assertions"][0]["field"] == "current_speed_kph"
+    assert supervisor.calls[4][2]["stop_mode"] == "any"
+    assert supervisor.calls[4][2]["pause_on_condition"] is True
     assert captured["data"]["terminal"] is True
     assert cancelled["data"]["cancelled"] is True
     assert stopped["data"]["stopped"] is True

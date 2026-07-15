@@ -1,19 +1,36 @@
 {
   "name": "Infernux · 熔炉",
   "short_name": "Infernux",
+  "id": "/",
   "description": "Open-source C++17/Vulkan game engine with a Python production layer.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#0a0c11",
   "theme_color": "#0a0c11",
   "lang": "en",
+  "categories": ["developer", "education", "games"],
   "icons": [
     {
       "src": "/assets/logo.png",
       "sizes": "256x256",
       "type": "image/png",
       "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Download Infernux",
+      "short_name": "Download",
+      "url": "/download.html",
+      "icons": [{ "src": "/assets/logo.png", "sizes": "256x256", "type": "image/png" }]
+    },
+    {
+      "name": "Infernux Documentation",
+      "short_name": "Docs",
+      "url": "/wiki.html",
+      "icons": [{ "src": "/assets/logo.png", "sizes": "256x256", "type": "image/png" }]
     }
   ]
 }

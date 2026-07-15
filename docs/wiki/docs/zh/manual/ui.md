@@ -1,10 +1,13 @@
 ---
+title: "屏幕空间 UI"
+description: "解释屏幕空间 UI 层级、Canvas 缩放、锚点、文本和图片布局、按钮事件、命中测试与当前过渡效果限制。"
 category: 手册
 tags: ["UI", "Canvas", "布局", "事件", "响应式"]
 status: preview
 since: "0.2.1"
 last_verified: "2026-07-15"
 audience: ["user", "agent"]
+related_api: ["Infernux.ui.UICanvas","Infernux.ui.UIText","Infernux.ui.UIImage","Infernux.ui.UIButton","Infernux.ui.UISelectable"]
 agent_summary: "解释屏幕空间 UI 层级、Canvas 缩放、锚点、文本和图片布局、按钮事件、命中测试与当前过渡效果限制。"
 source_paths: ["python/Infernux/ui", "python/Infernux/renderstack/default_forward_pipeline.pyi", "python/Infernux/renderstack/default_deferred_pipeline.pyi"]
 ---
@@ -42,6 +45,22 @@ Infernux UI 是以 `UICanvas` 为根的组件层级。其子 GameObject 挂载 `
 
 `UICanvas.raycast()` 返回最前方的可命中元素，`raycast_all()` 返回从前到后的完整列表。
 
+```text
+[INX-DIAGRAM:pipeline:指针事件在屏幕空间 UI 中的传播]
+Game 视口中的指针
+          ▼
+转换到 Canvas 设计坐标
+          ▼
+Canvas 排序 → 父子矩形 → 从前向后 raycast
+          ▼
+第一个启用的 raycast_target
+          ▼
+UISelectable 状态 → UIButton on_click 监听器
+
+raycast_target = false 的装饰 UIImage ──▶ 跳过
+模态 UI 获得焦点 ──▶ 抑制玩法输入
+```
+
 ## 文本、图片与按钮
 
 `UIText` 支持水平/垂直对齐、行高、字距、溢出行为及三种尺寸模式。短标签使用 `AutoWidth`，自动换行段落使用 `AutoHeight`，布局不可移动时使用 `FixedSize`。
@@ -71,6 +90,15 @@ class MainMenu(InxComponent):
 
 如果之后需要 `remove_listener`，应保留稳定的方法回调。`ColorTint` 是当前已实现的选择过渡；Sprite Swap 与 Animation 标记为未来能力。
 
+## 何时使用屏幕空间 UI
+
+| 适合 | 不适合 |
+|---|---|
+| HUD、菜单、弹窗、叠层和贴附视口的提示 | 必须存在于 3D 场景中的世界空间标签 |
+| 相对 Canvas 的指针交互 | 对世界几何做物理拾取或 Camera 射线 |
+| 拥有明确焦点归属的可选择控件 | 会拦截 raycast 的装饰层 |
+| 在目标宽高比上验证过的响应式布局 | 假设 1920 × 1080 设计尺寸就是物理视口 |
+
 ## 响应式检查清单
 
 1. 在参考分辨率、16:9、16:10、超宽屏和窄竖屏中测试 Canvas。
@@ -88,4 +116,3 @@ class MainMenu(InxComponent):
 - [UIButton](../api/UIButton.md)
 - [UISelectable](../api/UISelectable.md)
 - [输入与时间](input-and-time.md)
-

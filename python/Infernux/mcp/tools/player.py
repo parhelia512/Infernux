@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from Infernux.mcp import session
 from Infernux.mcp.supervisor import SupervisorSession
 from Infernux.mcp.tools.common import fail, ok, register_tool_metadata
+from Infernux.mcp.tools.runtime import MotionCaptureStopMode, RuntimeAssertion
 
 
 class PlayerComponentProbe(BaseModel):
@@ -29,12 +30,21 @@ def register_player_tools(mcp, project_path: str) -> None:
     _register_metadata()
 
     @mcp.tool(name="player_validation_launch")
-    def player_validation_launch(executable_path: str = "", timeout_seconds: float = 60.0) -> dict:
-        """Launch the project's Debug Player while the Editor MCP remains available."""
+    def player_validation_launch(
+        executable_path: str = "",
+        start_scene: str = "",
+        timeout_seconds: float = 60.0,
+    ) -> dict:
+        """Launch the Debug Player, optionally at a BuildManifest scene for validation."""
         try:
             supervisor = _supervisor()
             executable = os.path.abspath(executable_path) if executable_path else _configured_executable(project_path)
-            status = supervisor.launch_player(executable, wait_for_ready=True, timeout_seconds=timeout_seconds)
+            status = supervisor.launch_player(
+                executable,
+                start_scene=start_scene,
+                wait_for_ready=True,
+                timeout_seconds=timeout_seconds,
+            )
             if not bool(status.get("player_ready")):
                 return fail(
                     "error.player_startup",
@@ -120,9 +130,28 @@ def register_player_tools(mcp, project_path: str) -> None:
         sample_interval: float = 0.1,
         trigger_scene_name: str = "",
         trigger_timeout: float = 60.0,
+        hold_key: str | int | None = None,
+        hold_keys: list[str | int] | None = None,
+        frame_count: int | None = None,
+        hold_frame_count: int | None = None,
+        wait_frame_count: int | None = None,
+        wait_seconds: float = 0.0,
+        pause_on_complete: bool = False,
         component_probes: list[PlayerComponentProbe] | None = None,
+        stop_assertions: list[RuntimeAssertion] | None = None,
+        stop_mode: MotionCaptureStopMode = "all",
+        pause_on_condition: bool = True,
     ) -> dict:
-        """Arm Player-owned sampling before input loads the target scene."""
+        """Arm Player-owned sampling and an optional frame-bounded input plan.
+
+        The Player presses held keys only after the target scene and public
+        probe objects are ready, releases them on the requested game frame,
+        and can pause after its bounded settle window. Agents should poll the
+        returned capture rather than issuing per-frame input requests. Stop
+        assertions are sampled only at ``sample_interval`` and may use scene
+        name, sampled Transform position, or fields explicitly declared in
+        ``component_probes``.
+        """
         try:
             return ok(_supervisor().player_motion_capture_arm(
                 object_names,
@@ -130,7 +159,17 @@ def register_player_tools(mcp, project_path: str) -> None:
                 sample_interval=float(sample_interval),
                 trigger_scene_name=str(trigger_scene_name or ""),
                 trigger_timeout=float(trigger_timeout),
+                hold_key=hold_key,
+                hold_keys=hold_keys,
+                frame_count=frame_count,
+                hold_frame_count=hold_frame_count,
+                wait_frame_count=wait_frame_count,
+                wait_seconds=float(wait_seconds),
+                pause_on_complete=bool(pause_on_complete),
                 component_probes=_probe_mappings(component_probes),
+                stop_assertions=_assertion_mappings(stop_assertions),
+                stop_mode=str(stop_mode),
+                pause_on_condition=bool(pause_on_condition),
             ))
         except Exception as exc:
             return _player_failure(exc)
@@ -200,6 +239,14 @@ def _probe_mappings(probes: list[PlayerComponentProbe] | None) -> list[dict[str,
     return [probe.model_dump() if isinstance(probe, PlayerComponentProbe) else dict(probe) for probe in probes or []]
 
 
+def _assertion_mappings(assertions: list[RuntimeAssertion] | None) -> list[dict[str, Any]]:
+    return [
+        assertion.model_dump(exclude_unset=True, exclude_none=True)
+        if isinstance(assertion, RuntimeAssertion) else dict(assertion)
+        for assertion in assertions or []
+    ]
+
+
 def _player_failure(exc: Exception) -> dict[str, Any]:
     return fail(
         "error.player_validation",
@@ -213,7 +260,11 @@ def _player_failure(exc: Exception) -> dict[str, Any]:
 
 def _register_metadata() -> None:
     entries = (
-        ("player_validation_launch", "Launch the configured Debug Player under Supervisor control.", ["Starts a Player process"]),
+        (
+            "player_validation_launch",
+            "Launch the configured Debug Player under Supervisor control, optionally at a declared build scene.",
+            ["Starts a Player process"],
+        ),
         ("player_validation_status", "Read managed Player lifecycle state.", []),
         (
             "player_validation_observe",
@@ -228,8 +279,8 @@ def _register_metadata() -> None:
         ),
         (
             "player_validation_motion_capture_arm",
-            "Arm bounded Player-owned sampling before a cross-scene input action.",
-            ["Starts a bounded read-only Player capture"],
+            "Arm bounded Player-owned sampling with optional frame-bound Player input and pause.",
+            ["Starts a bounded Player input/capture action"],
         ),
         (
             "player_validation_motion_capture_status",

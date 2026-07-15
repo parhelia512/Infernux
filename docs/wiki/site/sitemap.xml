@@ -333,6 +333,14 @@
          <lastmod>2026-07-15</lastmod>
     </url>
     <url>
+         <loc>https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html</loc>
+         <lastmod>2026-07-15</lastmod>
+    </url>
+    <url>
+         <loc>https://infernux-engine.com/wiki/site/en/architecture/render-graph-ownership.html</loc>
+         <lastmod>2026-07-15</lastmod>
+    </url>
+    <url>
          <loc>https://infernux-engine.com/wiki/site/en/learn/2d-foundations.html</loc>
          <lastmod>2026-07-15</lastmod>
     </url>
@@ -722,6 +730,14 @@
     </url>
     <url>
          <loc>https://infernux-engine.com/wiki/site/zh/architecture/jit.html</loc>
+         <lastmod>2026-07-15</lastmod>
+    </url>
+    <url>
+         <loc>https://infernux-engine.com/wiki/site/zh/architecture/native-python-boundary.html</loc>
+         <lastmod>2026-07-15</lastmod>
+    </url>
+    <url>
+         <loc>https://infernux-engine.com/wiki/site/zh/architecture/render-graph-ownership.html</loc>
          <lastmod>2026-07-15</lastmod>
     </url>
     <url>

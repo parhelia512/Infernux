@@ -229,10 +229,7 @@ def perform_pointer_click(
         return fail(
             "error.click_frame_barrier",
             "Synthetic mouse press did not reach a rendered ImGui frame before release.",
-            hint=(
-                "Check editor_ui_snapshot and console_read. The window state belongs to the Developer; do not restore, "
-                "resize, or foreground it. Wait for a presented frame or stop as an external-state interruption."
-            ),
+            hint="Check editor_ui_snapshot and console_read. The Editor may be blocked by a native modal dialog.",
         ) | {
             "data": {
                 "x": float(x),
