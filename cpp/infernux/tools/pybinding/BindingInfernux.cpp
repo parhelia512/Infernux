@@ -1007,6 +1007,34 @@ PYBIND11_MODULE(_Infernux, m)
         .def("is_material_preview_ready", &Infernux::IsMaterialPreviewReady, py::arg("resource_key"),
              py::call_guard<py::gil_scoped_release>(),
              "Check whether a material preview matches its latest requested generation")
+        .def_property_readonly(
+            "preview_task_snapshots",
+            [](const Infernux &self) {
+                py::list result;
+                for (const auto &snapshot : self.GetPreviewTaskSnapshots()) {
+                    py::dict item;
+                    item["kind"] = snapshot.kind;
+                    item["resource_key"] = snapshot.resourceKey;
+                    item["texture_name"] = snapshot.textureName;
+                    item["generation"] = snapshot.generation;
+                    item["ready_generation"] = snapshot.readyGeneration;
+                    item["pending_upload_version"] = snapshot.pendingUploadVersion;
+                    item["pending_preview_generation"] = snapshot.pendingPreviewGeneration;
+                    item["published_upload_version"] = snapshot.publishedUploadVersion;
+                    item["failed_upload_version"] = snapshot.failedUploadVersion;
+                    item["texture_id"] = snapshot.textureId;
+                    item["in_flight"] = snapshot.inFlight;
+                    item["has_render_ticket"] = snapshot.hasRenderTicket;
+                    item["render_ticket_done"] = snapshot.renderTicketDone;
+                    item["pending_width"] = snapshot.pendingWidth;
+                    item["pending_height"] = snapshot.pendingHeight;
+                    item["ready_width"] = snapshot.readyWidth;
+                    item["ready_height"] = snapshot.readyHeight;
+                    result.append(std::move(item));
+                }
+                return result;
+            },
+            "Read-only diagnostics for active material, texture, and mesh preview tasks")
         .def("render_timeline_cube_preview", &Infernux::RenderTimelineCubePreview, py::arg("px"), py::arg("py"),
              py::arg("pz"), py::arg("rx"), py::arg("ry"), py::arg("rz"), py::arg("sx"), py::arg("sy"), py::arg("sz"),
              py::arg("cam_yaw"), py::arg("cam_pitch"), py::arg("cam_distance"), py::arg("size") = 192,

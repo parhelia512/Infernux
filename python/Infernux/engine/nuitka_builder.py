@@ -14,6 +14,7 @@ moved to the final destination afterwards.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import queue
 import re
@@ -23,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -36,6 +38,10 @@ _STAGING_ROOT = "C:\\_InxBuild"
 # Persistent Nuitka compilation cache — lives outside the per-build staging
 # directory so it survives across builds, dramatically speeding up rebuilds.
 _NUITKA_CACHE_DIR = os.path.join(_STAGING_ROOT, "_nuitka_cache")
+_RUNTIME_PACK_DIR = os.path.join(_STAGING_ROOT, "_runtime_packs")
+_REQUIREMENTS_STATE_DIR = os.path.join(_STAGING_ROOT, "_requirements_state")
+_RUNTIME_PACK_SCHEMA_VERSION = 1
+_MAX_RUNTIME_PACKS = 4
 
 _AUTO_INSTALLABLE_PACKAGES = {
     "nuitka": "nuitka",
@@ -794,8 +800,26 @@ def _ensure_python_packages(python_exe: str, *module_names: str) -> None:
 
 
 def _install_requirements_files(python_exe: str, requirement_files: List[str]) -> None:
+    os.makedirs(_REQUIREMENTS_STATE_DIR, exist_ok=True)
+    interpreter_key = hashlib.sha256(os.path.normcase(os.path.abspath(python_exe)).encode("utf-8")).hexdigest()[:24]
+    state_path = os.path.join(_REQUIREMENTS_STATE_DIR, f"{interpreter_key}.json")
+    try:
+        with open(state_path, "r", encoding="utf-8") as state_file:
+            state = json.load(state_file)
+        if not isinstance(state, dict):
+            state = {}
+    except (OSError, json.JSONDecodeError):
+        state = {}
+
+    changed = False
     for requirement_file in requirement_files:
         if not requirement_file or not os.path.isfile(requirement_file):
+            continue
+        with open(requirement_file, "rb") as source:
+            requirement_hash = hashlib.sha256(source.read()).hexdigest()
+        state_key = os.path.normcase(os.path.abspath(requirement_file))
+        if state.get(state_key) == requirement_hash:
+            Debug.log_internal(f"Project requirements unchanged; reusing builder environment: {requirement_file}")
             continue
         Debug.log_internal(
             f"Installing project requirements into builder Python: {requirement_file}"
@@ -812,6 +836,14 @@ def _install_requirements_files(python_exe: str, requirement_files: List[str]) -
                 "--quiet",
             ],
         )
+        state[state_key] = requirement_hash
+        changed = True
+
+    if changed:
+        temporary = state_path + f".{os.getpid()}.tmp"
+        with open(temporary, "w", encoding="utf-8") as state_file:
+            json.dump(state, state_file, indent=2, sort_keys=True)
+        os.replace(temporary, state_path)
 
 
 class NuitkaBuilder:
@@ -864,6 +896,7 @@ class NuitkaBuilder:
         raw_copy_packages: Optional[List[str]] = None,
         console_mode: str = "disable",
         lto: bool = True,
+        runtime_pack_cache: bool = False,
     ):
         self.entry_script = os.path.abspath(entry_script)
         self.output_dir = os.path.abspath(output_dir)
@@ -877,6 +910,7 @@ class NuitkaBuilder:
         self.icon_path = icon_path
         self.console_mode = console_mode
         self.lto = lto
+        self.runtime_pack_cache = bool(runtime_pack_cache)
         self.extra_include_packages = [
             pkg for pkg in list(extra_include_packages or [])
             if not self._is_game_build_excluded_package(pkg)
@@ -937,28 +971,150 @@ class NuitkaBuilder:
         cmd = self._build_command()
         _p(f"cmd: {' '.join(cmd)}", 0.05)
 
-        _p(t("build.step.running_nuitka"), 0.10)
-        dist_dir = self._run_nuitka(cmd, on_progress, cancel_event)
+        runtime_pack_key = self._runtime_pack_fingerprint(cmd) if self.runtime_pack_cache else ""
+        dist_dir = self._restore_runtime_pack(runtime_pack_key) if runtime_pack_key else None
+        if dist_dir is None:
+            _p(t("build.step.running_nuitka"), 0.10)
+            dist_dir = self._run_nuitka(cmd, on_progress, cancel_event)
 
-        _p(t("build.step.injecting_libs"), 0.85)
-        self._inject_native_libs(dist_dir)
+            _p(t("build.step.injecting_libs"), 0.85)
+            self._inject_native_libs(dist_dir)
 
-        if self.raw_copy_packages:
-            _p(t("build.step.injecting_jit"), 0.87)
-            self._inject_jit_packages(dist_dir)
+            if self.raw_copy_packages:
+                _p(t("build.step.injecting_jit"), 0.87)
+                self._inject_jit_packages(dist_dir)
 
-        if sys.platform == "win32":
-            _p(t("build.step.embedding_manifest"), 0.90)
-            self._embed_utf8_manifest(dist_dir)
+            if sys.platform == "win32":
+                _p(t("build.step.embedding_manifest"), 0.90)
+                self._embed_utf8_manifest(dist_dir)
 
-            _p(t("build.step.signing_exe"), 0.92)
-            self._sign_executable(dist_dir)
+                _p(t("build.step.signing_exe"), 0.92)
+                self._sign_executable(dist_dir)
+
+            if runtime_pack_key:
+                _p("Caching reusable Infernux Runtime Pack", 0.94)
+                self._store_runtime_pack(runtime_pack_key, dist_dir)
+        else:
+            _p("Reused prebuilt Infernux Runtime Pack", 0.94)
 
         _p(t("build.step.cleaning_artifacts"), 0.95)
         self._cleanup_build_artifacts()
 
         _p(t("build.step.nuitka_complete"), 1.0)
         return dist_dir
+
+    def _runtime_pack_fingerprint(self, cmd: List[str]) -> str:
+        """Fingerprint every input that can change a reusable Player runtime."""
+        digest = hashlib.sha256()
+        digest.update(f"runtime-pack-v{_RUNTIME_PACK_SCHEMA_VERSION}\0".encode("ascii"))
+        digest.update(os.path.normcase(os.path.abspath(self._builder_python)).encode("utf-8"))
+
+        normalized_command = []
+        for argument in cmd:
+            value = str(argument)
+            value = value.replace(self._staging_dir, "<STAGING>")
+            value = value.replace(getattr(self, "_staged_entry", ""), "<ENTRY>")
+            normalized_command.append(value)
+        digest.update(json.dumps(normalized_command, sort_keys=True).encode("utf-8"))
+
+        with open(self._staged_entry, "rb") as entry_file:
+            digest.update(entry_file.read())
+        for requirement_file in sorted(self.extra_requirements_files):
+            if os.path.isfile(requirement_file):
+                with open(requirement_file, "rb") as source:
+                    digest.update(source.read())
+
+        import Infernux
+
+        package_root = Path(Infernux.__file__).resolve().parent
+        relevant_suffixes = {".py", ".pyd", ".dll", ".so", ".dylib", ".json", ".glsl", ".vert", ".frag", ".shadingmodel"}
+        for path in sorted(package_root.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in relevant_suffixes:
+                continue
+            relative = path.relative_to(package_root).as_posix()
+            if "/__pycache__/" in f"/{relative}/" or relative.endswith(".pyi"):
+                continue
+            digest.update(relative.encode("utf-8"))
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        return digest.hexdigest()
+
+    def _runtime_pack_path(self, runtime_pack_key: str) -> str:
+        return os.path.join(_RUNTIME_PACK_DIR, runtime_pack_key)
+
+    def _restore_runtime_pack(self, runtime_pack_key: str) -> Optional[str]:
+        pack_root = self._runtime_pack_path(runtime_pack_key)
+        manifest_path = os.path.join(pack_root, "runtime-pack.json")
+        source_dist = os.path.join(pack_root, "dist")
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+                manifest = json.load(manifest_file)
+        except (OSError, json.JSONDecodeError):
+            return None
+        if (
+            manifest.get("schema_version") != _RUNTIME_PACK_SCHEMA_VERSION
+            or manifest.get("fingerprint") != runtime_pack_key
+            or not os.path.isdir(source_dist)
+        ):
+            return None
+
+        destination = os.path.join(self._staging_dir, "boot.dist")
+        shutil.rmtree(destination, ignore_errors=True)
+        shutil.copytree(source_dist, destination)
+        try:
+            os.utime(manifest_path, None)
+        except OSError:
+            pass
+        Debug.log_internal(f"Runtime Pack cache hit: {runtime_pack_key[:16]}")
+        return destination
+
+    def _store_runtime_pack(self, runtime_pack_key: str, dist_dir: str) -> None:
+        os.makedirs(_RUNTIME_PACK_DIR, exist_ok=True)
+        pack_root = self._runtime_pack_path(runtime_pack_key)
+        marker = {
+            "schema_version": _RUNTIME_PACK_SCHEMA_VERSION,
+            "fingerprint": runtime_pack_key,
+            "python_abi": f"cp{sys.version_info.major}{sys.version_info.minor}",
+            "platform": sys.platform,
+            "created_at": time.time(),
+        }
+        with open(os.path.join(dist_dir, "_infernux_runtime_pack.json"), "w", encoding="utf-8") as marker_file:
+            json.dump(marker, marker_file, indent=2, sort_keys=True)
+            marker_file.write("\n")
+
+        if os.path.isdir(pack_root):
+            return
+        temporary = pack_root + f".{os.getpid()}.tmp"
+        shutil.rmtree(temporary, ignore_errors=True)
+        try:
+            os.makedirs(temporary, exist_ok=False)
+            shutil.copytree(dist_dir, os.path.join(temporary, "dist"))
+            with open(os.path.join(temporary, "runtime-pack.json"), "w", encoding="utf-8") as manifest_file:
+                json.dump(marker, manifest_file, indent=2, sort_keys=True)
+                manifest_file.write("\n")
+            try:
+                os.replace(temporary, pack_root)
+            except OSError:
+                if not os.path.isdir(pack_root):
+                    raise
+            self._prune_runtime_packs()
+            Debug.log_internal(f"Runtime Pack cached: {runtime_pack_key[:16]}")
+        finally:
+            shutil.rmtree(temporary, ignore_errors=True)
+
+    @staticmethod
+    def _prune_runtime_packs() -> None:
+        try:
+            packs = [
+                path for path in Path(_RUNTIME_PACK_DIR).iterdir()
+                if path.is_dir() and not path.name.endswith(".tmp")
+            ]
+        except OSError:
+            return
+        packs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        for stale in packs[_MAX_RUNTIME_PACKS:]:
+            shutil.rmtree(stale, ignore_errors=True)
 
     # ------------------------------------------------------------------
     # Nuitka availability check

@@ -457,8 +457,28 @@ void AppendPrefabNodePreview(const json &nodeJson, const glm::mat4 &parentWorld,
 
     auto componentsIt = nodeJson.find("components");
     if (componentsIt != nodeJson.end() && componentsIt->is_array()) {
-        for (const auto &componentJson : *componentsIt)
-            AppendPrefabMeshComponent(componentJson, worldMatrix, aggregate, defaultMat, errorMat);
+        for (const auto &componentJson : *componentsIt) {
+            if (!componentJson.is_object())
+                continue;
+
+            // Current prefab documents wrap serialized component fields in
+            // `data` and identify native types with `type_id`. Keep accepting
+            // the legacy flat shape so existing prefabs continue to preview.
+            auto dataIt = componentJson.find("data");
+            if (dataIt == componentJson.end() || !dataIt->is_object()) {
+                AppendPrefabMeshComponent(componentJson, worldMatrix, aggregate, defaultMat, errorMat);
+                continue;
+            }
+
+            json normalized = *dataIt;
+            normalized["enabled"] = componentJson.value("enabled", true);
+            std::string type = componentJson.value("type_id", std::string());
+            const size_t typeSeparator = type.find_last_of(".:");
+            if (typeSeparator != std::string::npos)
+                type = type.substr(typeSeparator + 1);
+            normalized["type"] = std::move(type);
+            AppendPrefabMeshComponent(normalized, worldMatrix, aggregate, defaultMat, errorMat);
+        }
     }
 
     auto childrenIt = nodeJson.find("children");
@@ -1320,22 +1340,23 @@ void Infernux::PumpPreviewTasks()
     if (!m_renderer)
         return;
 
+    // Inspector and Project can both pump during one ImGui frame. Check the
+    // frame before consuming the edge-triggered work flag; otherwise the
+    // second caller clears work re-armed by the first caller and a completed
+    // GPU readback can remain in-flight forever.
+    const int currentFrame = ImGui::GetFrameCount();
+    if (m_lastPumpFrame == currentFrame) {
+        PumpTimelineCubePreviewIfDirty();
+        return;
+    }
+    m_lastPumpFrame = currentFrame;
+
     if (!m_hasPreviewPumpWork.exchange(false, std::memory_order_acq_rel)) {
         PumpTimelineCubePreviewIfDirty();
         return;
     }
 
     CommitPublishedPreviewTextures();
-
-    const int currentFrame = ImGui::GetFrameCount();
-    const bool firstPumpThisFrame = (m_lastPumpFrame != currentFrame);
-    if (firstPumpThisFrame)
-        m_lastPumpFrame = currentFrame;
-
-    if (!firstPumpThisFrame) {
-        PumpTimelineCubePreviewIfDirty();
-        return;
-    }
 
     constexpr int kMaxUploadsPerFrame = 3;
     int uploadBudget = kMaxUploadsPerFrame;
@@ -1563,6 +1584,81 @@ bool Infernux::IsMaterialPreviewReady(const std::string &resourceKey) const
            LiveImGuiTextureId(m_renderer.get(), state.textureName) != 0;
 }
 
+std::vector<Infernux::PreviewTaskSnapshot> Infernux::GetPreviewTaskSnapshots() const
+{
+    std::vector<PreviewTaskSnapshot> snapshots;
+    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+    snapshots.reserve(m_materialPreviewStates.size() + m_texturePreviewStates.size() + m_meshPreviewStates.size());
+
+    auto finish = [this](PreviewTaskSnapshot &snapshot) {
+        snapshot.textureId = LiveImGuiTextureId(m_renderer.get(), snapshot.textureName);
+        if (m_renderer) {
+            snapshot.publishedUploadVersion = m_renderer->GetImGuiTextureVersion(snapshot.textureName);
+            snapshot.failedUploadVersion = m_renderer->GetFailedImGuiTextureVersion(snapshot.textureName);
+        }
+    };
+
+    for (const auto &[key, state] : m_materialPreviewStates) {
+        PreviewTaskSnapshot snapshot;
+        snapshot.kind = "material";
+        snapshot.resourceKey = key;
+        snapshot.textureName = state.textureName;
+        snapshot.generation = state.generation;
+        snapshot.readyGeneration = state.readyGeneration;
+        snapshot.pendingUploadVersion = state.pendingUploadVersion;
+        snapshot.pendingPreviewGeneration = state.pendingPreviewGeneration;
+        snapshot.inFlight = state.inFlight;
+        snapshot.hasRenderTicket = static_cast<bool>(state.renderTicket);
+        snapshot.renderTicketDone = state.renderTicket && state.renderTicket->IsDone();
+        snapshot.pendingWidth = state.pendingSize;
+        snapshot.pendingHeight = state.pendingSize;
+        snapshot.readyWidth = state.readySize;
+        snapshot.readyHeight = state.readySize;
+        finish(snapshot);
+        snapshots.push_back(std::move(snapshot));
+    }
+
+    for (const auto &[key, state] : m_texturePreviewStates) {
+        PreviewTaskSnapshot snapshot;
+        snapshot.kind = "texture";
+        snapshot.resourceKey = key;
+        snapshot.textureName = state.textureName;
+        snapshot.generation = state.generation;
+        snapshot.readyGeneration = state.readyGeneration;
+        snapshot.pendingUploadVersion = state.pendingUploadVersion;
+        snapshot.pendingPreviewGeneration = state.pendingPreviewGeneration;
+        snapshot.inFlight = state.inFlight;
+        snapshot.pendingWidth = state.pendingWidth;
+        snapshot.pendingHeight = state.pendingHeight;
+        snapshot.readyWidth = state.readyWidth;
+        snapshot.readyHeight = state.readyHeight;
+        finish(snapshot);
+        snapshots.push_back(std::move(snapshot));
+    }
+
+    for (const auto &[key, state] : m_meshPreviewStates) {
+        PreviewTaskSnapshot snapshot;
+        snapshot.kind = "mesh";
+        snapshot.resourceKey = key;
+        snapshot.textureName = state.textureName;
+        snapshot.generation = state.generation;
+        snapshot.readyGeneration = state.readyGeneration;
+        snapshot.pendingUploadVersion = state.pendingUploadVersion;
+        snapshot.pendingPreviewGeneration = state.pendingPreviewGeneration;
+        snapshot.inFlight = state.inFlight;
+        snapshot.hasRenderTicket = static_cast<bool>(state.renderTicket);
+        snapshot.renderTicketDone = state.renderTicket && state.renderTicket->IsDone();
+        snapshot.pendingWidth = state.pendingSize;
+        snapshot.pendingHeight = state.pendingSize;
+        snapshot.readyWidth = state.readySize;
+        snapshot.readyHeight = state.readySize;
+        finish(snapshot);
+        snapshots.push_back(std::move(snapshot));
+    }
+
+    return snapshots;
+}
+
 uint64_t Infernux::GetTexturePreviewTextureId(const std::string &resourceKey) const
 {
     std::lock_guard<std::mutex> lock(m_previewResultMutex);
@@ -1786,10 +1882,11 @@ uint64_t Infernux::QueryOrScheduleMeshPreview(const std::string &resourceKey, co
     if (resourceKey.empty() || meshFilePath.empty())
         return 0;
 
+    const std::string key = CanonicalizePreviewKey(resourceKey);
     std::lock_guard<std::mutex> lock(m_previewResultMutex);
-    auto &state = m_meshPreviewStates[resourceKey];
+    auto &state = m_meshPreviewStates[key];
     if (state.textureName.empty())
-        state.textureName = BuildMeshPreviewTextureName(resourceKey);
+        state.textureName = BuildMeshPreviewTextureName(key);
     state.meshFilePath = meshFilePath;
 
     // ── Detect content changes ──────────────────────────────────
@@ -1812,8 +1909,10 @@ uint64_t Infernux::QueryOrScheduleMeshPreview(const std::string &resourceKey, co
     // ── Schedule render if not already in flight ────────────────
     if (!state.inFlight && state.readyGeneration < state.generation) {
         state.inFlight = true;
-        m_meshPreviewRequestQueue.push(MeshPreviewRequest{resourceKey, meshFilePath, state.generation});
+        m_meshPreviewRequestQueue.push(MeshPreviewRequest{key, meshFilePath, state.generation});
         m_hasPreviewPumpWork.store(true, std::memory_order_release);
+        if (m_renderer)
+            m_renderer->RequestFullSpeedFrame();
     }
 
     // Stale-return: keep showing old preview while new one renders (no flicker).

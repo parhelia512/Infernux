@@ -219,6 +219,30 @@ class Infernux
     uint64_t QueryOrScheduleMaterialPreview(const std::string &resourceKey, const std::string &matFilePath,
                                             const std::string &materialJson = "", uint64_t fileMtimeHint = 0);
 
+    struct PreviewTaskSnapshot
+    {
+        std::string kind;
+        std::string resourceKey;
+        std::string textureName;
+        uint64_t generation = 0;
+        uint64_t readyGeneration = 0;
+        uint64_t pendingUploadVersion = 0;
+        uint64_t pendingPreviewGeneration = 0;
+        uint64_t publishedUploadVersion = 0;
+        uint64_t failedUploadVersion = 0;
+        uint64_t textureId = 0;
+        bool inFlight = false;
+        bool hasRenderTicket = false;
+        bool renderTicketDone = false;
+        int pendingWidth = 0;
+        int pendingHeight = 0;
+        int readyWidth = 0;
+        int readyHeight = 0;
+    };
+
+    /// @brief Read-only diagnostics for active preview state machines.
+    std::vector<PreviewTaskSnapshot> GetPreviewTaskSnapshots() const;
+
     /// @brief Pump completed preview tasks on main thread and upload textures.
     void PumpPreviewTasks();
 

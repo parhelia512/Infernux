@@ -33,6 +33,15 @@
       }
     },
     {
+      "name": "native-dev",
+      "displayName": "Native Development Preset (Windows, engine module only)",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/out/build-native-dev",
+      "cacheVariables": {
+        "INFERNUX_BUILD_TESTS": "OFF"
+      }
+    },
+    {
       "name": "release-macos",
       "displayName": "Release Preset (macOS / Ninja)",
       "generator": "Ninja",
@@ -82,6 +91,14 @@
       "name": "debug-profile",
       "configurePreset": "debug-profile",
       "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "native-dev",
+      "configurePreset": "native-dev",
+      "configuration": "RelWithDebInfo",
+      "targets": [
+        "_Infernux"
+      ]
     },
     {
       "name": "release-macos",

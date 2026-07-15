@@ -77,6 +77,23 @@ const translations = {
         "downloadPage.releaseNotes.ready": "Canonical English release notes · sourced from UpdateLog.md",
         "downloadPage.releaseNotes.sourceLanguage": "Release notes are shown in their canonical English source language.",
         "downloadPage.releaseNotes.fallback": "Structured notes are unavailable; use the GitHub Release link below.",
+        "downloadPage.webApp.kicker": "WEB APP · DOCUMENTATION SHELL",
+        "downloadPage.webApp.title": "Keep the Infernux knowledge deck within reach.",
+        "downloadPage.webApp.body": "Install this website as a lightweight app for a dedicated window, quick launch, and resilient access to pages you have already visited.",
+        "downloadPage.webApp.home": "Launch from the home screen, Start menu, or app launcher.",
+        "downloadPage.webApp.offline": "The shell and previously visited pages can recover when the connection drops.",
+        "downloadPage.webApp.boundary": "This does not install the game engine or pre-download the complete Manual.",
+        "downloadPage.webApp.action": "Install documentation app",
+        "downloadPage.webApp.status.checking": "Checking whether this browser can install the web app…",
+        "downloadPage.webApp.status.ready": "Ready: this browser can install the documentation app.",
+        "downloadPage.webApp.status.prompting": "Waiting for the browser's installation decision…",
+        "downloadPage.webApp.status.accepted": "Installation accepted. The launcher may take a moment to appear.",
+        "downloadPage.webApp.status.dismissed": "Installation dismissed. Reload or use the browser menu when you want to try again.",
+        "downloadPage.webApp.status.installed": "Installed, or already running in standalone app mode.",
+        "downloadPage.webApp.status.iosSafari": "Safari: tap Share, then Add to Home Screen.",
+        "downloadPage.webApp.status.iosOther": "Open this page in Safari, then tap Share and Add to Home Screen.",
+        "downloadPage.webApp.status.unavailable": "No direct prompt is available. Use the browser's Install app or Add to home screen menu when offered.",
+        "downloadPage.webApp.status.failed": "The browser could not open the prompt. Use its install menu instead.",
 
         "home.hero.badge": "RELEASE 0.2.1 · LIVE",
         "home.hero.kicker": "Open source · MIT · Win64 (broader platforms in development)",
@@ -389,6 +406,23 @@ const translations = {
         "downloadPage.releaseNotes.ready": "权威英文发布说明 · 来源 UpdateLog.md",
         "downloadPage.releaseNotes.sourceLanguage": "发布说明以权威英文源语言展示。",
         "downloadPage.releaseNotes.fallback": "结构化发布说明不可用；请使用下方 GitHub Release 链接。",
+        "downloadPage.webApp.kicker": "WEB APP · 文档外壳",
+        "downloadPage.webApp.title": "把 Infernux 知识台留在手边。",
+        "downloadPage.webApp.body": "把本站安装为轻量应用，即可使用独立窗口、快速启动，并在断网时恢复你已经访问过的页面。",
+        "downloadPage.webApp.home": "从主屏幕、开始菜单或应用启动器直接打开。",
+        "downloadPage.webApp.offline": "连接中断时，站点外壳和已访问页面仍可恢复。",
+        "downloadPage.webApp.boundary": "这不会安装游戏引擎，也不会预先下载完整 Manual。",
+        "downloadPage.webApp.action": "安装文档应用",
+        "downloadPage.webApp.status.checking": "正在检查此浏览器是否可以安装 Web App……",
+        "downloadPage.webApp.status.ready": "已就绪：此浏览器可以安装文档应用。",
+        "downloadPage.webApp.status.prompting": "正在等待浏览器中的安装选择……",
+        "downloadPage.webApp.status.accepted": "已接受安装；启动图标可能需要片刻才会出现。",
+        "downloadPage.webApp.status.dismissed": "已取消安装；需要时可刷新页面或使用浏览器菜单重试。",
+        "downloadPage.webApp.status.installed": "应用已安装，或当前已经以独立应用模式运行。",
+        "downloadPage.webApp.status.iosSafari": "Safari：轻点“分享”，然后选择“添加到主屏幕”。",
+        "downloadPage.webApp.status.iosOther": "请在 Safari 中打开本页，再点“分享 → 添加到主屏幕”。",
+        "downloadPage.webApp.status.unavailable": "当前没有直接安装提示；浏览器提供时，请使用“安装应用”或“添加到主屏幕”菜单。",
+        "downloadPage.webApp.status.failed": "浏览器无法打开安装提示，请改用其安装菜单。",
 
         "home.hero.badge": "RELEASE 0.2.1 · 已上线",
         "home.hero.kicker": "开源 · MIT · WIN64（多平台正在路上！）",
@@ -625,6 +659,10 @@ const translations = {
 };
 
 let currentLang = localStorage.getItem('lang') || 'en';
+
+function translateSiteKey(key, lang = currentLang) {
+    return translations[lang]?.[key] || "";
+}
 
 function applyLanguage(lang) {
     currentLang = lang;

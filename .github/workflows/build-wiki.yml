@@ -105,6 +105,21 @@ jobs:
       - name: Verify responsive evidence images
         run: node docs/tools/check-image-variants.mjs
 
+      - name: Verify installable PWA assets
+        run: node docs/tools/check-pwa-assets.mjs
+
+      - name: Test PWA installation interaction
+        run: node docs/tools/test-pwa-install.mjs
+
+      - name: Audit shipped runtime assets and visual state
+        run: node docs/tools/check-runtime-assets.mjs
+
+      - name: Test runtime visual state
+        run: node docs/tools/test-runtime-visual-state.mjs
+
+      - name: Test installed website update flow
+        run: node docs/tools/test-service-worker-update.mjs
+
       - name: Enforce static performance budget
         run: node docs/tools/check-static-budget.mjs
 
@@ -125,6 +140,9 @@ jobs:
 
       - name: Test documentation health client
         run: node docs/tools/test-doc-health.mjs
+
+      - name: Test website health reporting
+        run: node docs/tools/test-website-health-report.mjs
 
       - name: Test offline caching strategy
         run: node docs/tools/test-service-worker.mjs

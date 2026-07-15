@@ -31,6 +31,9 @@ class NuitkaBuilder:
     extra_include_packages: List[str]
     extra_include_data: List[str]
     extra_requirements_files: List[str]
+    raw_copy_packages: List[str]
+    lto: bool
+    runtime_pack_cache: bool
 
     def __init__(
         self,
@@ -44,7 +47,10 @@ class NuitkaBuilder:
         extra_include_packages: Optional[List[str]] = None,
         extra_include_data: Optional[List[str]] = None,
         extra_requirements_files: Optional[List[str]] = None,
+        raw_copy_packages: Optional[List[str]] = None,
         console_mode: str = ...,
+        lto: bool = ...,
+        runtime_pack_cache: bool = ...,
     ) -> None: ...
 
     def build(self) -> str:

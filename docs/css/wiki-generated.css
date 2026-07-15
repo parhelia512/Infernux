@@ -631,3 +631,11 @@
     .api-sidebar-toggle-mark,
     .doc-outline-toggle-mark { transition: none; }
 }
+.clipboard-fallback {
+    position: fixed;
+    inset: 0 auto auto 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}

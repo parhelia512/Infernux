@@ -253,13 +253,18 @@ class ProjectPanel : public EditorPanel
     std::unordered_map<std::string, std::pair<uint64_t, double>> m_materialMtimeCache;
     std::unordered_map<std::string, std::pair<uint64_t, double>> m_textureMtimeCache;
     std::unordered_map<std::string, std::pair<uint64_t, double>> m_modelMtimeCache;
+    struct PrefabTypeCacheEntry
+    {
+        uint64_t mtimeNs = 0;
+        bool isUi = false;
+    };
+    std::unordered_map<std::string, PrefabTypeCacheEntry> m_prefabTypeCache;
 
     void ProcessPendingThumbnails();
     uint64_t GetThumbnail(const std::string &filePath, uint64_t cachedMtimeNs);
-    uint64_t GetMaterialThumbnail(const std::string &filePath);
+    uint64_t GetMaterialThumbnail(const std::string &filePath, uint64_t cachedMtimeNs);
     uint64_t GetEmbeddedMaterialThumbnail(const FileItem &item);
-    uint64_t GetModelThumbnail(const std::string &filePath);
-    uint64_t GetPrefabThumbnail(const std::string &filePath);
+    uint64_t GetModelThumbnail(const std::string &filePath, uint64_t cachedMtimeNs);
     uint64_t GetMaterialMtimeNs(const std::string &filePath);
     uint64_t GetTextureMtimeNs(const std::string &filePath);
 
@@ -272,7 +277,7 @@ class ProjectPanel : public EditorPanel
     void EnsureTypeIconsLoaded();
     uint64_t GetTypeIconId(const FileItem &item) const;
     uint64_t GetModel3dIconId() const;
-    static bool IsUiPrefabFile(const std::string &filePath);
+    bool IsUiPrefabFile(const std::string &filePath, uint64_t cachedMtimeNs);
 
     // ── Drag-drop maps ───────────────────────────────────────────────
     struct DragDropInfo

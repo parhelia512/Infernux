@@ -118,6 +118,15 @@ def test_runtime_renderer_state_combines_frame_submission_and_gpu_residency(monk
             "tracked_bytes": 4096,
             "material_pipeline_count": 2,
         }
+        preview_task_snapshots = [
+            {
+                "kind": "material",
+                "resource_key": "matedit|Assets/Test.mat",
+                "generation": 2,
+                "ready_generation": 2,
+                "texture_id": 123,
+            }
+        ]
         asset_runtime_records = [object(), object(), object()]
 
     class _Engine:
@@ -140,6 +149,7 @@ def test_runtime_renderer_state_combines_frame_submission_and_gpu_residency(monk
     assert state["frame"]["game_render_graph_execution_count"] == 42
     assert "Bloom_Composite" in state["frame"]["game_render_graph_pass_names"]
     assert state["gpu_residency"]["tracked_bytes"] == 4096
+    assert state["preview_tasks"][0]["ready_generation"] == 2
     assert state["asset_runtime_record_count"] == 3
     assert state["submission_ready"] is True
 

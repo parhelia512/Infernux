@@ -797,6 +797,7 @@ void ProjectPanel::ClearDirCachesNow()
     m_dirTreeMetaCache.clear();
     m_augmentedCache.clear();
     m_labelCache.clear();
+    m_prefabTypeCache.clear();
 }
 
 ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot(const std::string &path)
@@ -810,9 +811,13 @@ ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot(const std::string &path)
     // File changes are generation-driven. TTL validation is only for directory nodes.
     auto it = m_dirCache.find(path);
     if (it != m_dirCache.end()) {
-        if (it->second.assetGeneration == assetGeneration &&
-            (m_frameTimeNow - it->second.lastValidatedAt) < DIR_CACHE_TTL)
-            return &it->second;
+        if (it->second.assetGeneration == assetGeneration) {
+            // AssetDatabase and the Editor file watcher both invalidate this
+            // cache on mutations. Avoid polling directory mtimes from the UI
+            // thread when that event-driven source of truth is available.
+            if (catalog || (m_frameTimeNow - it->second.lastValidatedAt) < DIR_CACHE_TTL)
+                return &it->second;
+        }
         uint64_t mtimeNs = GetMtimeNs(path);
         it->second.lastValidatedAt = m_frameTimeNow;
         if (it->second.assetGeneration == assetGeneration && it->second.mtimeNs == mtimeNs)
@@ -1182,10 +1187,6 @@ uint64_t ProjectPanel::GetThumbnail(const std::string &filePath, uint64_t cached
     if (filePath.empty() || !m_engine)
         return 0;
 
-    uint64_t texMtime = GetTextureMtimeNs(filePath);
-    if (texMtime == 0)
-        return 0;
-
     // Read import settings from .meta for nearest/srgb.
     bool nearest = false;
     bool srgb = false;
@@ -1201,13 +1202,24 @@ uint64_t ProjectPanel::GetThumbnail(const std::string &filePath, uint64_t cached
         }
     }
 
+    uint64_t texMtime = cachedMtimeNs;
+    if (texMtime == 0)
+        texMtime = GetTextureMtimeNs(filePath);
+    if (texMtime == 0)
+        return 0;
+    // Import settings affect the generated pixels even when the source file
+    // itself is unchanged. Fold only the settings used by this preview path
+    // into the generation fingerprint.
+    texMtime ^= nearest ? UINT64_C(0x9e3779b97f4a7c15) : 0;
+    texMtime ^= srgb ? UINT64_C(0xc2b2ae3d27d4eb4f) : 0;
+
     const std::string resourceKey = std::string("tex|") + filePath;
     // pump=false: PreRender already pumped once this frame.
     auto [texId, w, h] = m_engine->QueryOrScheduleTexturePreview(resourceKey, filePath, texMtime, nearest, srgb, false);
     return texId;
 }
 
-uint64_t ProjectPanel::GetMaterialThumbnail(const std::string &filePath)
+uint64_t ProjectPanel::GetMaterialThumbnail(const std::string &filePath, uint64_t cachedMtimeNs)
 {
     if (filePath.empty() || !m_engine)
         return 0;
@@ -1220,7 +1232,7 @@ uint64_t ProjectPanel::GetMaterialThumbnail(const std::string &filePath)
         return liveTexture;
 
     const std::string resourceKey = std::string("mat|") + filePath;
-    uint64_t mtimeNs = GetMaterialMtimeNs(filePath);
+    uint64_t mtimeNs = cachedMtimeNs != 0 ? cachedMtimeNs : GetMaterialMtimeNs(filePath);
     if (mtimeNs == 0) {
         // Transient stat failure (e.g. during an atomic .mat save: tmp + rename
         // briefly leaves the file missing). Keep showing the last-rendered
@@ -1251,23 +1263,25 @@ uint64_t ProjectPanel::GetEmbeddedMaterialThumbnail(const FileItem &item)
     return m_engine->QueryOrScheduleMaterialPreview(resourceKey, item.path, "", stamp);
 }
 
-uint64_t ProjectPanel::GetModelThumbnail(const std::string &filePath)
+uint64_t ProjectPanel::GetModelThumbnail(const std::string &filePath, uint64_t cachedMtimeNs)
 {
     if (filePath.empty() || !m_engine)
         return 0;
 
     double now = m_frameTimeNow;
 
-    uint64_t mtimeNs = 0;
-    auto it = m_modelMtimeCache.find(filePath);
-    if (it != m_modelMtimeCache.end() && (now - it->second.second) < 1.0) {
-        mtimeNs = it->second.first;
-    } else {
-        std::error_code ec;
-        if (!fs::exists(fs::u8path(filePath), ec))
-            return 0;
-        mtimeNs = GetMtimeNs(filePath);
-        m_modelMtimeCache[filePath] = {mtimeNs, now};
+    uint64_t mtimeNs = cachedMtimeNs;
+    if (mtimeNs == 0) {
+        auto it = m_modelMtimeCache.find(filePath);
+        if (it != m_modelMtimeCache.end() && (now - it->second.second) < 1.0) {
+            mtimeNs = it->second.first;
+        } else {
+            std::error_code ec;
+            if (!fs::exists(fs::u8path(filePath), ec))
+                return 0;
+            mtimeNs = GetMtimeNs(filePath);
+            m_modelMtimeCache[filePath] = {mtimeNs, now};
+        }
     }
     if (mtimeNs == 0)
         return 0;
@@ -1276,23 +1290,21 @@ uint64_t ProjectPanel::GetModelThumbnail(const std::string &filePath)
     return m_engine->QueryOrScheduleMeshPreview(resourceKey, filePath, mtimeNs);
 }
 
-uint64_t ProjectPanel::GetPrefabThumbnail(const std::string &filePath)
-{
-    if (IsUiPrefabFile(filePath))
-        return 0; // caller shows model_3d.png placeholder
-    return GetModelThumbnail(filePath);
-}
-
 uint64_t ProjectPanel::GetModel3dIconId() const
 {
     auto it = m_typeIconCache.find("model_3d");
     return it != m_typeIconCache.end() ? it->second : 0;
 }
 
-bool ProjectPanel::IsUiPrefabFile(const std::string &filePath)
+bool ProjectPanel::IsUiPrefabFile(const std::string &filePath, uint64_t cachedMtimeNs)
 {
     if (filePath.empty())
         return false;
+
+    uint64_t mtimeNs = cachedMtimeNs != 0 ? cachedMtimeNs : GetMtimeNs(filePath);
+    auto cached = m_prefabTypeCache.find(filePath);
+    if (cached != m_prefabTypeCache.end() && cached->second.mtimeNs == mtimeNs)
+        return cached->second.isUi;
 
     std::ifstream input(fs::u8path(filePath), std::ios::binary);
     if (!input.is_open())
@@ -1323,7 +1335,10 @@ bool ProjectPanel::IsUiPrefabFile(const std::string &filePath)
             for (const auto &componentJson : *componentsIt) {
                 if (!componentJson.is_object())
                     continue;
-                const std::string type = componentJson.value("type", std::string());
+                std::string type = componentJson.value("type_id", componentJson.value("type", std::string()));
+                const size_t typeSeparator = type.find_last_of(".:");
+                if (typeSeparator != std::string::npos)
+                    type = type.substr(typeSeparator + 1);
                 if (isUiComponent(type))
                     hasUi = true;
                 if (isSceneMeshComponent(type))
@@ -1339,7 +1354,9 @@ bool ProjectPanel::IsUiPrefabFile(const std::string &filePath)
 
     walk(*rootIt);
     // UI-only prefabs (Canvas / widgets without a mesh renderer) use the static icon.
-    return hasUi && !hasSceneMesh;
+    const bool isUi = hasUi && !hasSceneMesh;
+    m_prefabTypeCache[filePath] = {mtimeNs, isUi};
+    return isUi;
 }
 
 void ProjectPanel::ProcessPendingThumbnails()
@@ -2540,6 +2557,7 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
             // Record cell start position for full-cell drop overlay later
             // ── Resolve display texture (inline for speed) ──
             uint64_t displayTexId = 0;
+            bool isUiPrefab = false;
             if (item.type == FileItem::SubMesh) {
                 displayTexId = GetTypeIconId(item);
             } else if (item.type == FileItem::SubMaterial) {
@@ -2550,18 +2568,19 @@ void ProjectPanel::RenderFileGrid(InxGUIContext *ctx)
                 if (IsImageExt(item.ext))
                     displayTexId = GetThumbnail(item.path, item.mtimeNs);
                 else if (IsMaterialExt(item.ext))
-                    displayTexId = GetMaterialThumbnail(item.path);
+                    displayTexId = GetMaterialThumbnail(item.path, item.mtimeNs);
                 else if (IsModelExt(item.ext))
-                    displayTexId = GetModelThumbnail(item.path);
+                    displayTexId = GetModelThumbnail(item.path, item.mtimeNs);
                 else if (item.ext == ".prefab") {
-                    if (IsUiPrefabFile(item.path))
+                    isUiPrefab = IsUiPrefabFile(item.path, item.mtimeNs);
+                    if (isUiPrefab)
                         displayTexId = GetModel3dIconId();
                     else
-                        displayTexId = GetPrefabThumbnail(item.path);
+                        displayTexId = GetModelThumbnail(item.path, item.mtimeNs);
                 }
                 if (displayTexId == 0) {
                     // Scene prefabs waiting for GPU preview → model_3d icon, not file.png.
-                    if (item.ext == ".prefab" && !IsUiPrefabFile(item.path))
+                    if (item.ext == ".prefab" && !isUiPrefab)
                         displayTexId = GetModel3dIconId();
                     if (displayTexId == 0)
                         displayTexId = GetTypeIconId(item);

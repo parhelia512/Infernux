@@ -707,12 +707,17 @@ def _renderer_state() -> dict[str, Any]:
     frame = dict(native.renderer_frame_snapshot)
     residency = dict(native.gpu_residency_snapshot)
     try:
+        preview_tasks = [dict(item) for item in native.preview_task_snapshots]
+    except (AttributeError, RuntimeError):
+        preview_tasks = []
+    try:
         asset_runtime_record_count = len(native.asset_runtime_records)
     except Exception:
         asset_runtime_record_count = 0
     return {
         "frame": frame,
         "gpu_residency": residency,
+        "preview_tasks": preview_tasks,
         "asset_runtime_record_count": asset_runtime_record_count,
         "submission_ready": bool(
             frame.get("game_camera_available")

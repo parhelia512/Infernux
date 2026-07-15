@@ -26,6 +26,19 @@ The homepage runtime evidence keeps `demo.png` as the canonical, structured-data
 
 AVIF is preferred, lossless WebP is the modern fallback, and PNG remains last. The image gate locks the byte content and dimensions, requires at least 80% AVIF and 40% WebP savings, verifies source ordering and preserves lazy loading. The performance budget counts the largest mutually exclusive representation, so adding fallback formats cannot hide a heavier delivered path or falsely charge one visitor for all three files.
 
+### Install and touch icons
+
+The install icons are deterministic, project-authored derivatives of the repository-owned `logo.png`; they do not introduce an external artwork source or license. Pillow 12.2.0 in the repository `infernux` environment resized the source with Lanczos sampling, composited it over the site background `#0a0c11`, and wrote optimized 256-color opaque PNGs. The standalone maskable asset keeps the complete emblem inside the Web App Manifest safe-zone circle (radius 40% of the canvas); it is intentionally more padded than the ordinary launcher icons.
+
+| Local file | Role and geometry | Bytes | SHA-256 |
+|---|---|---:|---|
+| `infernux-icon-192.png` | Chromium install icon; 192×192, opaque | 10,064 | `edfa0d3e709db4ac3100978575147579d4ccdb63c695c3d551e78bc7891c0f4a` |
+| `infernux-icon-512.png` | Chromium install/splash icon; 512×512, opaque | 49,570 | `9f73c451f95f09decaf95702971099c1a6237a8e454c293f201dddfc7473e280` |
+| `infernux-icon-maskable-512.png` | Adaptive launcher icon; 512×512, opaque, safe-zone padded | 25,603 | `54c43fee25612ce3d2d0fa4f14cff5191149201faa2d97d0b834860bfd3fbcc1` |
+| `infernux-apple-touch-icon.png` | Apple home-screen icon; 180×180, opaque | 9,163 | `a4e54a3d319ab3badace561328c94233c07fc3181b116ca137033a68a31de7f5` |
+
+`docs/tools/check-pwa-assets.mjs` locks each file's PNG signature, dimensions, opacity, reviewed hash, manifest role, HTML link, provenance, and Service Worker precache entry. Regenerate and review the complete set together if the emblem or background color changes.
+
 ## Font Awesome subsetting
 
 The two Font Awesome files are generated from the official 6.4.0 `webfonts` files with the `pyftsubset` executable provided by the repository's `infernux` environment. The solid subset contains the code points declared by the first `unicode-range` in `css/fontawesome-subset.css`; the brand subset contains `U+F09B` (GitHub) and `U+F3E2` (Python). When a new icon class is introduced, regenerate the matching WOFF2, update its `unicode-range` and checksum, then run the website verifier. The verifier rejects missing CSS mappings, unexpected font hashes, and Font Awesome files large enough to indicate that a complete upstream font was restored.

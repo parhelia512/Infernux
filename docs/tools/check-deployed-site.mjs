@@ -38,17 +38,17 @@ function recordHealth(id, kind, target, status, started, detail = null) {
 }
 
 const checks = [
-  { route: "/", type: "text/html", tokens: ["<h1", "data-i18n=\"nav.start\"", "wiki.html?layer=manual#written-guides", "data-i18n=\"home.hero.start\"", "id=\"hero-platform-note\"", "id=\"runtime-capture\"", "https://arxiv.org/abs/2604.10263", "http-equiv=\"Content-Security-Policy\"", "script-src-attr 'none'", "style-src 'self'; style-src-attr 'none'", "data-site-action=\"theme\"", "css/style.css?v=14", "js/main.js?v=10", "<source srcset=\"assets/demo-0.2.1.avif\" type=\"image/avif\">", "<source srcset=\"assets/demo-0.2.1.webp\" type=\"image/webp\">", "<img src=\"assets/demo.png\" width=\"1245\" height=\"653\"", ...socialMetaTokens], forbid: ["fonts.googleapis.com", "cdnjs.cloudflare.com", "performance is competitive with Unity", "不比Unity差", "onclick=", "<style", " style="] },
-  { route: "/wiki.html", type: "text/html", tokens: ["DOCUMENTATION DECK", "data-static-doc-directory", "wiki/site/en/learn/getting-started.html", "wiki/site/zh/manual/engine-map.html", "aria-current=\"page\" data-i18n=\"nav.learn\"", "script-src-attr 'none'", "style-src 'self'; style-src-attr 'none'", "css/wiki-noscript.css?v=1", "css/style.css?v=14", "js/main.js?v=10", ...socialMetaTokens], forbid: ["<style", " style="] },
-  { route: "/community.html", type: "text/html", tokens: ["Infernux Community Wall", "community-load-more", "community-browse-all", "giscus-readiness", "giscus-load", "giscus-thread", "data-loading=\"lazy\"", "js/community.js?v=5", "css/community.css?v=7", "js/i18n.js?v=13", "script-src 'self' https://giscus.app", "style-src 'self' https://giscus.app; style-src-attr 'unsafe-inline'", "connect-src 'self' https://api.github.com", "frame-src https://giscus.app", "css/style.css?v=14", "js/main.js?v=10", ...socialMetaTokens], forbid: ["<script src=\"https://giscus.app/client.js\"", "<style"] },
-  { route: "/download.html", type: "text/html", tokens: ["InfernuxHubInstaller.exe", "css/style.css?v=14", ...socialMetaTokens] },
-  { route: "/roadmap.html", type: "text/html", tokens: ["<h1", "css/style.css?v=14", ...socialMetaTokens] },
+  { route: "/", type: "text/html", tokens: ["<h1", "data-i18n=\"nav.start\"", "wiki.html?layer=manual#written-guides", "data-i18n=\"home.hero.start\"", "id=\"hero-platform-note\"", "id=\"runtime-capture\"", "https://arxiv.org/abs/2604.10263", "http-equiv=\"Content-Security-Policy\"", "script-src-attr 'none'", "style-src 'self'; style-src-attr 'none'", "data-site-action=\"theme\"", "css/style.css?v=16", "js/i18n.js?v=14", "js/main.js?v=12", "rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"assets/infernux-apple-touch-icon.png\"", "<source srcset=\"assets/demo-0.2.1.avif\" type=\"image/avif\">", "<source srcset=\"assets/demo-0.2.1.webp\" type=\"image/webp\">", "<img src=\"assets/demo.png\" width=\"1245\" height=\"653\"", ...socialMetaTokens], forbid: ["fonts.googleapis.com", "cdnjs.cloudflare.com", "performance is competitive with Unity", "不比Unity差", "onclick=", "<style", " style="] },
+  { route: "/wiki.html", type: "text/html", tokens: ["DOCUMENTATION DECK", "data-static-doc-directory", "wiki/site/en/learn/getting-started.html", "wiki/site/zh/manual/engine-map.html", "aria-current=\"page\" data-i18n=\"nav.learn\"", "script-src-attr 'none'", "style-src 'self'; style-src-attr 'none'", "css/wiki-noscript.css?v=1", "css/style.css?v=16", "js/i18n.js?v=14", "js/main.js?v=12", ...socialMetaTokens], forbid: ["<style", " style="] },
+  { route: "/community.html", type: "text/html", tokens: ["Infernux Community Wall", "community-load-more", "community-browse-all", "giscus-readiness", "giscus-load", "giscus-thread", "data-loading=\"lazy\"", "js/community.js?v=5", "css/community.css?v=7", "js/i18n.js?v=14", "script-src 'self' https://giscus.app", "style-src 'self' https://giscus.app; style-src-attr 'unsafe-inline'", "connect-src 'self' https://api.github.com", "frame-src https://giscus.app", "css/style.css?v=16", "js/main.js?v=12", ...socialMetaTokens], forbid: ["<script src=\"https://giscus.app/client.js\"", "<style"] },
+  { route: "/download.html", type: "text/html", tokens: ["InfernuxHubInstaller.exe", "data-pwa-install", "id=\"pwa-install-status\"", "id=\"pwa-install-button\"", "downloadPage.webApp.boundary", "css/download.css?v=2", "js/pwa-install.js?v=1", "js/i18n.js?v=14", "css/style.css?v=16", "js/main.js?v=12", ...socialMetaTokens] },
+  { route: "/roadmap.html", type: "text/html", tokens: ["<h1", "css/style.css?v=16", "js/i18n.js?v=14", "js/main.js?v=12", ...socialMetaTokens] },
   { route: "/offline.html", type: "text/html", tokens: ["Connection interrupted.", "script-src-attr 'none'", "style-src 'self' 'unsafe-inline'; style-src-attr 'none'", "class=\"retry\" href=\"\"", "--offline-soft: #858d9e", "--offline-border: #687181", "color: var(--offline-on-accent)"] },
-  { route: "/site.webmanifest", type: "application/manifest+json", alternateTypes: ["application/json"], token: "\"display_override\"" },
+  { route: "/site.webmanifest", type: "application/manifest+json", alternateTypes: ["application/json"], tokens: ["\"display_override\"", "\"prefer_related_applications\": false", "infernux-icon-192.png", "infernux-icon-512.png", "infernux-icon-maskable-512.png", "\"purpose\": \"maskable\""] },
   { route: "/sw.js", type: "text/javascript", alternateTypes: ["application/javascript"], token: "networkFirst(request, true)" },
   { route: "/sitemap.xml", type: "application/xml", alternateTypes: ["text/xml"], token: "xmlns:xhtml=\"http://www.w3.org/1999/xhtml\"", minTextBytes: 50_000 },
   { route: "/wiki/site/index.html", type: "text/html", tokens: ["Infernux Documentation", ...socialMetaTokens] },
-  { route: "/wiki/site/en/learn/getting-started.html", type: "text/html", tokens: ["data-doc-trail", "data-doc-build-provenance", '"@type": "LearningResource"', "nav-priority active", "aria-current=\"page\">Start", "script-src-attr 'none'", "style-src 'self'; style-src-attr 'none'", "id=\"docs-search-filters\"", "/css/docs-search.css?v=2", "/js/docs-search.js?v=2", "data-site-action=\"theme\"", "/css/style.css?v=14", "/js/main.js?v=10", ...socialMetaTokens], forbid: ["<style", " style="] },
+  { route: "/wiki/site/en/learn/getting-started.html", type: "text/html", tokens: ["data-doc-trail", "data-doc-build-provenance", '"@type": "LearningResource"', "nav-priority active", "aria-current=\"page\">Start", "script-src-attr 'none'", "style-src 'self'; style-src-attr 'none'", "id=\"docs-search-filters\"", "/css/docs-search.css?v=2", "/js/docs-search.js?v=2", "data-site-action=\"theme\"", "/css/style.css?v=16", "/js/main.js?v=12", "/css/wiki-generated.css?v=5", "/js/wiki-generated.js?v=8", ...socialMetaTokens], forbid: ["<style", " style="] },
   { route: "/wiki/site/en/api/GameObject.html", type: "text/html", tokens: ["data-doc-outline", "data-doc-build-provenance", '"@type": "TechArticle"', "href=\"/wiki/site/en/api/index.html\" class=\"active\" aria-current=\"page\""] },
   { route: "/wiki/site/en/manual/input-and-time.html", type: "text/html", tokens: ["doc-diagram--decision", "Input intent across render and fixed timelines", "Choose the time domain"] },
   { route: "/wiki/site/en/manual/assets-and-meta.html", type: "text/html", tokens: ["doc-diagram--pipeline", "Asset identity from source file to runtime object", "Choose a reference path"] },
@@ -64,17 +64,20 @@ const checks = [
   { route: "/docs-manifest.json", type: "application/json", token: "\"build\"" },
   { route: "/llms-full.txt", type: "text/plain", alternateTypes: ["application/octet-stream"], token: "Corpus-Content-SHA256", minTextBytes: 100_000 },
   { route: "/css/fonts.css", type: "text/css", token: "font-family: \"Inter\"" },
-  { route: "/css/style.css", type: "text/css", tokens: ["@media (forced-colors: active)", ".nav-links a.nav-priority", ".nav-links.mobile-open a.nav-priority", ".hero-platform-note", ".hero-text-links", "--accent-fill: #a52b36", "--on-accent: #ffffff", "--text-soft: #858d9e", "--code-hl-comment: #8c94a4"] },
+  { route: "/css/style.css", type: "text/css", tokens: ["@media (forced-colors: active)", ".nav-links a.nav-priority", ".nav-links.mobile-open a.nav-priority", ".navbar.is-scrolled", ".reveal-pending", ".site-update-notice", "data-update-state=\"applying\"", ".hero-platform-note", ".hero-text-links", "--accent-fill: #a52b36", "--on-accent: #ffffff", "--text-soft: #858d9e", "--code-hl-comment: #8c94a4"] },
   { route: "/css/fontawesome-subset.css", type: "text/css", token: "Font Awesome Free 6.4.0" },
   { route: "/css/docs-search.css", type: "text/css", tokens: [".docs-search-dialog", ".docs-search-filters", "overscroll-behavior-inline: contain"] },
   { route: "/css/wiki-noscript.css", type: "text/css", token: ".docs-static-language" },
-  { route: "/css/wiki-generated.css", type: "text/css", tokens: [".doc-build-provenance", ".doc-diagram", "overscroll-behavior-inline: contain"] },
+  { route: "/css/wiki-generated.css", type: "text/css", tokens: [".doc-build-provenance", ".doc-diagram", ".clipboard-fallback", "overscroll-behavior-inline: contain"] },
   { route: "/css/community.css", type: "text/css", tokens: [".forum-controls", ".forum-pagination", ".topic-signals", ".giscus-readiness", ".giscus-install-action"] },
+  { route: "/css/download.css", type: "text/css", tokens: [".pwa-install", ".pwa-install-control [hidden]", "data-install-state=\"ready\""] },
+  { route: "/js/i18n.js", type: "text/javascript", alternateTypes: ["application/javascript"], tokens: ["translateSiteKey", "downloadPage.webApp.status.iosSafari", "downloadPage.webApp.status.unavailable"] },
   { route: "/js/docs-search.js", type: "text/javascript", alternateTypes: ["application/javascript"], tokens: ["/api-index.json", "function buildSearchModel", "languageFilter.value", "statusFilter.value"] },
-  { route: "/js/main.js", type: "text/javascript", alternateTypes: ["application/javascript"], tokens: ["mobileMenuFocusables", "handleMobileMenuKeydown", "handleMobileMenuPointerDown", "mobile-menu-open", "bindSiteActions", "data-site-action"] },
+  { route: "/js/main.js", type: "text/javascript", alternateTypes: ["application/javascript"], tokens: ["mobileMenuFocusables", "handleMobileMenuKeydown", "handleMobileMenuPointerDown", "mobile-menu-open", "bindSiteActions", "is-scrolled", "reveal-pending", "data-site-action", "monitorServiceWorkerUpdates", "SKIP_WAITING", "controllerchange", "site-update-notice"] },
   { route: "/js/docs-health.js", type: "text/javascript", alternateTypes: ["application/javascript"], token: "normalizeDocsHealth" },
   { route: "/js/wiki-generated.js", type: "text/javascript", alternateTypes: ["application/javascript"], token: "initializeBuildProvenance" },
   { route: "/js/community.js", type: "text/javascript", alternateTypes: ["application/javascript"], tokens: ["COMMUNITY_CACHE_TTL_MS", "sort=updated", "communityNextPage", "mergeCommunityTopics", "GISCUS_ORIGIN", "GISCUS_OPT_IN_KEY", "loadGiscusEmbed", "document.createElement(\"script\")", "event.source !== frame.contentWindow", "classifyGiscusError", "renderGiscusReadiness"] },
+  { route: "/js/pwa-install.js", type: "text/javascript", alternateTypes: ["application/javascript"], tokens: ["beforeinstallprompt", "appinstalled", "promptEvent.prompt()", "(display-mode: standalone)", "navigator.standalone", "iosSafari", "iosOther"] },
   { route: "/assets/fonts/inter-latin.woff2", type: "font/woff2", alternateTypes: ["application/octet-stream"], minBytes: 40_000, magicHex: "774f4632" },
   { route: "/assets/fonts/fa-solid-subset-900.woff2", type: "font/woff2", alternateTypes: ["application/octet-stream"], minBytes: 3_000, maxBytes: 16_384, magicHex: "774f4632" },
   { route: "/assets/fonts/fa-brands-subset-400.woff2", type: "font/woff2", alternateTypes: ["application/octet-stream"], minBytes: 800, maxBytes: 16_384, magicHex: "774f4632" },
@@ -82,7 +85,16 @@ const checks = [
   { route: "/assets/demo-0.2.1.webp", type: "image/webp", localAlternateTypes: ["application/octet-stream"], minBytes: 180_000, maxBytes: 220_000, magicHex: "52494646", sha256: "bf5cdbc260331e75ccf1519b1cc582cb4764ae101ccdbda27feb3082d71b66df" },
   { route: "/assets/demo-0.2.1.avif", type: "image/avif", minBytes: 50_000, maxBytes: 80_000, magicHex: "66747970", magicOffset: 4, sha256: "cf88c7f49c3da599003066d6059249de02a6c92cf288cd7bee2f07316a63e82d" },
   { route: socialImageRoute, type: "image/jpeg", minBytes: 100_000, maxBytes: 512_000, magicHex: "ffd8ff", sha256: socialImageSha256, jpegDimensions: [1200, 630] },
+  { route: "/assets/infernux-icon-192.png", type: "image/png", minBytes: 8_000, maxBytes: 20_000, magicHex: "89504e470d0a1a0a", sha256: "edfa0d3e709db4ac3100978575147579d4ccdb63c695c3d551e78bc7891c0f4a", pngDimensions: [192, 192] },
+  { route: "/assets/infernux-icon-512.png", type: "image/png", minBytes: 40_000, maxBytes: 60_000, magicHex: "89504e470d0a1a0a", sha256: "9f73c451f95f09decaf95702971099c1a6237a8e454c293f201dddfc7473e280", pngDimensions: [512, 512] },
+  { route: "/assets/infernux-icon-maskable-512.png", type: "image/png", minBytes: 20_000, maxBytes: 35_000, magicHex: "89504e470d0a1a0a", sha256: "54c43fee25612ce3d2d0fa4f14cff5191149201faa2d97d0b834860bfd3fbcc1", pngDimensions: [512, 512] },
+  { route: "/assets/infernux-apple-touch-icon.png", type: "image/png", minBytes: 7_000, maxBytes: 15_000, magicHex: "89504e470d0a1a0a", sha256: "a4e54a3d319ab3badace561328c94233c07fc3181b116ca137033a68a31de7f5", pngDimensions: [180, 180] },
 ];
+
+function pngDimensions(buffer) {
+  if (buffer.length < 24 || buffer.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a" || buffer.toString("ascii", 12, 16) !== "IHDR") return null;
+  return [buffer.readUInt32BE(16), buffer.readUInt32BE(20)];
+}
 
 function jpegDimensions(buffer) {
   if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
@@ -117,7 +129,7 @@ async function request(check) {
     const contentType = response.headers.get("content-type") || "";
     const allowedTypes = [check.type, ...(check.alternateTypes || []), ...(localPreview ? check.localAlternateTypes || [] : [])];
     if (!allowedTypes.some((type) => contentType.includes(type))) throw new Error(`unexpected content-type '${contentType}'`);
-    if (check.minBytes || check.maxBytes || check.magicHex || check.sha256 || check.jpegDimensions) {
+    if (check.minBytes || check.maxBytes || check.magicHex || check.sha256 || check.jpegDimensions || check.pngDimensions) {
       const body = Buffer.from(await response.arrayBuffer());
       if (check.minBytes && body.byteLength < check.minBytes) throw new Error(`response is only ${body.byteLength} bytes`);
       if (check.maxBytes && body.byteLength > check.maxBytes) throw new Error(`response is ${body.byteLength} bytes; expected no more than ${check.maxBytes} bytes`);
@@ -131,6 +143,12 @@ async function request(check) {
         const dimensions = jpegDimensions(body);
         if (!dimensions || dimensions[0] !== check.jpegDimensions[0] || dimensions[1] !== check.jpegDimensions[1]) {
           throw new Error(`unexpected JPEG dimensions '${dimensions?.join("x") || "unreadable"}'`);
+        }
+      }
+      if (check.pngDimensions) {
+        const dimensions = pngDimensions(body);
+        if (!dimensions || dimensions[0] !== check.pngDimensions[0] || dimensions[1] !== check.pngDimensions[1]) {
+          throw new Error(`unexpected PNG dimensions '${dimensions?.join("x") || "unreadable"}'`);
         }
       }
       console.log(`PASS ${check.route} (${elapsed} ms)`);

@@ -97,6 +97,65 @@ def test_player_always_raw_copies_numpy_when_jit_is_disabled(tmp_path, monkeypat
 
     assert result == str(tmp_path / "dist")
     assert captured["raw_copy_packages"] == ["numpy"]
+    assert captured["runtime_pack_cache"] is False
+    assert captured["output_filename"] == "TestGame.exe"
+
+
+def test_debug_player_uses_generic_reusable_runtime_pack(tmp_path, monkeypatch):
+    captured: dict = {}
+
+    class _FakeNuitkaBuilder:
+        _JIT_NOFOLLOW_PACKAGES = NuitkaBuilder._JIT_NOFOLLOW_PACKAGES
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def build(self, **_kwargs):
+            return str(tmp_path / "dist")
+
+    monkeypatch.setattr("Infernux.engine.game_builder.NuitkaBuilder", _FakeNuitkaBuilder)
+    builder = _make_builder(tmp_path, tmp_path / "build_output")
+    builder.debug_mode = True
+
+    builder._run_nuitka(str(tmp_path / "boot.py"), on_progress=None, user_packages=[])
+
+    assert captured["runtime_pack_cache"] is True
+    assert captured["output_filename"] == ("InfernuxPlayer.exe" if sys.platform == "win32" else "InfernuxPlayer")
+    assert captured["product_name"] == "Infernux Player"
+    assert captured["icon_path"] is None
+
+
+def test_runtime_pack_cache_round_trip(tmp_path, monkeypatch):
+    cache_root = tmp_path / "runtime-packs"
+    monkeypatch.setattr(nuitka_builder_module, "_RUNTIME_PACK_DIR", str(cache_root))
+    builder = object.__new__(NuitkaBuilder)
+    builder._staging_dir = str(tmp_path / "staging")
+    os.makedirs(builder._staging_dir)
+    dist = tmp_path / "original.dist"
+    dist.mkdir()
+    (dist / "InfernuxPlayer.exe").write_bytes(b"runtime")
+
+    builder._store_runtime_pack("a" * 64, str(dist))
+    restored = builder._restore_runtime_pack("a" * 64)
+
+    assert restored == os.path.join(builder._staging_dir, "boot.dist")
+    assert (tmp_path / "staging" / "boot.dist" / "InfernuxPlayer.exe").read_bytes() == b"runtime"
+    marker = json.loads((tmp_path / "staging" / "boot.dist" / "_infernux_runtime_pack.json").read_text())
+    assert marker["fingerprint"] == "a" * 64
+
+
+def test_requirements_install_is_skipped_when_content_is_unchanged(tmp_path, monkeypatch):
+    state_root = tmp_path / "requirements-state"
+    monkeypatch.setattr(nuitka_builder_module, "_REQUIREMENTS_STATE_DIR", str(state_root))
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("requests==2.32.0\n", encoding="utf-8")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(nuitka_builder_module.subprocess, "check_call", lambda command: calls.append(command))
+
+    nuitka_builder_module._install_requirements_files(sys.executable, [str(requirements)])
+    nuitka_builder_module._install_requirements_files(sys.executable, [str(requirements)])
+
+    assert len(calls) == 1
 
 
 def test_player_cleanup_preserves_engine_icon_resources(tmp_path):
@@ -175,7 +234,9 @@ class TestGameBuilderOutputSafety:
 
         boot_path = builder._generate_boot_script()
         boot_source = open(boot_path, "r", encoding="utf-8").read()
+        compile(boot_source, boot_path, "exec")
         assert 'os.environ["_INFERNUX_PLAYER_DEBUG_BUILD"] = "1" if _DEBUG_MODE else "0"' in boot_source
+        assert '_BUILD_MANIFEST.get("game_name", "InfernuxPlayer")' in boot_source
         assert 'if os.environ.get("_INFERNUX_PLAYER_CONTROL_FILE"):' in boot_source
 
         settings = output_dir / "Data" / "ProjectSettings"
@@ -184,6 +245,7 @@ class TestGameBuilderOutputSafety:
         builder._generate_manifest(str(output_dir))
         manifest = json.loads((output_dir / "Data" / "BuildManifest.json").read_text(encoding="utf-8"))
         assert manifest["debug_build"] is True
+        assert manifest["game_name"] == "TestGame"
 
     def test_validate_rejects_non_empty_unmarked_output_dir(self, tmp_path):
         output_dir = tmp_path / "build_output"

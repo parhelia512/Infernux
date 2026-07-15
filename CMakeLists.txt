@@ -529,7 +529,7 @@ add_custom_target(clang_format
 # ------------------------------------------------------------------------------
 set(INFERNUX_PYTHON_WHEEL_DIR "${CMAKE_BINARY_DIR}/python_wheel")
 
-add_custom_target(package_and_install_python ALL
+add_custom_target(package_and_install_python
     COMMAND ${CMAKE_COMMAND} -E echo "Ensuring Python packaging tools are available..."
     COMMAND ${CMAKE_COMMAND}
         -DINFERNUX_SOURCE_DIR=${CMAKE_SOURCE_DIR}
@@ -576,7 +576,7 @@ add_custom_target(package_and_install_python ALL
     COMMENT "Python packaging and installation after native module build"
 )
 
-add_dependencies(package_and_install_python _Infernux)
+add_dependencies(package_and_install_python clean_python_pycache _Infernux)
 
 # ------------------------------------------------------------------------------
 # API Reference Generation (auto-introspect Python package → Markdown)
@@ -598,32 +598,3 @@ add_custom_target(build_wiki_html
     COMMENT "Generate wiki HTML into docs/wiki/site"
 )
 add_dependencies(build_wiki_html generate_api_docs)
-
-# Ensure cleanup runs before any local build target compiles.
-function(infernux_add_preclean_dependency _dir _dep_target)
-    get_property(_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
-    foreach(_target IN LISTS _targets)
-        if(_target STREQUAL "${_dep_target}")
-            continue()
-        endif()
-
-        get_target_property(_is_imported ${_target} IMPORTED)
-        if(_is_imported)
-            continue()
-        endif()
-
-        get_target_property(_target_type ${_target} TYPE)
-        if(_target_type STREQUAL "INTERFACE_LIBRARY")
-            continue()
-        endif()
-
-        add_dependencies(${_target} ${_dep_target})
-    endforeach()
-
-    get_property(_subdirs DIRECTORY "${_dir}" PROPERTY SUBDIRECTORIES)
-    foreach(_subdir IN LISTS _subdirs)
-        infernux_add_preclean_dependency("${_subdir}" "${_dep_target}")
-    endforeach()
-endfunction()
-
-infernux_add_preclean_dependency("${CMAKE_SOURCE_DIR}" clean_python_pycache)

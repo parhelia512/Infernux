@@ -18,7 +18,7 @@ function safeMarkdown(value) {
 
 function commitMarkdown(repository, commit) {
     if (!repository || !shaPattern.test(commit || "")) return "Unavailable";
-    return `[`${commit.slice(0, 12)}`](https://github.com/${repository}/commit/${commit})`;
+    return `[\`${commit.slice(0, 12)}\`](https://github.com/${repository}/commit/${commit})`;
 }
 
 export function validateWebsiteHealthReport(report) {
@@ -26,6 +26,7 @@ export function validateWebsiteHealthReport(report) {
     assert(statuses.has(report.status) && report.status !== "skipped", "Website health report status must be passed or failed.");
     assert(!Number.isNaN(Date.parse(report.checked_at || "")), "Website health report checked_at must be an ISO timestamp.");
     assert(/^https?:\/\//.test(report.base_url || ""), "Website health report base_url must be HTTP(S).");
+    assert(Number.isInteger(report.duration_ms) && report.duration_ms >= 0, "Website health report duration_ms is invalid.");
     assert(Array.isArray(report.checks) && report.checks.length > 0, "Website health report must contain checks.");
     const ids = new Set();
     for (const check of report.checks) {
@@ -43,12 +44,19 @@ export function validateWebsiteHealthReport(report) {
     assert(report.summary?.checks_failed === failed, "Website health summary failed count differs from checks.");
     assert(report.summary?.checks_skipped === skipped, "Website health summary skipped count differs from checks.");
     assert(report.status === (failed ? "failed" : "passed"), "Website health report status differs from check results.");
-    if (report.deployment?.pages_build?.commit !== null) {
+    if (report.deployment?.pages_build?.commit != null) {
         assert(shaPattern.test(report.deployment.pages_build.commit || ""), "Pages build commit must be a full SHA.");
+        assert(report.deployment.pages_build.status === "built", "Pages build evidence must report built status.");
+        assert(!Number.isNaN(Date.parse(report.deployment.pages_build.updated_at || "")), "Pages build updated_at is invalid.");
     }
-    if (report.deployment?.documentation?.source_commit !== null) {
-        assert(shaPattern.test(report.deployment.documentation.source_commit || ""), "Documentation source commit must be a full SHA.");
+    const documentation = report.deployment?.documentation;
+    if (documentation?.build_status === "stamped") {
+        assert(shaPattern.test(documentation.source_commit || ""), "Stamped documentation source commit must be a full SHA.");
+        assert(!Number.isNaN(Date.parse(documentation.generated_at || "")), "Stamped documentation generated_at is invalid.");
+    } else if (documentation?.build_status === "unstamped") {
+        assert(documentation.source_commit === null && documentation.generated_at === null, "Unstamped documentation must not claim source provenance.");
     }
+    if (report.runner?.checkout_commit != null) assert(shaPattern.test(report.runner.checkout_commit), "Runner checkout commit must be a full SHA.");
     return report;
 }
 

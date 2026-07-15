@@ -259,7 +259,7 @@ async function verifyRootHtml() {
             for (const contract of ["text-size-adjust: 100%", "@media (forced-colors: active)", "outline: 3px solid Highlight"]) {
                 if (!source.includes(contract)) fail(`offline.html: missing standalone accessibility contract '${contract}'`);
             }
-        } else if (!source.includes("css/style.css?v=14")) {
+        } else if (!source.includes("css/style.css?v=16")) {
             fail(`${pageName}: shared accessibility style cache version is stale`);
         }
 
@@ -268,8 +268,8 @@ async function verifyRootHtml() {
         }
 
         if (["index.html", "wiki.html", "roadmap.html", "community.html", "download.html"].includes(pageName)) {
-            if (!source.includes("js/i18n.js?v=13")) fail(`${pageName}: shared localization cache version is stale`);
-            if (!source.includes("js/main.js?v=10")) fail(`${pageName}: shared interaction cache version is stale`);
+            if (!source.includes("js/i18n.js?v=14")) fail(`${pageName}: shared localization cache version is stale`);
+            if (!source.includes("js/main.js?v=12")) fail(`${pageName}: shared interaction cache version is stale`);
             for (const action of ["theme", "language", "menu"]) {
                 if (!source.includes(`data-site-action="${action}"`)) fail(`${pageName}: missing external '${action}' action binding`);
             }
@@ -425,7 +425,7 @@ async function verifyBuiltWikiExperience() {
     if (/^\s*\.api-main\s+thead\s*\{\s*display:\s*none/im.test(template)) {
         fail("wiki/theme/main.html: table headings are hidden outside the API-only page scope");
     }
-    for (const contract of ["class=\"skip-link\"", "id=\"main-content\"", "aria-controls=\"primary-navigation\"", "class=\"doc-provenance\"", "data-docs-search-trigger", "data-doc-context-trigger", "data-doc-build-provenance", "data-doc-build-facts", "id=\"docs-search-dialog\"", "id=\"docs-search-filters\"", "/js/docs-search.js?v=2", "/css/docs-search.css?v=2", "/js/wiki-generated.js?v=7", "/css/wiki-generated.css?v=4", "/css/style.css?v=14", "/js/main.js?v=10", "rel=\"manifest\" href=\"/site.webmanifest\"", "width=\"256\" height=\"256\"", "class=\"api-sidebar-toggle\"", "id=\"api-namespace-tree\"", "rel=\"canonical\"", "type=\"text/plain\"", "type=\"application/json\"", "property=\"og:title\"", "name=\"twitter:card\"", "application/ld+json", "BreadcrumbList", "LearningResource", "TechArticle", "data-doc-outline", "id=\"doc-outline-links\"", "aria-controls=\"doc-outline-links\"", "overflow-wrap: anywhere", "min-width: 7rem", "nav-priority", "/wiki.html#start-here", "/wiki.html?layer=manual#written-guides", "data-site-action=\"theme\"", "data-site-action=\"menu\"", "http-equiv=\"Content-Security-Policy\"", "script-src-attr 'none'"]) {
+    for (const contract of ["class=\"skip-link\"", "id=\"main-content\"", "aria-controls=\"primary-navigation\"", "class=\"doc-provenance\"", "data-docs-search-trigger", "data-doc-context-trigger", "data-doc-build-provenance", "data-doc-build-facts", "id=\"docs-search-dialog\"", "id=\"docs-search-filters\"", "/js/docs-search.js?v=2", "/css/docs-search.css?v=2", "/js/wiki-generated.js?v=8", "/css/wiki-generated.css?v=5", "/css/style.css?v=16", "/js/main.js?v=12", "rel=\"manifest\" href=\"/site.webmanifest\"", "rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"/assets/infernux-apple-touch-icon.png\"", "width=\"256\" height=\"256\"", "class=\"api-sidebar-toggle\"", "id=\"api-namespace-tree\"", "rel=\"canonical\"", "type=\"text/plain\"", "type=\"application/json\"", "property=\"og:title\"", "name=\"twitter:card\"", "application/ld+json", "BreadcrumbList", "LearningResource", "TechArticle", "data-doc-outline", "id=\"doc-outline-links\"", "aria-controls=\"doc-outline-links\"", "overflow-wrap: anywhere", "min-width: 7rem", "nav-priority", "/wiki.html#start-here", "/wiki.html?layer=manual#written-guides", "data-site-action=\"theme\"", "data-site-action=\"menu\"", "http-equiv=\"Content-Security-Policy\"", "script-src-attr 'none'"]) {
         if (!template.includes(contract)) fail(`wiki/theme/main.html: missing generated-document contract '${contract}'`);
     }
     if (template.includes("document.querySelectorAll('.api-main pre')")) fail("wiki/theme/main.html: repeated code-copy runtime must live in the shared generated-page script");
@@ -439,7 +439,7 @@ async function verifyBuiltWikiExperience() {
         if (/\son[a-z]+\s*=/i.test(html)) fail(`${relative}: generated page contains an inline event handler`);
         if (/\sstyle\s*=/i.test(html)) fail(`${relative}: generated page contains an inline style attribute`);
         if (/<style\b/i.test(html)) fail(`${relative}: generated page contains an inline style element`);
-        if (!html.includes('/js/main.js?v=10')) fail(`${relative}: generated page uses a stale shared interaction runtime`);
+        if (!html.includes('/js/main.js?v=12')) fail(`${relative}: generated page uses a stale shared interaction runtime`);
 
         if (relative === "wiki/site/404.html") {
             if (metaContent(html, "name", "robots") !== "noindex, follow") fail(`${relative}: generated error page must be excluded from indexing`);
@@ -575,7 +575,7 @@ async function verifyBuiltWikiExperience() {
         if (!html.includes("data-doc-context-trigger")) fail(`${document.url}: missing Agent context copy control`);
         if (!html.includes('class="doc-breadcrumb"')) fail(`${document.url}: missing document breadcrumb`);
         if (!html.includes('data-doc-trail')) fail(`${document.url}: missing document navigation and feedback fallback`);
-        if (!html.includes('/js/wiki-generated.js?v=7')) fail(`${document.url}: missing shared generated-page runtime v7`);
+        if (!html.includes('/js/wiki-generated.js?v=8')) fail(`${document.url}: missing shared generated-page runtime v8`);
         if (!html.includes('data-doc-build-provenance')) fail(`${document.url}: missing visible documentation build evidence`);
         if (!html.includes('data-doc-outline')) fail(`${document.url}: missing progressive document outline container`);
         const counterpart = document.language === "zh-CN"
@@ -618,7 +618,7 @@ async function verifyBuiltWikiExperience() {
         '<link rel="canonical" href="https://infernux-engine.com/wiki/site/en/api/GameObject.html">',
         '<link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/api-index.json">',
         'data-doc-context-trigger',
-        '/js/wiki-generated.js?v=7',
+        '/js/wiki-generated.js?v=8',
         'data-doc-build-provenance',
         'data-doc-build-facts',
         'data-doc-outline'
@@ -1124,10 +1124,14 @@ async function verifyPublishingFiles() {
     const webManifest = JSON.parse(await readFile(path.join(docsRoot, "site.webmanifest"), "utf8"));
     if (webManifest.id !== "/" || webManifest.start_url !== "/" || webManifest.scope !== "/") fail("site.webmanifest: id, start_url, and scope must remain root-scoped");
     if (!Array.isArray(webManifest.display_override) || !webManifest.display_override.includes("standalone")) fail("site.webmanifest: missing standalone display fallback");
+    if (webManifest.prefer_related_applications !== false) fail("site.webmanifest: prefer_related_applications must remain false");
     for (const icon of webManifest.icons || []) {
         if (!await exists(path.join(docsRoot, icon.src.replace(/^\//, "")))) fail(`site.webmanifest: missing icon '${icon.src}'`);
-        if (icon.src === "/assets/logo.png" && icon.sizes !== "256x256") fail("site.webmanifest: logo dimensions must match the 256x256 source asset");
     }
+    const manifestIcons = webManifest.icons || [];
+    if (!manifestIcons.some((icon) => icon.src === "/assets/infernux-icon-192.png" && icon.sizes === "192x192" && icon.purpose === "any")) fail("site.webmanifest: missing reviewed 192x192 install icon");
+    if (!manifestIcons.some((icon) => icon.src === "/assets/infernux-icon-512.png" && icon.sizes === "512x512" && icon.purpose === "any")) fail("site.webmanifest: missing reviewed 512x512 install icon");
+    if (!manifestIcons.some((icon) => icon.src === "/assets/infernux-icon-maskable-512.png" && icon.sizes === "512x512" && icon.purpose === "maskable")) fail("site.webmanifest: missing reviewed maskable icon");
 
     const offline = await readFile(path.join(docsRoot, "offline.html"), "utf8");
     for (const contract of ["noindex, nofollow", "Connection interrupted.", "恢复网络后", "width=\"256\" height=\"256\"", "href=\"/wiki.html\""]) {
@@ -1137,18 +1141,34 @@ async function verifyPublishingFiles() {
     const serviceWorker = await readFile(path.join(docsRoot, "sw.js"), "utf8");
     const cacheVersion = serviceWorker.match(/const CACHE_VERSION = "([a-f0-9]{16})";/)?.[1];
     const precacheSource = serviceWorker.match(/const PRECACHE_URLS = (\[[\s\S]*?\]);/)?.[1];
+    const versionInputCount = Number(serviceWorker.match(/const VERSION_INPUT_COUNT = (\d+);/)?.[1]);
     let precacheRoutes = [];
     try {
         precacheRoutes = JSON.parse(precacheSource || "[]");
     } catch (error) {
-        fail(`sw.js: invalid precache list (${error.message})`);
+        fail(`sw.js: invalid core-shell list (${error.message})`);
     }
-    for (const required of ["/offline.html", "/index.html", "/wiki.html", "/docs-index.json", "/docs-health.json", "/learning-paths.json", "/api-index.json", "/docs-manifest.json", "/assets/logo.png"]) {
-        if (!precacheRoutes.includes(required)) fail(`sw.js: precache is missing '${required}'`);
+
+    const shellPages = ["/offline.html", "/index.html", "/wiki.html", "/roadmap.html", "/community.html", "/download.html"];
+    const expectedPrecacheRoutes = new Set([...shellPages, "/site.webmanifest", "/assets/logo.png"]);
+    for (const pageRoute of shellPages) {
+        const source = await readFile(path.join(docsRoot, pageRoute.slice(1)), "utf8");
+        for (const match of source.matchAll(/\b(?:href|src)=["']([^"']+\.(?:css|js)(?:[?#][^"']*)?)["']/gi)) {
+            const resolved = new URL(match[1], `https://infernux-engine.com${pageRoute}`);
+            if (resolved.origin === "https://infernux-engine.com" && /^\/(?:css|js)\//.test(resolved.pathname)) {
+                expectedPrecacheRoutes.add(resolved.pathname);
+            }
+        }
     }
-    if (!precacheRoutes.some((route) => /^\/css\/wiki-template\.[a-f0-9]{16}\.css$/.test(route))) fail("sw.js: precache is missing the content-hashed Wiki style");
+    for (const name of (await readdir(path.join(docsRoot, "assets", "fonts"))).filter((name) => name.endsWith(".woff2"))) {
+        expectedPrecacheRoutes.add(`/assets/fonts/${name}`);
+    }
+    const expectedPrecache = [...expectedPrecacheRoutes].sort();
+    if (JSON.stringify(precacheRoutes) !== JSON.stringify(expectedPrecache)) {
+        fail("sw.js: core shell must equal the five root routes, offline recovery, and their dependency-derived runtime assets");
+    }
     if (new Set(precacheRoutes).size !== precacheRoutes.length) fail("sw.js: precache contains duplicate routes");
-    const serviceWorkerEvidence = [];
+
     let precacheBytes = 0;
     for (const route of precacheRoutes) {
         if (!/^\/[A-Za-z0-9._/-]+$/.test(route)) {
@@ -1162,17 +1182,72 @@ async function verifyPublishingFiles() {
         }
         const content = await readFile(target);
         precacheBytes += content.length;
+    }
+    if (precacheBytes > 768 * 1024) fail(`sw.js: core shell exceeds 768 KiB (${precacheBytes} bytes)`);
+
+    const expectedVersionInputs = new Set(precacheRoutes);
+    for (const route of ["/docs-index.json", "/docs-health.json", "/learning-paths.json", "/api-index.json", "/docs-manifest.json", "/release.json", "/release-notes.json", "/llms.txt"]) {
+        expectedVersionInputs.add(route);
+    }
+    for (const directory of ["css", "js"]) {
+        for (const name of (await readdir(path.join(docsRoot, directory))).filter((name) => name.endsWith(`.${directory}`))) {
+            expectedVersionInputs.add(`/${directory}/${name}`);
+        }
+    }
+    for (const name of (await readdir(path.join(docsRoot, "assets"))).filter((name) => /^wiki-docs\.[a-f0-9]{16}\.json$/.test(name))) {
+        expectedVersionInputs.add(`/assets/${name}`);
+    }
+    const expectedVersionInputRoutes = [...expectedVersionInputs].sort();
+    if (versionInputCount !== expectedVersionInputRoutes.length) fail(`sw.js: version input count '${versionInputCount}' is stale; expected '${expectedVersionInputRoutes.length}'`);
+    const serviceWorkerEvidence = [];
+    for (const route of expectedVersionInputRoutes) {
+        if (!/^\/[A-Za-z0-9._/-]+$/.test(route) || !await exists(path.join(docsRoot, route.slice(1)))) {
+            fail(`sw.js: invalid or missing version input '${route}'`);
+            continue;
+        }
+        const content = await readFile(path.join(docsRoot, route.slice(1)));
         serviceWorkerEvidence.push(`${route}\0${createHash("sha256").update(content).digest("hex")}`);
     }
     const expectedCacheVersion = createHash("sha256").update(serviceWorkerEvidence.join("\n")).digest("hex").slice(0, 16);
     if (cacheVersion !== expectedCacheVersion) fail(`sw.js: cache version '${cacheVersion}' is stale; expected '${expectedCacheVersion}'`);
-    if (precacheBytes > 2 * 1024 * 1024) fail(`sw.js: precache exceeds 2 MiB (${precacheBytes} bytes)`);
-    for (const contract of ["networkFirst(request, true)", "cacheFirst(request)", "staleWhileRevalidate(request)", "url.origin !== self.location.origin", "url.pathname === \"/sw.js\"", "caches.delete(key)", "ignoreSearch: true"]) {
+    for (const contract of ["networkFirst(request, true)", "cacheFirst(request)", "staleWhileRevalidate(request)", "url.origin !== self.location.origin", "url.pathname === \"/sw.js\"", "caches.delete(key)", "ignoreSearch: true", "pathname === \"/\"", "matchManaged(\"/index.html\")", "VERSION_INPUT_COUNT", "RUNTIME_CACHE_NAME = CACHE_PREFIX + \"runtime-v1\"", "RUNTIME_MAX_ENTRIES = 96", "putRuntime(request, response)", "cache.keys()", "keys.slice(0, overflow)", "key !== RUNTIME_CACHE_NAME", "migrateLegacyCache", "activateManagedCaches", "Storage pressure must never replace a successful network response"]) {
         if (!serviceWorker.includes(contract)) fail(`sw.js: missing offline safety contract '${contract}'`);
     }
+    const installBlock = serviceWorker.slice(
+        serviceWorker.indexOf('self.addEventListener("install"'),
+        serviceWorker.indexOf('self.addEventListener("activate"')
+    );
+    if (installBlock.includes("skipWaiting")) fail("sw.js: replacement worker must not bypass the user-confirmed update prompt during install");
+    if (!serviceWorker.includes('event.data === "SKIP_WAITING"')) fail("sw.js: explicit update action cannot activate the waiting worker");
     const serviceWorkerBuilder = await readFile(path.join(docsRoot, "tools", "build-service-worker.mjs"), "utf8");
-    for (const contract of ["maxPrecacheBytes = 2 * 1024 * 1024", "createHash(\"sha256\")", "sw.js is stale", "networkFirst", "cacheFirst", "staleWhileRevalidate"]) {
+    for (const contract of ["maxPrecacheBytes = 768 * 1024", "shellRuntimeRoutes", "evidenceRoutes", "RUNTIME_MAX_ENTRIES = 96", "putRuntime", "matchManaged", "migrateLegacyCache", "activateManagedCaches", "createHash(\"sha256\")", "sw.js is stale", "networkFirst", "cacheFirst", "staleWhileRevalidate"]) {
         if (!serviceWorkerBuilder.includes(contract)) fail(`build-service-worker.mjs: missing deterministic PWA contract '${contract}'`);
+    }
+
+    const deployedChecker = await readFile(path.join(docsRoot, "tools", "check-deployed-site.mjs"), "utf8");
+    for (const contract of ["--report", "buildWebsiteHealthReport", "renderWebsiteHealthSummary", "pages/builds/latest", "x-github-api-version", "GITHUB_STEP_SUMMARY", "Local preview does not claim production Pages evidence"]) {
+        if (!deployedChecker.includes(contract)) fail(`check-deployed-site.mjs: missing auditable health-report contract '${contract}'`);
+    }
+    const healthReporter = await readFile(path.join(docsRoot, "tools", "website-health-report.mjs"), "utf8");
+    for (const contract of ["schema_version: 1", "validateWebsiteHealthReport", "checks_total", "pages_build", "documentation", "checkout_commit", "renderWebsiteHealthSummary", "Duplicate website health check id"]) {
+        if (!healthReporter.includes(contract)) fail(`website-health-report.mjs: missing report schema contract '${contract}'`);
+    }
+    const healthReportTest = await readFile(path.join(docsRoot, "tools", "test-website-health-report.mjs"), "utf8");
+    for (const contract of ["schema, counts, deployment commits", "failure summary", "invalid-report rejection", "Pages build", "Documentation source"]) {
+        if (!healthReportTest.includes(contract)) fail(`test-website-health-report.mjs: missing report assertion '${contract}'`);
+    }
+    const websiteHealthWorkflow = await readFile(path.join(repoRoot, ".github", "workflows", "website-health.yml"), "utf8");
+    for (const contract of ["pages: read", "--report artifacts/website-health.json", "actions/upload-artifact@v4", "always()", "retention-days: 30", "website-health-${{ github.run_id }}-${{ github.run_attempt }}"]) {
+        if (!websiteHealthWorkflow.includes(contract)) fail(`website-health.yml: missing auditable report workflow contract '${contract}'`);
+    }
+    const websiteQualityWorkflow = await readFile(path.join(repoRoot, ".github", "workflows", "website-quality.yml"), "utf8");
+    if ((websiteQualityWorkflow.match(/\.github\/workflows\/website-health\.yml/g) || []).length !== 2) {
+        fail("website-quality.yml: health workflow changes must trigger both PR and push verification");
+    }
+    for (const workflowName of ["website-quality.yml", "build-wiki.yml"]) {
+        const workflow = await readFile(path.join(repoRoot, ".github", "workflows", workflowName), "utf8");
+        if (!workflow.includes("node docs/tools/test-website-health-report.mjs")) fail(`${workflowName}: website health report test is not enforced`);
+        if (!workflow.includes("node docs/tools/check-pwa-assets.mjs")) fail(`${workflowName}: installable PWA asset gate is not enforced`);
     }
 
     const manifest = JSON.parse(await readFile(path.join(docsRoot, "docs-manifest.json"), "utf8"));
@@ -1193,9 +1268,25 @@ async function verifyPublishingFiles() {
     for (const contract of ["id=\"release-notes-status\"", "id=\"release-notes-summary\"", "id=\"release-notes-grid\"", "downloadPage.releaseNotes.title"]) {
         if (!download.includes(contract)) fail(`download.html: missing structured release-note contract '${contract}'`);
     }
+    for (const contract of ["data-pwa-install", "data-install-state=\"checking\"", "id=\"pwa-install-status\"", "role=\"status\"", "aria-live=\"polite\"", "id=\"pwa-install-button\"", "aria-describedby=\"pwa-install-status pwa-install-boundary\"", "data-i18n=\"downloadPage.webApp.boundary\"", "css/download.css?v=2", "js/pwa-install.js?v=1"]) {
+        if (!download.includes(contract)) fail(`download.html: missing honest PWA installation contract '${contract}'`);
+    }
     const downloadJs = await readFile(path.join(docsRoot, "js", "download.js"), "utf8");
     for (const contract of ["release-notes.json", "function renderReleaseNotes", "document.createElement(\"article\")", "textContent = item.title"]) {
         if (!downloadJs.includes(contract)) fail(`download.js: missing safe release-note rendering contract '${contract}'`);
+    }
+    const pwaInstallJs = await readFile(path.join(docsRoot, "js", "pwa-install.js"), "utf8");
+    for (const contract of ["beforeinstallprompt", "event.preventDefault()", "appinstalled", "(display-mode: standalone)", "navigator.standalone", "promptEvent.prompt()", "installState !== \"ready\"", "iosSafari", "iosOther", "translateSiteKey", "__INFERNUX_PWA_INSTALL_TEST__"]) {
+        if (!pwaInstallJs.includes(contract)) fail(`pwa-install.js: missing installation state-machine contract '${contract}'`);
+    }
+    if (/localStorage|sessionStorage|innerHTML/.test(pwaInstallJs)) fail("pwa-install.js: install discovery must not persist or inject HTML");
+    const downloadCss = await readFile(path.join(docsRoot, "css", "download.css"), "utf8");
+    for (const contract of [".pwa-install", ".pwa-install-control [hidden]", "data-install-state=\"ready\"", "data-install-state=\"installed\"", "grid-template-columns: 1fr"] ) {
+        if (!downloadCss.includes(contract)) fail(`download.css: missing responsive PWA installation contract '${contract}'`);
+    }
+    for (const workflowName of ["website-quality.yml", "build-wiki.yml"]) {
+        const workflow = await readFile(path.join(repoRoot, ".github", "workflows", workflowName), "utf8");
+        if (!workflow.includes("node docs/tools/test-pwa-install.mjs")) fail(`${workflowName}: PWA installation interaction test is not enforced`);
     }
 }
 

@@ -47,6 +47,8 @@ def _try_get_cpp_mesh_preview(native: Any, norm_path: str) -> int:
     cache_key = f"mesh|{norm_path}"
     mtime_hint = safe_mtime_ns(norm_path)
     try:
+        if hasattr(native, "pump_preview_tasks"):
+            native.pump_preview_tasks()
         return int(native.query_or_schedule_mesh_preview(cache_key, norm_path, int(mtime_hint)))
     except Exception as exc:
         Debug.log(f"[Suppressed] {type(exc).__name__}: {exc}")

@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pages: read
 
 concurrency:
   group: website-production-health
@@ -30,7 +31,16 @@ jobs:
       - name: Check production routes and machine indexes
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node docs/tools/check-deployed-site.mjs --base-url https://infernux-engine.com
+        run: node docs/tools/check-deployed-site.mjs --base-url https://infernux-engine.com --report artifacts/website-health.json
+
+      - name: Upload structured website health report
+        if: ${{ always() && hashFiles('artifacts/website-health.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: website-health-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/website-health.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Audit GitHub community readiness
         env:

@@ -402,11 +402,9 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
 
         Returns the path to the temporary boot script.
         """
-        _debug_mode = self.debug_mode
-        _log_level_str = "LogLevel.Debug" if _debug_mode else "LogLevel.Info"
-
         boot_src = f'''\
 """Infernux Game — compiled entry point."""
+import json
 import os
 import sys
 import traceback
@@ -415,12 +413,21 @@ import traceback
 # package skips heavy editor-only UI panels and watchdog file watcher.
 os.environ["_INFERNUX_PLAYER_MODE"] = "1"
 
-_DEBUG_MODE = {_debug_mode!r}
-os.environ["_INFERNUX_PLAYER_DEBUG_BUILD"] = "1" if _DEBUG_MODE else "0"
 # Determine the directory containing the executable
 _DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 if not os.path.isdir(os.path.join(_DIR, "Data")):
     _DIR = os.path.dirname(os.path.abspath(sys.executable))
+
+_BUILD_MANIFEST = {{}}
+try:
+    with open(os.path.join(_DIR, "Data", "BuildManifest.json"), "r", encoding="utf-8") as _mf:
+        _BUILD_MANIFEST = json.load(_mf)
+except (OSError, ValueError):
+    pass
+_DEBUG_MODE = bool(_BUILD_MANIFEST.get("debug_build", False))
+_GAME_NAME = str(_BUILD_MANIFEST.get("game_name", "InfernuxPlayer") or "InfernuxPlayer")
+_SAFE_GAME_NAME = "".join(_ch if _ch not in '<>:"/\\\\|?*' else '_' for _ch in _GAME_NAME)
+os.environ["_INFERNUX_PLAYER_DEBUG_BUILD"] = "1" if _DEBUG_MODE else "0"
 
 # Ensure the raw-copied NumPy runtime and optional JIT packages are importable.
 # Nuitka standalone may not include the exe directory in sys.path by default.
@@ -457,7 +464,7 @@ os.environ["_INFERNUX_PLAYER_LOG"] = _LOG
 
 # Debug mode: write a detailed log next to the executable
 if _DEBUG_MODE:
-    _DEBUG_LOG = os.path.join(_DIR, "{self.project_name}_debug.log")
+    _DEBUG_LOG = os.path.join(_DIR, _SAFE_GAME_NAME + "_debug.log")
     _debug_fh = open(_DEBUG_LOG, "w", encoding="utf-8")
     sys.stdout = _debug_fh
     sys.stderr = _debug_fh
@@ -507,7 +514,7 @@ try:
     _log("boot: calling run_player")
     run_player(
         project_path=os.path.join(_DIR, "Data"),
-        engine_log_level={_log_level_str},
+        engine_log_level=LogLevel.Debug if _DEBUG_MODE else LogLevel.Info,
     )
     _log("boot: run_player returned")
 except Exception as _exc:
@@ -556,17 +563,24 @@ finally:
         if self.enable_jit:
             raw_pkgs.update(p for p in all_pkgs if p in jit_set)
 
+        development_runtime_pack = bool(self.debug_mode)
+        runtime_executable = "InfernuxPlayer.exe" if sys.platform == "win32" else "InfernuxPlayer"
         nk = NuitkaBuilder(
             entry_script=boot_script,
             output_dir=self.output_dir,
-            output_filename=f"{self.project_name}.exe",
-            product_name=self.project_name,
-            icon_path=selected_icon if selected_icon and os.path.isfile(selected_icon) else None,
+            output_filename=runtime_executable if development_runtime_pack else f"{self.project_name}.exe",
+            product_name="Infernux Player" if development_runtime_pack else self.project_name,
+            icon_path=(
+                None
+                if development_runtime_pack
+                else selected_icon if selected_icon and os.path.isfile(selected_icon) else None
+            ),
             extra_include_packages=compiled_pkgs,
             extra_requirements_files=self._project_requirement_files(),
             raw_copy_packages=sorted(raw_pkgs),
             console_mode="force" if self.debug_mode else "disable",
             lto=self.lto,
+            runtime_pack_cache=development_runtime_pack,
         )
 
         def _nk_progress(msg: str, pct: float):
@@ -629,6 +643,14 @@ finally:
                     else:
                         os.remove(dst)
                 shutil.move(src, dst)
+
+        if self.debug_mode:
+            runtime_name = "InfernuxPlayer.exe" if sys.platform == "win32" else "InfernuxPlayer"
+            game_name = f"{self.project_name}.exe" if sys.platform == "win32" else self.project_name
+            runtime_executable = os.path.join(final_dir, runtime_name)
+            game_executable = os.path.join(final_dir, game_name)
+            if os.path.isfile(runtime_executable) and os.path.normcase(runtime_executable) != os.path.normcase(game_executable):
+                os.replace(runtime_executable, game_executable)
 
         Debug.log_internal(
             f"  moved dist to output in {time.perf_counter() - _move_t0:.2f}s"

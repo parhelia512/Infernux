@@ -38,6 +38,81 @@
 .download-protocol pre { margin: 0; padding: 18px; overflow-x: auto; background: var(--code-bg); border: 1px solid var(--border); }
 .download-protocol code { font-family: var(--font-mono); font-size: .78rem; }
 
+.pwa-install {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(250px, .65fr);
+    gap: 30px;
+    align-items: center;
+    margin-top: var(--section-space);
+    padding: 30px;
+    overflow: hidden;
+    background:
+        linear-gradient(135deg, var(--accent-soft), transparent 52%),
+        var(--bg-panel);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-soft);
+}
+
+.pwa-install::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    content: "";
+    background: var(--accent);
+}
+
+.pwa-install[data-install-state="ready"] { border-color: var(--accent); }
+.pwa-install[data-install-state="installed"] { border-color: var(--signal); }
+.pwa-install[data-install-state="iosSafari"],
+.pwa-install[data-install-state="iosOther"] { border-color: var(--hazard); }
+.pwa-install-copy h2 { margin: 14px 0 10px; }
+.pwa-install-copy > p { margin: 0; color: var(--text-muted); line-height: 1.7; }
+
+.pwa-install-benefits {
+    display: grid;
+    gap: 9px;
+    margin: 20px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.pwa-install-benefits li {
+    position: relative;
+    padding-left: 22px;
+    color: var(--text-muted);
+    line-height: 1.55;
+}
+
+.pwa-install-benefits li::before {
+    position: absolute;
+    left: 0;
+    content: "▰";
+    color: var(--accent);
+    font-size: .72rem;
+}
+
+.pwa-install-control {
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+    min-width: 0;
+    padding: 20px;
+    background: var(--bg-contrast);
+    border: 1px solid var(--border);
+    text-align: center;
+}
+
+.pwa-install-icon { width: 88px; height: 88px; border: 1px solid var(--border-strong); }
+.pwa-install-status { min-height: 3.2em; margin: 0; color: var(--text-soft); font: .72rem/1.6 var(--font-mono); }
+.pwa-install-status[data-install-state="ready"] { color: var(--accent-strong); }
+.pwa-install-status[data-install-state="installed"] { color: var(--signal); }
+.pwa-install-status[data-install-state="iosSafari"],
+.pwa-install-status[data-install-state="iosOther"] { color: var(--hazard); }
+.pwa-install-control .btn { min-width: 190px; justify-content: center; }
+.pwa-install-control [hidden] { display: none; }
+.pwa-install-noscript { margin: 0; color: var(--text-muted); font-size: .78rem; line-height: 1.6; }
+
 .release-notes-status { color: var(--text-soft); font: .72rem/1.6 var(--font-mono); }
 .release-notes-summary { margin-top: 20px; padding: 18px 20px; border-left: 2px solid var(--accent); background: var(--accent-soft); color: var(--text-muted); line-height: 1.7; }
 .release-notes-summary:empty { display: none; }
@@ -56,12 +131,13 @@
 
 @media (max-width: 900px) {
     .release-telemetry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .download-grid, .download-protocol, .release-notes-grid { grid-template-columns: 1fr; }
+    .download-grid, .download-protocol, .release-notes-grid, .pwa-install { grid-template-columns: 1fr; }
     .release-note-section-upgrade { grid-column: auto; }
 }
 
 @media (max-width: 640px) {
     .release-telemetry, .requirement-grid { grid-template-columns: 1fr; }
-    .download-card, .download-protocol { padding: 18px; }
+    .download-card, .download-protocol, .pwa-install { padding: 18px; }
     .download-actions .btn { width: 100%; justify-content: center; }
+    .pwa-install-control .btn { width: 100%; }
 }

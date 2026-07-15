@@ -303,6 +303,19 @@ class TestProjectPanelCallbacks:
         assert gutter_capture < bottom_area < fallback
         assert source.count('ctx->RecordSemanticRect("project_background", "File Grid Background"') == 2
 
+    def test_project_preview_rendering_uses_catalog_stamps_without_ui_thread_polling(self):
+        source = Path("cpp/infernux/function/editor/ProjectPanel.cpp").read_text(encoding="utf-8")
+        snapshot_cache = source[source.index("ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot"):
+                                source.index("ProjectPanel::DirTreeMeta *ProjectPanel::GetDirTreeMeta")]
+        grid_preview = source[source.index("// ── Resolve display texture"):
+                              source.index("// ── Render icon")]
+
+        assert "if (catalog || (m_frameTimeNow - it->second.lastValidatedAt) < DIR_CACHE_TTL)" in snapshot_cache
+        assert "GetMaterialThumbnail(item.path, item.mtimeNs)" in grid_preview
+        assert "GetModelThumbnail(item.path, item.mtimeNs)" in grid_preview
+        assert "IsUiPrefabFile(item.path, item.mtimeNs)" in grid_preview
+        assert grid_preview.count("IsUiPrefabFile(") == 1
+
     def test_get_unique_name_callback(self):
         pp = ProjectPanel()
         pp.get_unique_name = lambda cur, base, ext: f"{base}_1{ext}"
