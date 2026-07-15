@@ -7,8 +7,8 @@ import sys
 
 
 def is_frozen() -> bool:
-    """Return *True* when running inside a PyInstaller bundle."""
-    return getattr(sys, "frozen", False)
+    """Return *True* inside a PyInstaller or Nuitka standalone build."""
+    return bool(getattr(sys, "frozen", False) or "__compiled__" in globals())
 
 
 def get_bundle_dir() -> str:

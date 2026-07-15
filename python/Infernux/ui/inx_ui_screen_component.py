@@ -27,6 +27,11 @@ def clear_rect_cache(frame_id: int = 0) -> None:
         _rect_cache_frame = frame_id
 
 
+def _invalidate_rect_cache() -> None:
+    """Discard cached hierarchy rectangles after a geometry mutation."""
+    _rect_cache.clear()
+
+
 class InxUIScreenComponent(InxUIComponent):
     """2D screen-space UI element with a canvas-pixel rectangle.
 
@@ -201,6 +206,7 @@ class InxUIScreenComponent(InxUIComponent):
         self.y = float(rect_y) - py - anchor_y
         self.width = float(rect_w)
         self.height = float(rect_h)
+        _invalidate_rect_cache()
 
     def set_visual_position(self, vis_x: float, vis_y: float,
                             canvas_width: float, canvas_height: float):
@@ -227,6 +233,7 @@ class InxUIScreenComponent(InxUIComponent):
         anchor_x, anchor_y = self._anchor_origin(pw, ph)
         self.x = new_rx - px - anchor_x
         self.y = new_ry - py - anchor_y
+        _invalidate_rect_cache()
 
     def set_size_preserve_visual_position(self, width: float, height: float,
                                           canvas_width: float, canvas_height: float):
@@ -246,6 +253,7 @@ class InxUIScreenComponent(InxUIComponent):
         self.y = new_ry - py - anchor_y
         self.width = new_width
         self.height = new_height
+        _invalidate_rect_cache()
 
     def set_size_preserve_center(self, width: float, height: float,
                                  canvas_width: float, canvas_height: float):
@@ -264,6 +272,7 @@ class InxUIScreenComponent(InxUIComponent):
         self.y = new_rect_y - py - anchor_y
         self.width = new_width
         self.height = new_height
+        _invalidate_rect_cache()
 
     def set_size_preserve_corner(self, width: float, height: float,
                                  canvas_width: float, canvas_height: float,
@@ -290,6 +299,7 @@ class InxUIScreenComponent(InxUIComponent):
         self.y = new_rect_y - py - anchor_y
         self.width = new_width
         self.height = new_height
+        _invalidate_rect_cache()
 
     # ------------------------------------------------------------------
     # Pointer event hooks (override in subclasses)

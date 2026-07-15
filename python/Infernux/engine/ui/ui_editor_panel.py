@@ -335,7 +335,7 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
         # Keep UI mode active the entire time the panel is visible
         if self._on_request_ui_mode:
             self._on_request_ui_mode(True)
-        self._was_focused = ctx.is_window_focused(0)
+        self._was_focused = self._is_window_or_child_focused(ctx)
 
     def _on_not_visible(self, ctx):
         if self._on_request_ui_mode:
@@ -842,7 +842,7 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
 
         if (self._selected_element_comp is not None
                 and focused_canvas is not None
-                and ctx.is_window_focused(0)
+                and self._is_window_or_child_focused(ctx)
                 and not ctx.want_text_input()):
             dx = dy = 0
             if ctx.is_key_pressed(KEY_LEFT_ARROW):

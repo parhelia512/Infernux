@@ -533,6 +533,8 @@ void SceneRenderGraph::Execute(VkCommandBuffer commandBuffer)
         m_fullscreenRenderer.ResetPool();
 
         m_renderGraph->Execute(commandBuffer);
+        ++m_executionCount;
+        m_lastExecutedBuildRevision = m_graphBuildRevision;
 
         // Non-MSAA scene/game targets are sampled by ImGui after the render
         // graph finishes. The graph leaves offscreen color outputs in
@@ -1444,6 +1446,7 @@ void SceneRenderGraph::BuildRenderGraph()
                  "Output: ",
                  m_pythonGraphDesc.outputTexture.empty() ? "(backbuffer)" : m_pythonGraphDesc.outputTexture);
 
+    ++m_graphBuildRevision;
     m_graphBuilt = true;
 }
 

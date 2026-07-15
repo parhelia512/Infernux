@@ -123,10 +123,13 @@ class SceneConfirmationMixin:
                 ctx.close_current_popup()
 
             ctx.button("  保存  Save  ", _on_save)
+            ctx.record_semantic_item("button", "Save", True, "scene.confirm.save")
             ctx.same_line()
             ctx.button("  不保存  Don't Save  ", _on_dont_save)
+            ctx.record_semantic_item("button", "Don't Save", True, "scene.confirm.discard")
             ctx.same_line()
             ctx.button("  取消  Cancel  ", _on_cancel)
+            ctx.record_semantic_item("button", "Cancel", True, "scene.confirm.cancel")
 
             ctx.end_popup()
 

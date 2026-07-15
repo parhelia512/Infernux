@@ -65,6 +65,7 @@ def render_object_field(
     picker_asset_items: Optional[object] = None,
     on_pick: Optional[object] = None,
     on_clear: Optional[object] = None,
+    semantic_id: str = "",
 ) -> bool:
     """Render an object reference field with drag-drop and picker support."""
     ...

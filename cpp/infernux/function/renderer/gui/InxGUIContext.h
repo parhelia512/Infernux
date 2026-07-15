@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -34,6 +35,10 @@ struct PropertyDesc
     Type type = Float;
     std::string widgetId;
     std::string label;
+    // Stable automation identity. Kept separate from the invisible ImGui
+    // widget ID so Inspector renderers can change layout without changing
+    // the public semantic contract.
+    std::string semanticId;
     float fVal[4] = {0, 0, 0, 0}; // Float or vector x/y/z/w
     int iVal = 0;                 // Int or enum index
     bool bVal = false;            // Bool
@@ -102,8 +107,10 @@ class InxGUIContext
 
     void ColorEdit(const std::string &label, float color[4]);
     bool ColorPicker(const std::string &label, float color[4], int flags = 0);
-    void Vector2Control(const std::string &label, float value[2], float speed = 0.1f, float labelWidth = 0.0f);
-    void Vector3Control(const std::string &label, float value[3], float speed = 0.1f, float labelWidth = 0.0f);
+    void Vector2Control(const std::string &label, float value[2], float speed = 0.1f, float labelWidth = 0.0f,
+                        const std::string &axisSemanticBase = "");
+    void Vector3Control(const std::string &label, float value[3], float speed = 0.1f, float labelWidth = 0.0f,
+                        const std::string &axisSemanticBase = "");
     void Vector4Control(const std::string &label, float value[4], float speed = 0.1f, float labelWidth = 0.0f);
 
     /* combo & lists */
@@ -164,7 +171,7 @@ class InxGUIContext
     bool BeginPopup(const std::string &id);
     bool BeginPopupModal(const std::string &title, int flags = 0);
     bool BeginPopupContextItem(const std::string &id = "", int mouseButton = 1);
-    bool BeginPopupContextWindow(const std::string &id = "", int mouseButton = 1);
+    bool BeginPopupContextWindow(const std::string &id = "", int mouseButton = 1, bool noOpenOverItems = false);
     void EndPopup();
     void CloseCurrentPopup();
     void BeginTooltip();
@@ -215,6 +222,16 @@ class InxGUIContext
     float GetItemRectMinY();
     float GetItemRectMaxX();
     float GetItemRectMaxY();
+
+    // Explicit semantic hooks for raw ImGui widgets that bypass this wrapper.
+    // They are inert unless the remote validation capture is enabled.
+    void RecordSemanticItem(const std::string &kind, const std::string &label, bool enabled = true,
+                            const std::string &semanticId = "", std::optional<bool> boolValue = std::nullopt,
+                            std::optional<double> numericValue = std::nullopt,
+                            std::optional<std::string> stringValue = std::nullopt);
+    void RecordSemanticRect(const std::string &kind, const std::string &label, float x, float y, float width,
+                            float height, bool enabled = true, const std::string &semanticId = "");
+    void RecordSemanticWindow(const std::string &kind, const std::string &label, const std::string &semanticId = "");
 
     /* invisible button (for splitter) */
     bool InvisibleButton(const std::string &id, float width, float height);

@@ -22,6 +22,7 @@ from Infernux.ui.ui_render_dispatch import dispatch as _ui_dispatch
 from Infernux.ui.ui_event_system import UIEventProcessor
 from Infernux.ui.ui_canvas_utils import collect_sorted_canvases
 from Infernux.ui.inx_ui_screen_component import clear_rect_cache
+from Infernux.engine.player_control import PlayerControlChannel
 
 
 class PlayerGUI(InxGUIRenderable):
@@ -36,6 +37,7 @@ class PlayerGUI(InxGUIRenderable):
         self._last_h = 0
         self._ui_event_processor = UIEventProcessor()
         self._last_frame_time = time.time()
+        self._control = PlayerControlChannel.from_environment()
 
         # Splash
         self._splash = None
@@ -100,7 +102,16 @@ class PlayerGUI(InxGUIRenderable):
         # DeferredTaskRunner is now ticked by InxRenderer's pre-GUI callback
         # (before BuildFrame) so scene mutations complete before panels render.
 
+        # Standalone Players have no competing Editor viewport.  Establish the
+        # gameplay-input contract before any early return caused by splash,
+        # camera startup, a missing GUI texture, or background rendering.
+        Input.set_game_focused(True)
+
         if self._engine:
+            if self._control.poll(self._engine) == "shutdown":
+                self._engine.request_exit()
+                return
+
             # In player mode there's no MenuBarPanel, so we must handle
             # close requests (Alt+F4 / window X) directly.
             native = self._engine.get_native_engine()
@@ -140,10 +151,6 @@ class PlayerGUI(InxGUIRenderable):
             if Input.get_key_down(KeyCode.ESCAPE):
                 Input.set_cursor_locked(False)
                 cursor_locked = False
-
-        Input.set_game_focused(
-            game_hovered or cursor_locked
-        )
 
         # Process UI events
         if game_hovered:

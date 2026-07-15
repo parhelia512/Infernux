@@ -1,0 +1,80 @@
+# Infernux
+
+> Infernux is an open-source, Python-native game engine with a C++17/Vulkan runtime. This index routes humans and software agents to canonical, version-aware documentation.
+
+Current documented preview: 0.2.1
+Canonical site: https://infernux-engine.com/
+Repository: https://github.com/ChenlizheMe/Infernux
+License: MIT
+
+## Start here
+
+- [Documentation home](https://infernux-engine.com/wiki/site/index.html): Learn, Manual, Architecture, and generated API entry point.
+- [Getting started (English)](https://infernux-engine.com/wiki/site/en/learn/getting-started.html): install, project, editor panels, scene, Play mode.
+- [快速开始（中文）](https://infernux-engine.com/wiki/site/zh/learn/getting-started.html): 安装、项目、编辑器面板、场景与 Play 模式。
+- [Your first component](https://infernux-engine.com/wiki/site/en/learn/first-component.html): authoritative minimal InxComponent workflow.
+- [第一个组件](https://infernux-engine.com/wiki/site/zh/learn/first-component.html): InxComponent 最小工作流。
+- [2D foundations](https://infernux-engine.com/wiki/site/en/learn/2d-foundations.html): orthographic Camera, SpriteRenderer, texture import, world scale, and movement validation.
+- [2D 基础](https://infernux-engine.com/wiki/site/zh/learn/2d-foundations.html): 正交 Camera、SpriteRenderer、纹理导入、世界尺度与移动验证。
+- [3D foundations](https://infernux-engine.com/wiki/site/en/learn/3d-foundations.html): perspective Camera, mesh, material, Light, shadows, and RenderStack diagnosis.
+- [3D 基础](https://infernux-engine.com/wiki/site/zh/learn/3d-foundations.html): 透视 Camera、网格、材质、Light、阴影与 RenderStack 排查。
+- [Animation workflow](https://infernux-engine.com/wiki/site/en/learn/animation-workflow.html): 2D/3D clips, `.animfsm`, SpiritAnimator, SkeletalAnimator, parameters, and transitions.
+- [动画工作流](https://infernux-engine.com/wiki/site/zh/learn/animation-workflow.html): 2D/3D Clip、`.animfsm`、Animator 参数与过渡。
+- [Audio workflow](https://infernux-engine.com/wiki/site/en/learn/audio-workflow.html): WAV import, AudioListener, multi-track AudioSource, looping, one-shots, and lifetime.
+- [音频工作流](https://infernux-engine.com/wiki/site/zh/learn/audio-workflow.html): WAV 导入、AudioListener、多轨 AudioSource、循环、One-shot 与生命周期。
+- [Build and share](https://infernux-engine.com/wiki/site/en/learn/build-and-share.html): Build Settings, Windows standalone output, and distribution validation.
+- [构建并分享](https://infernux-engine.com/wiki/site/zh/learn/build-and-share.html): Build Settings、Windows 独立构建与分发验证。
+
+## Concepts and routing
+
+- [Engine map (English)](https://infernux-engine.com/wiki/site/en/manual/engine-map.html): maps development tasks to responsible systems and canonical APIs.
+- [引擎地图（中文）](https://infernux-engine.com/wiki/site/zh/manual/engine-map.html): 把开发任务映射到引擎系统与权威 API。
+- [Scenes and objects](https://infernux-engine.com/wiki/site/en/manual/scenes-and-objects.html): scene ownership, GameObject activation, Transform hierarchy, components, and scene loading.
+- [场景与对象](https://infernux-engine.com/wiki/site/zh/manual/scenes-and-objects.html): 场景所有权、激活、Transform 层级、组件与场景加载。
+- [Input and time](https://infernux-engine.com/wiki/site/en/manual/input-and-time.html): held/down/up input, Game view focus, mouse coordinates, delta time, and fixed-step timing.
+- [输入与时间](https://infernux-engine.com/wiki/site/zh/manual/input-and-time.html): 按住/按下/抬起输入语义、Game 视图焦点、鼠标坐标、帧时间与固定时间步。
+- [Physics](https://infernux-engine.com/wiki/site/en/manual/physics.html): rigid bodies, colliders, fixed-step forces, callbacks, layers, and queries.
+- [物理](https://infernux-engine.com/wiki/site/zh/manual/physics.html): 刚体、碰撞体、固定步力、碰撞回调、层与物理查询。
+- [Screen-space UI](https://infernux-engine.com/wiki/site/en/manual/ui.html): Canvas scaling, anchors, text/image layout, events, hit testing, and responsive checks.
+- [屏幕空间 UI](https://infernux-engine.com/wiki/site/zh/manual/ui.html): Canvas 缩放、锚点、文本/图片布局、事件、命中测试和响应式检查。
+- [Assets and meta files](https://infernux-engine.com/wiki/site/en/manual/assets-and-meta.html): GUID identity, typed references, import settings, cache behavior, and safe asset mutations.
+- [资源与 meta 文件](https://infernux-engine.com/wiki/site/zh/manual/assets-and-meta.html): GUID 身份、类型化引用、导入设置、缓存行为与安全资源变更。
+- [Rendering and RenderStack](https://infernux-engine.com/wiki/site/en/manual/rendering-and-renderstack.html): pipelines, injection points, pass order, RenderGraph lifetime, effects, and materials.
+- [渲染与 RenderStack](https://infernux-engine.com/wiki/site/zh/manual/rendering-and-renderstack.html): 管线、注入点、Pass 顺序、RenderGraph 生命周期、效果与材质。
+- [API versioning](https://infernux-engine.com/wiki/site/en/manual/api-versioning.html): immutable release snapshots, machine-readable comparisons, and compatibility interpretation.
+- [API 版本](https://infernux-engine.com/wiki/site/zh/manual/api-versioning.html): 不可变发布快照、机器可读差异与兼容性解释。
+- [Debugging](https://infernux-engine.com/wiki/site/en/manual/debugging.html): first-error workflow, logging, minimal reproductions, and issue evidence.
+- [调试](https://infernux-engine.com/wiki/site/zh/manual/debugging.html): 第一错误原则、日志、最小复现与 Issue 证据。
+- [Why Infernux exists](https://infernux-engine.com/wiki/site/en/architecture/about.html): motivation and architecture.
+- [JIT-accelerated scripting](https://infernux-engine.com/wiki/site/en/architecture/jit.html): batch bridge, Numba JIT, auto-parallelization, and constraints.
+
+## Community and support
+
+- [Community hub](https://infernux-engine.com/community.html): latest public discussions, forum categories, GitHub sign-in boundary, and embedded community wall.
+- [GitHub Discussions](https://github.com/ChenlizheMe/Infernux/discussions): questions, ideas, general conversation, and project showcases.
+- [GitHub Issues](https://github.com/ChenlizheMe/Infernux/issues): reproducible defects and actionable engineering work.
+
+## API
+
+- [English API index](https://infernux-engine.com/wiki/site/en/api/index.html): generated Python API reference.
+- [中文 API 索引](https://infernux-engine.com/wiki/site/zh/api/index.html): 自动生成的 Python API 参考。
+- [InxComponent](https://infernux-engine.com/wiki/site/en/api/InxComponent.html): lifecycle and script component base.
+- [serialized_field](https://infernux-engine.com/wiki/site/en/api/serialized_field.html): Inspector-editable component fields.
+- [GameObject](https://infernux-engine.com/wiki/site/en/api/GameObject.html): object ownership and components.
+- [Transform](https://infernux-engine.com/wiki/site/en/api/Transform.html): position, rotation, scale, and hierarchy.
+
+## Machine-readable indexes
+
+- [Documentation index](https://infernux-engine.com/docs-index.json): curated page inventory and agent summaries.
+- [API index](https://infernux-engine.com/api-index.json): localized symbols, modules, kinds, signatures, status, and canonical URLs.
+- [API changes](https://infernux-engine.com/api-changes.json): current-versus-previous release additions, removals, and structural changes; 0.2.1 is the first baseline.
+- [Documentation manifest](https://infernux-engine.com/docs-manifest.json): schema, languages, version, and trust rules.
+- [Wiki search catalog](https://infernux-engine.com/assets/wiki-docs.json): searchable handwritten documentation content.
+
+## Trust rules
+
+1. Check page metadata (`status`, `since`, `last_verified`) against the user's engine version.
+2. Treat generated API pages as the authority for current signatures.
+3. Treat Learn and Manual pages as the authority for recommended workflows.
+4. Architecture pages may discuss experimental or future work; do not present it as shipped behavior without corroboration.
+5. Never infer an API only from a similarly named API in Unity or another engine.

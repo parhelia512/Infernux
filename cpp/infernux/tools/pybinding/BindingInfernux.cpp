@@ -611,6 +611,47 @@ PYBIND11_MODULE(_Infernux, m)
                                    result["over_budget_bytes"] = snapshot.overBudgetBytes;
                                    return result;
                                })
+        .def_property_readonly("renderer_frame_snapshot",
+                               [](Infernux &self) {
+                                   auto *renderer = self.GetRenderer();
+                                   const RendererFrameTelemetrySnapshot snapshot =
+                                       renderer ? renderer->GetFrameTelemetrySnapshot() : RendererFrameTelemetrySnapshot{};
+                                   py::dict result;
+                                   result["frame"] = snapshot.frame;
+                                   result["scene_view_visible"] = snapshot.sceneViewVisible;
+                                   result["scene_target_ready"] = snapshot.sceneTargetReady;
+                                   result["game_camera_enabled"] = snapshot.gameCameraEnabled;
+                                   result["game_camera_available"] = snapshot.gameCameraAvailable;
+                                   result["game_target_ready"] = snapshot.gameTargetReady;
+                                   result["scene_target_width"] = snapshot.sceneTargetWidth;
+                                   result["scene_target_height"] = snapshot.sceneTargetHeight;
+                                   result["game_target_width"] = snapshot.gameTargetWidth;
+                                   result["game_target_height"] = snapshot.gameTargetHeight;
+                                   result["scene_draw_call_count"] = snapshot.sceneDrawCallCount;
+                                   result["scene_shadow_draw_call_count"] = snapshot.sceneShadowDrawCallCount;
+                                   result["game_draw_call_count"] = snapshot.gameDrawCallCount;
+                                   result["game_shadow_draw_call_count"] = snapshot.gameShadowDrawCallCount;
+                                   result["light_count"] = snapshot.lightCount;
+                                   result["particle_count"] = snapshot.particleCount;
+                                   result["scene_render_graph_name"] = snapshot.sceneRenderGraphName;
+                                   result["game_render_graph_name"] = snapshot.gameRenderGraphName;
+                                   result["scene_render_graph_execution_count"] =
+                                       snapshot.sceneRenderGraphExecutionCount;
+                                   result["game_render_graph_execution_count"] =
+                                       snapshot.gameRenderGraphExecutionCount;
+                                   result["scene_render_graph_current_executed"] =
+                                       snapshot.sceneRenderGraphCurrentExecuted;
+                                   result["game_render_graph_current_executed"] =
+                                       snapshot.gameRenderGraphCurrentExecuted;
+                                   result["scene_render_graph_pass_names"] = snapshot.sceneRenderGraphPassNames;
+                                   result["game_render_graph_pass_names"] = snapshot.gameRenderGraphPassNames;
+                                   result["game_render_ms"] = snapshot.gameRenderMs;
+                                   result["game_only_frame_ms"] = snapshot.gameOnlyFrameMs;
+                                   result["scene_update_ms"] = snapshot.sceneUpdateMs;
+                                   result["gui_build_ms"] = snapshot.guiBuildMs;
+                                   result["prepare_frame_ms"] = snapshot.prepareFrameMs;
+                                   return result;
+                               })
         .def_property_readonly("asset_runtime_records", &Infernux::GetAssetRuntimeRecords)
         .def_property_readonly("gpu_residency_budget_bytes",
                                [](const Infernux &self) {
@@ -649,7 +690,15 @@ PYBIND11_MODULE(_Infernux, m)
                 return r ? r->GetDisplayScale() : 1.0f;
             },
             "Get the OS display scale factor (e.g. 2.0 for 200%% scaling)")
-        .def("run", &Infernux::Run)
+        .def(
+            "run",
+            [](Infernux &self) {
+                // The native frame loop can run for the lifetime of the Editor.
+                // Release the GIL so loopback MCP and other Python worker threads
+                // can make progress between Python callback boundaries.
+                py::gil_scoped_release release;
+                self.Run();
+            })
         .def(
             "set_pre_scene_update_callback",
             [](Infernux &self, py::object callback) {
@@ -658,6 +707,7 @@ PYBIND11_MODULE(_Infernux, m)
                 } else {
                     py::function fn = py::cast<py::function>(callback);
                     self.SetPreSceneUpdateCallback([fn](float deltaTime) {
+                        py::gil_scoped_acquire acquire;
                         try {
                             fn(deltaTime);
                         } catch (py::error_already_set &e) {
@@ -677,10 +727,9 @@ PYBIND11_MODULE(_Infernux, m)
                 if (callback.is_none()) {
                     r->SetPreGuiCallback(nullptr);
                 } else {
-                    // GIL is already held during DrawFrame (Run() keeps it),
-                    // so no acquire needed in the callback.
                     py::function fn = py::cast<py::function>(callback);
                     r->SetPreGuiCallback([fn]() {
+                        py::gil_scoped_acquire acquire;
                         try {
                             fn();
                         } catch (py::error_already_set &e) {
@@ -703,6 +752,7 @@ PYBIND11_MODULE(_Infernux, m)
                 } else {
                     py::function fn = py::cast<py::function>(callback);
                     r->SetPostDrawCallback([fn]() {
+                        py::gil_scoped_acquire acquire;
                         try {
                             fn();
                         } catch (py::error_already_set &e) {
@@ -718,6 +768,26 @@ PYBIND11_MODULE(_Infernux, m)
         .def(
             "pump_events", [](Infernux & /*self*/) { SDL_PumpEvents(); },
             "Pump the OS message queue to prevent Windows Not Responding during long operations")
+        .def("queue_synthetic_key_input", &Infernux::QueueSyntheticKeyInput, py::arg("scancode"),
+             py::arg("pressed"), py::arg("repeat") = false,
+             "Queue a synthetic key event for the next graphical input frame")
+        .def("queue_synthetic_mouse_button_input", &Infernux::QueueSyntheticMouseButtonInput, py::arg("button"),
+             py::arg("pressed"), py::arg("x"), py::arg("y"),
+             "Queue a synthetic mouse-button event for the next graphical input frame")
+        .def("queue_synthetic_mouse_motion_input", &Infernux::QueueSyntheticMouseMotionInput, py::arg("x"),
+             py::arg("y"), py::arg("delta_x"), py::arg("delta_y"),
+             "Queue a synthetic mouse-motion event for the next graphical input frame")
+        .def("queue_synthetic_mouse_wheel_input", &Infernux::QueueSyntheticMouseWheelInput, py::arg("horizontal"),
+             py::arg("vertical"), "Queue a synthetic mouse-wheel event for the next graphical input frame")
+        .def("queue_synthetic_text_input", &Infernux::QueueSyntheticTextInput, py::arg("text"),
+             "Queue UTF-8 text input for the next graphical input frame")
+        .def("queue_synthetic_close_request", &Infernux::QueueSyntheticCloseRequest,
+             "Queue a window-close request through the graphical event loop")
+        .def_property_readonly("last_processed_synthetic_input_sequence",
+                               &Infernux::GetLastProcessedSyntheticInputSequence,
+                               "Sequence of the last synthetic input event consumed by the graphical event loop")
+        .def_property_readonly("pending_synthetic_input_count", &Infernux::GetPendingSyntheticInputCount,
+                               "Number of queued synthetic input events")
         .def("set_log_level", &Infernux::SetLogLevel)
         .def(
             "register_gui_renderable",
@@ -779,6 +849,13 @@ PYBIND11_MODULE(_Infernux, m)
                     r->HideWindow();
             },
             "Hide the Infernux window")
+        .def(
+            "is_window_minimized",
+            [](Infernux &self) -> bool {
+                auto *r = self.GetRenderer();
+                return r && r->IsWindowMinimized();
+            },
+            "Return whether the Infernux window is currently minimized or occluded")
         .def(
             "set_window_icon",
             [](Infernux &self, const std::string &iconPath) {
@@ -999,6 +1076,52 @@ PYBIND11_MODULE(_Infernux, m)
             },
             py::arg("game_view") = true,
             "Asynchronously read the most recently submitted scene or game render target")
+        .def(
+            "request_capture",
+            [](Infernux &self, const std::string &source, const std::string &outputPath) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Capture requires graphical renderer initialization");
+                CaptureSource captureSource;
+                if (source == "scene")
+                    captureSource = CaptureSource::Scene;
+                else if (source == "game")
+                    captureSource = CaptureSource::Game;
+                else
+                    throw std::invalid_argument("Capture source must be 'scene' or 'game'");
+                return renderer->RequestCapture(captureSource, outputPath);
+            },
+            py::arg("source"), py::arg("output_path"),
+            "Capture an engine-owned render target asynchronously without reading OS window or desktop pixels")
+        .def(
+            "query_capture",
+            [](Infernux &self, uint64_t captureId) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Capture requires graphical renderer initialization");
+                const CaptureSnapshot value = renderer->QueryCapture(captureId);
+                py::dict result;
+                result["capture_id"] = value.id;
+                result["source"] = CaptureSourceName(value.source);
+                result["pixel_origin"] = "engine_render_target";
+                result["os_capture_fallback"] = false;
+                result["status"] = CaptureStatusName(value.status);
+                result["source_generation"] = value.sourceGeneration;
+                result["engine_frame"] = value.engineFrame;
+                result["width"] = value.width;
+                result["height"] = value.height;
+                result["output_path"] = value.outputPath;
+                result["error"] = value.error;
+                return result;
+            },
+            py::arg("capture_id"), "Return status and metadata for an engine capture request")
+        .def(
+            "cancel_capture",
+            [](Infernux &self, uint64_t captureId) {
+                auto *renderer = self.GetRenderer();
+                return renderer && renderer->CancelCapture(captureId);
+            },
+            py::arg("capture_id"), "Cancel an unfinished engine capture request")
         .def(
             "resize_game_render_target",
             [](Infernux &self, uint32_t width, uint32_t height) {

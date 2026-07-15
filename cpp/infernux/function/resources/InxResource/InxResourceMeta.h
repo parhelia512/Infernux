@@ -65,6 +65,7 @@ class InxResourceMeta
 
     // Generate metadata file path from resource file path
     static std::string GetMetaFilePath(const std::string &resourceFilePath);
+    static std::string NormalizeFilePath(const std::string &filePath);
 
   private:
     MetadataMap m_metadata;

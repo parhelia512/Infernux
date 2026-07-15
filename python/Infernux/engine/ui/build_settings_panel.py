@@ -18,22 +18,16 @@ import sys
 import threading
 from typing import Dict, List, Optional
 
-
-class _BuildCancelled(Exception):
-    """Raised when the user cancels the build."""
-    pass
-
 from Infernux.debug import Debug
+from Infernux.engine.build_cancellation import BuildCancelled
 from Infernux.engine.project_context import get_project_root
 from Infernux.engine.game_builder import (
     BuildOutputDirectoryError,
     GameBuilder,
-    _BuildCancelled as _GameBuilderCancelled,
 )
-from Infernux.engine.nuitka_builder import _BuildCancelled as _NuitkaCancelled
 from Infernux.engine.i18n import t
 from .theme import Theme, ImGuiCol, ImGuiStyleVar
-from ._dialogs import pick_folder_dialog, pick_file_dialog, show_system_error_dialog
+from ._dialogs import pick_folder_dialog, pick_file_dialog
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +106,7 @@ class BuildSettingsPanel:
         self._building: bool = False
         self._build_progress: float = 0.0
         self._build_message: str = ""
+        self._build_cancelled: bool = False
         self._build_error: Optional[str] = None
         self._build_output_dir: Optional[str] = None
         self._cancel_event: threading.Event = threading.Event()
@@ -213,11 +208,7 @@ class BuildSettingsPanel:
             return
 
         if visible:
-            if self._building:
-                ctx.begin_disabled(True)
             self._render_body(ctx)
-            if self._building:
-                ctx.end_disabled()
 
         ctx.end_window()
 
@@ -230,6 +221,8 @@ class BuildSettingsPanel:
         
         ctx.push_style_color(ImGuiCol.ChildBg, 0.0, 0.0, 0.0, 0.0)
         ctx.push_style_var_float(ImGuiStyleVar.ChildBorderSize, 0.0)
+        if self._building:
+            ctx.begin_disabled(True)
         if ctx.begin_child("##build_body", 0, child_h, False):
             self._render_output_section(ctx)
             ctx.separator()
@@ -239,6 +232,8 @@ class BuildSettingsPanel:
             ctx.separator()
             self._render_scene_section(ctx)
         ctx.end_child()
+        if self._building:
+            ctx.end_disabled()
         ctx.pop_style_var(1)
         ctx.pop_style_color(1)
 
@@ -255,21 +250,45 @@ class BuildSettingsPanel:
         placeholder = os.path.basename(root) if root else "MyGame"
         ctx.set_next_item_width(300)
         new_name = ctx.text_input("##game_name", self._game_name, 256)
+        ctx.record_semantic_item(
+            "text_input",
+            t("build.game_name"),
+            True,
+            "build_settings.game_name",
+            string_value=new_name,
+        )
         if new_name != self._game_name:
             self._game_name = new_name
             self._save()
         ctx.same_line(0, 20)
         new_debug = ctx.checkbox(t("build.debug_mode") + "##debug_mode", self._debug_mode)
+        ctx.record_semantic_item(
+            "checkbox",
+            t("build.debug_mode"),
+            True,
+            "build_settings.debug_mode",
+            bool_value=new_debug,
+        )
         if new_debug != self._debug_mode:
             self._debug_mode = new_debug
             self._save()
         ctx.same_line(0, 20)
         new_lto = ctx.checkbox(t("build.lto") + "##lto", self._lto)
+        ctx.record_semantic_item(
+            "checkbox", t("build.lto"), True, "build_settings.lto", bool_value=new_lto
+        )
         if new_lto != self._lto:
             self._lto = new_lto
             self._save()
         ctx.same_line(0, 20)
         new_jit = ctx.checkbox(t("build.enable_jit") + "##enable_jit", self._enable_jit)
+        ctx.record_semantic_item(
+            "checkbox",
+            t("build.enable_jit"),
+            True,
+            "build_settings.enable_jit",
+            bool_value=new_jit,
+        )
         if new_jit != self._enable_jit:
             self._enable_jit = new_jit
             self._save()
@@ -282,11 +301,22 @@ class BuildSettingsPanel:
         ctx.label(t("build.output_directory"))
         ctx.set_next_item_width(ctx.get_content_region_avail_width() - 84)
         new_val = ctx.text_input("##output_dir", self._output_dir, 512)
+        ctx.record_semantic_item(
+            "text_input",
+            t("build.output_directory"),
+            True,
+            "build_settings.output_dir",
+            string_value=new_val,
+        )
         if new_val != self._output_dir:
             self._output_dir = new_val
             self._save()
         ctx.same_line()
-        ctx.button(t("build.browse") + "##browse_out", self._browse_output_dir, width=80)
+        browse_output_label = t("build.browse")
+        ctx.button(browse_output_label + "##browse_out", self._browse_output_dir, width=80)
+        ctx.record_semantic_item(
+            "button", browse_output_label, True, "build_settings.output_dir.browse"
+        )
         ctx.push_style_color(ImGuiCol.Text, 0.5, 0.5, 0.5, 1.0)
         ctx.label(t("build.output_directory_hint").format(marker=GameBuilder.OUTPUT_MARKER_FILENAME))
         ctx.pop_style_color(1)
@@ -296,14 +326,29 @@ class BuildSettingsPanel:
         icon_input_w = ctx.get_content_region_avail_width() - 84 - (clear_btn_w + (4 if clear_btn_w else 0))
         ctx.set_next_item_width(max(120, icon_input_w))
         new_icon = ctx.text_input("##build_icon", self._icon_path, 512)
+        ctx.record_semantic_item(
+            "text_input",
+            t("build.icon"),
+            True,
+            "build_settings.icon",
+            string_value=new_icon,
+        )
         if new_icon != self._icon_path:
             self._icon_path = new_icon
             self._save()
         ctx.same_line()
-        ctx.button(t("build.browse") + "##browse_icon", self._browse_icon_path, width=80)
+        browse_icon_label = t("build.browse")
+        ctx.button(browse_icon_label + "##browse_icon", self._browse_icon_path, width=80)
+        ctx.record_semantic_item(
+            "button", browse_icon_label, True, "build_settings.icon.browse"
+        )
         if self._icon_path:
             ctx.same_line(0, 4)
-            ctx.button(t("build.clear_icon") + "##clear_icon", self._clear_icon_path, width=80)
+            clear_icon_label = t("build.clear_icon")
+            ctx.button(clear_icon_label + "##clear_icon", self._clear_icon_path, width=80)
+            ctx.record_semantic_item(
+                "button", clear_icon_label, True, "build_settings.icon.clear"
+            )
         else:
             ctx.push_style_color(ImGuiCol.Text, 0.5, 0.5, 0.5, 1.0)
             ctx.label("  " + t("build.icon_hint"))
@@ -352,6 +397,13 @@ class BuildSettingsPanel:
         ctx.label(t("build.display_mode"))
         display_modes = [t(k) for k in _DISPLAY_MODES_KEYS]
         new_idx = ctx.combo("##display_mode", self._display_mode_idx, display_modes)
+        ctx.record_semantic_item(
+            "combo",
+            t("build.display_mode"),
+            True,
+            "build_settings.display_mode",
+            string_value=_DISPLAY_MODE_KEYS[new_idx],
+        )
         if new_idx != self._display_mode_idx:
             self._display_mode_idx = new_idx
             self._save()
@@ -359,16 +411,37 @@ class BuildSettingsPanel:
         if self._display_mode_idx == 1:  # Windowed
             ctx.label(t("build.window_size"))
             new_w = ctx.input_int(t("build.width") + "##win_w", self._window_width, 16, 160)
+            ctx.record_semantic_item(
+                "int_input",
+                t("build.width"),
+                True,
+                "build_settings.window.width",
+                numeric_value=float(new_w),
+            )
             if new_w != self._window_width:
                 self._window_width = max(320, min(7680, new_w))
                 self._save()
             ctx.same_line()
             new_h = ctx.input_int(t("build.height") + "##win_h", self._window_height, 16, 160)
+            ctx.record_semantic_item(
+                "int_input",
+                t("build.height"),
+                True,
+                "build_settings.window.height",
+                numeric_value=float(new_h),
+            )
             if new_h != self._window_height:
                 self._window_height = max(240, min(4320, new_h))
                 self._save()
 
             new_resizable = ctx.checkbox(t("build.window_resizable") + "##resizable", self._window_resizable)
+            ctx.record_semantic_item(
+                "checkbox",
+                t("build.window_resizable"),
+                True,
+                "build_settings.window.resizable",
+                bool_value=new_resizable,
+            )
             if new_resizable != self._window_resizable:
                 self._window_resizable = new_resizable
                 self._save()
@@ -514,7 +587,12 @@ class BuildSettingsPanel:
 
         if not can_add_open_scene:
             ctx.begin_disabled(True)
-        ctx.button("  " + t("build.add_open_scene") + "  ", _add_current)
+        add_open_scene_label = t("build.add_open_scene")
+        if ctx.button("  " + add_open_scene_label + "  "):
+            _add_current()
+        ctx.record_semantic_item(
+            "button", add_open_scene_label, can_add_open_scene, "build_settings.scene.add_open"
+        )
         if not can_add_open_scene:
             ctx.end_disabled()
             if ctx.is_item_hovered():
@@ -535,6 +613,13 @@ class BuildSettingsPanel:
             # Use a fixed row height so selectable and buttons align
             row_h = 24
             ctx.selectable(f"  {i}    {name}    ({rel})##row", False, 16, 0, row_h)
+            ctx.record_semantic_item(
+                "selectable",
+                name,
+                True,
+                f"build_settings.scene.{i}.row",
+                string_value=rel.replace("\\", "/"),
+            )
 
             # Drag source — reorder
             if ctx.begin_drag_drop_source(0):
@@ -563,6 +648,9 @@ class BuildSettingsPanel:
                     self._scenes[idx - 1], self._scenes[idx] = self._scenes[idx], self._scenes[idx - 1]
                     self._save()
                 ctx.button(t("build.move_up") + f"##{i}", _up, width=btn_w, height=row_h)
+                ctx.record_semantic_item(
+                    "button", t("build.move_up"), True, f"build_settings.scene.{i}.move_up"
+                )
                 ctx.same_line(0, btn_spc)
 
             if i < len(self._scenes) - 1:
@@ -570,12 +658,18 @@ class BuildSettingsPanel:
                     self._scenes[idx], self._scenes[idx + 1] = self._scenes[idx + 1], self._scenes[idx]
                     self._save()
                 ctx.button(t("build.move_down") + f"##{i}", _down, width=btn_w, height=row_h)
+                ctx.record_semantic_item(
+                    "button", t("build.move_down"), True, f"build_settings.scene.{i}.move_down"
+                )
                 ctx.same_line(0, btn_spc)
 
             def _rm(idx=i):
                 nonlocal remove_idx
                 remove_idx = idx
             ctx.button(t("build.remove") + f"##{i}", _rm, width=btn_w, height=row_h)
+            ctx.record_semantic_item(
+                "button", t("build.remove"), True, f"build_settings.scene.{i}.remove"
+            )
 
             ctx.pop_style_var(1)
             ctx.pop_id()
@@ -604,22 +698,70 @@ class BuildSettingsPanel:
     # ------------------------------------------------------------------
 
     def _render_build_controls(self, ctx):
-        # Build controls zone is always interactive (not affected by
-        # the disabled wrapper around the settings body).
         if self._building:
-            ctx.end_disabled()
-            ctx.label(self._build_message or t("build.building"))
+            ctx.record_semantic_item(
+                "status",
+                "Building",
+                False,
+                "build_settings.status",
+                string_value="building",
+            )
+            ctx.record_semantic_item(
+                "status",
+                "Build progress",
+                False,
+                "build_settings.progress",
+                numeric_value=float(self._build_progress),
+            )
+            progress_message = self._build_message or t("build.building")
+            ctx.record_semantic_item(
+                "status",
+                "Build progress message",
+                False,
+                "build_settings.progress_message",
+                string_value=progress_message,
+            )
+            ctx.label(progress_message)
             ctx.progress_bar(self._build_progress, -1.0, 20.0, "")
-            ctx.button("  " + t("build.cancel") + "  ##cancel_build",
-                       self._cancel_build, width=120, height=30)
-            ctx.begin_disabled(True)
+            cancel_label = t("build.cancel")
+            ctx.button("  " + cancel_label + "  ##cancel_build", self._cancel_build, width=120, height=30)
+            ctx.record_semantic_item("button", cancel_label, True, "build_settings.cancel")
+        elif self._build_cancelled:
+            ctx.record_semantic_item(
+                "status", "Cancelled", False, "build_settings.status", string_value="cancelled"
+            )
+            ctx.label(t("build.cancelled"))
+            ctx.same_line()
+            ctx.button("OK##dismiss_cancelled", self._dismiss_build_cancelled)
+            ctx.record_semantic_item("button", "OK", True, "build_settings.cancelled.dismiss")
         elif self._build_error:
+            ctx.record_semantic_item(
+                "status", "Failed", False, "build_settings.status", string_value="failed"
+            )
+            ctx.record_semantic_item(
+                "status",
+                "Build error",
+                False,
+                "build_settings.error",
+                string_value=str(self._build_error),
+            )
             ctx.push_style_color(ImGuiCol.Text, *Theme.ERROR_TEXT)
             ctx.label(t("build.failed").format(err=self._build_error))
             ctx.pop_style_color(1)
             ctx.same_line()
             ctx.button("OK##dismiss_err", self._dismiss_build_error)
+            ctx.record_semantic_item("button", "OK", True, "build_settings.error.dismiss")
         elif self._build_output_dir:
+            ctx.record_semantic_item(
+                "status", "Succeeded", False, "build_settings.status", string_value="succeeded"
+            )
+            ctx.record_semantic_item(
+                "status",
+                "Build output",
+                False,
+                "build_settings.result.output_dir",
+                string_value=str(self._build_output_dir),
+            )
             ctx.push_style_color(ImGuiCol.Text, *Theme.SUCCESS_TEXT)
             ctx.label(t("build.succeeded").format(path=os.path.basename(self._build_output_dir) + "/"))
             ctx.pop_style_color(1)
@@ -635,10 +777,18 @@ class BuildSettingsPanel:
                 else:
                     _sp.Popen(["xdg-open", self._build_output_dir])
 
-            ctx.button(t("build.open_folder"), _open_folder)
+            open_folder_label = t("build.open_folder")
+            ctx.button(open_folder_label, _open_folder)
+            ctx.record_semantic_item(
+                "button", open_folder_label, True, "build_settings.result.open_folder"
+            )
             ctx.same_line()
             ctx.button("OK##dismiss_ok", self._dismiss_build_result)
+            ctx.record_semantic_item("button", "OK", True, "build_settings.result.dismiss")
         else:
+            ctx.record_semantic_item(
+                "status", "Ready", False, "build_settings.status", string_value="ready"
+            )
             can_build = len(self._scenes) > 0 and bool(self._output_dir)
 
             if not can_build:
@@ -652,16 +802,23 @@ class BuildSettingsPanel:
             ctx.button("  " + t("build.build") + "  ",
                         self._start_build if can_build else lambda: None,
                         width=140, height=36)
+            ctx.record_semantic_item("button", t("build.build"), can_build, "build_settings.build")
             ctx.same_line(0, 16)
             ctx.button("  " + t("build.build_and_run") + "  ",
                         self._start_build_and_run if can_build else lambda: None,
                         width=160, height=36)
+            ctx.record_semantic_item(
+                "button", t("build.build_and_run"), can_build, "build_settings.build_and_run"
+            )
 
             if not can_build:
                 ctx.pop_style_color(3)
 
     def _dismiss_build_error(self):
         self._build_error = None
+
+    def _dismiss_build_cancelled(self):
+        self._build_cancelled = False
 
     def _dismiss_build_result(self):
         self._build_output_dir = None
@@ -714,13 +871,12 @@ class BuildSettingsPanel:
     def _show_output_directory_error(self, exc: BuildOutputDirectoryError) -> None:
         message = self._format_output_directory_error(exc)
         self._build_error = message
-        show_system_error_dialog(t("build.output_directory_error_title"), message)
 
     def _on_build_progress(self, message: str, fraction: float):
         self._build_message = message
         self._build_progress = fraction
         if self._cancel_event.is_set():
-            raise _BuildCancelled()
+            raise BuildCancelled()
 
     def _start_build(self):
         self._do_build(run_after=False)
@@ -734,6 +890,7 @@ class BuildSettingsPanel:
         self._building = True
         self._build_progress = 0.0
         self._build_message = "Starting build..."
+        self._build_cancelled = False
         self._build_error = None
         self._build_output_dir = None
         self._cancel_event.clear()
@@ -765,8 +922,8 @@ class BuildSettingsPanel:
                     launcher = os.path.join(result, exe_name)
                     if os.path.isfile(launcher):
                         subprocess.Popen([launcher], cwd=result)
-            except (_BuildCancelled, _GameBuilderCancelled, _NuitkaCancelled):
-                self._build_error = t("build.cancelled")
+            except BuildCancelled:
+                self._build_cancelled = True
             except BuildOutputDirectoryError as exc:
                 self._show_output_directory_error(exc)
             except Exception as exc:

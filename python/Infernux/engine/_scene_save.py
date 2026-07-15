@@ -17,7 +17,7 @@ This module orchestrates those primitives into a complete workflow.
 from __future__ import annotations
 
 import os
-from typing import Optional, Callable
+from typing import Optional
 
 from Infernux.debug import Debug
 from Infernux.engine.project_context import get_project_root
@@ -26,7 +26,6 @@ from .scene_manager import (
     SCENE_EXTENSION,
     DEFAULT_SCENE_FILE_BASE,
     _effective_project_root,
-    _show_save_dialog,
     _load_editor_settings,
     _save_editor_settings,
     _get_scene_root_objects,
@@ -126,14 +125,23 @@ class SceneSaveMixin:
             Debug.log_warning("No active scene to save.")
             return False
 
+        # The scene document owns its display name.  Update it before
+        # serialization so Save As survives an Editor restart, but restore it
+        # if the persistence operation fails.
+        previous_scene_name = scene.name
+        target_scene_name = os.path.splitext(os.path.basename(path))[0]
+        scene.name = target_scene_name
+
         # Step 1 (main thread): serialize scene graph → JSON string
         try:
             json_str = scene.serialize()
         except Exception as exc:
+            scene.name = previous_scene_name
             Debug.log_error(f"Failed to serialize scene: {exc}")
             return False
 
         if not json_str:
+            scene.name = previous_scene_name
             Debug.log_error("Scene serialization returned empty data.")
             return False
 
@@ -145,20 +153,32 @@ class SceneSaveMixin:
             from Infernux.core.document_store import DocumentStore
             DocumentStore.instance().write_and_wait(abs_path, json_str)
         except (OSError, RuntimeError) as exc:
+            scene.name = previous_scene_name
             Debug.log_error(f"Failed to write scene file: {exc}")
             return False
 
         self._current_scene_path = abs_path
         self._dirty = False
 
+        # Save As publishes a brand-new asset through DocumentStore. Register
+        # it synchronously so the Project panel can expose it on the next frame;
+        # the file watcher remains a fallback for transient database contention.
+        if self._asset_database is not None and not self._asset_database.contains_path(abs_path):
+            try:
+                from Infernux.core.assets import AssetManager
+
+                result = AssetManager.import_asset(abs_path, database=self._asset_database)
+                if not result:
+                    detail = getattr(result, "error", "") or "asset import was rejected"
+                    Debug.log_warning(f"Scene saved but asset registration is pending: {detail}")
+            except Exception as exc:
+                Debug.log_warning(f"Scene saved but asset registration is pending: {exc}")
+
         # Notify undo system of clean state
         from Infernux.engine.undo import UndoManager
         mgr = UndoManager.instance()
         if mgr:
             mgr.mark_save_point()
-
-        # Update scene name to match file
-        scene.name = os.path.splitext(os.path.basename(path))[0]
 
         # Persist editor camera state for this scene
         self._save_camera_state(self._current_scene_path)
@@ -189,40 +209,143 @@ class SceneSaveMixin:
             index += 1
 
     def _show_save_as_dialog(self):
-        """Open a file dialog (on a background thread)."""
+        """Open the editor-owned Save As modal for the active scene."""
         root = _effective_project_root()
         if not root:
             Debug.log_warning("No project root set — cannot save scene.")
             return
 
-        assets_dir = os.path.join(root, "Assets")
-        os.makedirs(assets_dir, exist_ok=True)
-
-        def _on_result(chosen_path: Optional[str]):
-            if chosen_path:
-                # Validate under Assets/
-                if self._is_under_assets(chosen_path):
-                    self._pending_save_path = chosen_path
-                else:
-                    Debug.log_warning("Scene must be saved under Assets/ directory.")
-                    self._pending_save_path = ""  # cancel sentinel
-            else:
-                self._pending_save_path = ""  # cancel sentinel
-
         if self._current_scene_path:
-            default_filename = os.path.basename(self._current_scene_path)
+            default_name = os.path.splitext(os.path.basename(self._current_scene_path))[0]
         else:
-            default_filename = f"{DEFAULT_SCENE_FILE_BASE}{SCENE_EXTENSION}"
-        _show_save_dialog(assets_dir, _on_result, default_filename)
+            default_name = DEFAULT_SCENE_FILE_BASE
+
+        self._save_as_folder = "Assets"
+        self._save_as_name = default_name
+        self._save_as_error = ""
+        self._save_as_focus_name = True
+        self._save_as_popup_requested = True
+        self._save_as_popup_open = True
+
+    def render_save_as_popup(self, ctx) -> None:
+        """Render the scene Save As workflow inside the Editor process."""
+        if not self._save_as_popup_open:
+            return
+
+        popup_id = "Save Scene As###scene_save_as"
+        if self._save_as_popup_requested:
+            ctx.open_popup(popup_id)
+            self._save_as_popup_requested = False
+
+        # ImGuiWindowFlags_AlwaysAutoResize = 1 << 6 = 64.
+        if not ctx.begin_popup_modal(popup_id, 64):
+            return
+
+        ctx.record_semantic_window("modal", "Save Scene As", "scene.save_as")
+        ctx.label("保存场景到项目 Assets 目录")
+        ctx.label("Save the scene under this project's Assets directory.")
+        ctx.spacing()
+
+        self._save_as_folder = ctx.text_input(
+            "Folder##scene_save_as_folder", self._save_as_folder, 512
+        )
+        ctx.record_semantic_item("text_input", "Folder", True, "scene.save_as.folder")
+        if self._save_as_focus_name:
+            ctx.set_keyboard_focus_here()
+            self._save_as_focus_name = False
+        self._save_as_name = ctx.text_input(
+            "Name##scene_save_as_name", self._save_as_name, 256
+        )
+        ctx.record_semantic_item("text_input", "Name", True, "scene.save_as.name")
+
+        if self._save_as_error:
+            ctx.spacing()
+            ctx.text_wrapped(self._save_as_error)
+
+        ctx.spacing()
+        ctx.separator()
+        ctx.spacing()
+
+        def _save() -> None:
+            path, error = self._resolve_save_as_path()
+            if error:
+                self._save_as_error = error
+                return
+            if os.path.exists(path) and os.path.normcase(path) != os.path.normcase(self._current_scene_path or ""):
+                self._save_as_error = "A scene already exists at this location. Choose another name to avoid overwriting it."
+                return
+            if not self._do_save(path):
+                self._save_as_error = "The scene could not be saved. Check the Console for details."
+                return
+            self._close_save_as_popup(ctx)
+            if self._post_save_callback:
+                callback = self._post_save_callback
+                self._post_save_callback = None
+                callback()
+
+        def _cancel() -> None:
+            self._close_save_as_popup(ctx)
+            if self._post_save_callback is not None:
+                if self._pending_action == "close" and self._engine:
+                    self._engine.cancel_close()
+                self._close_in_progress = False
+                self._clear_pending_action()
+                self._post_save_callback = None
+
+        ctx.button("Save##scene_save_as_confirm", _save)
+        ctx.record_semantic_item("button", "Save", True, "scene.save_as.confirm")
+        ctx.same_line()
+        ctx.button("Cancel##scene_save_as_cancel", _cancel)
+        ctx.record_semantic_item("button", "Cancel", True, "scene.save_as.cancel")
+        ctx.end_popup()
+
+    def _resolve_save_as_path(self) -> tuple[str, str]:
+        root = _effective_project_root()
+        if not root:
+            return "", "No project root is available."
+
+        folder = str(self._save_as_folder or "").strip().replace("\\", "/")
+        if not folder:
+            folder = "Assets"
+        if os.path.isabs(folder):
+            return "", "Folder must be a project-relative path under Assets."
+
+        target_folder = os.path.abspath(os.path.join(root, folder))
+        if not self._is_under_assets(target_folder):
+            return "", "Scenes must be saved under the project's Assets directory."
+
+        name = str(self._save_as_name or "").strip()
+        if name.lower().endswith(SCENE_EXTENSION):
+            name = name[: -len(SCENE_EXTENSION)]
+        if not name:
+            return "", "Enter a scene name."
+        if name != os.path.basename(name) or any(ch in name for ch in '<>:"/\\|?*'):
+            return "", "Scene name contains an invalid path or filename character."
+
+        return os.path.join(target_folder, name + SCENE_EXTENSION), ""
+
+    def _close_save_as_popup(self, ctx) -> None:
+        self._save_as_popup_open = False
+        self._save_as_popup_requested = False
+        self._save_as_focus_name = False
+        self._save_as_error = ""
+        ctx.close_current_popup()
 
     def _is_under_assets(self, path: str) -> bool:
         """Check if *path* is within the project's Assets/ directory."""
         root = _effective_project_root()
         if not root:
             return False
-        assets = os.path.normcase(os.path.abspath(os.path.join(root, "Assets")))
-        target = os.path.normcase(os.path.abspath(path))
-        return target.startswith(assets + os.sep) or target == assets
+        # The native AssetDatabase may return a Windows 8.3 alias while the
+        # Python project context keeps the long path. Resolve both forms before
+        # comparing their path components.
+        assets = os.path.normcase(os.path.realpath(os.path.abspath(os.path.join(root, "Assets"))))
+        target = os.path.normcase(os.path.realpath(os.path.abspath(path)))
+        try:
+            return os.path.commonpath((assets, target)) == assets
+        except ValueError:
+            # Different Windows volumes cannot share a common path.
+            return False
 
     def _remember_last_scene(self, path: str):
         settings = _load_editor_settings()

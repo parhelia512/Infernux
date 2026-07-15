@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Getting Started - Infernux Scripting API</title>
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="stylesheet" href="/css/style.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ======================================================
+           Infernux API Reference — Unity-Inspired Dark Theme
+           ====================================================== */
+
+        /* Layout */
+        .api-layout {
+            display: flex;
+            min-height: calc(100vh - var(--nav-height));
+            padding-top: var(--nav-height);
+        }
+
+        /* ---- Sidebar ---- */
+        .api-sidebar {
+            width: 280px;
+            background: #0b0b12;
+            border-right: 1px solid var(--border);
+            position: sticky;
+            top: var(--nav-height);
+            height: calc(100vh - var(--nav-height));
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        .api-sidebar::-webkit-scrollbar { width: 5px; }
+        .api-sidebar::-webkit-scrollbar-track { background: transparent; }
+        .api-sidebar::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+
+        .sidebar-hdr {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .sidebar-hdr h3 {
+            margin: 0;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+        }
+
+        /* Language toggle */
+        .lang-sw {
+            display: flex;
+            gap: 1px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .lang-sw a {
+            padding: 3px 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            background: var(--bg-elevated);
+            text-decoration: none;
+            transition: all 0.12s;
+        }
+        .lang-sw a.on {
+            background: var(--primary);
+            color: #fff;
+        }
+        .lang-sw a:hover:not(.on) {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+        }
+
+        /* Namespace tree */
+        .ns-tree { padding: 6px 0 20px; }
+
+        .ns-group { margin-bottom: 1px; }
+
+        .ns-hd {
+            display: flex;
+            align-items: center;
+            padding: 7px 16px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.1s;
+        }
+        .ns-hd:hover { background: rgba(255,255,255,0.025); }
+
+        .ns-arr {
+            width: 14px;
+            font-size: 0.5rem;
+            color: #555;
+            transition: transform 0.15s;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+        .ns-hd.open .ns-arr { transform: rotate(90deg); }
+
+        .ns-nm {
+            font-size: 0.84rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        .ns-hd.hi .ns-nm { color: var(--primary); }
+
+        .ns-ch {
+            display: none;
+            padding: 2px 0 4px;
+        }
+        .ns-hd.open + .ns-ch { display: block; }
+
+        .ns-ch a {
+            display: block;
+            padding: 3px 16px 3px 38px;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.1s, background 0.1s;
+            border-left: 2px solid transparent;
+        }
+        .ns-ch a:hover {
+            color: var(--text-primary);
+            background: rgba(255,255,255,0.02);
+        }
+        .ns-ch a.cur {
+            color: var(--text-primary);
+            background: rgba(255,107,53,0.07);
+            border-left-color: var(--primary);
+            font-weight: 600;
+        }
+
+        /* ---- Content ---- */
+        .api-main {
+            flex: 1;
+            padding: 36px 56px 80px;
+            max-width: 880px;
+            min-width: 0;
+        }
+
+        /* H1 — class name */
+        .api-main h1 {
+            font-size: 1.85rem;
+            font-weight: 700;
+            margin: 0 0 4px;
+            padding: 0;
+            border: none;
+            color: var(--text-primary);
+        }
+
+        /* "class in Package" subtitle */
+        .api-main .class-info {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            margin-bottom: 22px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--border);
+        }
+        .api-main .class-info b { color: var(--text-secondary); }
+        .api-main .class-info a { color: var(--primary); }
+
+        /* H2 — section headers */
+        .api-main h2 {
+            font-size: 0.92rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted);
+            margin: 30px 0 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .api-main h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin: 18px 0 6px;
+        }
+
+        /* Paragraphs */
+        .api-main p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.75;
+            margin-bottom: 12px;
+        }
+
+        .api-main blockquote {
+            margin: 12px 0;
+            padding: 10px 16px;
+            background: rgba(255,107,53,0.04);
+            border-left: 3px solid var(--primary);
+            border-radius: 0 4px 4px 0;
+        }
+        .api-main blockquote p { margin: 0; font-size: 0.85rem; }
+
+        /* Tables — Unity style: hidden header, 2-col */
+        .api-main table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 4px 0 18px;
+        }
+        .api-main thead { display: none; }
+
+        .api-main tbody tr {
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .api-main tbody tr:last-child { border-bottom: none; }
+
+        .api-main td {
+            padding: 7px 0;
+            font-size: 0.86rem;
+            vertical-align: top;
+        }
+        .api-main td:first-child {
+            width: 200px;
+            padding-right: 20px;
+            color: var(--primary);
+            font-size: 0.86rem;
+            font-weight: 500;
+        }
+        .api-main td:last-child { color: var(--text-secondary); }
+        .api-main td a { color: var(--primary); }
+        .api-main tbody tr:hover { background: rgba(255,255,255,0.012); }
+
+        /* Inline code — normal font, subtle highlight */
+        .api-main code {
+            font-family: inherit;
+            font-size: inherit;
+            background: rgba(255,255,255,0.06);
+            padding: 1px 5px;
+            border-radius: 3px;
+            color: var(--primary-light);
+        }
+
+        /* Code blocks */
+        .api-main pre {
+            background: #0d0d15;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px 20px;
+            overflow-x: auto;
+            margin: 10px 0 18px;
+        }
+        .api-main pre code {
+            font-family: var(--font-mono);
+            background: none;
+            padding: 0;
+            font-size: 0.83rem;
+            line-height: 1.65;
+            color: var(--text-secondary);
+        }
+
+        /* Lists */
+        .api-main ul, .api-main ol { padding-left: 18px; margin-bottom: 12px; }
+        .api-main li {
+            margin-bottom: 4px;
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+            line-height: 1.6;
+        }
+
+        .api-main hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 26px 0;
+        }
+
+        /* ---- Footer ---- */
+        .api-ft { margin-left: 280px; }
+        .api-ft .footer-bottom p { font-size: 0.8rem; }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 1024px) {
+            .api-sidebar { width: 240px; }
+            .api-main { padding: 28px 32px 60px; }
+            .api-ft { margin-left: 240px; }
+        }
+        @media (max-width: 768px) {
+            .api-layout { flex-direction: column; }
+            .api-sidebar {
+                width: 100%; position: relative; top: 0;
+                height: auto; max-height: 50vh;
+                border-right: none; border-bottom: 1px solid var(--border);
+            }
+            .api-main { padding: 20px; max-width: 100%; }
+            .api-ft { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links">
+                <a href="/index.html">Home</a>
+                <a href="/index.html#system">Features</a>
+                <a href="/index.html#capabilities">Showcase</a>
+                <a href="/roadmap.html">Roadmap</a>
+                <a href="/wiki.html" class="active">Docs</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank">
+                    <i class="fab fa-github"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell" style="padding-top: calc(var(--nav-height) + 60px); min-height: 80vh; padding-bottom: 80px;">
+        <div class="container" style="max-width: 860px; margin: 0 auto;">
+            <div class="api-main" style="padding: 0; max-width: none;">
+                <h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
+<p>This guide gets you from a fresh machine to a running Infernux scene. It targets the <strong>0.2.1 preview</strong> on Windows. Preview builds change quickly, so confirm the version shown by the Hub or release page before diagnosing a mismatch.</p>
+<h2 id="what-you-will-accomplish">What you will accomplish<a class="headerlink" href="#what-you-will-accomplish" title="Permanent link">&para;</a></h2>
+<p>By the end, you should be able to:</p>
+<ul>
+<li>install or launch Infernux;</li>
+<li>create or open a project;</li>
+<li>recognize the Scene, Game, Hierarchy, Inspector, Project, and Console areas;</li>
+<li>save a scene and enter Play mode.</li>
+</ul>
+<h2 id="1-get-the-engine">1. Get the engine<a class="headerlink" href="#1-get-the-engine" title="Permanent link">&para;</a></h2>
+<p>Use one of the supported project entry points:</p>
+<ol>
+<li>Download the latest preview from the <a href="https://github.com/ChenlizheMe/Infernux/releases">Infernux releases page</a>.</li>
+<li>Follow the package instructions included with that release.</li>
+<li>Keep the Hub, editor, and project on a local writable drive while learning the workflow.</li>
+</ol>
+<p>If you are developing the engine itself, use the repository build instructions instead of mixing a source build with a packaged preview.</p>
+<h2 id="2-create-or-open-a-project">2. Create or open a project<a class="headerlink" href="#2-create-or-open-a-project" title="Permanent link">&para;</a></h2>
+<p>Launch the Hub or editor and choose a project location. A healthy project opens without repeated errors in the Console and exposes its files in the Project panel.</p>
+<p>Do not store generated engine files beside unrelated source repositories. A dedicated project directory makes asset discovery, import, and troubleshooting much easier.</p>
+<h2 id="3-read-the-editor-layout">3. Read the editor layout<a class="headerlink" href="#3-read-the-editor-layout" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Purpose</th>
+<th>First check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Scene</td>
+<td>Edit the world and select objects visually</td>
+<td>Can you orbit or frame the scene?</td>
+</tr>
+<tr>
+<td>Game</td>
+<td>Preview the active camera output</td>
+<td>Does it change when Play mode starts?</td>
+</tr>
+<tr>
+<td>Hierarchy</td>
+<td>Inspect objects in the current scene</td>
+<td>Can you select an object by name?</td>
+</tr>
+<tr>
+<td>Inspector</td>
+<td>Edit the selected object's components</td>
+<td>Does selection update the Inspector?</td>
+</tr>
+<tr>
+<td>Project</td>
+<td>Browse project assets and scripts</td>
+<td>Can you find the project's asset files?</td>
+</tr>
+<tr>
+<td>Console</td>
+<td>Read logs, warnings, and errors</td>
+<td>Is it free of repeating exceptions?</td>
+</tr>
+</tbody>
+</table>
+<p>The exact docking arrangement may differ between builds. Use panel names and responsibilities—not a screenshot position—as the stable mental model.</p>
+<h2 id="4-save-and-run-a-scene">4. Save and run a scene<a class="headerlink" href="#4-save-and-run-a-scene" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Open or create a scene.</li>
+<li>Add or select a visible object.</li>
+<li>Save the scene before entering Play mode.</li>
+<li>Start Play mode and watch the Game panel and Console.</li>
+<li>Stop Play mode before making structural changes you intend to keep.</li>
+</ol>
+<h3 id="expected-result">Expected result<a class="headerlink" href="#expected-result" title="Permanent link">&para;</a></h3>
+<p>The editor enters and exits Play mode cleanly, the Game view updates, and the Console does not accumulate the same error every frame.</p>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<h3 id="the-editor-does-not-launch">The editor does not launch<a class="headerlink" href="#the-editor-does-not-launch" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Confirm the package matches your Windows architecture.</li>
+<li>Start from the release-provided launcher rather than moving individual binaries out of the package.</li>
+<li>Check whether security software quarantined a runtime dependency.</li>
+</ul>
+<h3 id="the-project-opens-but-assets-are-missing">The project opens but assets are missing<a class="headerlink" href="#the-project-opens-but-assets-are-missing" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Confirm you opened the project root rather than a nested asset folder.</li>
+<li>Avoid changing project files outside the editor while it is importing them.</li>
+<li>Read the first Console error; later errors may only be consequences.</li>
+</ul>
+<h3 id="play-mode-produces-a-blank-game-view">Play mode produces a blank Game view<a class="headerlink" href="#play-mode-produces-a-blank-game-view" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Confirm the scene contains and enables a Camera.</li>
+<li>Check that the scene you edited is the scene being played.</li>
+<li>Inspect the Console for script or resource-loading errors.</li>
+</ul>
+<h2 id="next-step">Next step<a class="headerlink" href="#next-step" title="Permanent link">&para;</a></h2>
+<p>Continue with <a href="first-component.html">Your First Component</a> to add Python gameplay behavior. For a system-oriented overview, use the <a href="../manual/engine-map.html">Engine Map</a>.</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <script src="/js/main.js?v=2"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.ns-hd').forEach(function(h) {
+            h.addEventListener('click', function() { this.classList.toggle('open'); });
+        });
+    });
+    </script>
+</body>
+</html>

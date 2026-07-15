@@ -50,6 +50,7 @@ class HierarchyPanel : public EditorPanel
     void ClearSelectionAndNotify();
     void SetSelectedObjectById(uint64_t id, bool clearSearch = false);
     void ExpandToObject(uint64_t objId);
+    void InvalidateSceneStructureCache();
 
     /// Allow external panels (UIEditorPanel) to queue an auto-expand.
     void SetPendingExpandId(uint64_t id)

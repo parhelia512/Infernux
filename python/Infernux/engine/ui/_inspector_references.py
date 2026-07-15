@@ -6,6 +6,7 @@ from Infernux.engine.i18n import t
 from .inspector_utils import (
     max_label_w, field_label, render_serialized_field, has_field_changed,
     render_compact_section_header, render_info_text, pretty_field_name,
+    semantic_capture_enabled, inspector_component_semantic_id,
 )
 from ._inspector_undo import (
     _record_property, _record_builtin_property, _notify_scene_modified,
@@ -394,6 +395,8 @@ def _render_asset_reference_field(ctx, comp, field_name, metadata, current_value
         picker_asset_items=_picker,
         on_pick=_on_pick,
         on_clear=_on_clear,
+        semantic_id=(inspector_component_semantic_id(comp, field_name)
+                     if semantic_capture_enabled(ctx) else ""),
     )
 
 
@@ -429,6 +432,8 @@ def _render_component_ref_inline(ctx, py_comp, field_name, metadata, lw):
         picker_scene_items=_comp_scene,
         on_pick=_comp_on_pick,
         on_clear=_comp_on_clear,
+        semantic_id=(inspector_component_semantic_id(py_comp, field_name)
+                     if semantic_capture_enabled(ctx) else ""),
     )
 
 
@@ -469,6 +474,8 @@ def _render_gameobject_ref_inline(ctx, py_comp, field_name, metadata, current_va
         picker_scene_items=_go_scene,
         on_pick=_go_on_pick,
         on_clear=_go_on_clear,
+        semantic_id=(inspector_component_semantic_id(py_comp, field_name)
+                     if semantic_capture_enabled(ctx) else ""),
     )
 
 
@@ -596,7 +603,7 @@ def render_object_field(ctx: InxGUIContext, field_id: str, display_text: str,
                         type_hint: str, selected: bool = False, clickable: bool = True,
                         accept_drag_type: str = None, on_drop_callback=None,
                         picker_scene_items=None, picker_asset_items=None,
-                        on_pick=None, on_clear=None) -> bool:
+                        on_pick=None, on_clear=None, semantic_id: str = "") -> bool:
     """Render a Unity-style object field (selectable box showing an object reference)."""
     from .igui import IGUI
     return IGUI.object_field(
@@ -606,4 +613,5 @@ def render_object_field(ctx: InxGUIContext, field_id: str, display_text: str,
         picker_scene_items=picker_scene_items,
         picker_asset_items=picker_asset_items,
         on_pick=on_pick, on_clear=on_clear,
+        semantic_id=semantic_id,
     )

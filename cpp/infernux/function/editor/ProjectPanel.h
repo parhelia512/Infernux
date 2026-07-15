@@ -30,6 +30,7 @@ class ProjectPanel : public EditorPanel
 {
   public:
     ProjectPanel();
+    std::unordered_map<std::string, double> ConsumeSubTimings() override;
 
     // ── Public API (called from Python bootstrap / other panels) ─────
 
@@ -264,6 +265,7 @@ class ProjectPanel : public EditorPanel
 
     // ── File-type icon cache ─────────────────────────────────────────
     std::unordered_map<std::string, uint64_t> m_typeIconCache;
+    std::unordered_set<std::string> m_pendingTypeIconIds;
     bool m_typeIconsLoaded = false;
     std::string m_iconsDir;
 
@@ -304,6 +306,18 @@ class ProjectPanel : public EditorPanel
     std::string m_preferredNavPath;
     /// When true, bare project root is not a valid browse target ([..] stops at subfolders).
     bool m_navHasSubfolders = false;
+    bool m_canNavigateUp = false;
+    double m_subPreIcons = 0.0;
+    double m_subPrePreview = 0.0;
+    double m_subPreOther = 0.0;
+    double m_subBreadcrumb = 0.0;
+    double m_subFolderTree = 0.0;
+    double m_subFileGrid = 0.0;
+    double m_subTail = 0.0;
+    double m_subGridContext = 0.0;
+    double m_subGridData = 0.0;
+    double m_subGridItems = 0.0;
+    double m_subGridTail = 0.0;
     std::string m_lastNotifiedPath;
 
     // Breadcrumb
@@ -370,6 +384,9 @@ class ProjectPanel : public EditorPanel
     void RenderDragDropSource(InxGUIContext *ctx, const FileItem &item);
     void RenderFolderDropTarget(InxGUIContext *ctx, const std::string &folderPath);
     void RenderItemLabel(InxGUIContext *ctx, const FileItem &item, float iconSize, float cellStartX);
+    [[nodiscard]] std::string MakeProjectFolderSemanticId(const std::string &path) const;
+    [[nodiscard]] std::string MakeProjectItemSemanticId(const FileItem &item) const;
+    [[nodiscard]] std::string MakeProjectRelativeSemanticPath(const std::string &path) const;
 
     // ── Click & keyboard handling ────────────────────────────────────
     void HandleItemClick(const FileItem &item, InxGUIContext *ctx);
@@ -409,6 +426,7 @@ class ProjectPanel : public EditorPanel
     /// Lowest folder users may browse (Assets/Logs when present, else project root).
     std::string GetMinimumBrowsePath() const;
     void ClampNavigationPath();
+    void UpdateNavigationCache();
     void AssignCurrentPath(const std::string &path);
     /// True when [..] may move to the parent folder (blocked at project-root subfolders).
     bool CanNavigateUpFromCurrent() const;

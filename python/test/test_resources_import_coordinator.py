@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 from Infernux.core.assets import AssetManager
@@ -98,6 +99,27 @@ def _patch_asset_manager(monkeypatch, calls):
     monkeypatch.setattr(AssetManager, "_invalidate_project_panel_cache", classmethod(lambda _cls: None))
 
 
+def test_python_bytecode_and_cache_sidecars_never_enter_import_queue(tmp_path):
+    database = _AssetDatabaseProbe()
+    handler = ResourceChangeHandler(_EngineProbe(database))
+    cache = tmp_path / "Assets" / "Scripts" / "__pycache__"
+    cache.mkdir(parents=True)
+    bytecode = cache / "Controller.cpython-312.pyc"
+    moved_bytecode = cache / "Controller.cpython-312.optimized.pyc"
+    bytecode.write_bytes(b"cache")
+
+    handler.on_created(_event(bytecode))
+    handler.on_modified(_event(bytecode))
+    handler.on_moved(_event(bytecode, destination=moved_bytecode))
+    handler.on_deleted(_event(bytecode))
+    handler.on_deleted(_event(Path(f"{bytecode}.meta")))
+
+    assert handler.pending_count == 0
+    assert handler.process_pending_reloads(force=True) == 0
+    assert database.queries == []
+    assert database.mutations == []
+
+
 def test_reimport_meta_write_suppresses_meta_deleted_echo(monkeypatch, tmp_path):
     database = _AssetDatabaseProbe()
     handler = ResourceChangeHandler(_EngineProbe(database))
@@ -119,6 +141,27 @@ def test_reimport_meta_write_suppresses_meta_deleted_echo(monkeypatch, tmp_path)
     assert handler.process_pending_reloads(force=True) == 1
     # META_DELETED must be treated as DocumentStore echo, not a second reimport.
     assert [entry[0] for entry in database.mutations] == ["modified"]
+
+
+def test_asset_manager_delete_clears_live_python_references_after_database_commit(monkeypatch, tmp_path):
+    database = _AssetDatabaseProbe()
+    calls = []
+    _patch_asset_manager(monkeypatch, calls)
+    asset = tmp_path / "RaceDust.vfxsystem"
+    asset.write_text("{}", encoding="utf-8")
+    path = str(asset.resolve())
+    database.guid_by_path[path] = "race-dust-guid"
+    cleanup_calls = []
+    monkeypatch.setattr(
+        AssetManager,
+        "_clear_deleted_live_references",
+        classmethod(lambda _cls, guid, deleted_path: cleanup_calls.append((guid, deleted_path))),
+    )
+
+    assert AssetManager.delete_asset(path, database=database)
+
+    assert [entry[0] for entry in database.mutations] == ["deleted"]
+    assert cleanup_calls == [("race-dust-guid", path)]
 
 
 def test_missing_meta_rebuild_imports_unregistered_owner(monkeypatch, tmp_path):
@@ -235,6 +278,42 @@ def test_document_store_atomic_replace_ignores_temp_events_and_reimports_target(
     assert database.mutations[0][1] == str(target.resolve())
     assert [entry[0] for entry in asset_calls] == ["invalidate", "asset-modified"]
     assert all(str(temporary) not in str(entry) for entry in database.mutations)
+
+
+def test_first_scene_save_as_imports_active_unregistered_target(monkeypatch, tmp_path):
+    database = _AssetDatabaseProbe()
+    handler = ResourceChangeHandler(_EngineProbe(database))
+    asset_calls = []
+    _patch_asset_manager(monkeypatch, asset_calls)
+    monkeypatch.setattr(handler, "_is_active_scene_file", lambda _path: True)
+
+    target = tmp_path / "MainMenu.scene"
+    temporary = tmp_path / "MainMenu.scene.tmp.123456.9"
+    target.write_text("{}", encoding="utf-8")
+
+    handler.on_moved(_event(temporary, destination=target))
+
+    assert handler.process_pending_reloads(force=True) == 1
+    assert database.mutations == [("import", str(target.resolve()), threading.get_ident())]
+    assert [entry[0] for entry in asset_calls] == ["asset-created"]
+
+
+def test_active_registered_scene_watcher_echo_is_ignored(monkeypatch, tmp_path):
+    database = _AssetDatabaseProbe()
+    handler = ResourceChangeHandler(_EngineProbe(database))
+    asset_calls = []
+    _patch_asset_manager(monkeypatch, asset_calls)
+    monkeypatch.setattr(handler, "_is_active_scene_file", lambda _path: True)
+
+    target = tmp_path / "RaceTrack.scene"
+    target.write_text("{}", encoding="utf-8")
+    database.guid_by_path[str(target.resolve())] = "stable-guid"
+
+    handler.on_modified(_event(target))
+
+    assert handler.process_pending_reloads(force=True) == 1
+    assert database.mutations == []
+    assert asset_calls == []
 
 
 def test_document_store_atomic_replace_does_not_delete_republished_target(monkeypatch, tmp_path):

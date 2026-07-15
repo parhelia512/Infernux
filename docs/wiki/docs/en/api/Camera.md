@@ -11,7 +11,9 @@ class in <b>Infernux.components.builtin</b>
 A Camera component that renders a view of the scene.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+Use a perspective Camera for normal 3D depth and an orthographic Camera for scale-stable 2D framing. Keep near/far clipping proportional to scene scale.
 <!-- USER CONTENT END -->
 
 ## Properties
@@ -63,12 +65,22 @@ A Camera component that renders a view of the scene.
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for Camera
+from Infernux import Camera, CameraProjection, GameObject
+
+camera_object = GameObject.find("Main Camera")
+if camera_object is not None:
+    camera = camera_object.get_component(Camera)
+    if camera is not None:
+        camera.projection_mode = CameraProjection.Orthographic
+        camera.orthographic_size = 5.0
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [2D Foundations](../learn/2d-foundations.md)
+- [3D Foundations](../learn/3d-foundations.md)
+- [CameraProjection](CameraProjection.md)
+- [Rendering and RenderStack](../manual/rendering-and-renderstack.md)
 <!-- USER CONTENT END -->

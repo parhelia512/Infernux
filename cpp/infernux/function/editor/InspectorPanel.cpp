@@ -1,4 +1,5 @@
 #include <function/editor/InspectorPanel.h>
+#include <function/renderer/gui/InxGUISemantics.h>
 
 #include <imgui.h>
 
@@ -386,9 +387,10 @@ void InspectorPanel::RenderSingleObject(InxGUIContext *ctx, uint64_t objId)
     if (!info.hideTransform) {
         if (m_cachedTransformIconId == 0 && getComponentIconId)
             m_cachedTransformIconId = getComponentIconId("Transform", false);
-        auto [headerOpen, _unused] = RenderComponentHeader(ctx, "Transform", "transform", m_cachedTransformIconId,
-                                                           /*showEnabled=*/false, /*isEnabled=*/true, /*suffix=*/"",
-                                                           /*defaultOpen=*/true);
+        auto [headerOpen, _unused] = RenderComponentHeader(
+            ctx, "Transform", "transform", m_cachedTransformIconId,
+            /*showEnabled=*/false, /*isEnabled=*/true, /*suffix=*/"",
+            /*defaultOpen=*/true, "inspector.object." + std::to_string(objId) + ".component.transform");
 
         if (headerOpen) {
             if (isPrefabTransformReadonly)
@@ -431,10 +433,11 @@ void InspectorPanel::RenderSingleObject(InxGUIContext *ctx, uint64_t objId)
     for (const auto &comp : components) {
         ImGui::PushID(static_cast<int>(comp.componentId));
 
-        auto [headerOpen, newEnabled] =
-            RenderComponentHeader(ctx, comp.typeName, "comp_" + std::to_string(comp.componentId), comp.iconId,
-                                  /*showEnabled=*/true, comp.enabled, comp.isScript ? " (Script)" : "",
-                                  /*defaultOpen=*/true);
+        auto [headerOpen, newEnabled] = RenderComponentHeader(
+            ctx, comp.typeName, "comp_" + std::to_string(comp.componentId), comp.iconId,
+            /*showEnabled=*/true, comp.enabled, comp.isScript ? " (Script)" : "",
+            /*defaultOpen=*/true,
+            "inspector.object." + std::to_string(objId) + ".component." + std::to_string(comp.componentId));
 
         // Right-click context menu — only call Python when popup is open
         bool componentRemoved = false;
@@ -691,9 +694,13 @@ void InspectorPanel::RenderMultiEdit(InxGUIContext *ctx, const std::vector<uint6
 
 void InspectorPanel::RenderObjectHeader(InxGUIContext *ctx, uint64_t objId, const ObjectInfo &info)
 {
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
     // Active checkbox
     bool active = info.active;
     bool newActive = RenderInspectorCheckbox(ctx, "##obj_active", active);
+    if (captureSemantics)
+        ctx->RecordSemanticItem("inspector_active", "Active", true,
+                                "inspector.object." + std::to_string(objId) + ".active");
     if (newActive != active && setObjectProperty) {
         m_cachedObjInfo.active = newActive;
         setObjectProperty(objId, "active", newActive ? "true" : "false");
@@ -706,7 +713,10 @@ void InspectorPanel::RenderObjectHeader(InxGUIContext *ctx, uint64_t objId, cons
     char nameBuf[256];
     std::strncpy(nameBuf, info.name.c_str(), sizeof(nameBuf) - 1);
     nameBuf[sizeof(nameBuf) - 1] = '\0';
-    if (ImGui::InputText("##obj_name", nameBuf, sizeof(nameBuf))) {
+    const bool nameChanged = ImGui::InputText("##obj_name", nameBuf, sizeof(nameBuf));
+    if (captureSemantics)
+        ctx->RecordSemanticItem("inspector_name", "Name", true, "inspector.object." + std::to_string(objId) + ".name");
+    if (nameChanged) {
         std::string newName(nameBuf);
         if (newName != info.name && setObjectProperty) {
             m_cachedObjInfo.name = newName;
@@ -747,6 +757,7 @@ void InspectorPanel::RefreshTagLayerCache()
 
 void InspectorPanel::RenderTagLayerRow(InxGUIContext *ctx, uint64_t objId, const ObjectInfo &info)
 {
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
     RefreshTagLayerCache();
 
     float availW = ImGui::GetContentRegionAvail().x;
@@ -766,6 +777,9 @@ void InspectorPanel::RenderTagLayerRow(InxGUIContext *ctx, uint64_t objId, const
 
     int newTagIdx = ctx->SearchableCombo("Inspector.Tag", tagIdx, m_cachedTagItems, halfW - 30, 8,
                                          Tr("igui.search_hint").c_str(), Tr("igui.no_results").c_str());
+    if (captureSemantics)
+        ctx->RecordSemanticItem("inspector_tag", Tr("inspector.tag"), true,
+                                "inspector.object." + std::to_string(objId) + ".tag");
     if (newTagIdx != tagIdx) {
         if (newTagIdx == static_cast<int>(m_cachedTags.size())) {
             // "Add Tag..." selected
@@ -786,6 +800,9 @@ void InspectorPanel::RenderTagLayerRow(InxGUIContext *ctx, uint64_t objId, const
 
     int newLayer = ctx->SearchableCombo("Inspector.Layer", info.layer, m_cachedLayerItems, layerComboW, 8,
                                         Tr("igui.search_hint").c_str(), Tr("igui.no_results").c_str());
+    if (captureSemantics)
+        ctx->RecordSemanticItem("inspector_layer", Tr("inspector.layer"), true,
+                                "inspector.object." + std::to_string(objId) + ".layer");
     if (newLayer != info.layer) {
         if (newLayer == static_cast<int>(m_cachedLayerItems.size()) - 1) {
             // "Add Layer..." selected
@@ -815,9 +832,22 @@ void InspectorPanel::RenderTransform(InxGUIContext *ctx, uint64_t objId)
     float rot[3] = {td.rx, td.ry, td.rz};
     float scl[3] = {td.sx, td.sy, td.sz};
 
-    ctx->Vector3Control(Tr("Position"), pos, DRAG_SPEED_DEFAULT, labelW);
-    ctx->Vector3Control(Tr("Rotation"), rot, DRAG_SPEED_DEFAULT, labelW);
-    ctx->Vector3Control(Tr("Scale"), scl, DRAG_SPEED_FINE, labelW);
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
+    const std::string transformBase =
+        captureSemantics ? "inspector.object." + std::to_string(objId) + ".transform." : std::string{};
+    const std::string positionSemanticId = captureSemantics ? transformBase + "position" : std::string{};
+    const std::string rotationSemanticId = captureSemantics ? transformBase + "rotation" : std::string{};
+    const std::string scaleSemanticId = captureSemantics ? transformBase + "scale" : std::string{};
+
+    ctx->Vector3Control(Tr("Position"), pos, DRAG_SPEED_DEFAULT, labelW, positionSemanticId);
+    if (captureSemantics)
+        ctx->RecordSemanticItem("inspector_transform", Tr("Position"), true, positionSemanticId);
+    ctx->Vector3Control(Tr("Rotation"), rot, DRAG_SPEED_DEFAULT, labelW, rotationSemanticId);
+    if (captureSemantics)
+        ctx->RecordSemanticItem("inspector_transform", Tr("Rotation"), true, rotationSemanticId);
+    ctx->Vector3Control(Tr("Scale"), scl, DRAG_SPEED_FINE, labelW, scaleSemanticId);
+    if (captureSemantics)
+        ctx->RecordSemanticItem("inspector_transform", Tr("Scale"), true, scaleSemanticId);
 
     if (setTransformData) {
         bool changed = false;
@@ -953,8 +983,11 @@ void InspectorPanel::RenderMultiTransform(InxGUIContext *ctx, const std::vector<
 // Prefab header
 // ============================================================================
 
-void InspectorPanel::RenderPrefabHeader(InxGUIContext * /*ctx*/, uint64_t objId, const PrefabInfo &pinfo)
+void InspectorPanel::RenderPrefabHeader(InxGUIContext *ctx, uint64_t objId, const PrefabInfo &pinfo)
 {
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
+    const std::string semanticBase =
+        captureSemantics ? "inspector.object." + std::to_string(objId) + ".prefab" : std::string{};
     ImGui::Dummy(ImVec2(0, 4));
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, EditorTheme::PREFAB_HEADER_BG);
@@ -962,24 +995,33 @@ void InspectorPanel::RenderPrefabHeader(InxGUIContext * /*ctx*/, uint64_t objId,
 
     ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::PREFAB_TEXT);
     ImGui::TextUnformatted(Tr("inspector.prefab_label").c_str());
+    if (captureSemantics)
+        ctx->RecordSemanticItem("prefab_header", Tr("inspector.prefab_label"), true, semanticBase, std::nullopt,
+                                static_cast<double>(pinfo.overrideCount));
     ImGui::PopStyleColor();
 
     float gap = EditorTheme::PREFAB_HEADER_BTN_GAP;
 
     ImGui::SameLine(0, gap * 2);
     EditorTheme::PushFlatButtonStyle(EditorTheme::INSPECTOR_INLINE_BTN_IDLE);
-    if (ImGui::Button(Tr("inspector.prefab_select").c_str())) {
+    const std::string selectLabel = Tr("inspector.prefab_select");
+    if (ImGui::Button(selectLabel.c_str())) {
         if (prefabAction)
             prefabAction(objId, "select");
     }
+    if (captureSemantics)
+        ctx->RecordSemanticItem("prefab_action", selectLabel, true, semanticBase + ".select");
     ImGui::PopStyleColor(3);
 
     ImGui::SameLine(0, gap);
     EditorTheme::PushFlatButtonStyle(EditorTheme::INSPECTOR_INLINE_BTN_IDLE);
-    if (ImGui::Button(Tr("inspector.prefab_open").c_str())) {
+    const std::string openLabel = Tr("inspector.prefab_open");
+    if (ImGui::Button(openLabel.c_str())) {
         if (prefabAction)
             prefabAction(objId, "open");
     }
+    if (captureSemantics)
+        ctx->RecordSemanticItem("prefab_action", openLabel, true, semanticBase + ".open");
     ImGui::PopStyleColor(3);
 
     ImGui::SameLine(0, gap * 3);
@@ -987,26 +1029,39 @@ void InspectorPanel::RenderPrefabHeader(InxGUIContext * /*ctx*/, uint64_t objId,
     if (pinfo.overrideCount > 0) {
         ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::WARNING_TEXT);
         ImGui::Text("%d %s", pinfo.overrideCount, Tr("inspector.overrides").c_str());
+        if (captureSemantics)
+            ctx->RecordSemanticItem("prefab_override_count", Tr("inspector.overrides"), false,
+                                    semanticBase + ".override_count", std::nullopt,
+                                    static_cast<double>(pinfo.overrideCount));
         ImGui::PopStyleColor();
 
         ImGui::SameLine(0, gap * 2);
         EditorTheme::PushFlatButtonStyle(EditorTheme::INSPECTOR_INLINE_BTN_IDLE);
-        if (ImGui::Button(Tr("inspector.prefab_apply").c_str())) {
+        const std::string applyLabel = Tr("inspector.prefab_apply");
+        if (ImGui::Button(applyLabel.c_str())) {
             if (prefabAction)
                 prefabAction(objId, "apply");
         }
+        if (captureSemantics)
+            ctx->RecordSemanticItem("prefab_action", applyLabel, true, semanticBase + ".apply");
         ImGui::PopStyleColor(3);
 
         ImGui::SameLine(0, gap);
         EditorTheme::PushFlatButtonStyle(EditorTheme::INSPECTOR_INLINE_BTN_IDLE);
-        if (ImGui::Button(Tr("inspector.prefab_revert").c_str())) {
+        const std::string revertLabel = Tr("inspector.prefab_revert");
+        if (ImGui::Button(revertLabel.c_str())) {
             if (prefabAction)
                 prefabAction(objId, "revert");
         }
+        if (captureSemantics)
+            ctx->RecordSemanticItem("prefab_action", revertLabel, true, semanticBase + ".revert");
         ImGui::PopStyleColor(3);
     } else {
         ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::TEXT_DIM2);
         ImGui::TextUnformatted(Tr("inspector.no_overrides").c_str());
+        if (captureSemantics)
+            ctx->RecordSemanticItem("prefab_override_count", Tr("inspector.no_overrides"), false,
+                                    semanticBase + ".override_count", std::nullopt, 0.0);
         ImGui::PopStyleColor();
     }
 
@@ -1018,10 +1073,10 @@ void InspectorPanel::RenderPrefabHeader(InxGUIContext * /*ctx*/, uint64_t objId,
 // Component header (icon + checkbox + collapsing header)
 // ============================================================================
 
-std::pair<bool, bool> InspectorPanel::RenderComponentHeader(InxGUIContext * /*ctx*/, const std::string &typeName,
+std::pair<bool, bool> InspectorPanel::RenderComponentHeader(InxGUIContext *ctx, const std::string &typeName,
                                                             const std::string &headerId, uint64_t iconId,
                                                             bool showEnabled, bool isEnabled, const std::string &suffix,
-                                                            bool defaultOpen)
+                                                            bool defaultOpen, const std::string &semanticId)
 {
     bool newEnabled = isEnabled;
 
@@ -1060,6 +1115,11 @@ std::pair<bool, bool> InspectorPanel::RenderComponentHeader(InxGUIContext * /*ct
     }
     bool headerOpen = ImGui::CollapsingHeader(headerKey.c_str());
     ImGui::GetWindowDrawList()->PopClipRect();
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
+    const std::string semanticBase =
+        captureSemantics ? (semanticId.empty() ? "inspector.component." + headerId : semanticId) : std::string{};
+    if (ctx && captureSemantics)
+        ctx->RecordSemanticItem("component_header", displayName, true, semanticBase);
 
     float headerMinY = ImGui::GetItemRectMin().y;
     float headerMaxY = ImGui::GetItemRectMax().y;
@@ -1091,6 +1151,8 @@ std::pair<bool, bool> InspectorPanel::RenderComponentHeader(InxGUIContext * /*ct
 
     if (showEnabled) {
         newEnabled = RenderInspectorCheckbox(nullptr, "##hdr_en", isEnabled);
+        if (ctx && captureSemantics)
+            ctx->RecordSemanticItem("component_enabled", displayName, true, semanticBase + ".enabled");
         ImGui::SameLine(0, EditorTheme::INSPECTOR_HEADER_ITEM_SPC.x);
     }
 
@@ -1124,11 +1186,15 @@ bool InspectorPanel::RenderInspectorCheckbox(InxGUIContext * /*ctx*/, const char
 // Add Component button + popup
 // ============================================================================
 
-void InspectorPanel::RenderAddComponentButton(InxGUIContext * /*ctx*/)
+void InspectorPanel::RenderAddComponentButton(InxGUIContext *ctx)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, EditorTheme::ADD_COMP_FRAME_PAD);
     ImGui::SetCursorPosX(EditorTheme::INSPECTOR_ACTION_ALIGN_X);
-    if (ImGui::Button(Tr("inspector.add_component").c_str(), ImVec2(-1, 0))) {
+    const std::string label = Tr("inspector.add_component");
+    const bool clicked = ImGui::Button(label.c_str(), ImVec2(-1, 0));
+    if (ctx && InxGUISemantics::IsCaptureEnabled())
+        ctx->RecordSemanticItem("add_component", label, true, "inspector.add_component");
+    if (clicked) {
         m_addCompSearch[0] = '\0';
         if (getAddComponentEntries)
             m_addCompEntries = getAddComponentEntries();
@@ -1138,22 +1204,29 @@ void InspectorPanel::RenderAddComponentButton(InxGUIContext * /*ctx*/)
     ImGui::PopStyleVar();
 }
 
-void InspectorPanel::RenderAddComponentPopup(InxGUIContext * /*ctx*/)
+void InspectorPanel::RenderAddComponentPopup(InxGUIContext *ctx)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, EditorTheme::POPUP_ADD_COMP_PAD);
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, EditorTheme::POPUP_ADD_COMP_SPC);
 
     if (ImGui::BeginPopup("##add_component_popup")) {
+        const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
+        if (ctx && captureSemantics)
+            ctx->RecordSemanticWindow("add_component_popup", "Add Component", "inspector.add_component.popup");
         // Search field
-        if (m_addCompNeedsFocus) {
+        if (m_addCompNeedsFocus)
             ImGui::SetKeyboardFocusHere();
-            m_addCompNeedsFocus = false;
-        }
         ImGui::SetNextItemWidth(EditorTheme::ADD_COMP_SEARCH_W);
         const bool submitFirst =
             ImGui::InputTextWithHint("##comp_search", Tr("inspector.search_components").c_str(), m_addCompSearch,
                                      sizeof(m_addCompSearch), ImGuiInputTextFlags_EnterReturnsTrue);
-        const bool focusFirst = ImGui::IsItemFocused() && ImGui::IsKeyPressed(ImGuiKey_DownArrow);
+        if (ctx && captureSemantics)
+            ctx->RecordSemanticItem("component_search", Tr("inspector.search_components"), true,
+                                    "inspector.add_component.search");
+        const bool searchFocused = ImGui::IsItemFocused();
+        if (searchFocused)
+            m_addCompNeedsFocus = false;
+        const bool focusFirst = searchFocused && ImGui::IsKeyPressed(ImGuiKey_DownArrow);
         if (ImGui::IsKeyPressed(ImGuiKey_Escape))
             ImGui::CloseCurrentPopup();
 
@@ -1205,9 +1278,17 @@ void InspectorPanel::RenderAddComponentPopup(InxGUIContext * /*ctx*/)
                         assignedKeyboardFocus = true;
                     }
                     const bool activateFromKeyboard = submitFirst && !handledKeyboardSelection;
-                    if (ImGui::Selectable(selectLabel.c_str()) || activateFromKeyboard) {
-                        if (addComponent)
+                    const bool selected = ImGui::Selectable(selectLabel.c_str());
+                    if (ctx && captureSemantics)
+                        ctx->RecordSemanticItem("component_option", entry->displayName, true,
+                                                "inspector.add_component.option." + std::to_string(uid));
+                    if (selected || activateFromKeyboard) {
+                        if (addComponent) {
                             addComponent(entry->displayName, entry->isNative, entry->scriptPath);
+                            // The selection stays unchanged, so the normal selection-driven
+                            // invalidation path does not run after adding a component.
+                            InvalidateObjectCaches();
+                        }
                         ImGui::CloseCurrentPopup();
                         handledKeyboardSelection = true;
                     }

@@ -472,6 +472,8 @@ AssetDatabase::AssetScanArtifact AssetDatabase::BuildScanArtifact(const AssetSca
                 continue;
 
             const std::filesystem::path filePath = entry.path();
+            if (IsIgnoredImportPath(filePath))
+                continue;
             const std::string path = FromFsPath(filePath);
             if (filePath.extension() == ".tmp") {
                 if (!scanRoot.readOnly)
@@ -748,7 +750,7 @@ void AssetDatabase::PrepareMetadata(WorkerMetadataPrepare &item)
         const char emptySource = '\0';
         const char *contentData = content.empty() ? &emptySource : content.data();
         item.loader->CreateMeta(contentData, content.size(), item.file.path, metadata);
-        metadata.AddMetadata("file_path", FromFsPath(ToFsPath(item.file.path)));
+        metadata.AddMetadata("file_path", InxResourceMeta::NormalizeFilePath(item.file.path));
 
         if (item.mode == WorkerMetadataPrepare::Mode::Rebuild) {
             for (const auto &[key, value] : previousMetadata.GetMetadata()) {
@@ -908,7 +910,10 @@ bool AssetDatabase::CommitScanArtifact(AssetScanArtifact artifact, uint64_t expe
         if (loader == m_loaders.end() || !loader->second)
             throw std::logic_error("AssetDatabase metadata preparation has no loader");
         item.loader = loader->second;
-        if (indexed && !file.readOnly && indexed->source == file.source && indexed->meta != file.meta) {
+        if (indexed && !file.readOnly && indexed->resourceType != type) {
+            item.mode = WorkerMetadataPrepare::Mode::Rebuild;
+            item.fallbackGuid = indexed->guid;
+        } else if (indexed && !file.readOnly && indexed->source == file.source && indexed->meta != file.meta) {
             item.mode = WorkerMetadataPrepare::Mode::LoadExisting;
         } else if (indexed && !file.readOnly && indexed->source != file.source) {
             item.mode = WorkerMetadataPrepare::Mode::Rebuild;
@@ -1015,6 +1020,7 @@ bool AssetDatabase::ContinuePendingMetadataMerge(const std::shared_ptr<PendingRe
         item.request.guid = asset.guid;
         item.request.resourceType = metadata->second->GetResourceType();
         item.request.metadata = *metadata->second;
+        item.request.metadata.AddMetadata("file_path", InxResourceMeta::NormalizeFilePath(asset.path));
         item.expectedSource = asset.source;
         item.request.resolveAssetGuid = [pathSnapshot = state->importPathSnapshot](const std::string &dependencyPath) {
             const auto dependency = pathSnapshot->find(NormalizeFilesystemPath(dependencyPath));
@@ -1470,6 +1476,12 @@ AssetMutationResult AssetDatabase::ImportAsset(const std::string &path)
         return result;
     }
 
+    if (IsIgnoredImportPath(fsPath)) {
+        result.errorCode = AssetMutationErrorCode::UnsupportedType;
+        result.error = "Python bytecode and cache paths are not importable assets";
+        return result;
+    }
+
     if (IsMetaFile(fsPath)) {
         result.errorCode = AssetMutationErrorCode::UnsupportedType;
         result.error = "metadata sidecars cannot be imported as assets";
@@ -1519,6 +1531,11 @@ AssetMutationResult AssetDatabase::ReimportAsset(const std::string &path)
     result.path = path;
     result.resourceType = GetResourceTypeForPath(path);
     const std::filesystem::path fsPath = ToFsPath(path);
+    if (IsIgnoredImportPath(fsPath)) {
+        result.errorCode = AssetMutationErrorCode::UnsupportedType;
+        result.error = "Python bytecode and cache paths are not importable assets";
+        return result;
+    }
     if (!std::filesystem::is_regular_file(fsPath) || IsMetaFile(fsPath) || result.resourceType == ResourceType::Meta) {
         result.errorCode = AssetMutationErrorCode::InvalidPath;
         result.error = "registered asset path is not a supported regular file";
@@ -1815,6 +1832,22 @@ std::string AssetDatabase::NormalizePath(const std::string &path) const
     return NormalizeFilesystemPath(path);
 }
 
+bool AssetDatabase::IsIgnoredImportPath(const std::filesystem::path &path)
+{
+    const auto lowercase = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(),
+                       [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+        return value;
+    };
+    for (const auto &component : path) {
+        if (lowercase(FromFsPath(component)) == "__pycache__")
+            return true;
+    }
+
+    const std::string extension = lowercase(FromFsPath(path.extension()));
+    return extension == ".pyc" || extension == ".pyo";
+}
+
 bool AssetDatabase::IsMetaFile(const std::filesystem::path &path) const
 {
     return FromFsPath(path.extension()) == ".meta";
@@ -2085,6 +2118,27 @@ std::string AssetDatabase::CreateOrLoadMetadata(const std::string &filePath, Res
             if (!metaFile.SaveToFile(metaFilePath))
                 throw std::runtime_error("Failed to persist asset metadata: " + metaFilePath);
         }
+    } else if (metaFile.GetResourceType() != type) {
+        // Older metadata could serialize newer ResourceType values as
+        // DefaultText. Rebuild from the extension-selected loader while
+        // preserving the stable GUID and importer-specific settings.
+        InxResourceMeta rebuilt;
+        m_loaders[type]->CreateMeta(contentPtr, content.size(), filePath, rebuilt);
+        const std::string existingGuid = metaFile.GetGuid();
+        for (const auto &[key, metaPair] : metaFile.GetMetadata()) {
+            if (key == "guid" || key == "resource_type")
+                continue;
+            if (!rebuilt.HasKey(key))
+                rebuilt.AddMetadata(key, metaPair.second);
+        }
+        if (!existingGuid.empty())
+            rebuilt.AddMetadata("guid", existingGuid);
+        if (readOnly) {
+            rebuilt.AddMetadata("read_only", true);
+        } else if (persistMetadata && !rebuilt.SaveToFile(metaFilePath)) {
+            throw std::runtime_error("Failed to repair asset metadata type: " + metaFilePath);
+        }
+        metaFile = std::move(rebuilt);
     }
 
     std::string guid = metaFile.GetGuid();
@@ -2143,7 +2197,7 @@ std::string AssetDatabase::RebuildMetadata(const std::string &path, bool persist
 
     InxResourceMeta newMeta;
     loaderIt->second->CreateMeta(content.data(), content.size(), path, newMeta);
-    newMeta.AddMetadata("file_path", FromFsPath(ToFsPath(path)));
+    newMeta.AddMetadata("file_path", InxResourceMeta::NormalizeFilePath(path));
 
     if (fs::exists(fsMetaPath) && meta.GetMetadata().size() > 0) {
         for (const auto &[key, metaPair] : meta.GetMetadata()) {

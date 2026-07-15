@@ -147,6 +147,8 @@ class HierarchyCreationService:
 
         if name:
             obj.name = str(name)
+        else:
+            obj.name = _unique_scene_object_name(scene, str(obj.name), exclude_id=int(getattr(obj, "id", 0) or 0))
 
         self._finalize(obj, effective_parent_id, self._description_for(kind), select=select, record_undo=record_undo)
         return self._serialize_created(obj, kind, selected=select)
@@ -268,19 +270,32 @@ class HierarchyCreationService:
         return obj
 
     def _find_canvas_parent_id(self, scene, parent_id: int) -> int:
-        if parent_id == 0:
-            return 0
         from Infernux.ui import UICanvas
-        obj = scene.find_by_id(parent_id)
-        if not obj:
-            return parent_id
-        current = obj
-        while current is not None:
-            for comp in _get_py_components_safe(current):
-                if isinstance(comp, UICanvas):
+
+        candidate_ids = []
+        if parent_id:
+            candidate_ids.append(int(parent_id))
+        selection = self._selection_manager
+        if selection is not None and hasattr(selection, "get_primary"):
+            selected_id = int(selection.get_primary() or 0)
+            if selected_id and selected_id not in candidate_ids:
+                candidate_ids.append(selected_id)
+
+        for candidate_id in candidate_ids:
+            current = scene.find_by_id(candidate_id)
+            while current is not None:
+                if any(isinstance(comp, UICanvas) for comp in _get_py_components_safe(current)):
                     return int(current.id)
-            current = current.get_parent()
-        return parent_id
+                current = current.get_parent()
+
+        canvases = [
+            obj
+            for obj in scene.get_all_objects()
+            if any(isinstance(comp, UICanvas) for comp in _get_py_components_safe(obj))
+        ]
+        if len(canvases) == 1:
+            return int(canvases[0].id)
+        return 0
 
     def _finalize(self, obj, parent_id: int, description: str, *, select: bool, record_undo: bool) -> None:
         if parent_id:
@@ -351,6 +366,28 @@ def _component_names(obj) -> list[str]:
     except Exception as exc:
         Debug.log_suppressed("HierarchyCreationService.components.py", exc)
     return names
+
+
+def _unique_scene_object_name(scene, base_name: str, *, exclude_id: int = 0) -> str:
+    """Return a Unity-style default name that does not collide in the scene."""
+    base = str(base_name or "GameObject")
+    existing: set[str] = set()
+    try:
+        for obj in scene.get_all_objects() or []:
+            if int(getattr(obj, "id", 0) or 0) == int(exclude_id or 0):
+                continue
+            existing.add(str(getattr(obj, "name", "")))
+    except Exception as exc:
+        Debug.log_suppressed("HierarchyCreationService.unique_name", exc)
+        return base
+
+    if base not in existing:
+        return base
+
+    suffix = 1
+    while f"{base} ({suffix})" in existing:
+        suffix += 1
+    return f"{base} ({suffix})"
 
 
 def _get_py_components_safe(obj) -> list[Any]:

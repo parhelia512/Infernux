@@ -193,6 +193,7 @@ class IGUI:
         picker_asset_items: Optional[Callable[[str], Sequence[tuple]]] = None,
         on_pick: Optional[Callable[[Any], None]] = None,
         on_clear: Optional[Callable[[], None]] = None,
+        semantic_id: str = "",
     ) -> bool:
         """Render a Unity-style object-reference field with optional drop target
         and picker popup.
@@ -234,6 +235,10 @@ class IGUI:
             ctx.set_next_item_allow_overlap()
             if ctx.selectable(full_text, selected, 0, field_w, 0.0):
                 clicked = True
+                if has_picker:
+                    ctx.open_popup("##obj_picker")
+                    _popup_needs_focus.add(field_id)
+                    _picker_filters.pop(f"_igui_filter_{field_id}", None)
         else:
             ctx.selectable(full_text, False, 0, field_w, 0.0)
 
@@ -254,6 +259,8 @@ class IGUI:
             )
 
         ctx.end_group()
+        if semantic_id:
+            ctx.record_semantic_item("object_field", display_text, clickable, semantic_id)
         ctx.pop_style_color(3)
         ctx.pop_style_var(2)
 

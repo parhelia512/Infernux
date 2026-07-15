@@ -1,5 +1,7 @@
 """Tests for Infernux.engine.play_mode — PlayModeState, PlayModeEvent, PlayModeManager."""
 
+import threading
+
 from Infernux.engine.play_mode import PlayModeState, PlayModeEvent, PlayModeManager
 
 
@@ -60,10 +62,82 @@ class TestPlayModeManager:
         assert mgr._time_scale == 1.0
         assert mgr._total_play_time == 0.0
 
+    def test_debug_frame_gate_pauses_after_exact_completed_frame_budget(self):
+        class _SceneManager:
+            def __init__(self):
+                self.pause_calls = 0
+
+            def pause(self):
+                self.pause_calls += 1
+
+        mgr = PlayModeManager()
+        scene_manager = _SceneManager()
+        mgr._state = PlayModeState.PLAYING
+        mgr._get_scene_manager = lambda: scene_manager
+        completed = threading.Event()
+        mgr._arm_debug_frame_pause_gate(2, completed, pause_on_complete=True)
+
+        assert mgr._advance_debug_frame_pause_gate() is False
+        assert mgr._advance_debug_frame_pause_gate() is False
+        assert completed.is_set() is False
+        assert mgr._advance_debug_frame_pause_gate() is True
+
+        assert completed.is_set() is True
+        assert mgr.state is PlayModeState.PAUSED
+        assert scene_manager.pause_calls == 1
+
+    def test_debug_frame_gate_notifies_a_hold_boundary_before_completion(self):
+        mgr = PlayModeManager()
+        mgr._state = PlayModeState.PLAYING
+        completed = threading.Event()
+        hold_complete = threading.Event()
+        hold_callbacks = []
+        mgr._arm_debug_frame_pause_gate(
+            5,
+            completed,
+            pause_on_complete=False,
+            hold_frame_count=2,
+            hold_complete_event=hold_complete,
+            hold_complete_callback=lambda: hold_callbacks.append(True),
+        )
+
+        assert mgr._advance_debug_frame_pause_gate() is False
+        assert hold_complete.is_set() is False
+        assert mgr._advance_debug_frame_pause_gate() is False
+        assert hold_complete.is_set() is True
+        assert hold_callbacks == [True]
+        assert completed.is_set() is False
+
     def test_scene_backup_none_initially(self):
         mgr = PlayModeManager()
         assert mgr._scene_backup is None
         assert mgr._scene_path_backup is None
+
+    def test_restore_scene_path_reasserts_authored_scene_persistence(self, monkeypatch, tmp_path):
+        from Infernux.engine.scene_manager import SceneFileManager
+
+        authored = str(tmp_path / "racetrack.scene")
+        runtime = str(tmp_path / "results.scene")
+        manager = SceneFileManager()
+        manager._current_scene_path = runtime
+        manager._dirty = False
+        restored_cameras = []
+        remembered_paths = []
+        scene_changed = []
+        manager._restore_camera_state = restored_cameras.append
+        manager._remember_last_scene = remembered_paths.append
+        manager._on_scene_changed = lambda: scene_changed.append(True)
+
+        mgr = PlayModeManager()
+        mgr._scene_path_backup = authored
+        mgr._scene_dirty_backup = True
+        mgr._restore_scene_file_path()
+
+        assert manager.current_scene_path == authored
+        assert manager.is_dirty is True
+        assert restored_cameras == [authored]
+        assert remembered_paths == [authored]
+        assert scene_changed == [True]
 
     def test_listener_list_empty(self):
         mgr = PlayModeManager()

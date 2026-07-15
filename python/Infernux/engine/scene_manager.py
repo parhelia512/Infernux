@@ -17,7 +17,6 @@ This module orchestrates those primitives into a complete workflow.
 
 import os
 import json
-import threading
 from typing import Optional, Callable
 
 from Infernux.debug import Debug
@@ -115,33 +114,6 @@ def _save_editor_settings(settings: dict):
 
 
 # ---------------------------------------------------------------------------
-# File dialog — delegates to the unified save_file_dialog in _dialogs.py
-# ---------------------------------------------------------------------------
-
-def _show_save_dialog(initial_dir: str, callback: Callable[[Optional[str]], None],
-                      default_filename: str = "Untitled Scene.scene"):
-    """Show a native save-file dialog. *callback* receives the chosen path or None."""
-    def _run():
-        result: Optional[str] = None
-        try:
-            from Infernux.engine.ui._dialogs import save_file_dialog
-            result = save_file_dialog(
-                title="Save Scene",
-                win32_filter="Scene files (*.scene)\0*.scene\0All files (*.*)\0*.*\0\0",
-                initial_dir=initial_dir,
-                default_filename=default_filename,
-                default_ext="scene",
-                tk_filetypes=[("Scene files", "*.scene"), ("All Files", "*.*")],
-            )
-        except Exception as exc:
-            Debug.log_warning(f"Save dialog unavailable on this platform: {exc}")
-        callback(result)
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-
-
-# ---------------------------------------------------------------------------
 # SceneFileManager  — the main public API
 # ---------------------------------------------------------------------------
 
@@ -171,7 +143,15 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
         self._current_scene_path: Optional[str] = None
         self._dirty: bool = False
         self._on_scene_changed: Optional[Callable[[], None]] = None
-        self._pending_save_path: Optional[str] = None  # set by file dialog
+        self._pending_save_path: Optional[str] = None
+        # Save As is an in-editor modal so remote validation and local users
+        # share the exact same persistence workflow.
+        self._save_as_popup_open: bool = False
+        self._save_as_popup_requested: bool = False
+        self._save_as_focus_name: bool = False
+        self._save_as_folder: str = "Assets"
+        self._save_as_name: str = ""
+        self._save_as_error: str = ""
         self._asset_database = None  # Set via set_asset_database()
         self._engine = None  # set via set_engine()
 
@@ -294,8 +274,8 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
         The actual load is deferred to the next frame so the scene view can
         stop rendering old 3D content first.
         """
-        if self._load_in_progress:
-            Debug.log_warning("Scene load already in progress — ignoring open_scene()")
+        if self.is_loading:
+            Debug.log_warning("Scene load already pending or in progress — ignoring open_scene()")
             return False
         if self.is_prefab_mode:
             # Auto-save prefab and schedule exit.  The deferred exit runs
@@ -366,8 +346,23 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
             return
         self._close_in_progress = True
 
-        # During play mode, close immediately — the save dialog's "Save"
-        # button cannot save the pre-play state properly.
+        from Infernux.engine.ui.dirty_panel_confirmation import (
+            DirtyPanelConfirmationCoordinator,
+        )
+
+        DirtyPanelConfirmationCoordinator.instance().request_exit(
+            self._continue_close_after_dirty_panels,
+            self._cancel_close_after_dirty_panels,
+        )
+
+    def _cancel_close_after_dirty_panels(self) -> None:
+        native = self._native_engine_for_close()
+        if native:
+            native.cancel_close()
+        self._close_in_progress = False
+
+    def _continue_close_after_dirty_panels(self) -> None:
+        """Continue the existing scene close transaction after panel decisions."""
         if self._is_play_mode():
             native = self._native_engine_for_close()
             if native:
@@ -403,44 +398,10 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
                 native.confirm_close()
             return
 
-        # Use the same system Save/Discard/Cancel chain used by other exit
-        # confirmations, instead of a dedicated ImGui popup.
-        from Infernux.engine.ui._dialogs import ask_save_discard_cancel
-
-        choice = ask_save_discard_cancel(
-            title="Unsaved Scene",
-            message="Current scene has unsaved changes. Save before exiting?",
-        )
-        if choice == "cancel":
-            if native:
-                native.cancel_close()
-            self._close_in_progress = False
-            return
-
-        if choice == "discard":
-            self._dirty = False
-            if native:
-                native.confirm_close()
-            return
-
-        # save
-        save_ok = False
-        if self._current_scene_path:
-            save_ok = self._do_save(self._current_scene_path)
-        else:
-            self._pending_action = 'close'
-            self._post_save_callback = self._execute_pending_action
-            self._show_save_as_dialog()
-            return
-
-        if save_ok:
-            if native:
-                native.confirm_close()
-            return
-
-        if native:
-            native.cancel_close()
-        self._close_in_progress = False
+        # Keep the confirmation inside the Editor rather than opening an OS
+        # modal. This makes the save/discard/cancel path consistent with
+        # scene switching and observable to remote, human-equivalent tooling.
+        self._request_save_confirmation('close')
 
     def load_last_scene_or_default(self):
         """Called at startup — load the last opened scene, or create a default.
@@ -619,11 +580,17 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
             before_commit=before_commit,
         )
 
-    def _finish_open_scene(self, path: str) -> None:
-        """Publish editor bookkeeping after a successful Scene transaction."""
+    def _finish_open_scene(self, path: str, *, runtime_load: bool = False) -> None:
+        """Publish bookkeeping after a successful Scene transaction.
+
+        Runtime scene transitions update the live path for diagnostics and
+        subsequent loads, but must not replace the Editor's persisted scene or
+        clear its pre-play undo history.
+        """
         self._current_scene_path = os.path.abspath(path)
         self._dirty = False
-        self._reset_undo_history(scene_is_dirty=False)
+        if not runtime_load:
+            self._reset_undo_history(scene_is_dirty=False)
 
         from Infernux.lib import SceneManager
         scene = SceneManager.instance().get_active_scene()
@@ -637,7 +604,8 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
             Debug.log_internal(f"SpriteRenderer init: {exc}")
 
         self._restore_camera_state(self._current_scene_path)
-        self._remember_last_scene(self._current_scene_path)
+        if not runtime_load:
+            self._remember_last_scene(self._current_scene_path)
 
         # Sync all prefab instances to the latest on-disk prefab data
         self.sync_all_prefab_instances(scene)

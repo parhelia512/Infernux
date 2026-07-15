@@ -271,3 +271,84 @@ class PrefabModeCommand(UndoCommand):
 
     def redo(self) -> None:
         self.execute()
+
+
+class PrefabUnpackCommand(UndoCommand):
+    """Undoable removal of prefab linkage from one complete instance tree."""
+
+    def __init__(self, object_id: int, description: str = "Unpack Prefab"):
+        super().__init__(description)
+        self._object_id = int(object_id)
+        self._linkage: list[tuple[int, str, bool]] = []
+        scene = _get_active_scene()
+        root = scene.find_by_id(self._object_id) if scene else None
+        if root is not None:
+            pending = [root]
+            while pending:
+                obj = pending.pop()
+                self._linkage.append((
+                    int(obj.id),
+                    getattr(obj, "prefab_guid", "") or "",
+                    bool(getattr(obj, "prefab_root", False)),
+                ))
+                pending.extend(obj.get_children())
+
+    def execute(self) -> None:
+        self._apply(restored=False)
+
+    def undo(self) -> None:
+        self._apply(restored=True)
+
+    def redo(self) -> None:
+        self._apply(restored=False)
+
+    def _apply(self, *, restored: bool) -> None:
+        scene = _get_active_scene()
+        if scene is None:
+            return
+        for object_id, prefab_guid, prefab_root in self._linkage:
+            obj = scene.find_by_id(object_id)
+            if obj is None:
+                continue
+            obj.prefab_guid = prefab_guid if restored else ""
+            obj.prefab_root = prefab_root if restored else False
+        _bump_inspector_structure()
+
+
+class PrefabRevertCommand(UndoCommand):
+    """Undoable in-place replacement of one prefab instance subtree."""
+
+    def __init__(self, object_id: int, before_document: dict,
+                 reverted_document: dict, asset_database=None,
+                 description: str = "Revert Prefab Overrides"):
+        super().__init__(description)
+        self._object_id = int(object_id)
+        self._before_document = before_document
+        self._reverted_document = reverted_document
+        self._asset_database = asset_database
+
+    def execute(self) -> None:
+        self._apply(self._reverted_document, preserve_document_ids=False)
+
+    def undo(self) -> None:
+        self._apply(self._before_document, preserve_document_ids=True)
+
+    def redo(self) -> None:
+        self._apply(self._reverted_document, preserve_document_ids=False)
+
+    def _apply(self, document: dict, *, preserve_document_ids: bool) -> None:
+        scene = _get_active_scene()
+        obj = scene.find_by_id(self._object_id) if scene else None
+        if obj is None:
+            raise RuntimeError(f"Prefab instance root {self._object_id} is unavailable")
+        from Infernux.engine.component_restore import (
+            deserialize_game_object_document_transactionally,
+        )
+        if not deserialize_game_object_document_transactionally(
+            obj,
+            document,
+            self._asset_database,
+            preserve_document_ids=preserve_document_ids,
+        ):
+            raise RuntimeError("Prefab ObjectGraph transaction failed")
+        _bump_inspector_structure()

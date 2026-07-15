@@ -26,7 +26,9 @@ Example::
             )
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+Use this base for project gameplay components. Read [Your First Component](../learn/first-component.md) before relying on the lifecycle table alone.
 <!-- USER CONTENT END -->
 
 ## Constructors
@@ -114,12 +116,23 @@ Example::
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for InxComponent
+from Infernux import InxComponent, Vector3, serialized_field
+
+
+class Patrol(InxComponent):
+    speed: float = serialized_field(default=2.0, range=(0.0, 10.0))
+
+    def update(self, delta_time: float) -> None:
+        self.transform.translate(Vector3(self.speed * delta_time, 0.0, 0.0))
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [Your First Component](../learn/first-component.md)
+- [Scenes and Objects](../manual/scenes-and-objects.md)
+- [GameObject](GameObject.md)
+- [serialized_field](serialized_field.md)
+- [Time](Time.md)
 <!-- USER CONTENT END -->

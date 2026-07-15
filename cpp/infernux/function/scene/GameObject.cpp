@@ -728,7 +728,7 @@ std::string GameObject::Serialize() const
     return SerializeDocument().dump(2);
 }
 
-bool GameObject::DeserializeDocument(const nlohmann::json &j)
+bool GameObject::DeserializeDocument(const nlohmann::json &j, bool preserveDocumentIds)
 {
     try {
         Scene stagingScene("GameObject document staging");
@@ -775,7 +775,8 @@ bool GameObject::DeserializeDocument(const nlohmann::json &j)
         std::function<void(GameObject *, const json &, bool)> collectAssignments;
         collectAssignments = [&](GameObject *object, const json &document, bool isRoot) {
             const uint64_t committedObjectId =
-                documentId(document, "id", isRoot ? m_id : object->m_id, "GameObject id");
+                preserveDocumentIds ? documentId(document, "id", isRoot ? m_id : object->m_id, "GameObject id")
+                                    : (isRoot ? m_id : object->m_id);
             if (!objectIds.insert(committedObjectId).second)
                 throw std::invalid_argument("ObjectGraph contains a duplicate GameObject id");
             stagedToCommittedObjectId.emplace(object->m_id, committedObjectId);
@@ -784,9 +785,12 @@ bool GameObject::DeserializeDocument(const nlohmann::json &j)
                 rootObjectId = committedObjectId;
 
             const json &transformDocument = document.at("transform");
-            const uint64_t committedTransformId = documentId(
-                transformDocument, "component_id",
-                isRoot ? m_transform.GetComponentID() : object->m_transform.GetComponentID(), "Transform component_id");
+            const uint64_t committedTransformId =
+                preserveDocumentIds
+                    ? documentId(transformDocument, "component_id",
+                                 isRoot ? m_transform.GetComponentID() : object->m_transform.GetComponentID(),
+                                 "Transform component_id")
+                    : (isRoot ? m_transform.GetComponentID() : object->m_transform.GetComponentID());
             if (!componentIds.insert(committedTransformId).second)
                 throw std::invalid_argument("ObjectGraph contains a duplicate component_id");
             if (isRoot)
@@ -797,16 +801,22 @@ bool GameObject::DeserializeDocument(const nlohmann::json &j)
             size_t nativeComponentIndex = 0;
             for (const auto &componentDocument : document.at("components")) {
                 const DecodedComponentRecord record = DecodeComponentRecord(componentDocument);
-                const uint64_t componentId = record.componentId;
-                if (!componentIds.insert(componentId).second)
-                    throw std::invalid_argument("ObjectGraph contains a duplicate component_id");
                 if (record.kind == ComponentRecordKind::Python) {
-                    pythonComponentIds.push_back(componentId);
+                    if (preserveDocumentIds) {
+                        if (!componentIds.insert(record.componentId).second)
+                            throw std::invalid_argument("ObjectGraph contains a duplicate component_id");
+                        pythonComponentIds.push_back(record.componentId);
+                    }
                     continue;
                 }
                 if (nativeComponentIndex >= object->m_components.size())
                     throw std::logic_error("staged ObjectGraph native component count changed");
-                componentAssignments.push_back({object->m_components[nativeComponentIndex++].get(), componentId});
+                Component *stagedComponent = object->m_components[nativeComponentIndex++].get();
+                const uint64_t componentId =
+                    preserveDocumentIds ? record.componentId : stagedComponent->GetComponentID();
+                if (!componentIds.insert(componentId).second)
+                    throw std::invalid_argument("ObjectGraph contains a duplicate component_id");
+                componentAssignments.push_back({stagedComponent, componentId});
             }
             if (nativeComponentIndex != object->m_components.size())
                 throw std::logic_error("staged ObjectGraph native component count changed");
@@ -898,7 +908,8 @@ bool GameObject::DeserializeDocument(const nlohmann::json &j)
 
         m_name = std::move(stagedRoot->m_name);
         m_id = rootObjectId;
-        EnsureNextID(m_id);
+        for (const uint64_t objectId : objectIds)
+            EnsureNextID(objectId);
         m_active = stagedRoot->m_active;
         m_isStatic = stagedRoot->m_isStatic;
         m_tag = std::move(stagedRoot->m_tag);

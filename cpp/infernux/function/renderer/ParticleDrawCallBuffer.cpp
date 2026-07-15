@@ -84,7 +84,7 @@ DrawCallResult ParticleDrawCallBuffer::GetDrawCalls(const glm::vec3 &cameraRight
             DrawCall drawCall;
             drawCall.indexCount = static_cast<uint32_t>(QuadIndices().size());
             drawCall.worldMatrix = packed;
-            drawCall.material = batch.material.get();
+            drawCall.material = batch.material;
             drawCall.objectId = 0x5041525400000000ULL | batchId;
             drawCall.meshVertices = &QuadVertices();
             drawCall.meshIndices = &QuadIndices();

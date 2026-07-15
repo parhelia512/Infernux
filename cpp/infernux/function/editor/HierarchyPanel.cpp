@@ -1,5 +1,6 @@
 #include "HierarchyPanel.h"
 
+#include <function/renderer/gui/InxGUISemantics.h>
 #include <function/scene/GameObject.h>
 #include <function/scene/Scene.h>
 #include <function/scene/SceneManager.h>
@@ -103,7 +104,11 @@ const std::string &HierarchyPanel::Tr(const std::string &key)
 void HierarchyPanel::SetUiMode(bool enabled)
 {
     m_uiMode = enabled;
-    // Invalidate caches
+    InvalidateSceneStructureCache();
+}
+
+void HierarchyPanel::InvalidateSceneStructureCache()
+{
     m_cachedSceneKey.clear();
     m_cachedStructureVer = UINT64_MAX;
     m_lastRootRefreshTime = 0.0f;
@@ -111,6 +116,7 @@ void HierarchyPanel::SetUiMode(bool enabled)
     m_canvasRootsDirty = true;
     m_searchVisCache.clear();
     m_itemHeightMeasured = false;
+    m_flatItems.clear();
     m_flatListDirty = true;
 }
 
@@ -900,25 +906,43 @@ void HierarchyPanel::RenderItemContextMenu(InxGUIContext *ctx, GameObject *obj)
     const uint64_t objId = obj->GetID();
     const bool isPrefab = obj->IsPrefabInstance();
 
-    if (ctx->BeginMenu(Tr("hierarchy.create_child"))) {
+    const std::string &createChildLabel = Tr("hierarchy.create_child");
+    const bool createChildOpen = ctx->BeginMenu(createChildLabel);
+    ctx->RecordSemanticItem("menu", createChildLabel, true, "hierarchy.context.create_child");
+    if (createChildOpen) {
         ShowCreateEntriesForCategory(ctx, objId, "Camera");
-        if (ctx->BeginMenu(Tr("hierarchy.create_3d_object"))) {
+        const std::string &create3dLabel = Tr("hierarchy.create_3d_object");
+        const bool create3dOpen = ctx->BeginMenu(create3dLabel);
+        ctx->RecordSemanticItem("menu", create3dLabel, true, "hierarchy.context.create_child.create_3d");
+        if (create3dOpen) {
             ShowCreatePrimitiveMenu(ctx, objId);
             ctx->EndMenu();
         }
-        if (ctx->BeginMenu(Tr("hierarchy.create_2d_object"))) {
+        const std::string &create2dLabel = Tr("hierarchy.create_2d_object");
+        const bool create2dOpen = ctx->BeginMenu(create2dLabel);
+        ctx->RecordSemanticItem("menu", create2dLabel, true, "hierarchy.context.create_child.create_2d");
+        if (create2dOpen) {
             ShowCreate2DMenu(ctx, objId);
             ctx->EndMenu();
         }
-        if (ctx->BeginMenu(Tr("hierarchy.post_processing_menu"))) {
+        const std::string &postProcessingLabel = Tr("hierarchy.post_processing_menu");
+        const bool postProcessingOpen = ctx->BeginMenu(postProcessingLabel);
+        ctx->RecordSemanticItem("menu", postProcessingLabel, true, "hierarchy.context.create_child.post_processing");
+        if (postProcessingOpen) {
             ShowPostProcessingMenu(ctx, objId);
             ctx->EndMenu();
         }
-        if (ctx->BeginMenu(Tr("hierarchy.ui_menu"))) {
+        const std::string &uiLabel = Tr("hierarchy.ui_menu");
+        const bool uiOpen = ctx->BeginMenu(uiLabel);
+        ctx->RecordSemanticItem("menu", uiLabel, true, "hierarchy.context.create_child.ui");
+        if (uiOpen) {
             ShowUiMenu(ctx, objId);
             ctx->EndMenu();
         }
-        if (ctx->Selectable(Tr("hierarchy.empty_object"), false, 0, 0, 0)) {
+        const std::string &emptyLabel = Tr("hierarchy.empty_object");
+        const bool createEmptySelected = ctx->Selectable(emptyLabel, false, 0, 0, 0);
+        ctx->RecordSemanticItem("menu_item", emptyLabel, true, "hierarchy.context.create_child.empty");
+        if (createEmptySelected) {
             if (createEmpty)
                 createEmpty(objId);
         }
@@ -952,24 +976,37 @@ void HierarchyPanel::RenderItemContextMenu(InxGUIContext *ctx, GameObject *obj)
                             EditorTheme::PREFAB_TEXT.z, EditorTheme::PREFAB_TEXT.w);
         ctx->Label(Tr("hierarchy.prefab_label"));
         ctx->PopStyleColor(1);
-        if (ctx->Selectable(Tr("hierarchy.select_prefab_asset"), false, 0, 0, 0)) {
+        const bool selectPrefabAsset = ctx->Selectable(Tr("hierarchy.select_prefab_asset"), false, 0, 0, 0);
+        ctx->RecordSemanticItem("menu_item", Tr("hierarchy.select_prefab_asset"), true,
+                                "hierarchy.context.prefab.select_asset");
+        if (selectPrefabAsset) {
             if (prefabSelectAsset)
                 prefabSelectAsset(objId);
         }
-        if (ctx->Selectable(Tr("hierarchy.open_prefab"), false, 0, 0, 0)) {
+        const bool openPrefab = ctx->Selectable(Tr("hierarchy.open_prefab"), false, 0, 0, 0);
+        ctx->RecordSemanticItem("menu_item", Tr("hierarchy.open_prefab"), true, "hierarchy.context.prefab.open");
+        if (openPrefab) {
             if (prefabOpenAsset)
                 prefabOpenAsset(objId);
         }
-        if (ctx->Selectable(Tr("hierarchy.apply_all_overrides"), false, 0, 0, 0)) {
+        const bool applyPrefab = ctx->Selectable(Tr("hierarchy.apply_all_overrides"), false, 0, 0, 0);
+        ctx->RecordSemanticItem("menu_item", Tr("hierarchy.apply_all_overrides"), true,
+                                "hierarchy.context.prefab.apply");
+        if (applyPrefab) {
             if (prefabApplyOverrides)
                 prefabApplyOverrides(objId);
         }
-        if (ctx->Selectable(Tr("hierarchy.revert_all_overrides"), false, 0, 0, 0)) {
+        const bool revertPrefab = ctx->Selectable(Tr("hierarchy.revert_all_overrides"), false, 0, 0, 0);
+        ctx->RecordSemanticItem("menu_item", Tr("hierarchy.revert_all_overrides"), true,
+                                "hierarchy.context.prefab.revert");
+        if (revertPrefab) {
             if (prefabRevertOverrides)
                 prefabRevertOverrides(objId);
         }
         ctx->Separator();
-        if (ctx->Selectable(Tr("hierarchy.unpack_prefab"), false, 0, 0, 0)) {
+        const bool unpackPrefab = ctx->Selectable(Tr("hierarchy.unpack_prefab"), false, 0, 0, 0);
+        ctx->RecordSemanticItem("menu_item", Tr("hierarchy.unpack_prefab"), true, "hierarchy.context.prefab.unpack");
+        if (unpackPrefab) {
             if (prefabUnpack)
                 prefabUnpack(objId);
         }
@@ -994,13 +1031,21 @@ void HierarchyPanel::ShowCreatePrimitiveMenu(InxGUIContext *ctx, uint64_t parent
     {
         const char *key;
         int typeIdx;
+        const char *semanticId;
     };
     static const PrimEntry entries[] = {
-        {"hierarchy.primitive_cube", 0},     {"hierarchy.primitive_sphere", 1}, {"hierarchy.primitive_capsule", 2},
-        {"hierarchy.primitive_cylinder", 3}, {"hierarchy.primitive_plane", 4},  {"hierarchy.primitive_quad", 5},
+        {"hierarchy.primitive_cube", 0, "hierarchy.context.create_3d.cube"},
+        {"hierarchy.primitive_sphere", 1, "hierarchy.context.create_3d.sphere"},
+        {"hierarchy.primitive_capsule", 2, "hierarchy.context.create_3d.capsule"},
+        {"hierarchy.primitive_cylinder", 3, "hierarchy.context.create_3d.cylinder"},
+        {"hierarchy.primitive_plane", 4, "hierarchy.context.create_3d.plane"},
+        {"hierarchy.primitive_quad", 5, "hierarchy.context.create_3d.quad"},
     };
     for (auto &e : entries) {
-        if (ctx->Selectable(Tr(e.key), false, 0, 0, 0)) {
+        const std::string &label = Tr(e.key);
+        const bool selected = ctx->Selectable(label, false, 0, 0, 0);
+        ctx->RecordSemanticItem("menu_item", label, true, e.semanticId);
+        if (selected) {
             if (createPrimitive)
                 createPrimitive(e.typeIdx, parentId);
         }
@@ -1013,14 +1058,18 @@ void HierarchyPanel::ShowCreateLightMenu(InxGUIContext *ctx, uint64_t parentId)
     {
         const char *key;
         int typeIdx;
+        const char *semanticId;
     };
     static const LightEntry entries[] = {
-        {"hierarchy.light_directional", 0},
-        {"hierarchy.light_point", 1},
-        {"hierarchy.light_spot", 2},
+        {"hierarchy.light_directional", 0, "hierarchy.context.light.directional"},
+        {"hierarchy.light_point", 1, "hierarchy.context.light.point"},
+        {"hierarchy.light_spot", 2, "hierarchy.context.light.spot"},
     };
     for (auto &e : entries) {
-        if (ctx->Selectable(Tr(e.key), false, 0, 0, 0)) {
+        const std::string &label = Tr(e.key);
+        const bool selected = ctx->Selectable(label, false, 0, 0, 0);
+        ctx->RecordSemanticItem("menu_item", label, true, e.semanticId);
+        if (selected) {
             if (createLight)
                 createLight(e.typeIdx, parentId);
         }
@@ -1031,7 +1080,11 @@ void HierarchyPanel::ShowCreateEntriesForCategory(InxGUIContext *ctx, uint64_t p
 {
     for (auto &entry : createEntries) {
         if (entry.category == category) {
-            if (ctx->Selectable(Tr(entry.localeKey), false, 0, 0, 0)) {
+            const std::string &label = Tr(entry.localeKey);
+            const bool selected = ctx->Selectable(label, false, 0, 0, 0);
+            ctx->RecordSemanticItem("menu_item", label, true,
+                                    "hierarchy.context." + CaseFold(category) + "." + entry.localeKey);
+            if (selected) {
                 if (entry.callback)
                     entry.callback(parentId);
             }
@@ -1052,11 +1105,20 @@ void HierarchyPanel::ShowPostProcessingMenu(InxGUIContext *ctx, uint64_t parentI
 void HierarchyPanel::ShowUiMenu(InxGUIContext *ctx, uint64_t parentId)
 {
     for (auto &entry : createEntries) {
-        if (entry.category == "UI" && entry.localeKey == "hierarchy.ui_canvas") {
-            if (ctx->Selectable(Tr(entry.localeKey), false, 0, 0, 0)) {
-                if (entry.callback)
-                    entry.callback(parentId);
-            }
+        if (entry.category != "UI")
+            continue;
+
+        std::string semanticSuffix = CaseFold(entry.localeKey);
+        constexpr const char *prefix = "hierarchy.ui_";
+        if (entry.localeKey.rfind(prefix, 0) == 0)
+            semanticSuffix = entry.localeKey.substr(std::char_traits<char>::length(prefix));
+
+        const std::string &label = Tr(entry.localeKey);
+        const bool selected = ctx->Selectable(label, false, 0, 0, 0);
+        ctx->RecordSemanticItem("menu_item", label, true, "hierarchy.context.ui." + semanticSuffix);
+        if (selected) {
+            if (entry.callback)
+                entry.callback(parentId);
         }
     }
 }
@@ -1091,6 +1153,8 @@ void HierarchyPanel::RenderRenameInput(InxGUIContext *ctx, GameObject *obj)
     float availW = ctx->GetContentRegionAvailWidth();
     ctx->SetNextItemWidth(availW);
     ctx->InputTextWithHint("##rename", "", m_renameBuf, sizeof(m_renameBuf), 0);
+    ctx->RecordSemanticItem("hierarchy_rename", obj->GetName(), true,
+                            "hierarchy.object." + std::to_string(obj->GetID()) + ".rename");
 
     if (ctx->IsKeyPressed(kKeyEnter)) {
         CommitRename();
@@ -1185,6 +1249,8 @@ void HierarchyPanel::RenderFlatItem(InxGUIContext *ctx, const FlatItem &item, fl
         ImGui::Indent(indentPx);
 
     bool isOpen = ctx->TreeNodeEx(*displayName, nodeFlags);
+    if (InxGUISemantics::IsCaptureEnabled())
+        ctx->RecordSemanticItem("hierarchy_object", objectName, true, "hierarchy.object." + std::to_string(objId));
 
     if (indentPx > 0)
         ImGui::Unindent(indentPx);
@@ -1217,7 +1283,12 @@ void HierarchyPanel::RenderFlatItem(InxGUIContext *ctx, const FlatItem &item, fl
             NotifySelectionChanged();
         }
         m_rightClickedObjId = objId;
+        // The shared popup is rendered after the flat rows, outside this
+        // object's ID scope. Open it in that same scope so ImGui hashes the
+        // popup ID consistently.
+        ctx->PopID();
         ctx->OpenPopup("##HierarchyItemContext");
+        ctx->PushID(std::to_string(objId));
     }
 
     // Double-click focus
@@ -1615,6 +1686,8 @@ void HierarchyPanel::OnRenderContent(InxGUIContext *ctx)
     m_searchBuf[sizeof(m_searchBuf) - 1] = '\0';
     ctx->InputTextWithHint("##HierarchySearch", Tr("hierarchy.search_placeholder").c_str(), m_searchBuf,
                            sizeof(m_searchBuf), 0);
+    if (InxGUISemantics::IsCaptureEnabled())
+        ctx->RecordSemanticItem("hierarchy_search", Tr("hierarchy.search_placeholder"), true, "hierarchy.search");
     SetSearchQuery(m_searchBuf);
 
     ctx->Separator();
@@ -1786,15 +1859,20 @@ void HierarchyPanel::OnRenderContent(InxGUIContext *ctx)
 
         // ── Tail drop zone ──────────────────────────────────────
         auto tailDropStart = Clock::now();
+        bool tailContextMenuRequested = false;
         float remainingH = ctx->GetContentRegionAvailHeight();
         if (remainingH > 4.0f) {
             float tailW = ctx->GetContentRegionAvailWidth();
             ctx->InvisibleButton("##drop_to_root_tail", tailW, remainingH);
+            if (InxGUISemantics::IsCaptureEnabled())
+                ctx->RecordSemanticItem("hierarchy_background", "Hierarchy Background", true, "hierarchy.background");
 
             if (ctx->IsItemClicked(0)) {
                 CancelRename();
                 ClearSelectionAndNotify();
             }
+            if (ctx->IsItemClicked(1))
+                tailContextMenuRequested = true;
 
             // Drop target with top-edge line
             ctx->PushStyleColor(ImGuiCol_DragDropTarget, 0.0f, 0.0f, 0.0f, 0.0f);
@@ -1826,6 +1904,12 @@ void HierarchyPanel::OnRenderContent(InxGUIContext *ctx)
             ctx->PopStyleColor(1);
         }
 
+        // The tail is an InvisibleButton so it can accept root-level drops.
+        // BeginPopupContextWindow(..., noOpenOverItems=true) intentionally
+        // ignores it; forward its right click to a dedicated background popup.
+        if (tailContextMenuRequested && m_rightClickedObjId == 0)
+            ctx->OpenPopup("##HierarchyBackgroundContext");
+
         // Fallback: deselect when clicking the scrollable background
         // (the tail InvisibleButton only works when remainingH > 4)
         if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
@@ -1841,39 +1925,69 @@ void HierarchyPanel::OnRenderContent(InxGUIContext *ctx)
             ctx->Label(Tr("hierarchy.no_search_results"));
     }
 
-    // ── Parent for new objects ───────────────────────────────────
+    // ── Parent for background-menu creations ─────────────────────
+    // A blank-area context menu creates a root object. Creating a child is
+    // deliberately reserved for an object's own context menu, otherwise a
+    // selected object silently turns the next root creation into a collapsed
+    // child and makes it appear to disappear from the Hierarchy.
     uint64_t parentIdForNew = 0;
     if (isPrefabMode && isPrefabMode()) {
         Scene *pscene = SceneManager::Instance().GetActiveScene();
         if (pscene && !pscene->GetRootObjects().empty())
             parentIdForNew = pscene->GetRootObjects()[0]->GetID();
-    } else if (m_selCount > 0) {
-        parentIdForNew = m_selPrimary;
     }
 
     // ── Background context menu ─────────────────────────────────
-    if (ctx->BeginPopupContextWindow("", 1)) {
+    // An object row opens the shared item popup earlier in this frame. Do not
+    // also let the window-level popup consume that same right click.
+    bool backgroundContextOpen = false;
+    if (m_rightClickedObjId == 0) {
+        backgroundContextOpen = ctx->BeginPopup("##HierarchyBackgroundContext");
+        if (!backgroundContextOpen)
+            backgroundContextOpen = ctx->BeginPopupContextWindow("", 1, true);
+    }
+    if (backgroundContextOpen) {
+        ctx->RecordSemanticWindow("context_menu", "Hierarchy Create", "hierarchy.context.root");
         if (m_uiMode) {
             ShowUiModeContextMenu(ctx, parentIdForNew);
         } else {
             ShowCreateEntriesForCategory(ctx, parentIdForNew, "Camera");
-            if (ctx->BeginMenu(Tr("hierarchy.create_3d_object"))) {
+            const std::string &create3dLabel = Tr("hierarchy.create_3d_object");
+            if (ctx->BeginMenu(create3dLabel)) {
+                ctx->RecordSemanticItem("menu", create3dLabel, true, "hierarchy.context.create_3d");
                 ShowCreatePrimitiveMenu(ctx, parentIdForNew);
                 ctx->EndMenu();
+            } else {
+                ctx->RecordSemanticItem("menu", create3dLabel, true, "hierarchy.context.create_3d");
             }
-            if (ctx->BeginMenu(Tr("hierarchy.create_2d_object"))) {
+            const std::string &create2dLabel = Tr("hierarchy.create_2d_object");
+            if (ctx->BeginMenu(create2dLabel)) {
+                ctx->RecordSemanticItem("menu", create2dLabel, true, "hierarchy.context.create_2d");
                 ShowCreate2DMenu(ctx, parentIdForNew);
                 ctx->EndMenu();
+            } else {
+                ctx->RecordSemanticItem("menu", create2dLabel, true, "hierarchy.context.create_2d");
             }
-            if (ctx->BeginMenu(Tr("hierarchy.post_processing_menu"))) {
+            const std::string &postProcessingLabel = Tr("hierarchy.post_processing_menu");
+            if (ctx->BeginMenu(postProcessingLabel)) {
+                ctx->RecordSemanticItem("menu", postProcessingLabel, true, "hierarchy.context.post_processing");
                 ShowPostProcessingMenu(ctx, parentIdForNew);
                 ctx->EndMenu();
+            } else {
+                ctx->RecordSemanticItem("menu", postProcessingLabel, true, "hierarchy.context.post_processing");
             }
-            if (ctx->BeginMenu(Tr("hierarchy.ui_menu"))) {
+            const std::string &uiLabel = Tr("hierarchy.ui_menu");
+            if (ctx->BeginMenu(uiLabel)) {
+                ctx->RecordSemanticItem("menu", uiLabel, true, "hierarchy.context.ui");
                 ShowUiMenu(ctx, parentIdForNew);
                 ctx->EndMenu();
+            } else {
+                ctx->RecordSemanticItem("menu", uiLabel, true, "hierarchy.context.ui");
             }
-            if (ctx->Selectable(Tr("hierarchy.create_empty"), false, 0, 0, 0)) {
+            const std::string &createEmptyLabel = Tr("hierarchy.create_empty");
+            const bool createEmptySelected = ctx->Selectable(createEmptyLabel, false, 0, 0, 0);
+            ctx->RecordSemanticItem("menu_item", createEmptyLabel, true, "hierarchy.context.create_empty");
+            if (createEmptySelected) {
                 if (createEmpty)
                     createEmpty(parentIdForNew);
             }

@@ -314,7 +314,17 @@ class Engine():
         self._engine.tick(float(delta_time))
 
     def request_exit(self):
-        """Request the active native run loop to stop without cleaning up yet."""
+        """Request a safe close, preserving graphical Editor confirmations."""
+        if self._mode == RuntimeMode.Graphical:
+            try:
+                from Infernux.engine.scene_manager import SceneFileManager
+
+                manager = SceneFileManager.instance()
+                if manager is not None:
+                    manager.request_close()
+                    return
+            except Exception as exc:
+                Debug.log_suppressed("Engine.request_exit.scene_manager", exc)
         if self._engine:
             self._engine.exit()
     
@@ -431,8 +441,9 @@ class Engine():
           1. Stop ResourcesManager and drain coalesced events on the main thread
           2. C++ Cleanup (GPU drain + resource destruction)
         """
-        # Ask dirty editor panels (e.g. animation editors) for save/discard/cancel
-        # before we start irreversible shutdown.
+        # Dirty-panel decisions are completed by SceneFileManager's non-blocking
+        # Editor modal before native close is confirmed. This call is now only a
+        # teardown audit and must never open a platform dialog.
         if self._mode == RuntimeMode.Graphical and not self._confirm_dirty_panels_before_exit():
             return
 
@@ -519,46 +530,17 @@ class Engine():
         pmm._state = PlayModeState.EDIT
 
     def _confirm_dirty_panels_before_exit(self) -> bool:
-        """Query global dirty registry and confirm save/discard/cancel one-by-one."""
+        """Audit dirty state after native close confirmation without prompting."""
         try:
-            from Infernux.engine.project_context import (
-                get_dirty_panel_entries,
-                is_panel_dirty,
-                set_panel_dirty,
-            )
-            from Infernux.engine.ui._dialogs import ask_save_discard_cancel
+            from Infernux.engine.project_context import get_dirty_panel_entries
 
-            for entry in list(get_dirty_panel_entries()):
-                panel_id = str(entry.get("panel_id") or "")
-                title = str(entry.get("title") or panel_id or "Panel")
-                save_handler = entry.get("save_handler")
-                if not panel_id or not is_panel_dirty(panel_id):
-                    continue
-
-                choice = ask_save_discard_cancel(
-                    title=f"Unsaved {title}",
-                    message=f"{title} has unsaved changes. Save before exiting?",
+            entries = list(get_dirty_panel_entries())
+            if entries:
+                titles = ", ".join(str(entry.get("title") or entry.get("panel_id") or "Panel") for entry in entries)
+                Debug.log_warning(
+                    "Engine teardown reached with dirty panel registry entries after "
+                    f"close confirmation: {titles}"
                 )
-                if choice == "cancel":
-                    return False
-                if choice == "discard":
-                    set_panel_dirty(panel_id, False, title=title, save_handler=save_handler)
-                    continue
-
-                # save
-                if not callable(save_handler):
-                    return False
-                try:
-                    save_handler()
-                except Exception as exc:
-                    Debug.log_suppressed(
-                        f"Engine._confirm_dirty_panels_before_exit.save_handler[{panel_id}]",
-                        exc,
-                    )
-                    return False
-                if is_panel_dirty(panel_id):
-                    # Save was cancelled or failed.
-                    return False
             return True
         except Exception as exc:
             Debug.log_suppressed("Engine._confirm_dirty_panels_before_exit", exc)
@@ -598,6 +580,10 @@ class Engine():
 
     def hide(self):
         self._engine.hide()
+
+    def is_window_minimized(self) -> bool:
+        """Return whether the editor window is minimized or occluded."""
+        return bool(self._engine and self._engine.is_window_minimized())
 
     def set_window_icon(self, icon_path):
         """Set the editor window icon from a PNG file."""
@@ -709,6 +695,18 @@ class Engine():
     def request_render_target_readback(self, game_view: bool = True):
         """Return a non-blocking ticket for the latest submitted render target."""
         return self._engine.request_render_target_readback(game_view)
+
+    def request_capture(self, source: str, output_path: str) -> int:
+        """Capture a Scene or Game render target to an engine-encoded PNG."""
+        return int(self._engine.request_capture(source, output_path))
+
+    def query_capture(self, capture_id: int) -> dict:
+        """Return status and renderer metadata for an engine capture."""
+        return dict(self._engine.query_capture(capture_id))
+
+    def cancel_capture(self, capture_id: int) -> bool:
+        """Cancel an unfinished engine capture."""
+        return bool(self._engine.cancel_capture(capture_id))
 
     def set_game_camera_enabled(self, enabled: bool):
         """Enable or disable game camera rendering."""

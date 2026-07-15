@@ -14,7 +14,9 @@ wrapper (or ``clip.native``) to ``AudioSource.set_track_clip`` or
 still using it.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+The current reliable decoder supports WAV. Keep a loaded clip alive while an AudioSource track or one-shot may still reference it.
 <!-- USER CONTENT END -->
 
 ## Constructors
@@ -79,12 +81,18 @@ still using it.
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for AudioClip
+from Infernux.core.audio_clip import AudioClip
+
+clip = AudioClip.load("Assets/Audio/click.wav")
+if clip is not None:
+    print(clip.name, clip.duration, clip.sample_rate, clip.channels)
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [Audio Workflow](../learn/audio-workflow.md)
+- [AudioSource](AudioSource.md)
+- [Assets and Meta Files](../manual/assets-and-meta.md)
 <!-- USER CONTENT END -->

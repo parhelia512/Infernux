@@ -209,16 +209,16 @@ class SerializableObject:
             raise TypeError(f"{path}: SerializableObject fields must be an object")
         document_fields = set(fields_document)
         expected_fields = set(fields)
-        missing = sorted(expected_fields - document_fields)
         unknown = sorted(document_fields - expected_fields)
-        if missing or unknown:
+        if unknown:
             raise ValueError(
-                f"{path}: {type_id} field schema mismatch: missing={missing}, unknown={unknown}"
+                f"{path}: {type_id} field schema mismatch: unknown={unknown}"
             )
 
         from .value_codec import VALUE_CODECS
         for name, meta in fields.items():
-            VALUE_CODECS.validate(fields_document[name], meta, f"{path}.{name}")
+            if name in fields_document:
+                VALUE_CODECS.validate(fields_document[name], meta, f"{path}.{name}")
         return actual_cls, fields
 
     @classmethod
@@ -226,9 +226,16 @@ class SerializableObject:
         """Validate, decode, and construct one current-schema object."""
         actual_cls, fields = cls._validate_document(data)
 
+        from .serialized_field import copy_serialized_field_default
+
+        fields_document = data["fields"]
         decoded = {
-            name: _deserialize_so_value(
-                data["fields"][name], meta, f"{get_serializable_type_id(actual_cls)}.{name}"
+            name: (
+                _deserialize_so_value(
+                    fields_document[name], meta, f"{get_serializable_type_id(actual_cls)}.{name}"
+                )
+                if name in fields_document
+                else copy_serialized_field_default(meta)
             )
             for name, meta in fields.items()
         }

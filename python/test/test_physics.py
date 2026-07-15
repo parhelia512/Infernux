@@ -46,6 +46,9 @@ class TestCoerceVec3:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestPhysicsGravity:
+    def test_body_count_forwards_native_world_telemetry(self):
+        assert physics_module.Physics.body_count == CppPhysics.body_count
+
     def test_gravity_returns_vector3(self):
         g = physics_module.Physics.gravity
         assert hasattr(g, "x") and hasattr(g, "y") and hasattr(g, "z")

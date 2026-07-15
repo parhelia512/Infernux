@@ -476,12 +476,15 @@ class UndoManager:
     @enabled.setter
     def enabled(self, value: bool) -> None: ...
 
-    def execute(self, cmd: UndoCommand) -> None:
+    def execute(self, cmd: UndoCommand) -> bool:
         """Execute *cmd* and push it onto the undo stack.
 
         Args:
             cmd: The command to execute. If it can merge with the stack
                  top, the merge is performed instead of pushing a new entry.
+
+        Returns:
+            ``True`` when execution succeeded, otherwise ``False``.
         """
         ...
 

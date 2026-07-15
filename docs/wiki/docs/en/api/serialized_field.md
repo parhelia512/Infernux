@@ -39,7 +39,9 @@ Example::
         speed: float = serialized_field(default=5.0, range=(0, 100))
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+Keep an explicit type annotation beside each serialized field. Metadata controls Inspector presentation and validation; it does not replace runtime checks for missing object or asset references.
 <!-- USER CONTENT END -->
 
 ## Parameters
@@ -70,6 +72,16 @@ Example::
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for serialized_field
+from Infernux import InxComponent, serialized_field
+
+
+class ProjectileSettings(InxComponent):
+    speed: float = serialized_field(
+        default=20.0,
+        range=(0.0, 100.0),
+        tooltip="World units per second",
+        slider=True,
+    )
+    notes: str = serialized_field(default="", multiline=True)
 ```
 <!-- USER CONTENT END -->

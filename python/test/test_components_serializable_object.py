@@ -143,7 +143,6 @@ class TestSerialization:
         [
             (lambda data: data.pop("$version"), "invalid"),
             (lambda data: data.__setitem__("type_id", "removed:Type"), "unknown"),
-            (lambda data: data["fields"].pop("hp"), "missing"),
             (lambda data: data["fields"].__setitem__("legacy", True), "unknown"),
         ],
     )
@@ -152,6 +151,25 @@ class TestSerialization:
         mutate(data)
         with pytest.raises(ValueError, match=error):
             SerializableObject._deserialize(data)
+
+    def test_missing_additive_field_uses_an_independent_declared_default(self):
+        class AdditiveDefaults(SerializableObject):
+            hp: int = serialized_field(default=100)
+            tags: list = serialized_field(
+                default=[],
+                field_type=FieldType.LIST,
+                element_type=FieldType.STRING,
+            )
+
+        data = AdditiveDefaults(hp=42, tags=["saved"])._serialize()
+        data["fields"].pop("tags")
+
+        restored = SerializableObject._deserialize(data)
+
+        assert restored.hp == 42
+        assert restored.tags == []
+        restored.tags.append("local")
+        assert AdditiveDefaults().tags == []
 
 
 # ══════════════════════════════════════════════════════════════════════

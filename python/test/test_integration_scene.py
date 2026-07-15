@@ -38,6 +38,11 @@ class _StrictSceneComponent(InxComponent):
     value: int = 7
 
 
+class _AdditiveSceneComponent(InxComponent):
+    value: int = 7
+    label: str = "default"
+
+
 class _ExplodingAfterDeserializeComponent(InxComponent):
     value: int = 11
 
@@ -793,6 +798,18 @@ class TestSceneSerialization:
             SceneFileManager._instance = previous_manager
             set_project_root(previous_root)
 
+    def test_scene_file_manager_rejects_second_open_while_first_is_deferred(self):
+        previous_manager = SceneFileManager._instance
+        try:
+            manager = SceneFileManager()
+
+            assert manager.open_scene("first.scene") is True
+            assert manager.is_loading is True
+            assert manager.open_scene("second.scene") is False
+            assert manager._deferred_load_path == "first.scene"
+        finally:
+            SceneFileManager._instance = previous_manager
+
     def test_runtime_scene_manager_retains_pending_transaction_until_commit(
         self,
         scene,
@@ -816,10 +833,12 @@ class TestSceneSerialization:
         try:
             set_project_root(str(project_root))
             manager = SceneFileManager()
+            reset_undo_calls = []
+            remembered_paths = []
             monkeypatch.setattr(manager, "_prepare_native_scene_swap", lambda: None)
-            monkeypatch.setattr(manager, "_reset_undo_history", lambda **_kwargs: None)
+            monkeypatch.setattr(manager, "_reset_undo_history", lambda **kwargs: reset_undo_calls.append(kwargs))
             monkeypatch.setattr(manager, "_restore_camera_state", lambda _path: None)
-            monkeypatch.setattr(manager, "_remember_last_scene", lambda _path: None)
+            monkeypatch.setattr(manager, "_remember_last_scene", lambda value: remembered_paths.append(value))
             monkeypatch.setattr(manager, "sync_all_prefab_instances", lambda _scene: None)
 
             RuntimeSceneManager._pending_scene_load = str(path)
@@ -839,6 +858,8 @@ class TestSceneSerialization:
             assert manager.current_scene_path == os.path.abspath(path)
             assert scene.find("RuntimeDeferredTarget") is not None
             assert scene.is_playing() is True
+            assert reset_undo_calls == []
+            assert remembered_paths == []
         finally:
             transaction = RuntimeSceneManager._active_scene_transaction
             if transaction is not None and not transaction.is_complete:
@@ -917,6 +938,63 @@ class TestSceneSerialization:
         assert document["schema_version"] == 2
         assert document["objects"][0]["name"] == "AtomicSceneObject"
         assert list(tmp_path.glob("atomic.scene.tmp.*")) == []
+
+    def test_scene_file_manager_serializes_save_as_name_before_writing(
+        self,
+        scene,
+        tmp_path,
+        monkeypatch,
+    ):
+        from Infernux.engine.project_context import get_project_root, set_project_root
+
+        previous_root = get_project_root()
+        previous_manager = SceneFileManager._instance
+        project_root = tmp_path / "Project"
+        scene_path = project_root / "Assets" / "RaceTrack.scene"
+        scene_path.parent.mkdir(parents=True)
+
+        try:
+            set_project_root(str(project_root))
+            manager = SceneFileManager()
+            monkeypatch.setattr(manager, "_save_camera_state", lambda _path: None)
+            imported_paths = []
+
+            class _AssetDatabase:
+                @staticmethod
+                def contains_path(_path):
+                    return False
+
+            from Infernux.core.assets import AssetManager
+
+            manager._asset_database = _AssetDatabase()
+            monkeypatch.setattr(
+                AssetManager,
+                "import_asset",
+                classmethod(lambda _cls, path, **_kwargs: imported_paths.append(path) or True),
+            )
+
+            assert manager._do_save_inner(str(scene_path)) is True
+
+            document = json.loads(scene_path.read_text(encoding="utf-8"))
+            assert document["name"] == "RaceTrack"
+            assert scene.name == "RaceTrack"
+            assert imported_paths == [str(scene_path.resolve())]
+        finally:
+            SceneFileManager._instance = previous_manager
+            set_project_root(previous_root)
+
+    def test_scene_deserialize_advances_game_object_id_allocator(self, scene):
+        scene.create_game_object("PersistedHighId")
+        document = scene.serialize_document()
+        persisted_id = 9_000_000
+        document["objects"][0]["id"] = persisted_id
+
+        assert scene._commit_document(document) is True
+
+        created_after_load = scene.create_game_object("CreatedAfterLoad")
+        assert scene.find_by_id(persisted_id).name == "PersistedHighId"
+        assert created_after_load.id > persisted_id
+        assert scene.find_by_id(created_after_load.id) is created_after_load
 
     @pytest.mark.parametrize("schema_version", [0, 1, 3, "2"])
     def test_deserialize_rejects_non_current_schema(self, scene, schema_version):
@@ -1195,6 +1273,21 @@ class TestSceneSerialization:
         assert restored_component.component_id == original_component_id
         assert restored_component.value == 19
         assert scene.has_pending_py_components() is False
+
+    def test_scene_restore_backfills_missing_additive_python_field(self, scene):
+        root = scene.create_game_object("AdditivePythonField")
+        component = _AdditiveSceneComponent()
+        component.value = 19
+        component.label = "saved"
+        root.add_py_component(component)
+        document = json.loads(json.dumps(scene.serialize_document()))
+        _python_records(document["objects"][0])[0]["data"].pop("label")
+
+        assert deserialize_scene_document_transactionally(scene, document) is True
+
+        restored = scene.find("AdditivePythonField").get_py_component(_AdditiveSceneComponent)
+        assert restored.value == 19
+        assert restored.label == "default"
 
     def test_python_component_document_uses_stable_script_and_type_guids(self, scene):
         root = scene.create_game_object("StablePythonIdentity")

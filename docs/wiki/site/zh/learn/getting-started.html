@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>快速开始 - Infernux Scripting API</title>
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="stylesheet" href="/css/style.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ======================================================
+           Infernux API Reference — Unity-Inspired Dark Theme
+           ====================================================== */
+
+        /* Layout */
+        .api-layout {
+            display: flex;
+            min-height: calc(100vh - var(--nav-height));
+            padding-top: var(--nav-height);
+        }
+
+        /* ---- Sidebar ---- */
+        .api-sidebar {
+            width: 280px;
+            background: #0b0b12;
+            border-right: 1px solid var(--border);
+            position: sticky;
+            top: var(--nav-height);
+            height: calc(100vh - var(--nav-height));
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        .api-sidebar::-webkit-scrollbar { width: 5px; }
+        .api-sidebar::-webkit-scrollbar-track { background: transparent; }
+        .api-sidebar::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+
+        .sidebar-hdr {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .sidebar-hdr h3 {
+            margin: 0;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+        }
+
+        /* Language toggle */
+        .lang-sw {
+            display: flex;
+            gap: 1px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .lang-sw a {
+            padding: 3px 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            background: var(--bg-elevated);
+            text-decoration: none;
+            transition: all 0.12s;
+        }
+        .lang-sw a.on {
+            background: var(--primary);
+            color: #fff;
+        }
+        .lang-sw a:hover:not(.on) {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+        }
+
+        /* Namespace tree */
+        .ns-tree { padding: 6px 0 20px; }
+
+        .ns-group { margin-bottom: 1px; }
+
+        .ns-hd {
+            display: flex;
+            align-items: center;
+            padding: 7px 16px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.1s;
+        }
+        .ns-hd:hover { background: rgba(255,255,255,0.025); }
+
+        .ns-arr {
+            width: 14px;
+            font-size: 0.5rem;
+            color: #555;
+            transition: transform 0.15s;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+        .ns-hd.open .ns-arr { transform: rotate(90deg); }
+
+        .ns-nm {
+            font-size: 0.84rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        .ns-hd.hi .ns-nm { color: var(--primary); }
+
+        .ns-ch {
+            display: none;
+            padding: 2px 0 4px;
+        }
+        .ns-hd.open + .ns-ch { display: block; }
+
+        .ns-ch a {
+            display: block;
+            padding: 3px 16px 3px 38px;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.1s, background 0.1s;
+            border-left: 2px solid transparent;
+        }
+        .ns-ch a:hover {
+            color: var(--text-primary);
+            background: rgba(255,255,255,0.02);
+        }
+        .ns-ch a.cur {
+            color: var(--text-primary);
+            background: rgba(255,107,53,0.07);
+            border-left-color: var(--primary);
+            font-weight: 600;
+        }
+
+        /* ---- Content ---- */
+        .api-main {
+            flex: 1;
+            padding: 36px 56px 80px;
+            max-width: 880px;
+            min-width: 0;
+        }
+
+        /* H1 — class name */
+        .api-main h1 {
+            font-size: 1.85rem;
+            font-weight: 700;
+            margin: 0 0 4px;
+            padding: 0;
+            border: none;
+            color: var(--text-primary);
+        }
+
+        /* "class in Package" subtitle */
+        .api-main .class-info {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            margin-bottom: 22px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--border);
+        }
+        .api-main .class-info b { color: var(--text-secondary); }
+        .api-main .class-info a { color: var(--primary); }
+
+        /* H2 — section headers */
+        .api-main h2 {
+            font-size: 0.92rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted);
+            margin: 30px 0 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .api-main h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin: 18px 0 6px;
+        }
+
+        /* Paragraphs */
+        .api-main p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.75;
+            margin-bottom: 12px;
+        }
+
+        .api-main blockquote {
+            margin: 12px 0;
+            padding: 10px 16px;
+            background: rgba(255,107,53,0.04);
+            border-left: 3px solid var(--primary);
+            border-radius: 0 4px 4px 0;
+        }
+        .api-main blockquote p { margin: 0; font-size: 0.85rem; }
+
+        /* Tables — Unity style: hidden header, 2-col */
+        .api-main table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 4px 0 18px;
+        }
+        .api-main thead { display: none; }
+
+        .api-main tbody tr {
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .api-main tbody tr:last-child { border-bottom: none; }
+
+        .api-main td {
+            padding: 7px 0;
+            font-size: 0.86rem;
+            vertical-align: top;
+        }
+        .api-main td:first-child {
+            width: 200px;
+            padding-right: 20px;
+            color: var(--primary);
+            font-size: 0.86rem;
+            font-weight: 500;
+        }
+        .api-main td:last-child { color: var(--text-secondary); }
+        .api-main td a { color: var(--primary); }
+        .api-main tbody tr:hover { background: rgba(255,255,255,0.012); }
+
+        /* Inline code — normal font, subtle highlight */
+        .api-main code {
+            font-family: inherit;
+            font-size: inherit;
+            background: rgba(255,255,255,0.06);
+            padding: 1px 5px;
+            border-radius: 3px;
+            color: var(--primary-light);
+        }
+
+        /* Code blocks */
+        .api-main pre {
+            background: #0d0d15;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px 20px;
+            overflow-x: auto;
+            margin: 10px 0 18px;
+        }
+        .api-main pre code {
+            font-family: var(--font-mono);
+            background: none;
+            padding: 0;
+            font-size: 0.83rem;
+            line-height: 1.65;
+            color: var(--text-secondary);
+        }
+
+        /* Lists */
+        .api-main ul, .api-main ol { padding-left: 18px; margin-bottom: 12px; }
+        .api-main li {
+            margin-bottom: 4px;
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+            line-height: 1.6;
+        }
+
+        .api-main hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 26px 0;
+        }
+
+        /* ---- Footer ---- */
+        .api-ft { margin-left: 280px; }
+        .api-ft .footer-bottom p { font-size: 0.8rem; }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 1024px) {
+            .api-sidebar { width: 240px; }
+            .api-main { padding: 28px 32px 60px; }
+            .api-ft { margin-left: 240px; }
+        }
+        @media (max-width: 768px) {
+            .api-layout { flex-direction: column; }
+            .api-sidebar {
+                width: 100%; position: relative; top: 0;
+                height: auto; max-height: 50vh;
+                border-right: none; border-bottom: 1px solid var(--border);
+            }
+            .api-main { padding: 20px; max-width: 100%; }
+            .api-ft { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links">
+                <a href="/index.html">首页</a>
+                <a href="/index.html#system">特性</a>
+                <a href="/index.html#capabilities">能力</a>
+                <a href="/roadmap.html">路线图</a>
+                <a href="/wiki.html" class="active">文档</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank">
+                    <i class="fab fa-github"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell" style="padding-top: calc(var(--nav-height) + 60px); min-height: 80vh; padding-bottom: 80px;">
+        <div class="container" style="max-width: 860px; margin: 0 auto;">
+            <div class="api-main" style="padding: 0; max-width: none;">
+                <h1 id="_1">快速开始<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>这份指南帮助你从一台新机器走到可运行的 Infernux 场景，当前针对 Windows 上的 <strong>0.2.1 预览版</strong>。预览版迭代很快；排查行为差异前，请先确认 Hub 或 Release 页面显示的实际版本。</p>
+<h2 id="_2">你将完成什么<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>完成后，你应该能够：</p>
+<ul>
+<li>安装或启动 Infernux；</li>
+<li>创建或打开项目；</li>
+<li>理解 Scene、Game、Hierarchy、Inspector、Project 与 Console 面板的职责；</li>
+<li>保存场景并进入 Play 模式。</li>
+</ul>
+<h2 id="1">1. 获取引擎<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>请选择一种受支持的入口：</p>
+<ol>
+<li>从 <a href="https://github.com/ChenlizheMe/Infernux/releases">Infernux Releases</a> 获取最新预览版。</li>
+<li>按该版本包内的说明安装或解压。</li>
+<li>学习阶段建议把 Hub、编辑器和项目放在本地可写磁盘中。</li>
+</ol>
+<p>如果你的目标是开发引擎本身，请使用仓库里的源码构建说明，不要把源码构建与打包预览版混在同一套目录中。</p>
+<h2 id="2">2. 创建或打开项目<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<p>启动 Hub 或编辑器并选择项目位置。一个健康的项目应该能正常打开，在 Project 面板中显示文件，并且 Console 不会持续刷出同一个异常。</p>
+<p>不要把引擎生成文件塞进无关源码仓库。独立项目目录会让资源发现、导入和故障排查简单很多。</p>
+<h2 id="3">3. 理解编辑器布局<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>区域</th>
+<th>作用</th>
+<th>第一次检查什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Scene</td>
+<td>编辑世界并可视化选择对象</td>
+<td>能否环绕或聚焦场景？</td>
+</tr>
+<tr>
+<td>Game</td>
+<td>预览当前相机输出</td>
+<td>进入 Play 后是否更新？</td>
+</tr>
+<tr>
+<td>Hierarchy</td>
+<td>查看当前场景对象</td>
+<td>能否按名字选中对象？</td>
+</tr>
+<tr>
+<td>Inspector</td>
+<td>编辑选中对象及组件</td>
+<td>切换选择时是否同步更新？</td>
+</tr>
+<tr>
+<td>Project</td>
+<td>浏览项目资源和脚本</td>
+<td>能否找到项目资源文件？</td>
+</tr>
+<tr>
+<td>Console</td>
+<td>查看日志、警告和错误</td>
+<td>是否存在反复出现的异常？</td>
+</tr>
+</tbody>
+</table>
+<p>不同版本的停靠布局可能变化。稳定的心智模型是“面板名称和职责”，而不是某张截图中的固定位置。</p>
+<h2 id="4">4. 保存并运行场景<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
+<ol>
+<li>打开或创建一个场景。</li>
+<li>添加或选择一个可见对象。</li>
+<li>进入 Play 模式前保存场景。</li>
+<li>启动 Play，观察 Game 面板和 Console。</li>
+<li>对场景做需要保留的结构修改前，先退出 Play。</li>
+</ol>
+<h3 id="_3">预期结果<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>编辑器能够干净地进入和退出 Play，Game 视图会更新，Console 不会每帧重复累积同一错误。</p>
+<h2 id="_4">常见问题<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<h3 id="_5">编辑器无法启动<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>确认下载包与 Windows 架构匹配。</li>
+<li>使用 Release 包提供的启动入口，不要单独移动其中的二进制文件。</li>
+<li>检查安全软件是否隔离了运行时依赖。</li>
+</ul>
+<h3 id="_6">项目能打开但资源缺失<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>确认打开的是项目根目录，而不是其中的资源子目录。</li>
+<li>编辑器导入资源时，不要同时在外部批量移动文件。</li>
+<li>优先阅读 Console 的第一条错误；后续错误可能只是连锁反应。</li>
+</ul>
+<h3 id="play-game">Play 后 Game 视图为空<a class="headerlink" href="#play-game" title="Permanent link">&para;</a></h3>
+<ul>
+<li>确认场景存在且启用了 Camera。</li>
+<li>确认实际运行的就是刚才编辑的场景。</li>
+<li>检查 Console 是否有脚本或资源加载错误。</li>
+</ul>
+<h2 id="_7">下一步<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p>继续阅读<a href="first-component.html">第一个组件</a>，为对象添加 Python 玩法逻辑。想按系统查资料时，前往<a href="../manual/engine-map.html">引擎地图</a>。</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <script src="/js/main.js?v=2"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.ns-hd').forEach(function(h) {
+            h.addEventListener('click', function() { this.classList.toggle('open'); });
+        });
+    });
+    </script>
+</body>
+</html>

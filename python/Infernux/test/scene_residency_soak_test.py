@@ -1,4 +1,4 @@
-"""Fifty-cycle scene load/unload residency stability gate."""
+"""Sixty-cycle scene load/unload residency stability gate."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from Infernux.lib import (
 )
 
 
-CYCLES = 50
+CYCLES = 60
 WARMUP_CYCLES = 10
 MIB = 1024 * 1024
 
@@ -90,6 +90,28 @@ def _assert_stable(name: str, values: list[int], tolerance: int) -> None:
         )
     if max(tail[-10:]) - min(tail[-10:]) > tolerance:
         raise AssertionError(f"{name}: final window did not stabilize: {tail[-10:]}")
+
+
+def _assert_process_memory_stable(name: str, values: list[int]) -> None:
+    tail = values[WARMUP_CYCLES:]
+    if len(tail) != CYCLES - WARMUP_CYCLES:
+        raise AssertionError(f"{name}: incomplete samples ({len(values)}/{CYCLES})")
+    first_window_peak = max(tail[:10])
+    previous_window_peak = max(tail[-20:-10])
+    final_window = tail[-10:]
+    final_window_peak = max(final_window)
+    if final_window_peak > first_window_peak + 4 * MIB:
+        raise AssertionError(
+            f"{name}: bounded process residency grew from {first_window_peak} to "
+            f"{final_window_peak}"
+        )
+    if final_window_peak > previous_window_peak + MIB // 2:
+        raise AssertionError(
+            f"{name}: process residency kept growing from {previous_window_peak} to "
+            f"{final_window_peak} in the final two windows"
+        )
+    if max(final_window) - min(final_window) > MIB // 2:
+        raise AssertionError(f"{name}: final window did not stabilize: {final_window}")
 
 
 def main() -> int:
@@ -291,8 +313,8 @@ def main() -> int:
             if callback_failures:
                 raise callback_failures[0]
 
-            _assert_stable("RSS", rss_samples, 2 * MIB)
-            _assert_stable("private bytes", private_samples, 2 * MIB)
+            _assert_process_memory_stable("RSS", rss_samples)
+            _assert_process_memory_stable("private bytes", private_samples)
             _assert_stable("Python allocated blocks", python_block_samples, 1024)
             _assert_stable("Python GC objects", python_object_samples, 0)
             _assert_stable("loaded scenes", scene_count_samples, 0)

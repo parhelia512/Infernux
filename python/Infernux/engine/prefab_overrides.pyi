@@ -35,6 +35,11 @@ class Override:
     def __repr__(self) -> str: ...
 
 
+def resolve_prefab_instance_root(instance_obj: Any) -> Any:
+    """Return the root object of the linked prefab instance, if any."""
+    ...
+
+
 def compute_overrides(
     instance_obj: Any,
     prefab_path: str,
@@ -70,7 +75,7 @@ def revert_overrides(
     instance_obj: Any,
     prefab_path: str,
     asset_database: Any = None,
-) -> None:
+) -> bool:
     """Reset the instance to match the prefab source.
 
     Args:
@@ -78,4 +83,12 @@ def revert_overrides(
         prefab_path: Path to the source ``.prefab`` file.
         asset_database: Optional C++ ``AssetDatabase``.
     """
+    ...
+
+def revert_overrides_with_undo(
+    instance_obj: Any,
+    prefab_path: str,
+    asset_database: Any = None,
+) -> bool:
+    """Reset the instance as one structural editor Undo command."""
     ...

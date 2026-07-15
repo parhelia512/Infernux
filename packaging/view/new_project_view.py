@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, QSettings
 from model.new_project_model import NewProjectModel
 from viewmodel.new_project_viewmodel import NewProjectViewModel
 from hub_utils import is_frozen
+from i18n import tr
 
 
 class NewProjectView(QDialog):
@@ -17,7 +18,7 @@ class NewProjectView(QDialog):
 
     def __init__(self, version_manager=None, runtime_manager=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Create New Project")
+        self.setWindowTitle(tr("Create New Project"))
         self.setMinimumWidth(480)
         self._version_manager = version_manager
         self._runtime_manager = runtime_manager
@@ -35,9 +36,9 @@ class NewProjectView(QDialog):
 
         # Project name input
         name_layout = QVBoxLayout()
-        name_label = QLabel("Project Name:")
+        name_label = QLabel(tr("Project Name:"))
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Enter a name for your project")
+        self.name_edit.setPlaceholderText(tr("Enter a name for your project"))
         self.name_edit.textChanged.connect(self.viewmodel.set_name)
         self.name_edit.textChanged.connect(self._update_create_button_state)
         name_layout.addWidget(name_label)
@@ -46,12 +47,12 @@ class NewProjectView(QDialog):
 
         # Path chooser
         path_layout = QVBoxLayout()
-        path_label = QLabel("Project Location:")
+        path_label = QLabel(tr("Project Location:"))
         chooser_row = QHBoxLayout()
         self.path_edit = QLineEdit()
         self.path_edit.setReadOnly(True)
-        self.path_edit.setPlaceholderText("No path selected")
-        path_button = QPushButton("Browse...")
+        self.path_edit.setPlaceholderText(tr("No path selected"))
+        path_button = QPushButton(tr("Browse..."))
         path_button.setObjectName("normalBtn")
         path_button.clicked.connect(self._on_choose_path)
         chooser_row.addWidget(self.path_edit)
@@ -68,7 +69,7 @@ class NewProjectView(QDialog):
 
         # Engine version selector
         ver_layout = QVBoxLayout()
-        ver_label = QLabel("Engine Version:")
+        ver_label = QLabel(tr("Engine Version:"))
         self.version_combo = QComboBox()
         self.version_combo.setFixedHeight(32)
         self._no_version_hint = QLabel(
@@ -94,11 +95,11 @@ class NewProjectView(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        btn_cancel = QPushButton("Cancel")
+        btn_cancel = QPushButton(tr("Cancel"))
         btn_cancel.setObjectName("normalBtn")
         btn_cancel.clicked.connect(self.reject)
 
-        btn_create = QPushButton("Create")
+        btn_create = QPushButton(tr("Create"))
         btn_create.setObjectName("createBtn")
         btn_create.clicked.connect(self.accept)
         self._create_btn = btn_create
@@ -156,7 +157,7 @@ class NewProjectView(QDialog):
 
     def _on_choose_path(self):
         current_path = self.path_edit.text() or ""
-        folder = QFileDialog.getExistingDirectory(self, "Choose Project Location", current_path)
+        folder = QFileDialog.getExistingDirectory(self, tr("Choose Project Location"), current_path)
         if folder:
             self.path_edit.setText(folder)
             self.viewmodel.set_path(folder)

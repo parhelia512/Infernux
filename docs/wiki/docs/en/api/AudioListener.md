@@ -15,7 +15,9 @@ one active listener; additional enabled listeners remain registered but can
 be standby instead of immediately replacing the active listener.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+Place one intended active listener at the scene's listening position, normally on the active Camera or player head. Source distance is measured relative to it.
 <!-- USER CONTENT END -->
 
 ## Properties
@@ -43,12 +45,20 @@ be standby instead of immediately replacing the active listener.
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for AudioListener
+from Infernux import AudioListener, GameObject
+
+camera_object = GameObject.find("Main Camera")
+if camera_object is not None:
+    listener = camera_object.get_component(AudioListener)
+    if listener is None:
+        listener = camera_object.add_component(AudioListener)
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [Audio Workflow](../learn/audio-workflow.md)
+- [AudioSource](AudioSource.md)
+- [Camera](Camera.md)
 <!-- USER CONTENT END -->

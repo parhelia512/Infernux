@@ -9,7 +9,9 @@
 用于读取键盘、鼠标和触摸输入的接口。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+连续动作使用按住状态，一帧边沿操作使用 down/up。游戏鼠标逻辑应使用 Game 视口坐标并尊重 Game 焦点。
 <!-- USER CONTENT END -->
 
 ## 属性
@@ -58,12 +60,24 @@
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for Input
+from Infernux import InxComponent, Vector3
+from Infernux.input import Input, KeyCode
+
+
+class KeyboardMover(InxComponent):
+    speed: float = 4.0
+
+    def update(self, delta_time: float) -> None:
+        axis = float(Input.get_key(KeyCode.D)) - float(Input.get_key(KeyCode.A))
+        self.transform.translate(Vector3(axis * self.speed * delta_time, 0.0, 0.0))
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [输入与时间](../manual/input-and-time.md)
+- [KeyCode](KeyCode.md)
+- [Time](Time.md)
+- [Camera](Camera.md)
 <!-- USER CONTENT END -->

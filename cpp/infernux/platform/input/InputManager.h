@@ -58,6 +58,16 @@ class InputManager
     /// @brief Feed an SDL event into the input state.
     void ProcessSDLEvent(const SDL_Event &event);
 
+    /// @brief Mark a trusted synthetic pointer position for the current GUI frame.
+    ///
+    /// SDL's ImGui backend can otherwise fall back to the physical OS cursor
+    /// after a synthetic button release. The override is intentionally scoped
+    /// to the current frame and is consumed by the GUI layer before NewFrame.
+    void SetSyntheticMousePositionForFrame(float x, float y);
+
+    /// @brief Return the synthetic pointer position queued for the current frame.
+    [[nodiscard]] bool GetSyntheticMousePositionForFrame(float &x, float &y) const;
+
     // ---- Keyboard queries (Unity: Input.GetKey / GetKeyDown / GetKeyUp) ----
 
     /// @brief Returns true while the key identified by scancode is held down.
@@ -218,6 +228,10 @@ class InputManager
     float m_mouseDY = 0.f;
     float m_scrollX = 0.f;
     float m_scrollY = 0.f;
+
+    float m_syntheticMouseX = 0.f;
+    float m_syntheticMouseY = 0.f;
+    bool m_hasSyntheticMousePositionThisFrame = false;
 
     std::string m_inputString;
     int m_touchCount = 0;

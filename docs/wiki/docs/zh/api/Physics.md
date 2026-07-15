@@ -9,7 +9,9 @@
 物理系统的静态工具类。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+空间查询接受 Layer Mask 和明确的 Trigger 处理。应限制查询体积与距离，并选择能回答玩法问题的最简单查询。
 <!-- USER CONTENT END -->
 
 ## 属性
@@ -45,12 +47,26 @@
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for Physics
+from Infernux import InxComponent, Vector3
+from Infernux.physics import Physics
+
+
+class GroundProbe(InxComponent):
+    def is_grounded(self) -> bool:
+        hit = Physics.raycast(
+            self.transform.position,
+            Vector3(0.0, -1.0, 0.0),
+            max_distance=1.1,
+        )
+        return hit is not None
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [物理手册](../manual/physics.md)
+- [Rigidbody](Rigidbody.md)
+- [Collider](Collider.md)
+- [BoxCollider](BoxCollider.md)
 <!-- USER CONTENT END -->

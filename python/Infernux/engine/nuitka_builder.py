@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import hashlib
 import os
+import queue
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -25,6 +27,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from Infernux.debug import Debug
+from Infernux.engine.build_cancellation import BuildCancelled
 from Infernux.engine.i18n import t
 
 # ASCII-safe root for Nuitka staging and temporary build artifacts.
@@ -43,8 +46,40 @@ _AUTO_INSTALLABLE_PACKAGES = {
 }
 
 
-class _BuildCancelled(Exception):
-    """Raised when the user cancels the build."""
+_BuildCancelled = BuildCancelled
+
+
+def _terminate_process_tree(proc: subprocess.Popen, *, timeout: float = 10.0) -> None:
+    """Stop the compiler process tree created for one cancelled build."""
+    if proc.poll() is not None:
+        return
+
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=timeout,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+
+    if proc.poll() is None:
+        proc.kill()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
 
 
 def _has_msvc_toolchain() -> bool:
@@ -782,10 +817,9 @@ def _install_requirements_files(python_exe: str, requirement_files: List[str]) -
 class NuitkaBuilder:
     """Wraps Nuitka compilation for Infernux standalone builds."""
 
-    # Packages that must be excluded from Nuitka compilation and
-    # injected as raw site-packages into the dist.  Numba requires
-    # Python bytecode at runtime for its LLVM JIT compiler — Nuitka's
-    # C compilation removes the bytecode, making @njit silently fail.
+    # Packages that are excluded from Nuitka compilation and injected as raw
+    # site-packages. NumPy is an engine runtime dependency; Numba/llvmlite
+    # additionally require Python bytecode for LLVM JIT operation.
     _JIT_NOFOLLOW_PACKAGES = frozenset({"numba", "llvmlite", "numpy"})
     _GAME_BUILD_EXCLUDED_PACKAGES = frozenset({"mcp", "fastmcp"})
     _GAME_BUILD_NOFOLLOW_MODULES = frozenset({
@@ -940,6 +974,7 @@ class NuitkaBuilder:
                 "nuitka",
                 "ordered_set",
                 *self.extra_include_packages,
+                *self.raw_copy_packages,
             )
             Debug.log_internal(
                 f"  _ensure_python_packages in {_time.perf_counter() - _t0:.2f}s"
@@ -1251,6 +1286,11 @@ class NuitkaBuilder:
 
         import time as _time
         _nuitka_proc_t0 = _time.perf_counter()
+        process_group_args = (
+            {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+            if sys.platform == "win32"
+            else {"start_new_session": True}
+        )
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -1260,25 +1300,49 @@ class NuitkaBuilder:
             errors="replace",
             env=env,
             cwd=self._staging_dir,
+            **process_group_args,
         )
 
         lines_collected: List[str] = []
+        output_queue: queue.Queue[Optional[str]] = queue.Queue()
+
+        def _read_output() -> None:
+            try:
+                if proc.stdout is not None:
+                    for output_line in proc.stdout:
+                        output_queue.put(output_line)
+            finally:
+                output_queue.put(None)
+
+        reader = threading.Thread(target=_read_output, name="InfernuxNuitkaOutput", daemon=True)
+        reader.start()
         try:
-            for line in proc.stdout:
+            while True:
                 if cancel_event is not None and cancel_event.is_set():
-                    raise _BuildCancelled()
+                    raise BuildCancelled()
+                try:
+                    line = output_queue.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                if line is None:
+                    break
                 line = line.rstrip()
                 lines_collected.append(line)
                 if on_progress:
                     # Crude progress: Nuitka logs many lines; we map to 10%–85%
                     pct = min(0.85, 0.10 + len(lines_collected) * 0.001)
                     on_progress(line[-80:] if len(line) > 80 else line, pct)
-        except _BuildCancelled:
-            proc.kill()
-            proc.wait()
+        except BuildCancelled:
+            _terminate_process_tree(proc)
+            reader.join(timeout=2.0)
+            raise
+        except Exception:
+            _terminate_process_tree(proc)
+            reader.join(timeout=2.0)
             raise
 
         proc.wait()
+        reader.join(timeout=2.0)
         _nuitka_elapsed = _time.perf_counter() - _nuitka_proc_t0
         Debug.log_internal(
             f"  Nuitka subprocess finished in {_nuitka_elapsed:.1f}s  "
@@ -1403,10 +1467,9 @@ class NuitkaBuilder:
         import time as _time
         _t0 = _time.perf_counter()
 
-        # Discover site-packages directory of the builder Python.
-        # In conda environments getsitepackages() returns [env_root,
-        # env_root/Lib/site-packages] — we need the one that actually
-        # contains installed packages (the "Lib/site-packages" entry).
+        # Discover the builder site-packages directory containing every raw
+        # package. In Conda, getsitepackages() also returns the environment
+        # root, which is not itself the package directory.
         result = _run_python(
             self._builder_python,
             ["-c",
@@ -1417,7 +1480,10 @@ class NuitkaBuilder:
         candidates = _json.loads(result.stdout.strip())
         site_packages = ""
         for cand in reversed(candidates):
-            if os.path.isdir(cand) and os.path.isdir(os.path.join(cand, "numba")):
+            if os.path.isdir(cand) and all(
+                os.path.isdir(os.path.join(cand, pkg))
+                for pkg in self.raw_copy_packages
+            ):
                 site_packages = cand
                 break
         if not site_packages:
@@ -1650,13 +1716,13 @@ class NuitkaBuilder:
         ps_script = r'''
 $ErrorActionPreference = "Stop"
 $certName = "Infernux Build Signing"
-$securityModule = Get-Module -ListAvailable Microsoft.PowerShell.Security | Select-Object -First 1
-if (-not $securityModule) {
+$securityModulePath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1"
+if (-not (Test-Path -LiteralPath $securityModulePath)) {
     Write-Output "UNSUPPORTED:security-module"
     exit 0
 }
 
-Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
+Import-Module $securityModulePath -ErrorAction Stop
 
 if (-not (Get-PSDrive -Name Cert -ErrorAction SilentlyContinue)) {
     Write-Output "UNSUPPORTED:cert-drive"
@@ -1703,13 +1769,28 @@ Write-Output ("STATUS:" + [string]$result.Status)
 if ($result.StatusMessage) {
     Write-Output ("MESSAGE:" + [string]$result.StatusMessage)
 }
+if ($result.SignerCertificate) {
+    Write-Output ("SIGNER:" + [string]$result.SignerCertificate.Thumbprint)
+}
+Write-Output ("CERT:" + [string]$cert.Thumbprint)
 '''
         ps_script = ps_script.replace("$EXE_PATH", f'"{exe_path}"')
         try:
+            system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+            windows_powershell_root = os.path.join(
+                system_root, "System32", "WindowsPowerShell", "v1.0"
+            )
+            powershell_exe = os.path.join(windows_powershell_root, "powershell.exe")
+            signing_env = os.environ.copy()
+            # The Editor may itself be launched from PowerShell 7. Its inherited
+            # PSModulePath can make Windows PowerShell load incompatible type
+            # data before Microsoft.PowerShell.Security, producing duplicate
+            # ObjectSecurity members. Signing needs only the inbox modules.
+            signing_env["PSModulePath"] = os.path.join(windows_powershell_root, "Modules")
             r = subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                 "-Command", ps_script],
-                capture_output=True, text=True, timeout=60,
+                [powershell_exe, "-NoLogo", "-NoProfile", "-NonInteractive",
+                 "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                capture_output=True, text=True, timeout=60, env=signing_env,
             )
             stdout_lines = [line.strip() for line in (r.stdout or "").splitlines() if line.strip()]
             stderr_text = (r.stderr or "").strip()
@@ -1717,6 +1798,8 @@ if ($result.StatusMessage) {
             unsupported = next((line for line in stdout_lines if line.startswith("UNSUPPORTED:")), "")
             status_line = next((line for line in stdout_lines if line.startswith("STATUS:")), "")
             message_line = next((line for line in stdout_lines if line.startswith("MESSAGE:")), "")
+            signer_line = next((line for line in stdout_lines if line.startswith("SIGNER:")), "")
+            cert_line = next((line for line in stdout_lines if line.startswith("CERT:")), "")
 
             if r.returncode != 0:
                 details = stderr_text or "\n".join(stdout_lines)
@@ -1730,9 +1813,23 @@ if ($result.StatusMessage) {
 
             status = status_line.split(":", 1)[1] if status_line else ""
             message = message_line.split(":", 1)[1] if message_line else ""
+            signer_thumbprint = signer_line.split(":", 1)[1].strip().upper() if signer_line else ""
+            cert_thumbprint = cert_line.split(":", 1)[1].strip().upper() if cert_line else ""
 
             if status == "Valid":
                 Debug.log_internal("Signed EXE with self-signed certificate")
+            elif (
+                status in {"UnknownError", "NotTrusted"}
+                and signer_thumbprint
+                and signer_thumbprint == cert_thumbprint
+            ):
+                # A self-signed certificate is expected to terminate at an
+                # untrusted root unless the user explicitly installs it into a
+                # trust store. The Authenticode signature is nevertheless
+                # present and cryptographically associated with our cert.
+                Debug.log_internal(
+                    "Signed EXE with self-signed certificate; the local root is not trusted"
+                )
             else:
                 details = message or stderr_text or "\n".join(stdout_lines)
                 Debug.log_warning(f"Code signing returned: {status or details}")

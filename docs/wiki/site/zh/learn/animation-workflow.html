@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>动画工作流 - Infernux Scripting API</title>
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="stylesheet" href="/css/style.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ======================================================
+           Infernux API Reference — Unity-Inspired Dark Theme
+           ====================================================== */
+
+        /* Layout */
+        .api-layout {
+            display: flex;
+            min-height: calc(100vh - var(--nav-height));
+            padding-top: var(--nav-height);
+        }
+
+        /* ---- Sidebar ---- */
+        .api-sidebar {
+            width: 280px;
+            background: #0b0b12;
+            border-right: 1px solid var(--border);
+            position: sticky;
+            top: var(--nav-height);
+            height: calc(100vh - var(--nav-height));
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        .api-sidebar::-webkit-scrollbar { width: 5px; }
+        .api-sidebar::-webkit-scrollbar-track { background: transparent; }
+        .api-sidebar::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+
+        .sidebar-hdr {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .sidebar-hdr h3 {
+            margin: 0;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+        }
+
+        /* Language toggle */
+        .lang-sw {
+            display: flex;
+            gap: 1px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .lang-sw a {
+            padding: 3px 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            background: var(--bg-elevated);
+            text-decoration: none;
+            transition: all 0.12s;
+        }
+        .lang-sw a.on {
+            background: var(--primary);
+            color: #fff;
+        }
+        .lang-sw a:hover:not(.on) {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+        }
+
+        /* Namespace tree */
+        .ns-tree { padding: 6px 0 20px; }
+
+        .ns-group { margin-bottom: 1px; }
+
+        .ns-hd {
+            display: flex;
+            align-items: center;
+            padding: 7px 16px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.1s;
+        }
+        .ns-hd:hover { background: rgba(255,255,255,0.025); }
+
+        .ns-arr {
+            width: 14px;
+            font-size: 0.5rem;
+            color: #555;
+            transition: transform 0.15s;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+        .ns-hd.open .ns-arr { transform: rotate(90deg); }
+
+        .ns-nm {
+            font-size: 0.84rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        .ns-hd.hi .ns-nm { color: var(--primary); }
+
+        .ns-ch {
+            display: none;
+            padding: 2px 0 4px;
+        }
+        .ns-hd.open + .ns-ch { display: block; }
+
+        .ns-ch a {
+            display: block;
+            padding: 3px 16px 3px 38px;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.1s, background 0.1s;
+            border-left: 2px solid transparent;
+        }
+        .ns-ch a:hover {
+            color: var(--text-primary);
+            background: rgba(255,255,255,0.02);
+        }
+        .ns-ch a.cur {
+            color: var(--text-primary);
+            background: rgba(255,107,53,0.07);
+            border-left-color: var(--primary);
+            font-weight: 600;
+        }
+
+        /* ---- Content ---- */
+        .api-main {
+            flex: 1;
+            padding: 36px 56px 80px;
+            max-width: 880px;
+            min-width: 0;
+        }
+
+        /* H1 — class name */
+        .api-main h1 {
+            font-size: 1.85rem;
+            font-weight: 700;
+            margin: 0 0 4px;
+            padding: 0;
+            border: none;
+            color: var(--text-primary);
+        }
+
+        /* "class in Package" subtitle */
+        .api-main .class-info {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            margin-bottom: 22px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--border);
+        }
+        .api-main .class-info b { color: var(--text-secondary); }
+        .api-main .class-info a { color: var(--primary); }
+
+        /* H2 — section headers */
+        .api-main h2 {
+            font-size: 0.92rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted);
+            margin: 30px 0 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .api-main h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin: 18px 0 6px;
+        }
+
+        /* Paragraphs */
+        .api-main p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.75;
+            margin-bottom: 12px;
+        }
+
+        .api-main blockquote {
+            margin: 12px 0;
+            padding: 10px 16px;
+            background: rgba(255,107,53,0.04);
+            border-left: 3px solid var(--primary);
+            border-radius: 0 4px 4px 0;
+        }
+        .api-main blockquote p { margin: 0; font-size: 0.85rem; }
+
+        /* Tables — Unity style: hidden header, 2-col */
+        .api-main table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 4px 0 18px;
+        }
+        .api-main thead { display: none; }
+
+        .api-main tbody tr {
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .api-main tbody tr:last-child { border-bottom: none; }
+
+        .api-main td {
+            padding: 7px 0;
+            font-size: 0.86rem;
+            vertical-align: top;
+        }
+        .api-main td:first-child {
+            width: 200px;
+            padding-right: 20px;
+            color: var(--primary);
+            font-size: 0.86rem;
+            font-weight: 500;
+        }
+        .api-main td:last-child { color: var(--text-secondary); }
+        .api-main td a { color: var(--primary); }
+        .api-main tbody tr:hover { background: rgba(255,255,255,0.012); }
+
+        /* Inline code — normal font, subtle highlight */
+        .api-main code {
+            font-family: inherit;
+            font-size: inherit;
+            background: rgba(255,255,255,0.06);
+            padding: 1px 5px;
+            border-radius: 3px;
+            color: var(--primary-light);
+        }
+
+        /* Code blocks */
+        .api-main pre {
+            background: #0d0d15;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px 20px;
+            overflow-x: auto;
+            margin: 10px 0 18px;
+        }
+        .api-main pre code {
+            font-family: var(--font-mono);
+            background: none;
+            padding: 0;
+            font-size: 0.83rem;
+            line-height: 1.65;
+            color: var(--text-secondary);
+        }
+
+        /* Lists */
+        .api-main ul, .api-main ol { padding-left: 18px; margin-bottom: 12px; }
+        .api-main li {
+            margin-bottom: 4px;
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+            line-height: 1.6;
+        }
+
+        .api-main hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 26px 0;
+        }
+
+        /* ---- Footer ---- */
+        .api-ft { margin-left: 280px; }
+        .api-ft .footer-bottom p { font-size: 0.8rem; }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 1024px) {
+            .api-sidebar { width: 240px; }
+            .api-main { padding: 28px 32px 60px; }
+            .api-ft { margin-left: 240px; }
+        }
+        @media (max-width: 768px) {
+            .api-layout { flex-direction: column; }
+            .api-sidebar {
+                width: 100%; position: relative; top: 0;
+                height: auto; max-height: 50vh;
+                border-right: none; border-bottom: 1px solid var(--border);
+            }
+            .api-main { padding: 20px; max-width: 100%; }
+            .api-ft { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links">
+                <a href="/index.html">首页</a>
+                <a href="/index.html#system">特性</a>
+                <a href="/index.html#capabilities">能力</a>
+                <a href="/roadmap.html">路线图</a>
+                <a href="/wiki.html" class="active">文档</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank">
+                    <i class="fab fa-github"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell" style="padding-top: calc(var(--nav-height) + 60px); min-height: 80vh; padding-bottom: 80px;">
+        <div class="container" style="max-width: 860px; margin: 0 auto;">
+            <div class="api-main" style="padding: 0; max-width: none;">
+                <h1 id="_1">动画工作流<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>Infernux 把动画数据分为 Clip 与状态机控制器。运行时 Animator 读取控制器，驱动 Sprite 帧或骨骼模型。</p>
+<p><strong>预计时间：</strong> 25–35 分钟<br />
+<strong>完成标准：</strong> 默认状态在 Game 视图中播放，并且明确的参数或 Trigger 能切换到第二个状态。</p>
+<h2 id="_2">选择路径<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>路径</th>
+<th>Clip</th>
+<th>Renderer</th>
+<th>运行时组件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2D Sprite</td>
+<td><code>.animclip2d</code></td>
+<td><code>SpriteRenderer</code></td>
+<td><code>SpiritAnimator</code></td>
+</tr>
+<tr>
+<td>3D 骨骼</td>
+<td><code>.animclip3d</code> 或导入模型的嵌入 Take</td>
+<td><code>SkinnedMeshRenderer</code></td>
+<td><code>SkeletalAnimator</code></td>
+</tr>
+</tbody>
+</table>
+<p>两者都使用 <code>.animfsm</code> 控制器。<code>SpiritAnimator</code> 是当前 Sprite 动画组件的公开名称。</p>
+<h2 id="1-renderer">1. 准备 Renderer<a class="headerlink" href="#1-renderer" title="Permanent link">&para;</a></h2>
+<p>2D 路径先完成<a href="2d-foundations.html">2D 基础</a>，确认 SpriteRenderer 能手工显示所需的每个 Sprite Sheet 帧。</p>
+<p>3D 路径导入绑定骨骼的模型，确认 SkinnedMeshRenderer 能显示 Bind Pose。在创建状态前检查模型的嵌入动画 Take；嵌入 Take 可能通过模型的虚拟子动画身份引用。</p>
+<p>在 Renderer 和资源引用能独立工作之前，不要先排查 Animator。</p>
+<h2 id="2-clip">2. 创建 Clip<a class="headerlink" href="#2-clip" title="Permanent link">&para;</a></h2>
+<p>2D 路径打开 <strong>Window → 2D Animation Clip Editor</strong>，选择 Sprite Sheet 纹理，设置 FPS 和帧序列，预览后保存为 <code>Assets</code> 内的 <code>.animclip2d</code>。</p>
+<p>3D 路径创建或选择一个标识源模型与 Take 的 <code>.animclip3d</code>，在资源详情中确认 Take 时长与 Bind Pose 骨骼信息。</p>
+<p>Idle/Run 循环使用 Loop。Hit、Death 等一次性 Clip 在状态机应于结束后离开时保持非循环。</p>
+<h2 id="3">3. 构建状态机<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<p>在 Animation State Machine Editor 中创建或打开 <code>.animfsm</code>；双击该资源也会打开 Graph。</p>
+<ol>
+<li>选择正确的 2D 或 3D 控制器模式。</li>
+<li>至少添加两个状态，并为每个状态分配 Clip/Take。</li>
+<li>明确指定默认状态。</li>
+<li>添加一个参数或 Trigger。</li>
+<li>创建一条过渡，第一条条件保持简单。</li>
+<li>决定过渡是否等待 Exit Time。</li>
+<li>保存，并确认 <code>.meta</code> 与资源仍在一起。</li>
+</ol>
+<p>同时具有复杂条件和 Exit Time 的过渡很难排查，应先分别证明一种机制。</p>
+<h2 id="4-animator">4. 挂载 Animator<a class="headerlink" href="#4-animator" title="Permanent link">&para;</a></h2>
+<p>把 <code>SpiritAnimator</code> 加到 SpriteRenderer 所在 GameObject，或把 <code>SkeletalAnimator</code> 加到 SkinnedMeshRenderer 所在对象。组件元数据会强制要求对应 Renderer。</p>
+<p>把 <code>.animfsm</code> 分配给 <code>controller</code>，第一次运行保持 <code>auto_play</code> 开启、播放速度为 <code>1.0</code>。<code>SkeletalAnimator.cross_fade_duration</code> 控制 3D 状态间默认混合时长。</p>
+<h2 id="5">5. 驱动过渡<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<p>从玩法组件调用运行时参数 API：</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux</span><span class="w"> </span><span class="kn">import</span> <span class="n">InxComponent</span><span class="p">,</span> <span class="n">SpiritAnimator</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">class</span><span class="w"> </span><span class="nc">AnimationDriver</span><span class="p">(</span><span class="n">InxComponent</span><span class="p">):</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">animator</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">game_object</span><span class="o">.</span><span class="n">get_component</span><span class="p">(</span><span class="n">SpiritAnimator</span><span class="p">)</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">begin_move</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">animator</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">animator</span><span class="o">.</span><span class="n">set_bool</span><span class="p">(</span><span class="s2">&quot;moving&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">react</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">animator</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">animator</span><span class="o">.</span><span class="n">set_trigger</span><span class="p">(</span><span class="s2">&quot;react&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>3D 路径把组件类型替换为 <code>SkeletalAnimator</code>。参数从控制器初始化，并在每次 Update 中由过渡求值。</p>
+<h2 id="6">6. 验证可观察状态<a class="headerlink" href="#6" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>current_state</code> 与预期 Graph 节点一致。</li>
+<li>Clip 推进时 <code>is_playing</code> 为 true。</li>
+<li><code>normalized_time</code> 从 0 向 1 推进，只在循环状态中回绕。</li>
+<li>Trigger 被过渡消耗，不会永久触发。</li>
+<li>2D 帧索引或活动 3D Take 发生可见变化。</li>
+<li>停止 Play 并重新打开场景后，控制器引用仍存在。</li>
+</ul>
+<h2 id="_3">常见失败<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="_4">默认动画没有开始<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>检查 <code>auto_play</code>、控制器引用、明确默认状态、匹配的 Renderer，以及 Console 第一条错误。</p>
+<h3 id="_5">状态改变但图片或骨骼不变<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<p>2D 检查 Clip 帧索引是否存在于导入 Sprite 元数据中；3D 检查 Take 是否属于指定模型且骨架兼容。</p>
+<h3 id="_6">过渡始终不触发<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p>确认参数拼写与类型、条件方向、Exit Time 阈值、当前 normalized time，以及 Trigger 是否已被消耗。</p>
+<h2 id="_7">当前文档边界<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p><code>SpiritAnimator</code>、<code>SkeletalAnimator</code> 与 Clip/FSM 数据模型是公开运行时类，但当前 API 索引还没有它们的生成符号页。在匹配 Stub 补齐前，本 Learn 页面及其 <code>source_paths</code> 是权威 Preview 指南。</p>
+<h2 id="_8">下一步<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<p>谨慎添加 Animation Event 表达特定帧玩法信号，或继续<a href="audio-workflow.html">音频工作流</a>，从同一玩法动作触发一次性音效。</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <script src="/js/main.js?v=2"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.ns-hd').forEach(function(h) {
+            h.addEventListener('click', function() { this.classList.toggle('open'); });
+        });
+    });
+    </script>
+</body>
+</html>

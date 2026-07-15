@@ -24,6 +24,12 @@
 #define INFERNUX_FRAME_PROFILE_WINDOW 120
 #endif
 
+// A frame-count-only reporting cadence floods logs when a Debug Player runs
+// uncapped. Keep the minimum sample window, but emit at most once per interval.
+#ifndef INFERNUX_FRAME_PROFILE_REPORT_INTERVAL_SECONDS
+#define INFERNUX_FRAME_PROFILE_REPORT_INTERVAL_SECONDS 5
+#endif
+
 #ifndef INFERNUX_FRAME_PROFILE_DETAIL
 #define INFERNUX_FRAME_PROFILE_DETAIL 1
 #endif

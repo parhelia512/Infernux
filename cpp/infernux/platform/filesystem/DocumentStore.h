@@ -136,6 +136,7 @@ class DocumentStore final
         std::shared_ptr<DocumentWriteTicket> ticket;
     };
 
+    static std::string ResolvePath(const std::string &path);
     static std::string NormalizePath(const std::string &path);
     void StartWorkerLocked();
     void WorkerMain();

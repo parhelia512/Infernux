@@ -50,6 +50,7 @@ class EditorPanel : public InxGUIRenderable
         std::string label = m_title + "###" + m_windowId;
 
         bool visible = ImGui::Begin(label.c_str(), &m_isOpen, GetWindowFlags());
+        ctx->RecordSemanticWindow("editor_panel", m_title, m_windowId);
 
         if (visible) {
             OnRenderContent(ctx);

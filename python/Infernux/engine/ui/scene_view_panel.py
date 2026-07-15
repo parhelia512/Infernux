@@ -387,7 +387,7 @@ class SceneViewPanel(SceneViewGizmoMixin, SceneViewCameraMixin, SceneViewOverlay
                 native.request_full_speed_frame()
 
         # Track focus to auto-exit UI Mode
-        focused = (ClosablePanel.get_active_panel_id() == self.window_id) or ctx.is_window_focused(0)
+        focused = (ClosablePanel.get_active_panel_id() == self.window_id) or self._is_window_or_child_focused(ctx)
         if not focused and self._camera_capture_active:
             self._is_camera_dragging = False
             self._end_camera_capture(restore_cursor=False)
@@ -448,7 +448,7 @@ class SceneViewPanel(SceneViewGizmoMixin, SceneViewCameraMixin, SceneViewOverlay
         if ctx.want_text_input():
             return
 
-        panel_active = (ClosablePanel.get_active_panel_id() == self.window_id) or ctx.is_window_focused(0)
+        panel_active = (ClosablePanel.get_active_panel_id() == self.window_id) or self._is_window_or_child_focused(ctx)
         if not (panel_active or is_scene_hovered):
             return
 

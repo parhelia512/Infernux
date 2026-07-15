@@ -1046,7 +1046,11 @@ void RegisterSceneBindings(py::module_ &m)
     py::class_<PyComponentProxy, Component>(m, "PyComponentProxy")
         .def("get_py_component", &PyComponentProxy::GetPyComponent, "Get the underlying Python component")
         .def("get_py_type_name", &PyComponentProxy::GetPyTypeName, "Get the Python type name")
-        .def("is_valid", &PyComponentProxy::IsValid, "Check if this proxy holds a valid Python component");
+        .def("is_valid", &PyComponentProxy::IsValid, "Check if this proxy holds a valid Python component")
+        .def_property_readonly("overrides_update", &PyComponentProxy::OverridesUpdate)
+        .def_property_readonly("has_coroutine_scheduler", &PyComponentProxy::HasCoroutineScheduler)
+        .def_property_readonly("update_dispatch_count", &PyComponentProxy::GetUpdateDispatchCount)
+        .def_property_readonly("update_forward_count", &PyComponentProxy::GetUpdateForwardCount);
 
     // ========================================================================
     // CameraProjection enum
@@ -1581,8 +1585,11 @@ void RegisterSceneBindings(py::module_ &m)
             "Serialize GameObject to a Python document")
         .def(
             "_commit_document",
-            [](GameObject &object, py::handle document) { return object.DeserializeDocument(PythonToJson(document)); },
-            py::arg("document"), "Internal native subtree commit; Python callers must preflight first")
+            [](GameObject &object, py::handle document, bool preserveDocumentIds) {
+                return object.DeserializeDocument(PythonToJson(document), preserveDocumentIds);
+            },
+            py::arg("document"), py::arg("preserve_document_ids") = true,
+            "Internal native subtree commit; Python callers must preflight first")
         // ---- Hierarchy component search (Unity: GetComponentInChildren/Parent) ----
         .def(
             "get_component_in_children",

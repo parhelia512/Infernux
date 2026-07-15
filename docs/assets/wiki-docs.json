@@ -35,6 +35,514 @@
         ],
         "date": "2026-04-16"
       }
+    },
+    {
+      "title": "2D Foundations",
+      "summary": "Build a small, testable 2D scene: one orthographic Camera, one visible sprite, and one component that moves the sprite without depending on frame rate.",
+      "content": "\n# 2D Foundations\n\nBuild a small, testable 2D scene: one orthographic Camera, one visible sprite, and one component that moves the sprite without depending on frame rate.\n\n**Estimated time:** 15–20 minutes  \n**Completion check:** the sprite is visible, keeps its proportions, and moves at the same apparent speed when the frame rate changes.\n\n## Before you start\n\nComplete [Getting Started](getting-started.md) and [Your First Component](first-component.md). Prepare a PNG texture with transparency and keep the Console open.\n\n## 1. Import the sprite texture\n\nCopy the image into the project's `Assets` hierarchy and select it in the Project panel.\n\n- Set its texture type to **UI** only when it is intended for screen UI; a world sprite can use the normal/default texture path.\n- Keep sRGB enabled for color artwork.\n- Use Clamp when transparent edge pixels should not repeat.\n- Disable mipmaps only when the sprite will remain at a fixed screen size; moving or zooming sprites can benefit from them.\n\nKeep the image and its `.meta` file together. See [Assets and `.meta` Files](../manual/assets-and-meta.md) for the identity rules.\n\n## 2. Configure an orthographic Camera\n\nCreate or select the scene Camera and change its projection to orthographic. Position it so that it faces the XY plane where the sprite will live.\n\n`orthographic_size` controls the visible world height rather than perspective zoom. Choose a size deliberately, then use the Game view to verify the target aspect ratios. A sprite that looks correct only in the Scene view is not yet validated.\n\n## 3. Add a SpriteRenderer\n\nCreate a GameObject for the sprite and add **Rendering / Sprite Renderer**. Assign the imported texture in the sprite field.\n\nThe current SpriteRenderer draws a sprite-sheet frame on a Quad mesh. Its important controls are:\n\n- `frame_index` — which frame of a sprite sheet is visible;\n- `sprite_color` — RGBA tint multiplied with the texture;\n- `flip_x` / `flip_y` — visual mirroring;\n- `casts_shadows` / `receives_shadows` — interaction with lit sprite materials.\n\nStart with a white tint and frame 0. Use Transform position and scale to establish a consistent world-unit convention for the project.\n\n## 4. Add a movement check\n\nAttach this component to the sprite:\n\n```python\nfrom Infernux import InxComponent, Vector3, serialized_field\n\n\nclass SpriteDrift(InxComponent):\n    speed: float = serialized_field(default=2.0, range=(0.0, 10.0))\n\n    def update(self, delta_time: float) -> None:\n        self.transform.translate(Vector3(self.speed * delta_time, 0.0, 0.0))\n```\n\nEnter Play mode and change `speed` before the next run. The `delta_time` multiplier makes the value mean world units per second.\n\n## 5. Validate the scene\n\n- The Game view, not only the Scene view, shows the sprite.\n- Transparency has no repeated edge pixels.\n- The sprite does not stretch when the Game view aspect ratio changes.\n- Movement remains frame-rate independent.\n- No missing texture, material, or component error appears in the Console.\n\n## Common failures\n\n### The sprite is invisible\n\nCheck Camera direction and clipping range, the object's Z relationship to the Camera, texture assignment, active hierarchy state, and the current render pipeline.\n\n### The image is tinted unexpectedly\n\nSet `sprite_color` to white with full alpha and verify the source texture's color-space import setting.\n\n### A sprite sheet shows the wrong tile\n\nConfirm the imported metadata exposes the expected frames, then choose a valid `frame_index`. An Animator can drive this field later.\n\n## Next step\n\nContinue with [Animation Workflow](animation-workflow.md) to build an `.animclip2d` and drive it with `SpiritAnimator`, or add [Input and Time](../manual/input-and-time.md) to control the object.\n",
+      "groupKey": "learn",
+      "groupTitle": "Learn",
+      "url": "wiki/site/en/learn/2d-foundations.html",
+      "source": "en/learn/2d-foundations.md",
+      "meta": {
+        "category": "Learn",
+        "tags": [
+          "2d",
+          "sprite",
+          "camera",
+          "beginner"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "new-user",
+          "agent"
+        ],
+        "agent_summary": "Build a minimal 2D scene with an orthographic Camera, SpriteRenderer, imported texture, predictable world scale, and a frame-rate-independent movement check.",
+        "source_paths": [
+          "python/Infernux/components/builtin/sprite_renderer.py",
+          "python/Infernux/components/builtin/camera.pyi",
+          "python/Infernux/core/asset_types.py"
+        ]
+      }
+    },
+    {
+      "title": "3D Foundations",
+      "summary": "Create a minimal lit 3D scene whose rendering inputs are easy to inspect: one Camera, one mesh, one material, one Light, and one active RenderStack.",
+      "content": "\n# 3D Foundations\n\nCreate a minimal lit 3D scene whose rendering inputs are easy to inspect: one Camera, one mesh, one material, one Light, and one active RenderStack.\n\n**Estimated time:** 20–25 minutes  \n**Completion check:** the Game view shows a shaded object with a predictable material and a visible response when the Light moves.\n\n## Before you start\n\nComplete [Getting Started](getting-started.md). Read [Rendering and RenderStack](../manual/rendering-and-renderstack.md) if the project uses a non-default pipeline.\n\n## 1. Establish the render path\n\nConfirm the scene contains one active RenderStack and select a pipeline. Default Forward is a useful first scene because its opaque, sky, transparent, and post-effect order is explicit. Leave optional effects disabled until the base object renders.\n\nCreate a perspective Camera. Set its near/far clipping planes tightly enough for the scene scale, then position it toward the world origin. Excessively tiny near clipping and enormous far clipping reduce depth precision.\n\n## 2. Create a visible mesh\n\nCreate a primitive GameObject or import a model, then confirm it has a `MeshRenderer`.\n\n- A primitive uses an inline built-in mesh.\n- An imported model uses a mesh asset GUID and may expose multiple material slots.\n- `casts_shadows` controls shadow contribution.\n- `receives_shadows` controls whether other objects shade its surface.\n\nFor imported models, inspect `mesh_name`, vertex/index counts, submeshes, and material slot names before diagnosing the shader.\n\n## 3. Assign a material\n\nUse a lit material for the first test. Keep it opaque, assign a visible base color/texture, and leave custom render-state overrides at defaults.\n\nTransparent surfaces add draw-order and overdraw constraints. Alpha clipping is a better first choice for hard-edged leaves, fences, or cutout shapes.\n\n## 4. Add a Light\n\nCreate a Light and start with one simple light source. Set intensity to a moderate value, place it where its direction or range is obvious, and enable shadows only after unshadowed lighting works.\n\nChange the Light position, direction, color, or intensity in Edit mode and run again. A visible response proves the object is using a lit path rather than only an unlit fallback.\n\n## 5. Add a rotation check\n\nReuse the component from [Your First Component](first-component.md), or attach this compact version:\n\n```python\nfrom Infernux import InxComponent, Vector3\n\n\nclass DisplayTurntable(InxComponent):\n    def update(self, delta_time: float) -> None:\n        self.transform.rotate(Vector3(0.0, 30.0 * delta_time, 0.0))\n```\n\nThe moving highlight makes normals, lighting, and material response easier to inspect.\n\n## 6. Validate in order\n\n1. Mesh silhouette is visible with effects disabled.\n2. The material is assigned to the intended slot.\n3. Moving the Light changes the surface.\n4. Shadows appear only when both the Light and renderer settings allow them.\n5. The Camera clipping range contains the object throughout rotation.\n6. The Console has no missing shader, mesh, material, or RenderGraph resource error.\n\n## Common failures\n\n### The Game view is empty\n\nCheck the active Camera, Camera direction and clipping, active hierarchy state, RenderStack, mesh assignment, and material in that order.\n\n### The object is magenta, black, or flat\n\nVerify the shader and texture references resolve, then confirm a compatible Light exists. Disable custom effects before changing many material values at once.\n\n### Shadows disappear or flicker\n\nCheck Light shadow mode, renderer cast/receive settings, bias, shadow resolution, scene scale, and Camera range. Change one variable at a time.\n\n## Next step\n\nImport a rigged model and continue with [Animation Workflow](animation-workflow.md), or study [Assets and `.meta` Files](../manual/assets-and-meta.md) before moving production content.\n",
+      "groupKey": "learn",
+      "groupTitle": "Learn",
+      "url": "wiki/site/en/learn/3d-foundations.html",
+      "source": "en/learn/3d-foundations.md",
+      "meta": {
+        "category": "Learn",
+        "tags": [
+          "3d",
+          "mesh",
+          "material",
+          "light",
+          "camera"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "new-user",
+          "agent"
+        ],
+        "agent_summary": "Build and validate a minimal lit 3D scene using a perspective Camera, MeshRenderer, material, Light, shadows, and RenderStack.",
+        "source_paths": [
+          "python/Infernux/components/builtin/mesh_renderer.pyi",
+          "python/Infernux/components/builtin/camera.pyi",
+          "python/Infernux/components/builtin/light.pyi",
+          "python/Infernux/core/material.pyi",
+          "python/Infernux/renderstack"
+        ]
+      }
+    },
+    {
+      "title": "Animation Workflow",
+      "summary": "Infernux separates animation data into clips and a state-machine controller. A runtime Animator component reads the controller and drives either sprite frames or a skinned model.",
+      "content": "\n# Animation Workflow\n\nInfernux separates animation data into clips and a state-machine controller. A runtime Animator component reads the controller and drives either sprite frames or a skinned model.\n\n**Estimated time:** 25–35 minutes  \n**Completion check:** the default state plays in Game view and a deliberate parameter or trigger changes to a second state.\n\n## Choose the path\n\n| Path | Clip | Renderer | Runtime component |\n|---|---|---|---|\n| 2D sprite | `.animclip2d` | `SpriteRenderer` | `SpiritAnimator` |\n| 3D skeletal | `.animclip3d` or an imported embedded take | `SkinnedMeshRenderer` | `SkeletalAnimator` |\n\nBoth use an `.animfsm` controller. `SpiritAnimator` is the current public component name for sprite animation.\n\n## 1. Prepare the renderer\n\nFor 2D, complete [2D Foundations](2d-foundations.md) and confirm the SpriteRenderer can display every required sprite-sheet frame manually.\n\nFor 3D, import a rigged model and confirm the SkinnedMeshRenderer shows the model in bind pose. Inspect the model's embedded animation takes before creating states; embedded takes may be referenced through the model's virtual sub-animation identity.\n\nDo not diagnose the Animator until the renderer and asset references work on their own.\n\n## 2. Create clips\n\nFor 2D, open **Window → 2D Animation Clip Editor**. Choose the sprite-sheet texture, set FPS and frame sequence, preview it, then save as `.animclip2d` inside `Assets`.\n\nFor 3D, create or select an `.animclip3d` that identifies the source model and take. Confirm the take duration and bind-pose bone information in the asset details.\n\nUse looping for idle/run cycles. Leave one-shot clips such as hit reactions or a death animation non-looping when the state machine should leave them after completion.\n\n## 3. Build the state machine\n\nCreate or open an `.animfsm` in the Animation State Machine Editor. Double-clicking the asset also opens the graph.\n\n1. Select the correct 2D or 3D controller mode.\n2. Add at least two states and assign one clip/take to each.\n3. Choose an explicit default state.\n4. Add one parameter or trigger.\n5. Create a transition and keep its first condition simple.\n6. Decide whether the transition waits for exit time.\n7. Save the asset and check that its `.meta` remains beside it.\n\nA transition with both an unclear condition and exit-time gating is hard to diagnose. Prove one mechanism first, then combine them.\n\n## 4. Attach the Animator\n\nAdd `SpiritAnimator` to the same GameObject as SpriteRenderer, or `SkeletalAnimator` to the same object as SkinnedMeshRenderer. The required-renderer relationship is enforced by the component metadata.\n\nAssign the `.animfsm` to `controller`, leave `auto_play` enabled, and use playback speed `1.0` for the first run. `SkeletalAnimator.cross_fade_duration` controls the default blend duration between 3D states.\n\n## 5. Drive a transition\n\nUse the runtime parameter API from a gameplay component:\n\n```python\nfrom Infernux import InxComponent, SpiritAnimator\n\n\nclass AnimationDriver(InxComponent):\n    def start(self) -> None:\n        self.animator = self.game_object.get_component(SpiritAnimator)\n\n    def begin_move(self) -> None:\n        if self.animator is not None:\n            self.animator.set_bool(\"moving\", True)\n\n    def react(self) -> None:\n        if self.animator is not None:\n            self.animator.set_trigger(\"react\")\n```\n\nFor 3D, replace the component type with `SkeletalAnimator`. Parameters are seeded from the controller and evaluated by transitions every update.\n\n## 6. Verify observable state\n\n- `current_state` matches the expected graph node.\n- `is_playing` is true while a clip is advancing.\n- `normalized_time` advances from 0 toward 1 and wraps only for looping states.\n- A trigger is consumed by the transition rather than firing forever.\n- 2D frame indices or the active 3D take visibly change.\n- Stopping Play and reopening the scene preserves the controller reference.\n\n## Common failures\n\n### Default animation does not start\n\nCheck `auto_play`, the controller reference, an explicit default state, the matching renderer component, and the first Console error.\n\n### State changes but the image or skeleton does not\n\nFor 2D, verify clip frame indices exist in the imported sprite metadata. For 3D, verify the take belongs to the assigned model and its skeleton is compatible.\n\n### A transition never fires\n\nConfirm parameter spelling and type, condition direction, exit-time threshold, current normalized time, and whether a trigger was already consumed.\n\n## Current documentation boundary\n\n`SpiritAnimator`, `SkeletalAnimator`, and the clip/FSM data models are public runtime classes, but they do not yet have generated symbol pages in the current API index. This Learn page and the listed source paths are the canonical preview guidance until matching stubs are added.\n\n## Next step\n\nAdd animation events sparingly for frame-specific gameplay signals, or continue with [Audio Workflow](audio-workflow.md) to trigger a one-shot sound from the same gameplay action.\n",
+      "groupKey": "learn",
+      "groupTitle": "Learn",
+      "url": "wiki/site/en/learn/animation-workflow.html",
+      "source": "en/learn/animation-workflow.md",
+      "meta": {
+        "category": "Learn",
+        "tags": [
+          "animation",
+          "2d",
+          "3d",
+          "fsm",
+          "animator"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "Create 2D or 3D animation clips, place them in an .animfsm controller, attach SpiritAnimator or SkeletalAnimator, and verify state, transition, event, and playback behavior.",
+        "source_paths": [
+          "python/Infernux/engine/ui/animclip2d_editor_panel.py",
+          "python/Infernux/engine/ui/animfsm_editor_panel.py",
+          "python/Infernux/core/animation_clip.py",
+          "python/Infernux/core/animation_clip3d.py",
+          "python/Infernux/core/anim_state_machine.py",
+          "python/Infernux/components/spirit_animator.py",
+          "python/Infernux/components/skeletal_animator.py"
+        ]
+      }
+    },
+    {
+      "title": "Audio Workflow",
+      "summary": "Build a minimal audio scene with one listener, one persistent track, and one transient sound effect. The current reliable decode path is WAV; do not assume MP3 or OGG support fr...",
+      "content": "\n# Audio Workflow\n\nBuild a minimal audio scene with one listener, one persistent track, and one transient sound effect. The current reliable decode path is WAV; do not assume MP3 or OGG support from older UI text.\n\n**Estimated time:** 15–20 minutes  \n**Completion check:** track 0 can loop or stop predictably, and repeated one-shot playback uses the source pool without creating temporary GameObjects.\n\n## Before you start\n\nPrepare short WAV files for a looping ambience and a one-shot effect. Complete [Assets and `.meta` Files](../manual/assets-and-meta.md) so that clip GUIDs remain stable.\n\n## 1. Import and inspect WAV clips\n\nCopy the files into `Assets/Audio`. Select each asset and confirm its metadata.\n\nAudio import settings include:\n\n- `force_mono` for content intended to behave as a single-channel spatial source;\n- `load_in_background` for non-blocking load policy;\n- `quality` and a declared compression format;\n- the `.meta` GUID used by scene references.\n\nAt runtime, verify `AudioClip.is_loaded`, duration, sample rate, and channel count when a clip behaves unexpectedly.\n\n## 2. Place one AudioListener\n\nAdd an AudioListener to the GameObject representing the listening position, normally the active Camera or player head. Keep one intended active listener in the scene.\n\nMoving the listener changes spatial attenuation. For menu or effectively “2D” audio, place the AudioSource on or near the listener rather than assuming a non-spatial mode that is not exposed.\n\n## 3. Configure an AudioSource\n\nCreate an AudioSource GameObject and assign the ambience to track 0. `AudioSource` is multi-track rather than a single `clip` field.\n\n- `track_count` is from 1 to 16.\n- `play_on_awake` automatically starts only track 0.\n- `loop` applies when tracks reach their end.\n- `volume`, `pitch`, and `mute` affect the source.\n- `min_distance` and `max_distance` define spatial attenuation range.\n- `one_shot_pool_size` limits concurrent transient voices.\n\nStart with volume `1`, pitch `1`, a non-zero distance range, and no mute.\n\n## 4. Control playback from gameplay\n\n```python\nfrom Infernux import AudioSource, InxComponent\nfrom Infernux.core.audio_clip import AudioClip\n\n\nclass AudioDemo(InxComponent):\n    def start(self) -> None:\n        self.source = self.game_object.get_component(AudioSource)\n        self.click = AudioClip.load(\"Assets/Audio/click.wav\")\n\n    def play_click(self) -> None:\n        if self.source is not None and self.click is not None:\n            self.source.play_one_shot(self.click, volume_scale=0.8)\n```\n\nUse `play(track_index)`, `pause`, `un_pause`, and `stop` for persistent tracks. Use `play_one_shot` for overlapping effects; do not create and destroy an AudioSource for every click or impact.\n\nKeep loaded clips alive as long as the source may use them. A context manager or manual `unload()` is unsafe while playback still references the clip.\n\n## 5. Validate behavior\n\n- Exactly one intended listener receives the scene.\n- Track 0 starts only when configured to do so.\n- Looping has no accidental restart from repeated gameplay calls.\n- Walking beyond `max_distance` attenuates the source as expected.\n- Several rapid one-shots overlap up to the configured pool limit.\n- Stop and scene unload leave no sound continuing unexpectedly.\n\n## Common failures\n\n### The clip does not load\n\nUse WAV, verify the project path and `.meta`, then inspect the first audio/import error. Current runtime documentation only guarantees WAV decoding.\n\n### The sound is silent\n\nCheck listener presence, source mute/volume, per-track volume, clip assignment, listener distance, and whether the selected track is actually playing.\n\n### A one-shot stops too early\n\nKeep the `AudioClip` object alive and do not unload it while the source uses it. Also check the one-shot pool size when many sounds overlap.\n\n## Related reference\n\n- [AudioSource](../api/AudioSource.md)\n- [AudioListener](../api/AudioListener.md)\n- [AudioClip](../api/AudioClip.md)\n- [Input and Time](../manual/input-and-time.md)\n\n## Next step\n\nTrigger the one-shot from a `UIButton`, input edge, collision callback, or animation event, then verify the complete interaction in a standalone build.\n",
+      "groupKey": "learn",
+      "groupTitle": "Learn",
+      "url": "wiki/site/en/learn/audio-workflow.html",
+      "source": "en/learn/audio-workflow.md",
+      "meta": {
+        "category": "Learn",
+        "tags": [
+          "audio",
+          "listener",
+          "source",
+          "wav",
+          "sfx"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "Import a WAV clip, configure one AudioListener and a multi-track AudioSource, test looping and one-shot playback, and diagnose lifetime or spatial attenuation issues.",
+        "source_paths": [
+          "python/Infernux/core/audio_clip.pyi",
+          "python/Infernux/core/asset_types.py",
+          "python/Infernux/components/builtin/audio_source.pyi",
+          "python/Infernux/components/builtin/audio_listener.pyi"
+        ]
+      }
+    },
+    {
+      "title": "Build and Share a Project",
+      "summary": "This tutorial turns the project you tested in the editor into a Windows standalone build. It targets the 0.2.1 preview build pipeline.",
+      "content": "\n# Build and Share a Project\n\nThis tutorial turns the project you tested in the editor into a Windows standalone build. It targets the **0.2.1 preview** build pipeline.\n\n**Estimated time:** 10–20 minutes after build dependencies are available.\n\n## Before you start\n\n- Your project opens without repeating Console errors.\n- At least one scene is saved to the project.\n- The scene works in Play mode.\n- You have a writable output directory with enough free space.\n\n## 1. Open Build Settings\n\nOpen the editor's **Build Settings** window. The window owns the ordered scene list and standalone player configuration.\n\nAdd the currently open scene. An unsaved scene cannot be added, because the build needs a stable project-relative path. Add every scene that can be loaded at runtime, then order them deliberately: build index `0` is the initial scene.\n\n### Checkpoint\n\nThe scene list contains at least one valid saved scene and shows no missing-path warning.\n\n## 2. Configure the player\n\nSet the fields needed for the first build:\n\n- **Game name:** the executable and product-facing name.\n- **Output directory:** a dedicated empty or disposable build folder.\n- **Display mode:** windowed or the fullscreen mode appropriate for the project.\n- **Window size and resizable state:** the expected first-run window behavior.\n- **Icon and splash:** optional for the first validation build.\n- **Debug / JIT / LTO options:** keep preview defaults until a basic build succeeds.\n\nDo not choose the project directory itself as the output directory. A build pipeline creates and cleans generated files; keeping output separate protects project assets and makes distribution contents obvious.\n\n## 3. Build\n\nChoose **Build** to produce the standalone output, or **Build and Run** when you also want the editor to launch the result after packaging.\n\nThe pipeline validates the project and scene list, compiles the player, copies assets, processes splash content, writes a build manifest, and performs final cleanup. Follow the first reported error if the build stops; later messages may only describe cleanup after the failure.\n\n### Expected result\n\nBuild Settings reports success and provides the final output directory. That directory contains the executable plus the runtime files it needs.\n\n## 4. Test outside the editor\n\nClose or minimize the editor, then launch the executable from the output directory.\n\nVerify all of the following:\n\n- the initial scene is correct;\n- input works without the editor owning focus;\n- scene changes can load every scene included in Build Settings;\n- required textures, audio, scripts, and other assets are present;\n- window size, fullscreen behavior, title, and icon match the configuration;\n- a clean launch does not depend on files outside the output directory.\n\nTesting only through **Build and Run** is insufficient. A shareable build must also work when launched directly from its packaged directory.\n\n## 5. Prepare a shareable archive\n\nStop the game and archive the **entire output directory**, not only the `.exe`. Keep the directory structure intact. Before publishing:\n\n1. extract the archive to a different local directory;\n2. launch the extracted copy;\n3. test the start scene and one scene transition;\n4. include the engine version and known preview limitations in release notes.\n\n## Common failures\n\n### Build is disabled\n\n- Save the current scene.\n- Add at least one scene to Build Settings.\n- Choose a valid writable output directory.\n\n### Runtime starts with the wrong scene\n\nMove the desired start scene to build index `0`, save Build Settings, and rebuild.\n\n### Assets work in the editor but are missing in the build\n\n- Confirm assets live inside the project and use project-relative references.\n- Read the earliest resource-copy or loading error.\n- Rebuild into a clean output directory to avoid stale files.\n\n### The executable works only on the development machine\n\nTest the complete output on a clean Windows environment. Do not distribute a single executable copied out of its runtime directory.\n\n## Completion standard\n\nYou are done when a freshly extracted archive launches without the editor, opens the correct scene, accepts input, loads its required assets, and exits cleanly.\n\nReturn to the [Engine Map](../manual/engine-map.md) or read [Scenes and Objects](../manual/scenes-and-objects.md) before expanding to multiple levels.\n",
+      "groupKey": "learn",
+      "groupTitle": "Learn",
+      "url": "wiki/site/en/learn/build-and-share.html",
+      "source": "en/learn/build-and-share.md",
+      "meta": {
+        "category": "Learn",
+        "tags": [
+          "beginner",
+          "build",
+          "windows",
+          "release"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "new-user",
+          "agent"
+        ],
+        "agent_summary": "Add saved scenes to Build Settings, configure a Windows standalone player, build it, and verify the result outside the editor.",
+        "source_paths": [
+          "python/Infernux/engine/ui/build_settings_panel.py",
+          "python/Infernux/engine/game_builder.py"
+        ]
+      }
+    },
+    {
+      "title": "Your First Component",
+      "summary": "Infernux gameplay scripts are Python classes derived from InxComponent. This tutorial creates a component that rotates its owning object and exposes its speed in the Inspector.",
+      "content": "\n# Your First Component\n\nInfernux gameplay scripts are Python classes derived from `InxComponent`. This tutorial creates a component that rotates its owning object and exposes its speed in the Inspector.\n\n## Before you start\n\nComplete [Getting Started](getting-started.md) and open a saved scene containing a visible GameObject. Keep the Console visible while testing.\n\n## 1. Create the script\n\nCreate a Python script inside your project's script or asset area and name it `SpinComponent.py`.\n\n```python\nfrom Infernux import Debug, InxComponent, Vector3, serialized_field\n\n\nclass SpinComponent(InxComponent):\n    speed: float = serialized_field(\n        default=45.0,\n        range=(0.0, 360.0),\n        tooltip=\"Rotation speed in degrees per second\",\n    )\n\n    def start(self) -> None:\n        Debug.log(\"SpinComponent started\", self.game_object)\n\n    def update(self, delta_time: float) -> None:\n        self.transform.rotate(Vector3(0.0, self.speed * delta_time, 0.0))\n```\n\nWhat each part does:\n\n- `InxComponent` connects the Python class to the engine component lifecycle.\n- `serialized_field` makes `speed` editable and serializable in the Inspector.\n- `start()` runs before the first frame update after the component becomes active.\n- `update(delta_time)` runs every frame; multiplying by `delta_time` keeps movement frame-rate independent.\n- `self.transform` is a shortcut to the owning GameObject's Transform.\n\n## 2. Attach it to an object\n\n1. Save the script and wait for the editor to discover or reload it.\n2. Select the visible GameObject in the Hierarchy.\n3. In the Inspector, add the `SpinComponent` script component.\n4. Set **Speed** to a noticeable value such as `90`.\n5. Save the scene.\n\nIf the component does not appear, inspect the first Console error. A syntax error, an invalid import, or a class that does not inherit `InxComponent` prevents discovery.\n\n## 3. Verify the behavior\n\nEnter Play mode.\n\n### Expected result\n\n- The object rotates around its Y axis.\n- The Console logs `SpinComponent started` once.\n- Changing **Speed** before Play changes the rotation rate.\n- Stopping Play ends the update loop without repeated errors.\n\n## Lifecycle choices\n\n| Method | Use it for |\n|---|---|\n| `awake()` | One-time internal initialization when the component is created |\n| `start()` | Setup that depends on the active scene and other initialized components |\n| `update(delta_time)` | Frame-rate-dependent gameplay and input |\n| `fixed_update(fixed_delta_time)` | Fixed-step physics decisions |\n| `late_update(delta_time)` | Follow-up work after normal updates, such as camera following |\n| `on_destroy()` | Releasing resources or unregistering callbacks |\n\nSee the [InxComponent API](../api/InxComponent.md) for the complete lifecycle and component helpers.\n\n## Common mistakes\n\n### `update` never runs\n\n- Confirm the method includes `self` and `delta_time`.\n- Confirm the component and its GameObject are enabled.\n- Confirm the editor attached the class from the file you edited.\n\n### The Inspector does not show `speed`\n\n- Keep the type annotation: `speed: float`.\n- Assign `serialized_field(...)` at class scope, not inside `start()`.\n- Resolve script reload errors before re-adding the component.\n\n### The object rotates at different speeds on different machines\n\nUse `speed * delta_time`; do not add a fixed number of degrees per frame.\n\n## Next step\n\nUse the [Engine Map](../manual/engine-map.md) to choose the next system—input, physics, scenes, UI, coroutines, or rendering—and then open its exact API page.\n",
+      "groupKey": "learn",
+      "groupTitle": "Learn",
+      "url": "wiki/site/en/learn/first-component.html",
+      "source": "en/learn/first-component.md",
+      "meta": {
+        "category": "Learn",
+        "tags": [
+          "beginner",
+          "python",
+          "component",
+          "inspector"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "new-user",
+          "agent"
+        ],
+        "agent_summary": "Create an InxComponent Python script, expose a serialized speed field, attach it to a GameObject, and verify lifecycle behavior in Play mode.",
+        "source_paths": [
+          "python/Infernux/components",
+          "python/Infernux/__init__.pyi"
+        ]
+      }
+    },
+    {
+      "title": "Getting Started",
+      "summary": "This guide gets you from a fresh machine to a running Infernux scene. It targets the 0.2.1 preview on Windows. Preview builds change quickly, so confirm the version shown by the...",
+      "content": "\n# Getting Started\n\nThis guide gets you from a fresh machine to a running Infernux scene. It targets the **0.2.1 preview** on Windows. Preview builds change quickly, so confirm the version shown by the Hub or release page before diagnosing a mismatch.\n\n## What you will accomplish\n\nBy the end, you should be able to:\n\n- install or launch Infernux;\n- create or open a project;\n- recognize the Scene, Game, Hierarchy, Inspector, Project, and Console areas;\n- save a scene and enter Play mode.\n\n## 1. Get the engine\n\nUse one of the supported project entry points:\n\n1. Download the latest preview from the [Infernux releases page](https://github.com/ChenlizheMe/Infernux/releases).\n2. Follow the package instructions included with that release.\n3. Keep the Hub, editor, and project on a local writable drive while learning the workflow.\n\nIf you are developing the engine itself, use the repository build instructions instead of mixing a source build with a packaged preview.\n\n## 2. Create or open a project\n\nLaunch the Hub or editor and choose a project location. A healthy project opens without repeated errors in the Console and exposes its files in the Project panel.\n\nDo not store generated engine files beside unrelated source repositories. A dedicated project directory makes asset discovery, import, and troubleshooting much easier.\n\n## 3. Read the editor layout\n\n| Area | Purpose | First check |\n|---|---|---|\n| Scene | Edit the world and select objects visually | Can you orbit or frame the scene? |\n| Game | Preview the active camera output | Does it change when Play mode starts? |\n| Hierarchy | Inspect objects in the current scene | Can you select an object by name? |\n| Inspector | Edit the selected object's components | Does selection update the Inspector? |\n| Project | Browse project assets and scripts | Can you find the project's asset files? |\n| Console | Read logs, warnings, and errors | Is it free of repeating exceptions? |\n\nThe exact docking arrangement may differ between builds. Use panel names and responsibilities—not a screenshot position—as the stable mental model.\n\n## 4. Save and run a scene\n\n1. Open or create a scene.\n2. Add or select a visible object.\n3. Save the scene before entering Play mode.\n4. Start Play mode and watch the Game panel and Console.\n5. Stop Play mode before making structural changes you intend to keep.\n\n### Expected result\n\nThe editor enters and exits Play mode cleanly, the Game view updates, and the Console does not accumulate the same error every frame.\n\n## Troubleshooting\n\n### The editor does not launch\n\n- Confirm the package matches your Windows architecture.\n- Start from the release-provided launcher rather than moving individual binaries out of the package.\n- Check whether security software quarantined a runtime dependency.\n\n### The project opens but assets are missing\n\n- Confirm you opened the project root rather than a nested asset folder.\n- Avoid changing project files outside the editor while it is importing them.\n- Read the first Console error; later errors may only be consequences.\n\n### Play mode produces a blank Game view\n\n- Confirm the scene contains and enables a Camera.\n- Check that the scene you edited is the scene being played.\n- Inspect the Console for script or resource-loading errors.\n\n## Next step\n\nContinue with [Your First Component](first-component.md) to add Python gameplay behavior. For a system-oriented overview, use the [Engine Map](../manual/engine-map.md).\n",
+      "groupKey": "learn",
+      "groupTitle": "Learn",
+      "url": "wiki/site/en/learn/getting-started.html",
+      "source": "en/learn/getting-started.md",
+      "meta": {
+        "category": "Learn",
+        "tags": [
+          "beginner",
+          "editor",
+          "installation"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "new-user",
+          "agent"
+        ],
+        "agent_summary": "Install an Infernux preview, create or open a project, identify the main editor panels, save a scene, and enter Play mode.",
+        "source_paths": [
+          "README.md",
+          "packaging",
+          "python/Infernux/engine/ui"
+        ]
+      }
+    },
+    {
+      "title": "API Versioning and Compatibility",
+      "summary": "The generated API index describes one documented engine release. A compact immutable snapshot records its English symbol keys, kinds, signatures, status, and canonical URLs. The...",
+      "content": "\n# API Versioning and Compatibility\n\nThe generated API index describes one documented engine release. A compact immutable snapshot records its English symbol keys, kinds, signatures, status, and canonical URLs. The next release is compared with the nearest earlier snapshot.\n\n## Current baseline\n\n`0.2.1` is the first authoritative snapshot. There is no earlier machine-readable API baseline in the repository, so the current comparison correctly reports `comparison_available: false`. It does not infer history from file dates or commit noise.\n\n- [Current API index](https://infernux-engine.com/api-index.json)\n- [Machine-readable API changes](https://infernux-engine.com/api-changes.json)\n\n## Interpreting a future comparison\n\n| Change | Meaning | Migration response |\n|---|---|---|\n| Added | a new symbol key appears | optional adoption; check status and `since` |\n| Removed | an earlier symbol key is absent | find replacement before upgrading |\n| Changed | kind, signature, status, or `since` differs | inspect changed fields and exact API page |\n\nA change record is evidence of a structural API difference, not a complete behavioral compatibility promise. Read release notes and affected Manual/Learn pages before migration.\n\n## Release rule\n\nThe snapshot for a released version must not silently move. CI fails when the current API differs from the recorded snapshot. Maintainers must either restore the release API, update the documented release version, or explicitly record an intentional new release baseline.\n\nAgents should compare their installed engine version with `generated_for_release` before suggesting code. When no comparison exists, say so rather than inventing compatibility.\n",
+      "groupKey": "manual",
+      "groupTitle": "Manual",
+      "url": "wiki/site/en/manual/api-versioning.html",
+      "source": "en/manual/api-versioning.md",
+      "meta": {
+        "category": "Manual",
+        "tags": [
+          "api",
+          "version",
+          "compatibility",
+          "agent"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols.",
+        "source_paths": [
+          "docs/tools/build-api-diff.mjs",
+          "docs/api-snapshots",
+          "docs/api-changes.json",
+          "docs/api-index.json"
+        ]
+      }
+    },
+    {
+      "title": "Assets and .meta files",
+      "summary": "An asset has two forms of identity: its current path and a stable GUID recorded through the asset database and sidecar metadata. Paths are useful to people; GUIDs let serialized...",
+      "content": "\n# Assets and `.meta` files\n\nAn asset has two forms of identity: its current path and a stable GUID recorded through the asset database and sidecar metadata. Paths are useful to people; GUIDs let serialized references survive a rename or move.\n\n## Project workflow\n\n- Put project-owned content under the project's `Assets` hierarchy.\n- Import, move, rename, reimport, and delete through the editor or `AssetManager` mutation APIs.\n- Keep the asset and its `.meta` sidecar together in source control.\n- Do not hand-copy one asset's `.meta` onto another asset; a duplicated GUID destroys identity.\n- Review asset and metadata changes together in commits.\n\n`AssetManager.move_asset()` is not equivalent to a raw filesystem move: it updates database state and references. `delete_asset()` also evicts loaded state and clears matching active component references. Use filesystem manipulation only for recovery with the editor closed and verify the result after rescan.\n\n## References and loading\n\n`AssetRefBase` stores a `guid` plus a human-readable `path_hint`. `TextureRef`, `MaterialRef`, `ShaderRef`, and `AudioClipRef` communicate the expected type. `resolve()` returns the current loaded object or `None` when missing.\n\nFor direct loading, use the unified manager:\n\n```python\nfrom Infernux.core.assets import AssetManager\nfrom Infernux.core.texture import Texture\n\nicon = AssetManager.load(\"Assets/UI/icon.png\", Texture)\nif icon is None:\n    print(\"Icon could not be loaded\")\n```\n\n`load_by_guid()` is appropriate when a stable serialized identifier is already available. `find_assets()` matches project assets by filename pattern. Loading is cached; call `invalidate_path`, `invalidate`, or `flush` only when tooling has changed files outside the normal import flow.\n\n## Import settings\n\nTexture metadata includes type, wrap/filter mode, mipmap generation, sRGB interpretation, maximum size, and anisotropy. Audio and mesh assets have their own typed settings.\n\n- Color textures normally use sRGB; data textures such as many masks do not.\n- Normal maps should use the normal-map texture type.\n- Generate mipmaps for textures viewed at varying distances; consider disabling them for fixed-resolution UI.\n- Use clamp for UI edges and repeat only when tiling is intended.\n- Apply settings through the Inspector or typed import-setting functions, then reimport.\n\n## Materials and textures\n\n`Texture.load()` is a lower-level file loader. `AssetManager.load()` adds project GUID resolution and caching, so it is the normal choice for project assets.\n\n`Material` supports lit/unlit creation, cloning, shader properties, texture assignments, surface type, alpha clipping, render state, save, and explicit `flush()`. Prefer setting a material's texture from a GUID, project path, `Texture`, or `None` through `set_texture()` rather than reaching into its native object.\n\n## Missing-reference diagnosis\n\n1. Confirm the asset and `.meta` file both exist.\n2. Check whether the GUID changed after copying or conflict resolution.\n3. Reimport and inspect the mutation result instead of repeatedly reloading.\n4. Confirm the reference type matches the asset category.\n5. If a file changed outside the editor, invalidate its cache or trigger a rescan.\n6. After deletion, expect matching active `AssetRefBase` fields to be cleared rather than silently pointing at another asset.\n\n## Related reference\n\n- [Texture](../api/Texture.md)\n- [Material](../api/Material.md)\n- [UIImage](../api/UIImage.md)\n- [Build and Share](../learn/build-and-share.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "Manual",
+      "url": "wiki/site/en/manual/assets-and-meta.html",
+      "source": "en/manual/assets-and-meta.md",
+      "meta": {
+        "category": "Manual",
+        "tags": [
+          "assets",
+          "guid",
+          "meta",
+          "import",
+          "material",
+          "texture"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "Explain project assets, GUID and path identity, .meta sidecars, typed references, import settings, safe move/delete operations, caching, and runtime loading.",
+        "source_paths": [
+          "python/Infernux/core/assets.py",
+          "python/Infernux/core/asset_ref.py",
+          "python/Infernux/core/asset_types.py",
+          "python/Infernux/engine/asset_reference_cleanup.py"
+        ]
+      }
+    },
+    {
+      "title": "Debugging and the Console",
+      "summary": "Debugging is fastest when you separate the first cause from the errors it produces later. Infernux combines Python gameplay, native runtime systems, imported assets, and editor...",
+      "content": "\n# Debugging and the Console\n\nDebugging is fastest when you separate the **first cause** from the errors it produces later. Infernux combines Python gameplay, native runtime systems, imported assets, and editor state, so one bad input can appear as several downstream failures.\n\n## The first-error rule\n\nWhen the Console contains many messages:\n\n1. stop Play mode;\n2. clear the Console;\n3. reproduce the problem once;\n4. start with the earliest warning or error;\n5. fix or isolate that cause before interpreting later messages.\n\nA script import failure can prevent component discovery, which then causes missing-reference messages, which may finally produce update errors. Debugging the final message first wastes time.\n\n## Logging deliberately\n\nUse the `Debug` class for messages that belong to the engine Console:\n\n```python\nfrom Infernux import Debug, InxComponent\n\n\nclass Door(InxComponent):\n    def start(self) -> None:\n        Debug.log(\"Door initialized\", self.game_object)\n\n    def open(self) -> None:\n        if not self.enabled:\n            Debug.log_warning(\"Ignored open request while disabled\", self.game_object)\n            return\n        Debug.log(\"Door opened\", self.game_object)\n```\n\n- `Debug.log(...)` records expected milestones or temporary observations.\n- `Debug.log_warning(...)` records a recoverable but suspicious state.\n- `Debug.log_error(...)` records a failed operation that should be investigated.\n- `Debug.log_exception(...)` preserves exception context.\n- Supplying the related object as context makes the report easier to trace.\n\nDo not log a message every frame unless you are investigating a short capture. Per-frame logs can hide the original failure and distort timing.\n\n## Diagnose a component that does not run\n\nCheck in this order:\n\n1. **Import:** does the script load without syntax or import errors?\n2. **Discovery:** does the class inherit `InxComponent`, and can the Inspector add it?\n3. **Ownership:** is it attached to the GameObject you are observing?\n4. **Activation:** are the component, GameObject, and parent hierarchy active?\n5. **Signature:** does `update` accept `(self, delta_time)` and `fixed_update` accept `(self, fixed_delta_time)`?\n6. **Play state:** are you testing behavior that only runs in Play mode?\n7. **Early return:** is a guard condition intentionally skipping the work?\n\nAdd one log in `start()` and one at the branch you expect to enter. Avoid scattering many logs until you know which lifecycle boundary fails.\n\n## Diagnose references and assets\n\nFor a missing component or object reference:\n\n- log the owner and requested type once during setup;\n- confirm the object exists in the active scene;\n- confirm the component is attached and enabled;\n- avoid relying on duplicate names;\n- invalidate or reacquire references after a scene transition.\n\nFor an asset that works in the editor but not in a standalone build:\n\n- confirm it lives inside the project;\n- confirm references are project-relative and survive a moved project directory;\n- rebuild into a clean output directory;\n- inspect the first copy, import, or load error;\n- test the entire packaged directory, not a detached executable.\n\n## Reduce the problem\n\nA useful minimal reproduction has:\n\n- one saved scene;\n- the smallest number of GameObjects and components that still fail;\n- no unrelated assets or plugins;\n- a short deterministic sequence of actions;\n- the engine version and platform;\n- expected and actual results.\n\nRemove one dependency at a time. If the failure disappears, restore only that dependency and confirm it returns. This turns a vague project failure into a testable engine or usage issue.\n\n## Report evidence\n\nUse GitHub Discussions / Q&A when you are unsure whether behavior is a defect. Use GitHub Issues when you can provide a reproducible failure.\n\nA strong issue includes:\n\n```text\nEngine version:\nOperating system:\nProject type / relevant settings:\n\nSteps to reproduce:\n1.\n2.\n3.\n\nExpected result:\nActual result:\nFirst relevant Console error:\nMinimal project or code sample:\n```\n\nRemove credentials, local usernames, private paths, and proprietary assets before posting logs or projects publicly.\n\n## Related reference\n\n- [Debug](../api/Debug.md)\n- [InxComponent](../api/InxComponent.md)\n- [Scenes and Objects](scenes-and-objects.md)\n- [Community hub](https://infernux-engine.com/community.html)",
+      "groupKey": "manual",
+      "groupTitle": "Manual",
+      "url": "wiki/site/en/manual/debugging.html",
+      "source": "en/manual/debugging.md",
+      "meta": {
+        "category": "Manual",
+        "tags": [
+          "debugging",
+          "console",
+          "logging",
+          "troubleshooting"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "A repeatable Infernux debugging workflow using the Console, Debug logging, lifecycle checks, minimal reproduction, and evidence suitable for GitHub Issues.",
+        "source_paths": [
+          "python/Infernux/debug.py",
+          "python/Infernux/engine/ui/console_utils.py",
+          "python/Infernux/components/component.py"
+        ]
+      }
+    },
+    {
+      "title": "Engine Map",
+      "summary": "Use this page when you know what you want to build but not which Infernux type or module owns it. It is a routing map, not a replacement for task tutorials or exact API signatures.",
+      "content": "\n# Engine Map\n\nUse this page when you know **what you want to build** but not which Infernux type or module owns it. It is a routing map, not a replacement for task tutorials or exact API signatures.\n\n## Core authoring model\n\n```text\nProject\n└─ Scene\n   └─ GameObject\n      ├─ Transform\n      ├─ built-in Components\n      └─ Python InxComponent scripts\n```\n\nA Scene contains GameObjects. Each GameObject always has spatial state through its Transform and gains behavior through components. Python gameplay behavior derives from `InxComponent` and participates in the engine lifecycle.\n\n## Find a system by task\n\n| I want to… | Start with | Canonical reference |\n|---|---|---|\n| Move, rotate, scale, or parent an object | Transform | [Transform](../api/Transform.md) |\n| Write Python gameplay behavior | Component lifecycle | [InxComponent](../api/InxComponent.md) |\n| Expose a value in the Inspector | Serialized fields | [serialized_field](../api/serialized_field.md) |\n| Create, find, enable, or destroy objects | Object model | [GameObject](../api/GameObject.md) |\n| Load or switch levels | Scene management | [SceneManager](../api/SceneManager.md) |\n| Read keyboard, mouse, or touch input | Input | [Input](../api/Input.md) · [KeyCode](../api/KeyCode.md) |\n| Run fixed-step physical behavior | Physics components and queries | [Physics](../api/Physics.md) · [Rigidbody](../api/Rigidbody.md) |\n| Wait across frames without blocking | Coroutines | [Coroutine](../api/Coroutine.md) · [WaitForSeconds](../api/WaitForSeconds.md) |\n| Read frame and fixed timing | Timing | [Time](../api/Time.md) |\n| Log diagnostics | Debug | [Debug](../api/Debug.md) |\n| Build runtime user interfaces | UI | [UICanvas](../api/UICanvas.md) · [UIButton](../api/UIButton.md) |\n| Configure cameras and lights | Rendering components | [Camera](../api/Camera.md) · [Light](../api/Light.md) |\n| Add post-processing | Render stack | [RenderStack](../api/RenderStack.md) |\n| Build custom render passes | Render graph | [RenderGraph](../api/RenderGraph.md) |\n| Optimize array-heavy Python loops | JIT subsystem | [JIT guide](../architecture/jit.md) · [njit](../api/njit.md) |\n\n## Component lifecycle at a glance\n\n```text\ncreated → awake → enabled → start → update / fixed_update / late_update → disabled → destroyed\n```\n\n- Use `awake()` for the component's own invariant setup.\n- Use `start()` when setup depends on the active scene.\n- Use `update(delta_time)` for regular frame work.\n- Use `fixed_update(fixed_delta_time)` for fixed-step physics decisions.\n- Use `late_update(delta_time)` for work that must follow normal updates.\n- Use `on_enable()`, `on_disable()`, and `on_destroy()` to manage external registrations and resources.\n\nLifecycle details live in the [InxComponent API](../api/InxComponent.md).\n\n## Documentation layers\n\n| Layer | Best for | Stability |\n|---|---|---|\n| Learn | Completing a small end-to-end task | Curated and version-checked |\n| Manual | Understanding concepts and system ownership | Curated and version-checked |\n| API | Exact classes, properties, methods, and signatures | Generated from current bindings and stubs |\n| Architecture | Design rationale and research context | Explanatory; may describe experimental work |\n\nWhen a guide and generated signature disagree, treat the current generated API as the signature authority and report the guide mismatch.\n\n## Preview-status rule\n\nInfernux is in preview. Before relying on a behavior:\n\n1. check the page's `since` and `last_verified` metadata;\n2. compare it with the engine version you are running;\n3. verify the exact API signature;\n4. inspect the Console for the first relevant error.\n\nFor your first practical workflow, continue to [Your First Component](../learn/first-component.md).\n",
+      "groupKey": "manual",
+      "groupTitle": "Manual",
+      "url": "wiki/site/en/manual/engine-map.html",
+      "source": "en/manual/engine-map.md",
+      "meta": {
+        "category": "Manual",
+        "tags": [
+          "overview",
+          "systems",
+          "reference"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "A routing map from common Infernux development tasks to the responsible engine systems and canonical API pages.",
+        "source_paths": [
+          "python/Infernux",
+          "docs/wiki/docs/en/api"
+        ]
+      }
+    },
+    {
+      "title": "Input and Time",
+      "summary": "Input describes what happened during the current frame. Time determines how that frame contributes to continuous behavior. Keeping those responsibilities separate produces contr...",
+      "content": "\n# Input and Time\n\nInput describes what happened during the current frame. Time determines how that frame contributes to continuous behavior. Keeping those responsibilities separate produces controls that survive changing frame rates and editor focus.\n\n## Button state is a three-part contract\n\n| Query | True when | Typical use |\n|---|---|---|\n| `get_key(key)` | the key is held | continuous movement or charging |\n| `get_key_down(key)` | the key changed to pressed this frame | jump, open, confirm |\n| `get_key_up(key)` | the key changed to released this frame | release, stop charging |\n\nThe same distinction exists for mouse buttons. A `down` or `up` query is an edge event: read it in normal frame updates, not as a persistent state.\n\n```python\nfrom Infernux import InxComponent, Vector3\nfrom Infernux.input import Input, KeyCode\n\n\nclass KeyboardMover(InxComponent):\n    speed: float = 4.0\n\n    def update(self, delta_time: float) -> None:\n        direction = 0.0\n        if Input.get_key(KeyCode.A):\n            direction -= 1.0\n        if Input.get_key(KeyCode.D):\n            direction += 1.0\n\n        self.transform.translate(Vector3(direction * self.speed * delta_time, 0.0, 0.0))\n```\n\nMultiplying by `delta_time` converts a per-second speed into the distance for this frame.\n\n## Focus and mouse coordinates\n\nThe editor and the running game can compete for keyboard and mouse input. `Input.is_game_focused()` tells you whether the Game viewport owns gameplay focus. Do not interpret editor clicks as gameplay actions.\n\n- `mouse_position` is in screen coordinates.\n- `game_mouse_position` is relative to the game viewport.\n- `get_game_mouse_frame_state(...)` returns viewport-relative position, delta, scroll, and button state together.\n\nUse game-view coordinates for runtime UI and camera picking. Convert through the active Camera when a screen point must become a world ray.\n\nCursor locking is an explicit state. Lock for relative-look controls, unlock for menus, and always provide a predictable escape path.\n\n## Time domains\n\n| Value | Meaning |\n|---|---|\n| callback `delta_time` | scaled duration of the current rendered frame |\n| `Time.fixed_delta_time` | fixed simulation interval |\n| `Time.unscaled_delta_time` | frame duration unaffected by `time_scale` |\n| `Time.time` | scaled time since game start |\n| `Time.realtime_since_startup` | wall-clock-style runtime unaffected by pause |\n| `Time.time_scale` | multiplier applied to scaled game time |\n\nUse scaled time for gameplay that should slow or pause. Use unscaled time for pause menus, accessibility prompts, and other UI that must continue while gameplay time is stopped.\n\n## Update or fixed update?\n\n- Read immediate input edges in `update(delta_time)`.\n- Apply physics decisions in `fixed_update(fixed_delta_time)`.\n- If input must drive physics, capture the intent in `update`, then consume the stored intent in `fixed_update`.\n\nDo not assume one rendered frame equals one physics step. A slow frame may require multiple fixed steps, while a fast frame may render before the next fixed step.\n\n## Common failures\n\n### A jump repeats while a key is held\n\nUse `get_key_down`, not `get_key`, for one-shot actions.\n\n### Movement speed changes with frame rate\n\nExpress speed per second and multiply by the callback's `delta_time`.\n\n### Input fires when clicking editor panels\n\nCheck game focus and use game-viewport mouse coordinates.\n\n### Pause menu animations freeze\n\nDrive them from unscaled time rather than scaled gameplay time.\n\n## Related reference\n\n- [Input](../api/Input.md)\n- [KeyCode](../api/KeyCode.md)\n- [Time](../api/Time.md)\n- [Camera](../api/Camera.md)\n- [InxComponent lifecycle](../api/InxComponent.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "Manual",
+      "url": "wiki/site/en/manual/input-and-time.html",
+      "source": "en/manual/input-and-time.md",
+      "meta": {
+        "category": "Manual",
+        "tags": [
+          "input",
+          "time",
+          "keyboard",
+          "mouse",
+          "frame"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "Explain held/down/up input semantics, game-view focus, mouse coordinates, delta time, fixed time, unscaled time, and frame-independent movement.",
+        "source_paths": [
+          "python/Infernux/input",
+          "python/Infernux/timing.pyi"
+        ]
+      }
+    },
+    {
+      "title": "Physics",
+      "summary": "Infernux physics combines components that participate in simulation with global spatial queries. The main design decision is whether an object is controlled by physics or by aut...",
+      "content": "\n# Physics\n\nInfernux physics combines components that participate in simulation with global spatial queries. The main design decision is whether an object is controlled by physics or by authored transforms.\n\n## Rigidbody and Collider roles\n\n- A **Collider** defines a shape that can be hit, overlap, block, or act as a trigger.\n- A **Rigidbody** gives the object simulated mass, velocity, gravity, constraints, and force APIs.\n- A collider without a dynamic Rigidbody is suitable for static world geometry or query-only regions.\n- A trigger reports overlap events without producing a normal physical response.\n\nKeep collider geometry close to the visible object, but do not assume detailed render meshes make good collision shapes. Prefer the simplest shape that produces the intended play behavior.\n\n## Dynamic or kinematic\n\n| Mode | Controlled by | Use for |\n|---|---|---|\n| Dynamic | forces, gravity, collisions, velocity | crates, projectiles, physically reactive characters |\n| Kinematic | authored target position/rotation | moving platforms, doors, scripted obstacles |\n| Static | fixed Transform and collider | floors, walls, level geometry |\n\nDo not move a dynamic Rigidbody by writing its Transform every frame. That bypasses normal simulation intent and can produce tunneling or unstable contact. Apply forces or velocity for dynamic bodies; use `move_position` / `move_rotation` for kinematic bodies.\n\n## Fixed-step control\n\nPhysics decisions belong in `fixed_update(fixed_delta_time)`:\n\n```python\nfrom Infernux import InxComponent, Rigidbody, Vector3\n\n\nclass Thruster(InxComponent):\n    thrust: float = 12.0\n\n    def start(self) -> None:\n        self.body = self.game_object.get_component(Rigidbody)\n\n    def fixed_update(self, fixed_delta_time: float) -> None:\n        if self.body is not None:\n            self.body.add_force(Vector3(0.0, self.thrust, 0.0))\n```\n\nThe force API already participates in the fixed simulation. Do not multiply a continuous force by render-frame `delta_time` unless the selected force mode explicitly expects an impulse value you have computed yourself.\n\n## Collisions and triggers\n\n`InxComponent` exposes paired callbacks:\n\n- `on_collision_enter`, `on_collision_stay`, `on_collision_exit` for physical contact;\n- `on_trigger_enter`, `on_trigger_stay`, `on_trigger_exit` for trigger overlap.\n\nUse enter/exit for state transitions. Use stay only when work truly needs to repeat each fixed step. Filter early by component, tag, or layer before doing expensive logic.\n\nIf no callback arrives, check both objects:\n\n1. collider shape exists and is enabled;\n2. at least one participant has the required simulated body for the intended event;\n3. trigger state matches the callback family;\n4. layers are not configured to ignore one another;\n5. the objects are actually active in the hierarchy.\n\n## Queries\n\nThe global `Physics` API supports ray, sphere, and box queries:\n\n```python\nfrom Infernux import InxComponent, Vector3\nfrom Infernux.physics import Physics\n\n\nclass GroundProbe(InxComponent):\n    def is_grounded(self) -> bool:\n        origin = self.transform.position\n        hit = Physics.raycast(origin, Vector3(0.0, -1.0, 0.0), max_distance=1.1)\n        return hit is not None\n```\n\n- Use `raycast` for a first hit along a thin line.\n- Use `raycast_all` when ordering or multiple hits matter.\n- Use `overlap_sphere` / `overlap_box` to find colliders already inside a volume.\n- Use sphere or box casts when a moving volume must detect what lies ahead.\n- Use layer masks to reduce false positives and query cost.\n- Decide explicitly whether triggers should be included.\n\n## Stability checklist\n\n- Configure mass, drag, gravity, constraints, and collision mode deliberately.\n- Use fixed updates for simulation commands.\n- Avoid per-frame Transform writes on dynamic bodies.\n- Keep layer-collision rules documented at project level.\n- Choose query distance and volume intentionally; unlimited broad queries hide mistakes.\n- Draw or log temporary probe data when a query result is surprising.\n\n## Related reference\n\n- [Physics](../api/Physics.md)\n- [Rigidbody](../api/Rigidbody.md)\n- [Collider](../api/Collider.md)\n- [BoxCollider](../api/BoxCollider.md)\n- [SphereCollider](../api/SphereCollider.md)\n- [InxComponent collision lifecycle](../api/InxComponent.md)\n- [Input and Time](input-and-time.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "Manual",
+      "url": "wiki/site/en/manual/physics.html",
+      "source": "en/manual/physics.md",
+      "meta": {
+        "category": "Manual",
+        "tags": [
+          "physics",
+          "rigidbody",
+          "collider",
+          "raycast",
+          "trigger"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "Explain Rigidbody and Collider roles, dynamic versus kinematic movement, fixed-step forces, collision/trigger callbacks, layers, and physics queries.",
+        "source_paths": [
+          "python/Infernux/physics",
+          "python/Infernux/components/builtin",
+          "python/Infernux/components/component.py"
+        ]
+      }
+    },
+    {
+      "title": "Rendering and RenderStack",
+      "summary": "Infernux separates what is rendered from how a frame is scheduled. Cameras, renderable components, lights, and materials describe scene content. A scene-level RenderStack select...",
+      "content": "\n# Rendering and RenderStack\n\nInfernux separates **what is rendered** from **how a frame is scheduled**. Cameras, renderable components, lights, and materials describe scene content. A scene-level `RenderStack` selects a pipeline, builds its RenderGraph topology, and mounts optional passes at declared injection points.\n\n## One stack, one pipeline\n\n`RenderStack` is a scene singleton component. `RenderStack.instance()` returns the active stack when one exists. Its serialized state records the pipeline class, mounted passes, and pipeline parameters.\n\nThe built-in choices serve different constraints:\n\n| Pipeline | Shape | Notable settings |\n|---|---|---|\n| Default Forward | shadow → opaque → sky → transparent | shadow resolution, MSAA, screen UI |\n| Default Deferred | G-buffer/deferred lighting topology | shadow resolution, screen UI; deferred MSAA is off |\n\nChoose a pipeline for the whole scene based on lighting, material, transparency, and antialiasing needs. Do not switch pipelines every frame.\n\n## Injection points and effects\n\nPipelines expose named `InjectionPoint` objects. In the default forward pipeline, the public points are `after_opaque`, `after_sky`, and `after_transparent`. A pass declares where it belongs and which resources it requires or modifies.\n\n`RenderStack.add_pass()` mounts a pass, while enable, remove, reorder, and move-before operations control its execution. The stack serializes that configuration, so prefer these operations or the Inspector over editing `mounted_passes_json` directly.\n\nBuilt-in full-screen effects include Bloom, Tone Mapping, Color Adjustments, White Balance, Vignette, Film Grain, Sharpen, and Chromatic Aberration. Order matters: tone mapping and color-space-sensitive effects are not generally interchangeable.\n\n## Graph lifetime\n\nThe pipeline defines stable topology and optional passes extend it. When configuration changes, `invalidate_graph()` marks the graph dirty; `build_graph()` reconstructs it before rendering. Avoid invalidation in a per-frame gameplay loop.\n\nCustom pipeline code should override `define_topology(graph)`. Custom full-screen effects should declare resource contracts and implement `setup_passes(graph, bus)` rather than manually reaching into another pass's private objects.\n\n```python\nfrom Infernux.renderstack import BloomEffect, RenderStack\n\nstack = RenderStack.instance()\nif stack is not None:\n    bloom = BloomEffect()\n    bloom.threshold = 1.0\n    bloom.intensity = 0.7\n    stack.add_pass(bloom)\n```\n\nMount configuration during scene setup, not continuously in `update`.\n\n## Materials and transparency\n\nThe material chooses shaders, properties, textures, surface type, alpha clipping, depth, blending, culling, and render queue. Use opaque surfaces by default; transparent blending has ordering and overdraw costs. Use alpha clipping for cutout shapes when hard edges are acceptable.\n\nA material property only has an effect when its shader exposes the corresponding name. Check `has_property()` when writing generic tools.\n\n## Diagnosis order\n\n1. Confirm the scene has one active RenderStack and a discovered pipeline.\n2. Confirm the active Camera is eligible for that pipeline.\n3. Verify the material, shader, mesh, and texture references resolve.\n4. Check the pass is enabled and mounted at a compatible injection point.\n5. Check required ResourceBus names and pass order.\n6. Invalidate the graph after configuration changes, but not every frame.\n7. Disable optional effects one at a time to isolate the first failing pass.\n\n## Related reference\n\n- [RenderStack](../api/RenderStack.md)\n- [RenderPipeline](../api/RenderPipeline.md)\n- [RenderGraph](../api/RenderGraph.md)\n- [BloomEffect](../api/BloomEffect.md)\n- [ToneMappingEffect](../api/ToneMappingEffect.md)\n- [Material](../api/Material.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "Manual",
+      "url": "wiki/site/en/manual/rendering-and-renderstack.html",
+      "source": "en/manual/rendering-and-renderstack.md",
+      "meta": {
+        "category": "Manual",
+        "tags": [
+          "rendering",
+          "renderstack",
+          "pipeline",
+          "rendergraph",
+          "post-processing"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "Explain the scene RenderStack singleton, forward/deferred pipelines, injection points, pass ordering, graph invalidation, post-processing effects, and safe extension boundaries.",
+        "source_paths": [
+          "python/Infernux/renderstack",
+          "python/Infernux/rendergraph",
+          "python/Infernux/core/material.py"
+        ]
+      }
+    },
+    {
+      "title": "Scenes and Objects",
+      "summary": "Scenes, GameObjects, Transforms, and components form the ownership model for runtime content. Understanding which layer owns a value prevents fragile searches and cross-scene re...",
+      "content": "\n# Scenes and Objects\n\nScenes, GameObjects, Transforms, and components form the ownership model for runtime content. Understanding which layer owns a value prevents fragile searches and cross-scene references.\n\n## Ownership model\n\n```text\nScene\n└─ GameObject\n   ├─ Transform\n   │  └─ child GameObjects through Transform hierarchy\n   ├─ built-in native Components\n   └─ Python InxComponent instances\n```\n\n- A **Scene** is a loadable collection of objects.\n- A **GameObject** supplies identity, activation, tag, layer, and component ownership.\n- A **Transform** supplies spatial state and parent/child hierarchy.\n- A **Component** supplies behavior or data without becoming a second object identity.\n\nDo not treat a component as a free-standing scene object. Its lifetime and enabled state are constrained by its owning GameObject.\n\n## GameObject identity and activation\n\n`GameObject.name` is useful to humans but is not guaranteed to be unique. Use tags for broad role queries only when the project's tag contract makes the role stable. Keep direct component references for repeated frame work instead of calling global find operations every frame.\n\nActivation has two related views:\n\n- `active_self`: the object's own requested state;\n- `active_in_hierarchy`: the effective state after parent activation is considered.\n\nA child may request active state while remaining inactive because an ancestor is inactive. When diagnosing a component that does not update, inspect the effective hierarchy state as well as the component's `enabled` property.\n\n## Transform hierarchy\n\nThe Transform exposes world and local values:\n\n| Space | Position | Rotation | Scale |\n|---|---|---|---|\n| World | `position` | `rotation` / `euler_angles` | `lossy_scale` |\n| Local | `local_position` | `local_rotation` / `local_euler_angles` | `local_scale` |\n\nUse `set_parent(parent, world_position_stays=True)` when reparenting. With the default, the engine preserves the object's world placement and recomputes local values. Use `False` when the local relationship is the value you intend to preserve.\n\nPrefer Transform traversal (`parent`, `get_child`, `find`) when the relationship is spatial. Prefer component references when the relationship is behavioral.\n\n## Components\n\nA GameObject can own built-in components and Python components. Common operations include:\n\n- `add_component(type)` and `remove_component(instance)`;\n- `get_component(type)` for one compatible component;\n- `get_components(type)` for all compatible components;\n- `get_component_in_children(type)` and `get_component_in_parent(type)` for hierarchy-aware lookup.\n\nCache a required reference in `start()` when it remains valid for the component's lifetime:\n\n```python\nfrom Infernux import InxComponent, Rigidbody\n\n\nclass Motor(InxComponent):\n    def start(self) -> None:\n        self.body = self.game_object.get_component(Rigidbody)\n\n    def fixed_update(self, fixed_delta_time: float) -> None:\n        if self.body is None:\n            return\n        # Apply fixed-step motor logic here.\n```\n\nWhen a component is mandatory, fail visibly during setup instead of silently searching the whole scene every frame.\n\n## Loading scenes\n\n`SceneManager` accepts a build index or scene identifier through `load_scene(...)`. Build indexes come from the ordered scene list in Build Settings.\n\n```python\nfrom Infernux import InxComponent\nfrom Infernux.scene import SceneManager\n\n\nclass ExitPortal(InxComponent):\n    next_scene_index: int = 1\n\n    def travel(self) -> None:\n        if not SceneManager.load_scene(self.next_scene_index):\n            raise RuntimeError(f\"Unable to queue scene {self.next_scene_index}\")\n```\n\nThe load request may be processed at an engine-safe point rather than replacing the active scene in the middle of a component callback. Do not continue mutating old-scene objects after requesting a transition.\n\nUse `dont_destroy_on_load(game_object)` only for deliberately persistent objects such as a session coordinator. Persistent objects must handle repeated scene entry without duplicating themselves.\n\n## Practical rules\n\n1. Save scenes before adding them to Build Settings.\n2. Do not rely on GameObject names as unique persistent identifiers.\n3. Cache frequently used component references.\n4. Distinguish local and world Transform values before assigning them.\n5. Treat scene loads as ownership boundaries; old references may become invalid.\n6. Keep persistent cross-scene objects few and explicit.\n\n## Related reference\n\n- [GameObject](../api/GameObject.md)\n- [Transform](../api/Transform.md)\n- [Scene](../api/Scene.md)\n- [SceneManager](../api/SceneManager.md)\n- [InxComponent](../api/InxComponent.md)\n- [Build and Share a Project](../learn/build-and-share.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "Manual",
+      "url": "wiki/site/en/manual/scenes-and-objects.html",
+      "source": "en/manual/scenes-and-objects.md",
+      "meta": {
+        "category": "Manual",
+        "tags": [
+          "scene",
+          "gameobject",
+          "transform",
+          "hierarchy"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "Explain Infernux scene ownership, GameObject identity, Transform hierarchy, component lookup, activation, and build-index scene loading.",
+        "source_paths": [
+          "python/Infernux/scene",
+          "python/Infernux/components",
+          "python/Infernux/lib/_Infernux.pyi"
+        ]
+      }
+    },
+    {
+      "title": "Screen-space UI",
+      "summary": "Infernux UI is a component hierarchy rooted at UICanvas. Child GameObjects carry screen components such as UIText, UIImage, and UIButton. Layout uses canvas design pixels and is...",
+      "content": "\n# Screen-space UI\n\nInfernux UI is a component hierarchy rooted at `UICanvas`. Child GameObjects carry screen components such as `UIText`, `UIImage`, and `UIButton`. Layout uses canvas design pixels and is converted to the current Game viewport at render and input time.\n\n## Canvas first\n\nTreat the Canvas reference resolution as the coordinate system in which the interface is designed. The default is 1920 × 1080.\n\n| Setting | Purpose |\n|---|---|\n| `render_mode` | `ScreenOverlay`, or `CameraOverlay` for a selected camera |\n| `sort_order` | order between canvases; lower values draw first |\n| `ui_scale_mode` | constant pixels or scale from a reference resolution |\n| `screen_match_mode` | choose how width and height differences are reconciled |\n| `match_width_or_height` | blend from width matching (`0`) to height matching (`1`) |\n| `pixel_perfect` | prefer integer scaling when possible |\n\nFor a game HUD, start with `ScaleWithScreenSize` and test both the narrowest and widest supported aspect ratios. `ConstantPhysicalSize` is currently a future-facing option and behaves like constant pixels.\n\nScreen UI also depends on the selected render pipeline's `enable_screen_ui` setting.\n\n## Anchors and rectangles\n\nEvery `InxUIScreenComponent` has horizontal and vertical alignment anchors plus `x`, `y`, `width`, and `height`. These values are relative to its parent UI element, or the Canvas when there is no parent element.\n\n- Anchor panels to an edge that matches their intent: health to a corner, a dialog to center.\n- Keep related elements under a shared parent so they move as one layout unit.\n- Use `rotation` for appearance, but remember hit testing uses the rotated rectangle.\n- Use `opacity` for element transparency and `raycast_target` to opt into pointer hits.\n- Do not make decorative images raycast targets; they can hide buttons behind them.\n\n`UICanvas.raycast()` returns the front-most eligible element, while `raycast_all()` returns the complete front-to-back hit list.\n\n## Text, images, and buttons\n\n`UIText` supports horizontal/vertical alignment, line height, letter spacing, overflow behavior, and three resize modes. Use `AutoWidth` for short labels, `AutoHeight` for wrapped paragraphs, and `FixedSize` when the layout must not move.\n\n`UIImage.texture_path` points to a texture asset. Its color is a multiplicative tint; use `[1, 1, 1, 1]` to preserve the source image.\n\n`UIButton` combines a background, a label, selectable color states, and an `on_click` event:\n\n```python\nfrom Infernux import GameObject, InxComponent\nfrom Infernux.ui import UIButton\n\n\nclass MainMenu(InxComponent):\n    def start(self) -> None:\n        button_object = GameObject.find(\"StartButton\")\n        if button_object is None:\n            return\n\n        button = button_object.get_component(UIButton)\n        if button is not None:\n            button.on_click.add_listener(self.start_game)\n\n    def start_game(self) -> None:\n        print(\"Start requested\")\n```\n\nStore the callback as a stable method when you will later call `remove_listener`. `ColorTint` is the implemented selectable transition; sprite-swap and animation transitions are marked for future behavior.\n\n## Responsive checklist\n\n1. Test the Canvas at the reference resolution, 16:9, 16:10, ultrawide, and a narrow portrait viewport.\n2. Check text at the longest supported translation, not only the shortest English label.\n3. Ensure interactive targets remain large enough after scaling.\n4. Verify render order, raycast order, and visual order agree.\n5. Disable gameplay input while a modal UI owns focus.\n6. Confirm UI remains enabled in the active render pipeline.\n\n## Related reference\n\n- [UICanvas](../api/UICanvas.md)\n- [UIText](../api/UIText.md)\n- [UIImage](../api/UIImage.md)\n- [UIButton](../api/UIButton.md)\n- [UISelectable](../api/UISelectable.md)\n- [Input and Time](input-and-time.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "Manual",
+      "url": "wiki/site/en/manual/ui.html",
+      "source": "en/manual/ui.md",
+      "meta": {
+        "category": "Manual",
+        "tags": [
+          "ui",
+          "canvas",
+          "layout",
+          "events",
+          "responsive"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "Explain the screen-space UI hierarchy, Canvas scaling, anchors, text and image layout, button events, hit testing, and current transition limitations.",
+        "source_paths": [
+          "python/Infernux/ui",
+          "python/Infernux/renderstack/default_forward_pipeline.pyi",
+          "python/Infernux/renderstack/default_deferred_pipeline.pyi"
+        ]
+      }
     }
   ],
   "zh": [
@@ -72,6 +580,514 @@
           "并行"
         ],
         "date": "2026-04-16"
+      }
+    },
+    {
+      "title": "2D 基础",
+      "summary": "构建一个小而可验证的 2D 场景：一台正交 Camera、一个可见 Sprite，以及一个不会依赖帧率的移动组件。",
+      "content": "\n# 2D 基础\n\n构建一个小而可验证的 2D 场景：一台正交 Camera、一个可见 Sprite，以及一个不会依赖帧率的移动组件。\n\n**预计时间：** 15–20 分钟  \n**完成标准：** Sprite 可见、比例正确，并且帧率变化时视觉移动速度保持一致。\n\n## 开始之前\n\n先完成[快速开始](getting-started.md)和[第一个组件](first-component.md)。准备一张带透明通道的 PNG，并保持 Console 可见。\n\n## 1. 导入 Sprite 纹理\n\n把图片复制到项目 `Assets` 层级，在 Project 面板中选择它。\n\n- 只有用于屏幕 UI 时才选择 **UI** 纹理类型；世界 Sprite 可使用普通/默认纹理路径。\n- 彩色美术资源保持 sRGB 开启。\n- 透明边缘不应重复时使用 Clamp。\n- Sprite 在屏幕中始终保持固定大小时可考虑关闭 mipmap；缩放或远近变化时通常保留。\n\n图片与 `.meta` 文件必须一起保留。身份规则见[资源与 `.meta` 文件](../manual/assets-and-meta.md)。\n\n## 2. 配置正交 Camera\n\n创建或选择场景 Camera，把投影改为 Orthographic，并让它朝向 Sprite 所在的 XY 平面。\n\n`orthographic_size` 控制可见世界高度，而不是透视变焦。明确选择一个值，然后用 Game 视图验证目标宽高比。只在 Scene 视图中正确并不代表运行结果已通过。\n\n## 3. 添加 SpriteRenderer\n\n为 Sprite 创建 GameObject，添加 **Rendering / Sprite Renderer**，在 Sprite 字段指定刚导入的纹理。\n\n当前 SpriteRenderer 在 Quad 网格上绘制 Sprite Sheet 的一帧。主要控制项是：\n\n- `frame_index`：显示 Sprite Sheet 的哪一帧；\n- `sprite_color`：与纹理相乘的 RGBA 色调；\n- `flip_x` / `flip_y`：视觉镜像；\n- `casts_shadows` / `receives_shadows`：与受光 Sprite 材质的阴影交互。\n\n先使用白色色调和第 0 帧，再通过 Transform 位置和缩放建立项目统一的世界单位约定。\n\n## 4. 添加移动检查\n\n把以下组件挂到 Sprite：\n\n```python\nfrom Infernux import InxComponent, Vector3, serialized_field\n\n\nclass SpriteDrift(InxComponent):\n    speed: float = serialized_field(default=2.0, range=(0.0, 10.0))\n\n    def update(self, delta_time: float) -> None:\n        self.transform.translate(Vector3(self.speed * delta_time, 0.0, 0.0))\n```\n\n进入 Play，在下一次运行前改变 `speed`。乘以 `delta_time` 后，这个值表示每秒移动的世界单位。\n\n## 5. 验证场景\n\n- Game 视图而不只是 Scene 视图能看到 Sprite。\n- 透明边缘没有重复像素。\n- Game 视图宽高比变化时图片不被拉伸。\n- 移动速度不依赖帧率。\n- Console 没有纹理、材质或组件缺失错误。\n\n## 常见失败\n\n### Sprite 不可见\n\n检查 Camera 方向和裁剪范围、对象相对 Camera 的 Z 位置、纹理分配、活动层级状态与当前渲染管线。\n\n### 图片出现意外色调\n\n把 `sprite_color` 设为全 Alpha 白色，并核对源纹理的颜色空间导入设置。\n\n### Sprite Sheet 显示了错误格子\n\n确认导入元数据提供了预期帧，再选择有效的 `frame_index`。之后可由 Animator 驱动该字段。\n\n## 下一步\n\n继续[动画工作流](animation-workflow.md)，创建 `.animclip2d` 并使用 `SpiritAnimator` 驱动；或者结合[输入与时间](../manual/input-and-time.md)控制对象。\n",
+      "groupKey": "learn",
+      "groupTitle": "learn",
+      "url": "wiki/site/zh/learn/2d-foundations.html",
+      "source": "zh/learn/2d-foundations.md",
+      "meta": {
+        "category": "学习",
+        "tags": [
+          "2D",
+          "Sprite",
+          "相机",
+          "入门"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "new-user",
+          "agent"
+        ],
+        "agent_summary": "使用正交 Camera、SpriteRenderer、导入纹理、明确世界尺度和帧率无关移动检查构建最小 2D 场景。",
+        "source_paths": [
+          "python/Infernux/components/builtin/sprite_renderer.py",
+          "python/Infernux/components/builtin/camera.pyi",
+          "python/Infernux/core/asset_types.py"
+        ]
+      }
+    },
+    {
+      "title": "3D 基础",
+      "summary": "创建一个容易检查渲染输入的最小受光 3D 场景：一台 Camera、一个网格、一份材质、一盏 Light 和一个活动 RenderStack。",
+      "content": "\n# 3D 基础\n\n创建一个容易检查渲染输入的最小受光 3D 场景：一台 Camera、一个网格、一份材质、一盏 Light 和一个活动 RenderStack。\n\n**预计时间：** 20–25 分钟  \n**完成标准：** Game 视图显示有明暗的对象，移动 Light 时材质表面产生可预期变化。\n\n## 开始之前\n\n完成[快速开始](getting-started.md)。如果项目使用非默认管线，先阅读[渲染与 RenderStack](../manual/rendering-and-renderstack.md)。\n\n## 1. 建立渲染路径\n\n确认场景只有一个活动 RenderStack，并选择管线。Default Forward 适合第一个场景，因为不透明、天空、透明与后处理顺序明确。基础对象成功渲染前先关闭可选效果。\n\n创建透视 Camera。根据场景尺度合理收紧 Near/Far 裁剪面，再让 Camera 朝向世界原点。过小的 Near 和过大的 Far 会降低深度精度。\n\n## 2. 创建可见网格\n\n创建基础体 GameObject 或导入模型，并确认它具有 `MeshRenderer`。\n\n- 基础体使用内联的内置网格。\n- 导入模型通过网格资源 GUID 引用，并可能提供多个材质槽。\n- `casts_shadows` 决定是否贡献阴影。\n- `receives_shadows` 决定表面是否接受其他对象阴影。\n\n对导入模型，应先检查 `mesh_name`、顶点/索引数量、子网格和材质槽名称，再排查 Shader。\n\n## 3. 分配材质\n\n第一次测试使用 Lit 材质，保持 Opaque，指定明显的基础颜色/纹理，并让自定义渲染状态保持默认。\n\n透明表面会增加绘制排序与 overdraw 限制。树叶、栅栏等硬边镂空形状首先考虑 Alpha Clip。\n\n## 4. 添加 Light\n\n创建一盏简单 Light。使用中等强度，把它放在方向或范围明显的位置；无阴影光照工作后再启用阴影。\n\n在 Edit 模式改变 Light 位置、方向、颜色或强度，然后重新运行。表面产生变化可以证明对象使用 Lit 路径，而不是只有 Unlit 回退。\n\n## 5. 添加旋转检查\n\n复用[第一个组件](first-component.md)，或挂载以下紧凑版本：\n\n```python\nfrom Infernux import InxComponent, Vector3\n\n\nclass DisplayTurntable(InxComponent):\n    def update(self, delta_time: float) -> None:\n        self.transform.rotate(Vector3(0.0, 30.0 * delta_time, 0.0))\n```\n\n移动的高光便于检查法线、光照与材质响应。\n\n## 6. 按顺序验证\n\n1. 关闭效果时能看到网格轮廓。\n2. 材质位于预期槽位。\n3. 移动 Light 会改变表面。\n4. 只有 Light 与 Renderer 设置都允许时才出现阴影。\n5. 对象旋转全程处于 Camera 裁剪范围内。\n6. Console 没有 Shader、网格、材质或 RenderGraph 资源缺失错误。\n\n## 常见失败\n\n### Game 视图为空\n\n依次检查活动 Camera、Camera 方向和裁剪、活动层级、RenderStack、网格分配与材质。\n\n### 对象呈洋红、黑色或完全平坦\n\n确认 Shader 与纹理引用可解析，再确认存在兼容 Light。先关闭自定义效果，不要同时改变大量材质参数。\n\n### 阴影消失或闪烁\n\n检查 Light 阴影模式、Renderer 投射/接收设置、Bias、阴影分辨率、场景尺度和 Camera 范围，每次只改变一个变量。\n\n## 下一步\n\n导入绑定骨骼的模型并继续[动画工作流](animation-workflow.md)，或在移动生产资源前学习[资源与 `.meta` 文件](../manual/assets-and-meta.md)。\n",
+      "groupKey": "learn",
+      "groupTitle": "learn",
+      "url": "wiki/site/zh/learn/3d-foundations.html",
+      "source": "zh/learn/3d-foundations.md",
+      "meta": {
+        "category": "学习",
+        "tags": [
+          "3D",
+          "网格",
+          "材质",
+          "灯光",
+          "相机"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "new-user",
+          "agent"
+        ],
+        "agent_summary": "使用透视 Camera、MeshRenderer、材质、Light、阴影与 RenderStack 构建并验证最小受光 3D 场景。",
+        "source_paths": [
+          "python/Infernux/components/builtin/mesh_renderer.pyi",
+          "python/Infernux/components/builtin/camera.pyi",
+          "python/Infernux/components/builtin/light.pyi",
+          "python/Infernux/core/material.pyi",
+          "python/Infernux/renderstack"
+        ]
+      }
+    },
+    {
+      "title": "动画工作流",
+      "summary": "Infernux 把动画数据分为 Clip 与状态机控制器。运行时 Animator 读取控制器，驱动 Sprite 帧或骨骼模型。",
+      "content": "\n# 动画工作流\n\nInfernux 把动画数据分为 Clip 与状态机控制器。运行时 Animator 读取控制器，驱动 Sprite 帧或骨骼模型。\n\n**预计时间：** 25–35 分钟  \n**完成标准：** 默认状态在 Game 视图中播放，并且明确的参数或 Trigger 能切换到第二个状态。\n\n## 选择路径\n\n| 路径 | Clip | Renderer | 运行时组件 |\n|---|---|---|---|\n| 2D Sprite | `.animclip2d` | `SpriteRenderer` | `SpiritAnimator` |\n| 3D 骨骼 | `.animclip3d` 或导入模型的嵌入 Take | `SkinnedMeshRenderer` | `SkeletalAnimator` |\n\n两者都使用 `.animfsm` 控制器。`SpiritAnimator` 是当前 Sprite 动画组件的公开名称。\n\n## 1. 准备 Renderer\n\n2D 路径先完成[2D 基础](2d-foundations.md)，确认 SpriteRenderer 能手工显示所需的每个 Sprite Sheet 帧。\n\n3D 路径导入绑定骨骼的模型，确认 SkinnedMeshRenderer 能显示 Bind Pose。在创建状态前检查模型的嵌入动画 Take；嵌入 Take 可能通过模型的虚拟子动画身份引用。\n\n在 Renderer 和资源引用能独立工作之前，不要先排查 Animator。\n\n## 2. 创建 Clip\n\n2D 路径打开 **Window → 2D Animation Clip Editor**，选择 Sprite Sheet 纹理，设置 FPS 和帧序列，预览后保存为 `Assets` 内的 `.animclip2d`。\n\n3D 路径创建或选择一个标识源模型与 Take 的 `.animclip3d`，在资源详情中确认 Take 时长与 Bind Pose 骨骼信息。\n\nIdle/Run 循环使用 Loop。Hit、Death 等一次性 Clip 在状态机应于结束后离开时保持非循环。\n\n## 3. 构建状态机\n\n在 Animation State Machine Editor 中创建或打开 `.animfsm`；双击该资源也会打开 Graph。\n\n1. 选择正确的 2D 或 3D 控制器模式。\n2. 至少添加两个状态，并为每个状态分配 Clip/Take。\n3. 明确指定默认状态。\n4. 添加一个参数或 Trigger。\n5. 创建一条过渡，第一条条件保持简单。\n6. 决定过渡是否等待 Exit Time。\n7. 保存，并确认 `.meta` 与资源仍在一起。\n\n同时具有复杂条件和 Exit Time 的过渡很难排查，应先分别证明一种机制。\n\n## 4. 挂载 Animator\n\n把 `SpiritAnimator` 加到 SpriteRenderer 所在 GameObject，或把 `SkeletalAnimator` 加到 SkinnedMeshRenderer 所在对象。组件元数据会强制要求对应 Renderer。\n\n把 `.animfsm` 分配给 `controller`，第一次运行保持 `auto_play` 开启、播放速度为 `1.0`。`SkeletalAnimator.cross_fade_duration` 控制 3D 状态间默认混合时长。\n\n## 5. 驱动过渡\n\n从玩法组件调用运行时参数 API：\n\n```python\nfrom Infernux import InxComponent, SpiritAnimator\n\n\nclass AnimationDriver(InxComponent):\n    def start(self) -> None:\n        self.animator = self.game_object.get_component(SpiritAnimator)\n\n    def begin_move(self) -> None:\n        if self.animator is not None:\n            self.animator.set_bool(\"moving\", True)\n\n    def react(self) -> None:\n        if self.animator is not None:\n            self.animator.set_trigger(\"react\")\n```\n\n3D 路径把组件类型替换为 `SkeletalAnimator`。参数从控制器初始化，并在每次 Update 中由过渡求值。\n\n## 6. 验证可观察状态\n\n- `current_state` 与预期 Graph 节点一致。\n- Clip 推进时 `is_playing` 为 true。\n- `normalized_time` 从 0 向 1 推进，只在循环状态中回绕。\n- Trigger 被过渡消耗，不会永久触发。\n- 2D 帧索引或活动 3D Take 发生可见变化。\n- 停止 Play 并重新打开场景后，控制器引用仍存在。\n\n## 常见失败\n\n### 默认动画没有开始\n\n检查 `auto_play`、控制器引用、明确默认状态、匹配的 Renderer，以及 Console 第一条错误。\n\n### 状态改变但图片或骨骼不变\n\n2D 检查 Clip 帧索引是否存在于导入 Sprite 元数据中；3D 检查 Take 是否属于指定模型且骨架兼容。\n\n### 过渡始终不触发\n\n确认参数拼写与类型、条件方向、Exit Time 阈值、当前 normalized time，以及 Trigger 是否已被消耗。\n\n## 当前文档边界\n\n`SpiritAnimator`、`SkeletalAnimator` 与 Clip/FSM 数据模型是公开运行时类，但当前 API 索引还没有它们的生成符号页。在匹配 Stub 补齐前，本 Learn 页面及其 `source_paths` 是权威 Preview 指南。\n\n## 下一步\n\n谨慎添加 Animation Event 表达特定帧玩法信号，或继续[音频工作流](audio-workflow.md)，从同一玩法动作触发一次性音效。\n",
+      "groupKey": "learn",
+      "groupTitle": "learn",
+      "url": "wiki/site/zh/learn/animation-workflow.html",
+      "source": "zh/learn/animation-workflow.md",
+      "meta": {
+        "category": "学习",
+        "tags": [
+          "动画",
+          "2D",
+          "3D",
+          "FSM",
+          "Animator"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "创建 2D 或 3D 动画 Clip，放入 .animfsm 控制器，挂载 SpiritAnimator 或 SkeletalAnimator，并验证状态、过渡、事件与播放行为。",
+        "source_paths": [
+          "python/Infernux/engine/ui/animclip2d_editor_panel.py",
+          "python/Infernux/engine/ui/animfsm_editor_panel.py",
+          "python/Infernux/core/animation_clip.py",
+          "python/Infernux/core/animation_clip3d.py",
+          "python/Infernux/core/anim_state_machine.py",
+          "python/Infernux/components/spirit_animator.py",
+          "python/Infernux/components/skeletal_animator.py"
+        ]
+      }
+    },
+    {
+      "title": "音频工作流",
+      "summary": "构建一个包含单一 Listener、一条持续 Track 和一个瞬时音效的最小音频场景。当前可靠解码路径是 WAV，不要因为旧 UI 文本而假设已支持 MP3 或 OGG。",
+      "content": "\n# 音频工作流\n\n构建一个包含单一 Listener、一条持续 Track 和一个瞬时音效的最小音频场景。当前可靠解码路径是 WAV，不要因为旧 UI 文本而假设已支持 MP3 或 OGG。\n\n**预计时间：** 15–20 分钟  \n**完成标准：** Track 0 能可预测地循环或停止，反复 One-shot 播放复用 Source Pool，不创建临时 GameObject。\n\n## 开始之前\n\n准备用于循环环境声和一次性音效的短 WAV 文件。先完成[资源与 `.meta` 文件](../manual/assets-and-meta.md)，保证 Clip GUID 稳定。\n\n## 1. 导入并检查 WAV\n\n把文件复制到 `Assets/Audio`，逐一选择并检查元数据。\n\n音频导入设置包括：\n\n- `force_mono`：内容需要作为单声道空间源时使用；\n- `load_in_background`：后台加载策略；\n- `quality` 与声明的压缩格式；\n- 场景引用使用的 `.meta` GUID。\n\nClip 行为异常时，在运行时检查 `AudioClip.is_loaded`、时长、采样率和声道数。\n\n## 2. 放置一个 AudioListener\n\n把 AudioListener 添加到代表收听位置的 GameObject，通常是活动 Camera 或玩家头部。场景只保留一个预期活动 Listener。\n\n移动 Listener 会改变空间衰减。菜单或近似“2D”的声音应把 AudioSource 放在 Listener 附近，不要假设存在尚未暴露的非空间模式。\n\n## 3. 配置 AudioSource\n\n创建 AudioSource GameObject，把环境声分配给 Track 0。AudioSource 是多轨设计，并不是单一 `clip` 字段。\n\n- `track_count` 范围为 1–16。\n- `play_on_awake` 只自动播放 Track 0。\n- `loop` 作用于到达末尾的 Track。\n- `volume`、`pitch`、`mute` 影响整个 Source。\n- `min_distance` 与 `max_distance` 定义空间衰减范围。\n- `one_shot_pool_size` 限制并发瞬时 Voice。\n\n第一次测试使用音量 `1`、Pitch `1`、非零距离范围且不静音。\n\n## 4. 从玩法控制播放\n\n```python\nfrom Infernux import AudioSource, InxComponent\nfrom Infernux.core.audio_clip import AudioClip\n\n\nclass AudioDemo(InxComponent):\n    def start(self) -> None:\n        self.source = self.game_object.get_component(AudioSource)\n        self.click = AudioClip.load(\"Assets/Audio/click.wav\")\n\n    def play_click(self) -> None:\n        if self.source is not None and self.click is not None:\n            self.source.play_one_shot(self.click, volume_scale=0.8)\n```\n\n持续 Track 使用 `play(track_index)`、`pause`、`un_pause` 与 `stop`；可重叠音效使用 `play_one_shot`。不要为每次点击或撞击创建再销毁 AudioSource。\n\n只要 Source 仍可能使用 Clip，就保持加载对象存活。播放仍引用 Clip 时，Context Manager 或手动 `unload()` 都不安全。\n\n## 5. 验证行为\n\n- 只有一个预期 Listener 接收场景。\n- Track 0 只在配置允许时启动。\n- 循环不会因玩法代码反复调用而意外重启。\n- 走出 `max_distance` 后 Source 按预期衰减。\n- 快速触发多个 One-shot 时，在配置的 Pool 上限内重叠。\n- Stop 与场景卸载后没有声音意外继续。\n\n## 常见失败\n\n### Clip 无法加载\n\n使用 WAV，检查项目路径和 `.meta`，然后查看第一条音频/导入错误。当前运行时文档只保证 WAV 解码。\n\n### 没有声音\n\n检查 Listener、Source Mute/Volume、每轨音量、Clip 分配、Listener 距离，以及目标 Track 是否真的在播放。\n\n### One-shot 提前停止\n\n保持 `AudioClip` 对象存活，不要在 Source 使用时卸载；大量声音重叠时还要检查 One-shot Pool 大小。\n\n## 相关参考\n\n- [AudioSource](../api/AudioSource.md)\n- [AudioListener](../api/AudioListener.md)\n- [AudioClip](../api/AudioClip.md)\n- [输入与时间](../manual/input-and-time.md)\n\n## 下一步\n\n从 `UIButton`、输入边沿、碰撞回调或 Animation Event 触发 One-shot，然后在独立构建中验证完整交互。\n",
+      "groupKey": "learn",
+      "groupTitle": "learn",
+      "url": "wiki/site/zh/learn/audio-workflow.html",
+      "source": "zh/learn/audio-workflow.md",
+      "meta": {
+        "category": "学习",
+        "tags": [
+          "音频",
+          "Listener",
+          "Source",
+          "WAV",
+          "音效"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "导入 WAV，配置一个 AudioListener 和多轨 AudioSource，测试循环与 One-shot 播放，并排查生命周期或空间衰减问题。",
+        "source_paths": [
+          "python/Infernux/core/audio_clip.pyi",
+          "python/Infernux/core/asset_types.py",
+          "python/Infernux/components/builtin/audio_source.pyi",
+          "python/Infernux/components/builtin/audio_listener.pyi"
+        ]
+      }
+    },
+    {
+      "title": "构建并分享项目",
+      "summary": "这份教程会把已在编辑器中验证的项目变成 Windows 独立构建，当前针对 0.2.1 预览版构建流程。",
+      "content": "\n# 构建并分享项目\n\n这份教程会把已在编辑器中验证的项目变成 Windows 独立构建，当前针对 **0.2.1 预览版**构建流程。\n\n**预计时间：** 构建依赖可用后约 10–20 分钟。\n\n## 开始之前\n\n- 项目能够打开，Console 不反复输出异常。\n- 至少有一个场景已保存到项目中。\n- 场景能够在 Play 模式正常运行。\n- 有一个空间充足、可写的输出目录。\n\n## 1. 打开 Build Settings\n\n打开编辑器的 **Build Settings** 窗口。它负责有序场景列表与独立播放器配置。\n\n把当前打开的场景加入列表。未保存的场景无法加入，因为构建需要稳定的项目相对路径。把运行时可能加载的所有场景都加入列表，并主动安排顺序：构建索引 `0` 是启动场景。\n\n### 检查点\n\n场景列表至少包含一个有效的已保存场景，并且没有路径缺失警告。\n\n## 2. 配置播放器\n\n第一次构建需要设置：\n\n- **游戏名称：** 可执行文件和面向用户的产品名。\n- **输出目录：** 独立、空白或可随时清理的构建目录。\n- **显示模式：** 窗口或适合项目的全屏模式。\n- **窗口大小与可调整状态：** 首次运行时的窗口行为。\n- **图标与启动画面：** 第一次验证构建可以暂时省略。\n- **Debug / JIT / LTO：** 基础构建成功前保持预览版默认设置。\n\n不要把项目目录本身选作输出目录。构建流程会创建并清理生成文件；分离输出能保护项目资源，也能清楚展示真正需要分发的内容。\n\n## 3. 执行构建\n\n选择 **Build** 只生成独立产物，或选择 **Build and Run** 在打包后由编辑器启动结果。\n\n流水线会验证项目与场景列表、编译播放器、复制资源、处理启动内容、写入构建清单并完成最终清理。构建停止时优先处理第一条错误；后续消息可能只是失败后的清理结果。\n\n### 预期结果\n\nBuild Settings 报告成功并给出最终输出目录。目录中包含可执行文件及其需要的运行时文件。\n\n## 4. 在编辑器之外测试\n\n关闭或最小化编辑器，直接从输出目录启动可执行文件。\n\n逐项验证：\n\n- 启动场景正确；\n- 编辑器不占用焦点时输入仍然工作；\n- 场景切换能加载 Build Settings 中的全部场景；\n- 纹理、音频、脚本与其他必要资源都存在；\n- 窗口大小、全屏行为、标题与图标符合配置；\n- 干净启动不依赖输出目录之外的文件。\n\n只测试 **Build and Run** 不够。可分享构建还必须能从打包目录直接运行。\n\n## 5. 制作分享压缩包\n\n退出游戏，压缩**完整输出目录**，不要只复制 `.exe`。保持目录结构不变。发布前：\n\n1. 把压缩包解压到另一个本地目录；\n2. 启动解压后的副本；\n3. 测试启动场景与至少一次场景切换；\n4. 在发布说明中注明引擎版本与已知预览限制。\n\n## 常见失败\n\n### Build 按钮不可用\n\n- 保存当前场景。\n- 至少把一个场景加入 Build Settings。\n- 选择有效且可写的输出目录。\n\n### 运行时打开了错误场景\n\n把目标启动场景移动到构建索引 `0`，保存 Build Settings 后重新构建。\n\n### 资源在编辑器中正常，但构建后缺失\n\n- 确认资源位于项目内部，并使用项目相对引用。\n- 阅读最早出现的资源复制或加载错误。\n- 输出到干净目录，避免旧文件干扰判断。\n\n### 可执行文件只能在开发机器上运行\n\n在干净的 Windows 环境测试完整输出目录。不要从运行时目录中单独拿走可执行文件分发。\n\n## 完成标准\n\n把压缩包重新解压后，不启动编辑器也能运行；启动场景、输入、资源加载和退出都正常，才算完成。\n\n接下来可返回[引擎地图](../manual/engine-map.md)，或在制作多关卡前阅读[场景与对象](../manual/scenes-and-objects.md)。\n",
+      "groupKey": "learn",
+      "groupTitle": "learn",
+      "url": "wiki/site/zh/learn/build-and-share.html",
+      "source": "zh/learn/build-and-share.md",
+      "meta": {
+        "category": "学习",
+        "tags": [
+          "入门",
+          "构建",
+          "windows",
+          "发布"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "new-user",
+          "agent"
+        ],
+        "agent_summary": "把已保存场景加入 Build Settings，配置 Windows 独立播放器，执行构建，并在编辑器之外验证产物。",
+        "source_paths": [
+          "python/Infernux/engine/ui/build_settings_panel.py",
+          "python/Infernux/engine/game_builder.py"
+        ]
+      }
+    },
+    {
+      "title": "第一个组件",
+      "summary": "Infernux 的玩法脚本是继承 InxComponent 的 Python 类。本教程会制作一个持续旋转所属对象的组件，并把旋转速度暴露到 Inspector。",
+      "content": "\n# 第一个组件\n\nInfernux 的玩法脚本是继承 `InxComponent` 的 Python 类。本教程会制作一个持续旋转所属对象的组件，并把旋转速度暴露到 Inspector。\n\n## 开始之前\n\n先完成[快速开始](getting-started.md)，打开一个已保存且包含可见 GameObject 的场景。测试期间保持 Console 可见。\n\n## 1. 创建脚本\n\n在项目的脚本或资源区域创建 `SpinComponent.py`：\n\n```python\nfrom Infernux import Debug, InxComponent, Vector3, serialized_field\n\n\nclass SpinComponent(InxComponent):\n    speed: float = serialized_field(\n        default=45.0,\n        range=(0.0, 360.0),\n        tooltip=\"每秒旋转角度\",\n    )\n\n    def start(self) -> None:\n        Debug.log(\"SpinComponent started\", self.game_object)\n\n    def update(self, delta_time: float) -> None:\n        self.transform.rotate(Vector3(0.0, self.speed * delta_time, 0.0))\n```\n\n代码含义：\n\n- `InxComponent` 把 Python 类接入引擎组件生命周期。\n- `serialized_field` 让 `speed` 能在 Inspector 中编辑并随场景序列化。\n- `start()` 在组件激活后的第一次帧更新前执行。\n- `update(delta_time)` 每帧执行；乘以 `delta_time` 能避免速度依赖帧率。\n- `self.transform` 是所属 GameObject 的 Transform 快捷入口。\n\n## 2. 挂到对象上\n\n1. 保存脚本，等待编辑器发现或重新加载它。\n2. 在 Hierarchy 中选择可见的 GameObject。\n3. 在 Inspector 中添加 `SpinComponent` 脚本组件。\n4. 把 **Speed** 设置成容易观察的值，例如 `90`。\n5. 保存场景。\n\n如果组件没有出现，请查看 Console 的第一条错误。语法错误、无效导入或类没有继承 `InxComponent` 都会阻止脚本被发现。\n\n## 3. 验证行为\n\n进入 Play 模式。\n\n### 预期结果\n\n- 对象绕 Y 轴旋转。\n- Console 只输出一次 `SpinComponent started`。\n- Play 前修改 **Speed** 会改变旋转速度。\n- 停止 Play 后更新循环结束，Console 不反复报错。\n\n## 如何选择生命周期\n\n| 方法 | 适合处理 |\n|---|---|\n| `awake()` | 组件创建时的一次性内部初始化 |\n| `start()` | 依赖活动场景或其他已初始化组件的设置 |\n| `update(delta_time)` | 每帧玩法与输入 |\n| `fixed_update(fixed_delta_time)` | 固定步长的物理决策 |\n| `late_update(delta_time)` | 普通更新之后的跟随工作，例如相机跟随 |\n| `on_destroy()` | 释放资源或取消回调注册 |\n\n完整生命周期与组件辅助方法见 [InxComponent API](../api/InxComponent.md)。\n\n## 常见错误\n\n### `update` 从不执行\n\n- 确认方法参数包含 `self` 和 `delta_time`。\n- 确认组件及其 GameObject 已启用。\n- 确认编辑器挂载的类来自你刚编辑的文件。\n\n### Inspector 不显示 `speed`\n\n- 保留 `speed: float` 类型标注。\n- 在类作用域调用 `serialized_field(...)`，不要写进 `start()`。\n- 先解决脚本重载错误，再重新添加组件。\n\n### 不同机器的旋转速度不同\n\n使用 `speed * delta_time`，不要每帧增加固定角度。\n\n## 下一步\n\n打开[引擎地图](../manual/engine-map.md)，选择输入、物理、场景、UI、协程或渲染等下一个系统，再进入对应的精确 API 页面。\n",
+      "groupKey": "learn",
+      "groupTitle": "learn",
+      "url": "wiki/site/zh/learn/first-component.html",
+      "source": "zh/learn/first-component.md",
+      "meta": {
+        "category": "学习",
+        "tags": [
+          "入门",
+          "python",
+          "组件",
+          "inspector"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "new-user",
+          "agent"
+        ],
+        "agent_summary": "创建 InxComponent Python 脚本，暴露可序列化速度字段，把它挂到 GameObject，并在 Play 模式验证生命周期。",
+        "source_paths": [
+          "python/Infernux/components",
+          "python/Infernux/__init__.pyi"
+        ]
+      }
+    },
+    {
+      "title": "快速开始",
+      "summary": "这份指南帮助你从一台新机器走到可运行的 Infernux 场景，当前针对 Windows 上的 0.2.1 预览版。预览版迭代很快；排查行为差异前，请先确认 Hub 或 Release 页面显示的实际版本。",
+      "content": "\n# 快速开始\n\n这份指南帮助你从一台新机器走到可运行的 Infernux 场景，当前针对 Windows 上的 **0.2.1 预览版**。预览版迭代很快；排查行为差异前，请先确认 Hub 或 Release 页面显示的实际版本。\n\n## 你将完成什么\n\n完成后，你应该能够：\n\n- 安装或启动 Infernux；\n- 创建或打开项目；\n- 理解 Scene、Game、Hierarchy、Inspector、Project 与 Console 面板的职责；\n- 保存场景并进入 Play 模式。\n\n## 1. 获取引擎\n\n请选择一种受支持的入口：\n\n1. 从 [Infernux Releases](https://github.com/ChenlizheMe/Infernux/releases) 获取最新预览版。\n2. 按该版本包内的说明安装或解压。\n3. 学习阶段建议把 Hub、编辑器和项目放在本地可写磁盘中。\n\n如果你的目标是开发引擎本身，请使用仓库里的源码构建说明，不要把源码构建与打包预览版混在同一套目录中。\n\n## 2. 创建或打开项目\n\n启动 Hub 或编辑器并选择项目位置。一个健康的项目应该能正常打开，在 Project 面板中显示文件，并且 Console 不会持续刷出同一个异常。\n\n不要把引擎生成文件塞进无关源码仓库。独立项目目录会让资源发现、导入和故障排查简单很多。\n\n## 3. 理解编辑器布局\n\n| 区域 | 作用 | 第一次检查什么 |\n|---|---|---|\n| Scene | 编辑世界并可视化选择对象 | 能否环绕或聚焦场景？ |\n| Game | 预览当前相机输出 | 进入 Play 后是否更新？ |\n| Hierarchy | 查看当前场景对象 | 能否按名字选中对象？ |\n| Inspector | 编辑选中对象及组件 | 切换选择时是否同步更新？ |\n| Project | 浏览项目资源和脚本 | 能否找到项目资源文件？ |\n| Console | 查看日志、警告和错误 | 是否存在反复出现的异常？ |\n\n不同版本的停靠布局可能变化。稳定的心智模型是“面板名称和职责”，而不是某张截图中的固定位置。\n\n## 4. 保存并运行场景\n\n1. 打开或创建一个场景。\n2. 添加或选择一个可见对象。\n3. 进入 Play 模式前保存场景。\n4. 启动 Play，观察 Game 面板和 Console。\n5. 对场景做需要保留的结构修改前，先退出 Play。\n\n### 预期结果\n\n编辑器能够干净地进入和退出 Play，Game 视图会更新，Console 不会每帧重复累积同一错误。\n\n## 常见问题\n\n### 编辑器无法启动\n\n- 确认下载包与 Windows 架构匹配。\n- 使用 Release 包提供的启动入口，不要单独移动其中的二进制文件。\n- 检查安全软件是否隔离了运行时依赖。\n\n### 项目能打开但资源缺失\n\n- 确认打开的是项目根目录，而不是其中的资源子目录。\n- 编辑器导入资源时，不要同时在外部批量移动文件。\n- 优先阅读 Console 的第一条错误；后续错误可能只是连锁反应。\n\n### Play 后 Game 视图为空\n\n- 确认场景存在且启用了 Camera。\n- 确认实际运行的就是刚才编辑的场景。\n- 检查 Console 是否有脚本或资源加载错误。\n\n## 下一步\n\n继续阅读[第一个组件](first-component.md)，为对象添加 Python 玩法逻辑。想按系统查资料时，前往[引擎地图](../manual/engine-map.md)。\n",
+      "groupKey": "learn",
+      "groupTitle": "learn",
+      "url": "wiki/site/zh/learn/getting-started.html",
+      "source": "zh/learn/getting-started.md",
+      "meta": {
+        "category": "学习",
+        "tags": [
+          "入门",
+          "编辑器",
+          "安装"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "new-user",
+          "agent"
+        ],
+        "agent_summary": "安装 Infernux 预览版，创建或打开项目，理解主要编辑器面板，保存场景并进入 Play 模式。",
+        "source_paths": [
+          "README-zh.md",
+          "packaging",
+          "python/Infernux/engine/ui"
+        ]
+      }
+    },
+    {
+      "title": "API 版本与兼容性",
+      "summary": "生成的 API 索引描述一个已记录引擎版本。紧凑且不可变的快照保存英文符号键、类型、签名、状态与 canonical URL；下一版本与最近的更早快照比较。",
+      "content": "\n# API 版本与兼容性\n\n生成的 API 索引描述一个已记录引擎版本。紧凑且不可变的快照保存英文符号键、类型、签名、状态与 canonical URL；下一版本与最近的更早快照比较。\n\n## 当前基线\n\n`0.2.1` 是第一个权威快照。仓库中没有更早的机器可读 API 基线，因此当前比较会正确报告 `comparison_available: false`，不会根据文件日期或提交噪声猜测历史。\n\n- [当前 API 索引](https://infernux-engine.com/api-index.json)\n- [机器可读 API 变更](https://infernux-engine.com/api-changes.json)\n\n## 理解未来比较\n\n| 变化 | 含义 | 迁移响应 |\n|---|---|---|\n| Added | 出现新的符号键 | 可选采用；检查状态与 `since` |\n| Removed | 旧符号键不再存在 | 升级前寻找替代能力 |\n| Changed | 类型、签名、状态或 `since` 不同 | 检查变化字段与精确 API 页面 |\n\n变更记录只能证明结构 API 差异，不是完整行为兼容性承诺。迁移前还应阅读 Release Notes 和受影响的 Manual/Learn。\n\n## 发布规则\n\n已经发布版本的快照不能静默移动。当当前 API 与已记录快照不同时，CI 会失败。维护者必须恢复该版本 API、提升文档版本，或显式记录新的发布基线。\n\nAgent 在建议代码前应把已安装引擎版本与 `generated_for_release` 比较。没有可用比较时，应明确说明，而不是虚构兼容性。\n",
+      "groupKey": "manual",
+      "groupTitle": "manual",
+      "url": "wiki/site/zh/manual/api-versioning.html",
+      "source": "zh/manual/api-versioning.md",
+      "meta": {
+        "category": "手册",
+        "tags": [
+          "API",
+          "版本",
+          "兼容性",
+          "Agent"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "解释 API 快照不可变性、机器可读版本比较、当前 0.2.1 基线限制，以及如何理解新增、移除或改变的符号。",
+        "source_paths": [
+          "docs/tools/build-api-diff.mjs",
+          "docs/api-snapshots",
+          "docs/api-changes.json",
+          "docs/api-index.json"
+        ]
+      }
+    },
+    {
+      "title": "资源与 .meta 文件",
+      "summary": "一个资源具有两种身份：当前路径，以及通过资源数据库和边车元数据记录的稳定 GUID。路径便于人类理解；GUID 让序列化引用在资源改名或移动后仍可保持。",
+      "content": "\n# 资源与 `.meta` 文件\n\n一个资源具有两种身份：当前路径，以及通过资源数据库和边车元数据记录的稳定 GUID。路径便于人类理解；GUID 让序列化引用在资源改名或移动后仍可保持。\n\n## 项目工作流\n\n- 把项目内容放在项目的 `Assets` 层级中。\n- 通过编辑器或 `AssetManager` 变更 API 导入、移动、改名、重新导入和删除。\n- 资源与对应 `.meta` 文件应一同进入版本控制。\n- 不要把一个资源的 `.meta` 手工复制给另一个资源；重复 GUID 会破坏身份。\n- 提交时同时审查资源与元数据变化。\n\n`AssetManager.move_asset()` 不等同于文件系统移动：它还会更新数据库状态与引用。`delete_asset()` 会清理已加载状态，并清空活动组件中匹配的引用。只有在恢复场景下才应关闭编辑器后直接操作文件，之后必须重新扫描并验证。\n\n## 引用与加载\n\n`AssetRefBase` 保存 `guid` 与便于阅读的 `path_hint`。`TextureRef`、`MaterialRef`、`ShaderRef`、`AudioClipRef` 表达预期类型。`resolve()` 返回当前加载对象；缺失时返回 `None`。\n\n直接加载时使用统一管理器：\n\n```python\nfrom Infernux.core.assets import AssetManager\nfrom Infernux.core.texture import Texture\n\nicon = AssetManager.load(\"Assets/UI/icon.png\", Texture)\nif icon is None:\n    print(\"Icon could not be loaded\")\n```\n\n已有稳定序列化标识时可使用 `load_by_guid()`；`find_assets()` 按文件名模式查找项目资源。加载带缓存，只有工具绕过常规导入流程修改文件时才需要 `invalidate_path`、`invalidate` 或 `flush`。\n\n## 导入设置\n\n纹理元数据包括类型、寻址/过滤模式、mipmap、sRGB、最大尺寸与各向异性。音频和网格具有各自的类型化设置。\n\n- 颜色纹理通常使用 sRGB；遮罩等数据纹理通常不使用。\n- 法线贴图应选择法线纹理类型。\n- 远近距离会变化的纹理生成 mipmap；固定分辨率 UI 可考虑关闭。\n- UI 边缘使用 Clamp，只在明确平铺时使用 Repeat。\n- 通过 Inspector 或类型化设置函数修改，然后重新导入。\n\n## 材质与纹理\n\n`Texture.load()` 是较低层的文件加载器。`AssetManager.load()` 额外提供项目 GUID 解析与缓存，因此项目资源通常使用后者。\n\n`Material` 支持创建 lit/unlit 材质、克隆、Shader 属性、纹理槽、表面类型、Alpha 裁剪、渲染状态、保存和显式 `flush()`。应通过 `set_texture()` 使用 GUID、项目路径、`Texture` 或 `None` 设置纹理，而不是直接操作原生对象。\n\n## 丢失引用排查\n\n1. 确认资源与 `.meta` 文件同时存在。\n2. 检查复制或冲突解决后 GUID 是否改变。\n3. 重新导入并检查变更结果，不要只反复加载。\n4. 确认引用类型与资源类别匹配。\n5. 若文件在编辑器外改变，使缓存失效或触发重新扫描。\n6. 删除后，匹配的活动 `AssetRefBase` 字段应被清空，而不是静默指向其他资源。\n\n## 相关参考\n\n- [Texture](../api/Texture.md)\n- [Material](../api/Material.md)\n- [UIImage](../api/UIImage.md)\n- [构建并分享](../learn/build-and-share.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "manual",
+      "url": "wiki/site/zh/manual/assets-and-meta.html",
+      "source": "zh/manual/assets-and-meta.md",
+      "meta": {
+        "category": "手册",
+        "tags": [
+          "资源",
+          "GUID",
+          "meta",
+          "导入",
+          "材质",
+          "纹理"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "解释项目资源、GUID 与路径身份、.meta 边车文件、类型化引用、导入设置、安全移动/删除、缓存和运行时加载。",
+        "source_paths": [
+          "python/Infernux/core/assets.py",
+          "python/Infernux/core/asset_ref.py",
+          "python/Infernux/core/asset_types.py",
+          "python/Infernux/engine/asset_reference_cleanup.py"
+        ]
+      }
+    },
+    {
+      "title": "调试与 Console",
+      "summary": "把第一原因与它引发的后续错误分开，调试才会高效。Infernux 同时包含 Python 玩法、原生运行时、资源导入和编辑器状态，一个错误输入可能表现成多条下游故障。",
+      "content": "\n# 调试与 Console\n\n把**第一原因**与它引发的后续错误分开，调试才会高效。Infernux 同时包含 Python 玩法、原生运行时、资源导入和编辑器状态，一个错误输入可能表现成多条下游故障。\n\n## 第一错误原则\n\nConsole 中出现大量消息时：\n\n1. 停止 Play；\n2. 清空 Console；\n3. 只复现一次；\n4. 从最早的警告或错误开始；\n5. 先修复或隔离它，再解释后续消息。\n\n一次脚本导入失败可能导致组件无法发现，继而产生引用缺失，最后变成更新异常。直接从最后一条消息开始通常会浪费时间。\n\n## 有目的地记录日志\n\n需要进入引擎 Console 的信息使用 `Debug`：\n\n```python\nfrom Infernux import Debug, InxComponent\n\n\nclass Door(InxComponent):\n    def start(self) -> None:\n        Debug.log(\"Door initialized\", self.game_object)\n\n    def open(self) -> None:\n        if not self.enabled:\n            Debug.log_warning(\"Ignored open request while disabled\", self.game_object)\n            return\n        Debug.log(\"Door opened\", self.game_object)\n```\n\n- `Debug.log(...)`：记录预期里程碑或临时观察值。\n- `Debug.log_warning(...)`：记录可恢复但值得怀疑的状态。\n- `Debug.log_error(...)`：记录需要调查的失败操作。\n- `Debug.log_exception(...)`：保留异常上下文。\n- 把相关对象作为 context 传入，可让报告更容易追踪。\n\n除非只抓取很短的调试片段，否则不要每帧输出日志。逐帧日志会淹没第一错误，并改变时序表现。\n\n## 组件没有运行\n\n按这个顺序检查：\n\n1. **导入：** 脚本是否没有语法或 import 错误？\n2. **发现：** 类是否继承 `InxComponent`，Inspector 能否添加它？\n3. **所有权：** 是否真的挂在正在观察的 GameObject 上？\n4. **激活：** 组件、GameObject 与父层级是否实际激活？\n5. **签名：** `update` 是否接受 `(self, delta_time)`，`fixed_update` 是否接受 `(self, fixed_delta_time)`？\n6. **Play 状态：** 是否正在测试只会在 Play 中运行的行为？\n7. **提前返回：** 某个保护条件是否主动跳过了工作？\n\n先在 `start()` 放一条日志，再在预期进入的分支放一条。确定失败的生命周期边界之前，不要到处堆日志。\n\n## 引用与资源问题\n\n组件或对象引用缺失时：\n\n- 在初始化时只记录一次 owner 与请求类型；\n- 确认对象存在于活动场景；\n- 确认组件已挂载并启用；\n- 不依赖重复名称；\n- 场景切换后使旧引用失效，或重新获取。\n\n资源在编辑器中正常、独立构建中缺失时：\n\n- 确认资源位于项目内部；\n- 确认引用使用项目相对路径，移动项目后仍成立；\n- 构建到干净输出目录；\n- 查看最早的复制、导入或加载错误；\n- 测试完整打包目录，而不是被单独拿出的可执行文件。\n\n## 缩小问题\n\n有效的最小复现应包含：\n\n- 一个已保存场景；\n- 仍能触发失败的最少 GameObject 与组件；\n- 没有无关资源或插件；\n- 简短且确定的操作顺序；\n- 引擎版本与平台；\n- 预期结果和实际结果。\n\n每次只移除一个依赖。如果问题消失，只恢复该依赖并确认问题重新出现。这样才能把“整个项目坏了”变成可测试的引擎或使用问题。\n\n## 报告证据\n\n不确定行为是否为缺陷时，使用 GitHub Discussions / Q&A。能够提供稳定复现时，使用 GitHub Issues。\n\n一份可靠 Issue 包含：\n\n```text\n引擎版本：\n操作系统：\n项目类型 / 相关设置：\n\n复现步骤：\n1.\n2.\n3.\n\n预期结果：\n实际结果：\n第一条相关 Console 错误：\n最小项目或代码：\n```\n\n公开日志或项目之前，移除凭据、本地用户名、私有路径和专有资源。\n\n## 相关参考\n\n- [Debug](../api/Debug.md)\n- [InxComponent](../api/InxComponent.md)\n- [场景与对象](scenes-and-objects.md)\n- [社区入口](https://infernux-engine.com/community.html)",
+      "groupKey": "manual",
+      "groupTitle": "manual",
+      "url": "wiki/site/zh/manual/debugging.html",
+      "source": "zh/manual/debugging.md",
+      "meta": {
+        "category": "手册",
+        "tags": [
+          "调试",
+          "console",
+          "日志",
+          "故障排查"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "使用 Console、Debug 日志、生命周期检查、最小复现与 GitHub Issue 证据进行可重复的 Infernux 调试。",
+        "source_paths": [
+          "python/Infernux/debug.py",
+          "python/Infernux/engine/ui/console_utils.py",
+          "python/Infernux/components/component.py"
+        ]
+      }
+    },
+    {
+      "title": "引擎地图",
+      "summary": "当你知道想完成什么，却不知道该找哪个 Infernux 类型或模块时，从这里开始。本页是一张路由地图，不替代任务教程或精确 API 签名。",
+      "content": "\n# 引擎地图\n\n当你知道**想完成什么**，却不知道该找哪个 Infernux 类型或模块时，从这里开始。本页是一张路由地图，不替代任务教程或精确 API 签名。\n\n## 核心创作模型\n\n```text\n项目 Project\n└─ 场景 Scene\n   └─ 游戏对象 GameObject\n      ├─ Transform\n      ├─ 内置 Components\n      └─ Python InxComponent 脚本\n```\n\nScene 包含 GameObject。每个 GameObject 通过 Transform 拥有空间状态，通过组件获得行为。Python 玩法行为继承 `InxComponent` 并进入引擎生命周期。\n\n## 按任务寻找系统\n\n| 我想要…… | 从这里开始 | 权威参考 |\n|---|---|---|\n| 移动、旋转、缩放或设置父子关系 | Transform | [Transform](../api/Transform.md) |\n| 编写 Python 玩法行为 | 组件生命周期 | [InxComponent](../api/InxComponent.md) |\n| 在 Inspector 暴露数值 | 序列化字段 | [serialized_field](../api/serialized_field.md) |\n| 创建、查找、启用或销毁对象 | 对象模型 | [GameObject](../api/GameObject.md) |\n| 加载或切换关卡 | 场景管理 | [SceneManager](../api/SceneManager.md) |\n| 读取键盘、鼠标或触摸输入 | Input | [Input](../api/Input.md) · [KeyCode](../api/KeyCode.md) |\n| 运行固定步长物理行为 | 物理组件与查询 | [Physics](../api/Physics.md) · [Rigidbody](../api/Rigidbody.md) |\n| 跨帧等待但不阻塞 | 协程 | [Coroutine](../api/Coroutine.md) · [WaitForSeconds](../api/WaitForSeconds.md) |\n| 读取帧与固定步长时间 | Timing | [Time](../api/Time.md) |\n| 输出诊断信息 | Debug | [Debug](../api/Debug.md) |\n| 构建运行时 UI | UI | [UICanvas](../api/UICanvas.md) · [UIButton](../api/UIButton.md) |\n| 配置相机和灯光 | 渲染组件 | [Camera](../api/Camera.md) · [Light](../api/Light.md) |\n| 添加后处理 | Render Stack | [RenderStack](../api/RenderStack.md) |\n| 构建自定义渲染 Pass | Render Graph | [RenderGraph](../api/RenderGraph.md) |\n| 优化数组密集型 Python 循环 | JIT 子系统 | [JIT 指南](../architecture/jit.md) · [njit](../api/njit.md) |\n\n## 组件生命周期速览\n\n```text\n创建 → awake → 启用 → start → update / fixed_update / late_update → 禁用 → 销毁\n```\n\n- `awake()`：建立组件自身不变量。\n- `start()`：处理依赖活动场景的初始化。\n- `update(delta_time)`：普通逐帧工作。\n- `fixed_update(fixed_delta_time)`：固定步长的物理决策。\n- `late_update(delta_time)`：必须在普通更新后完成的工作。\n- `on_enable()`、`on_disable()`、`on_destroy()`：管理外部注册与资源。\n\n生命周期细节见 [InxComponent API](../api/InxComponent.md)。\n\n## 文档分层\n\n| 层级 | 最适合 | 稳定性 |\n|---|---|---|\n| 学习 Learn | 完成一个端到端小任务 | 人工维护并按版本验证 |\n| 手册 Manual | 理解概念与系统归属 | 人工维护并按版本验证 |\n| API | 查询类、属性、方法和签名 | 从当前绑定与类型存根生成 |\n| 架构 Architecture | 理解设计理由与研究背景 | 解释性质，可能包含实验方向 |\n\n如果教程与生成签名不一致，以当前生成 API 作为签名权威来源，并报告教程差异。\n\n## 预览版使用规则\n\nInfernux 仍处于预览阶段。依赖某个行为前：\n\n1. 检查页面的 `since` 与 `last_verified` 元数据；\n2. 与实际运行的引擎版本比较；\n3. 核对精确 API 签名；\n4. 从 Console 第一条相关错误开始排查。\n\n第一次实践请继续阅读[第一个组件](../learn/first-component.md)。\n",
+      "groupKey": "manual",
+      "groupTitle": "manual",
+      "url": "wiki/site/zh/manual/engine-map.html",
+      "source": "zh/manual/engine-map.md",
+      "meta": {
+        "category": "手册",
+        "tags": [
+          "总览",
+          "系统",
+          "参考"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "把常见 Infernux 开发任务映射到对应引擎系统与权威 API 页的路由地图。",
+        "source_paths": [
+          "python/Infernux",
+          "docs/wiki/docs/zh/api"
+        ]
+      }
+    },
+    {
+      "title": "输入与时间",
+      "summary": "Input 描述当前帧发生了什么，Time 决定这一帧对连续行为贡献多少。把二者职责分开，控制逻辑才能适应帧率变化和编辑器焦点。",
+      "content": "\n# 输入与时间\n\nInput 描述当前帧发生了什么，Time 决定这一帧对连续行为贡献多少。把二者职责分开，控制逻辑才能适应帧率变化和编辑器焦点。\n\n## 按键状态是三段契约\n\n| 查询 | 何时为 True | 常见用途 |\n|---|---|---|\n| `get_key(key)` | 按键持续按下 | 连续移动、蓄力 |\n| `get_key_down(key)` | 本帧刚刚按下 | 跳跃、打开、确认 |\n| `get_key_up(key)` | 本帧刚刚释放 | 释放、结束蓄力 |\n\n鼠标按钮也有相同区分。`down` 与 `up` 是边沿事件，应在普通逐帧更新中读取，不能当成持续状态。\n\n```python\nfrom Infernux import InxComponent, Vector3\nfrom Infernux.input import Input, KeyCode\n\n\nclass KeyboardMover(InxComponent):\n    speed: float = 4.0\n\n    def update(self, delta_time: float) -> None:\n        direction = 0.0\n        if Input.get_key(KeyCode.A):\n            direction -= 1.0\n        if Input.get_key(KeyCode.D):\n            direction += 1.0\n\n        self.transform.translate(Vector3(direction * self.speed * delta_time, 0.0, 0.0))\n```\n\n乘以 `delta_time`，可以把“每秒速度”换算成本帧距离。\n\n## 焦点与鼠标坐标\n\n编辑器与运行中的游戏可能争夺键鼠输入。`Input.is_game_focused()` 表示 Game 视口是否拥有玩法焦点。不要把点击编辑器面板解释成游戏操作。\n\n- `mouse_position` 使用屏幕坐标。\n- `game_mouse_position` 相对于 Game 视口。\n- `get_game_mouse_frame_state(...)` 一次返回视口位置、增量、滚轮与按钮状态。\n\n运行时 UI 和相机拾取使用 Game 视口坐标。需要把屏幕点转换为世界射线时，再交给活动 Camera。\n\n光标锁定是一种明确状态：相对视角控制时锁定，菜单中解锁，并始终保留可预测的退出方式。\n\n## 时间域\n\n| 值 | 含义 |\n|---|---|\n| 回调参数 `delta_time` | 当前渲染帧经过的缩放时间 |\n| `Time.fixed_delta_time` | 固定模拟间隔 |\n| `Time.unscaled_delta_time` | 不受 `time_scale` 影响的帧时长 |\n| `Time.time` | 游戏开始后的缩放时间 |\n| `Time.realtime_since_startup` | 不受暂停影响的实际运行时间 |\n| `Time.time_scale` | 缩放玩法时间的倍率 |\n\n会随游戏减速或暂停的行为使用缩放时间；暂停菜单、无障碍提示等在玩法暂停时仍需运行的 UI 使用非缩放时间。\n\n## update 还是 fixed_update？\n\n- 在 `update(delta_time)` 读取即时输入边沿。\n- 在 `fixed_update(fixed_delta_time)` 执行物理决策。\n- 输入需要驱动物理时，在 `update` 保存意图，再在 `fixed_update` 消费该状态。\n\n不要假设一个渲染帧等于一个物理步。慢帧可能执行多个固定步，快帧也可能在下一个固定步之前完成渲染。\n\n## 常见失败\n\n### 按住按键后跳跃反复触发\n\n一次性动作使用 `get_key_down`，而不是 `get_key`。\n\n### 移动速度随帧率变化\n\n把速度表示为每秒单位，并乘以回调提供的 `delta_time`。\n\n### 点击编辑器面板也触发游戏输入\n\n检查 Game 焦点，并使用 Game 视口鼠标坐标。\n\n### 暂停菜单动画也停止了\n\n使用非缩放时间驱动，而不是缩放玩法时间。\n\n## 相关参考\n\n- [Input](../api/Input.md)\n- [KeyCode](../api/KeyCode.md)\n- [Time](../api/Time.md)\n- [Camera](../api/Camera.md)\n- [InxComponent 生命周期](../api/InxComponent.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "manual",
+      "url": "wiki/site/zh/manual/input-and-time.html",
+      "source": "zh/manual/input-and-time.md",
+      "meta": {
+        "category": "手册",
+        "tags": [
+          "输入",
+          "时间",
+          "键盘",
+          "鼠标",
+          "帧"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "解释 held/down/up 输入语义、Game 视图焦点、鼠标坐标、帧时间、固定时间、非缩放时间与帧率无关移动。",
+        "source_paths": [
+          "python/Infernux/input",
+          "python/Infernux/timing.pyi"
+        ]
+      }
+    },
+    {
+      "title": "物理",
+      "summary": "Infernux 物理系统由参与模拟的组件和全局空间查询组成。最重要的设计决定，是对象由物理控制，还是由脚本直接编排 Transform。",
+      "content": "\n# 物理\n\nInfernux 物理系统由参与模拟的组件和全局空间查询组成。最重要的设计决定，是对象由物理控制，还是由脚本直接编排 Transform。\n\n## Rigidbody 与 Collider 职责\n\n- **Collider** 定义可命中、重叠、阻挡或作为触发器的形状。\n- **Rigidbody** 让对象拥有模拟质量、速度、重力、约束与力接口。\n- 没有动态 Rigidbody 的 Collider 适合静态世界几何或只参与查询的区域。\n- Trigger 报告重叠事件，不产生普通物理响应。\n\n碰撞几何应接近可见对象，但不要认为复杂渲染网格天然就是好碰撞体。优先使用能实现玩法目标的最简单形状。\n\n## 动态、运动学或静态\n\n| 模式 | 由谁控制 | 适合 |\n|---|---|---|\n| 动态 | 力、重力、碰撞、速度 | 箱子、投射物、物理响应角色 |\n| 运动学 | 编排的目标位置/旋转 | 移动平台、门、脚本障碍物 |\n| 静态 | 固定 Transform 与 Collider | 地面、墙壁、关卡几何 |\n\n不要每帧写 Transform 来移动动态 Rigidbody。这样会绕过正常模拟意图，导致穿透或接触不稳定。动态物体使用力或速度；运动学物体使用 `move_position` / `move_rotation`。\n\n## 固定步控制\n\n物理决策放在 `fixed_update(fixed_delta_time)`：\n\n```python\nfrom Infernux import InxComponent, Rigidbody, Vector3\n\n\nclass Thruster(InxComponent):\n    thrust: float = 12.0\n\n    def start(self) -> None:\n        self.body = self.game_object.get_component(Rigidbody)\n\n    def fixed_update(self, fixed_delta_time: float) -> None:\n        if self.body is not None:\n            self.body.add_force(Vector3(0.0, self.thrust, 0.0))\n```\n\n力接口本身会进入固定模拟。除非所选 force mode 明确要求自行计算的 impulse，否则不要再乘渲染帧 `delta_time`。\n\n## 碰撞与触发器\n\n`InxComponent` 提供两组回调：\n\n- `on_collision_enter`、`on_collision_stay`、`on_collision_exit`：物理接触；\n- `on_trigger_enter`、`on_trigger_stay`、`on_trigger_exit`：触发器重叠。\n\n状态切换使用 enter/exit；只有确实需要每个固定步重复时才使用 stay。先按组件、tag 或 layer 快速过滤，再执行昂贵逻辑。\n\n如果回调没有到达，检查双方：\n\n1. Collider 存在且启用；\n2. 至少一方拥有目标事件所需的模拟刚体；\n3. Trigger 状态与回调家族匹配；\n4. Layer 没有被配置为相互忽略；\n5. 对象在层级中实际激活。\n\n## 查询\n\n全局 `Physics` API 支持射线、球体与盒体查询：\n\n```python\nfrom Infernux import InxComponent, Vector3\nfrom Infernux.physics import Physics\n\n\nclass GroundProbe(InxComponent):\n    def is_grounded(self) -> bool:\n        origin = self.transform.position\n        hit = Physics.raycast(origin, Vector3(0.0, -1.0, 0.0), max_distance=1.1)\n        return hit is not None\n```\n\n- `raycast`：细线方向上的第一个命中。\n- `raycast_all`：需要多个命中或顺序时使用。\n- `overlap_sphere` / `overlap_box`：查找已经位于体积内的 Collider。\n- sphere/box cast：让移动体积检测前方目标。\n- 使用 layer mask 减少误报与查询成本。\n- 明确决定是否包含 Trigger。\n\n## 稳定性清单\n\n- 主动配置质量、阻力、重力、约束与碰撞检测模式。\n- 在固定更新中发送模拟命令。\n- 不要逐帧写动态刚体的 Transform。\n- 在项目层记录 Layer 碰撞规则。\n- 明确设置查询距离与体积；无界宽泛查询会掩盖错误。\n- 查询结果异常时，临时绘制或记录探针数据。\n\n## 相关参考\n\n- [Physics](../api/Physics.md)\n- [Rigidbody](../api/Rigidbody.md)\n- [Collider](../api/Collider.md)\n- [BoxCollider](../api/BoxCollider.md)\n- [SphereCollider](../api/SphereCollider.md)\n- [InxComponent 碰撞生命周期](../api/InxComponent.md)\n- [输入与时间](input-and-time.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "manual",
+      "url": "wiki/site/zh/manual/physics.html",
+      "source": "zh/manual/physics.md",
+      "meta": {
+        "category": "手册",
+        "tags": [
+          "物理",
+          "rigidbody",
+          "collider",
+          "射线",
+          "触发器"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "解释 Rigidbody 与 Collider 职责、动态和运动学移动、固定步力、碰撞/触发回调、层与物理查询。",
+        "source_paths": [
+          "python/Infernux/physics",
+          "python/Infernux/components/builtin",
+          "python/Infernux/components/component.py"
+        ]
+      }
+    },
+    {
+      "title": "渲染与 RenderStack",
+      "summary": "Infernux 将“渲染什么”与“一帧如何调度”分离。Camera、可渲染组件、灯光与材质描述场景内容；场景级 RenderStack 选择管线、构建 RenderGraph 拓扑，并把可选 Pass 挂载到声明的注入点。",
+      "content": "\n# 渲染与 RenderStack\n\nInfernux 将“渲染什么”与“一帧如何调度”分离。Camera、可渲染组件、灯光与材质描述场景内容；场景级 `RenderStack` 选择管线、构建 RenderGraph 拓扑，并把可选 Pass 挂载到声明的注入点。\n\n## 一个 Stack，一条管线\n\n`RenderStack` 是场景单例组件；存在活动实例时，`RenderStack.instance()` 会返回它。序列化状态记录管线类、挂载 Pass 和管线参数。\n\n内置选择面向不同约束：\n\n| 管线 | 结构 | 主要设置 |\n|---|---|---|\n| Default Forward | 阴影 → 不透明 → 天空 → 透明 | 阴影分辨率、MSAA、屏幕 UI |\n| Default Deferred | G-buffer / 延迟光照拓扑 | 阴影分辨率、屏幕 UI；延迟 MSAA 关闭 |\n\n应根据光照、材质、透明和抗锯齿需求为整个场景选择管线，不要每帧切换。\n\n## 注入点与效果\n\n管线公开具名 `InjectionPoint`。默认前向管线提供 `after_opaque`、`after_sky`、`after_transparent`。Pass 声明其位置，以及需要或修改的资源。\n\n`RenderStack.add_pass()` 挂载 Pass；启用、移除、重排和 move-before 操作控制执行。Stack 会序列化这些配置，因此应使用这些操作或 Inspector，不要直接编辑 `mounted_passes_json`。\n\n内置全屏效果包括 Bloom、Tone Mapping、Color Adjustments、White Balance、Vignette、Film Grain、Sharpen 与 Chromatic Aberration。顺序有语义：Tone Mapping 与依赖颜色空间的效果不能随意互换。\n\n## Graph 生命周期\n\n管线定义稳定拓扑，可选 Pass 对其扩展。配置改变时，`invalidate_graph()` 标记 Graph 为脏；`build_graph()` 在渲染前重建。不要在逐帧玩法循环中反复失效。\n\n自定义管线应覆盖 `define_topology(graph)`；自定义全屏效果应声明资源契约并实现 `setup_passes(graph, bus)`，不要直接获取其他 Pass 的私有对象。\n\n```python\nfrom Infernux.renderstack import BloomEffect, RenderStack\n\nstack = RenderStack.instance()\nif stack is not None:\n    bloom = BloomEffect()\n    bloom.threshold = 1.0\n    bloom.intensity = 0.7\n    stack.add_pass(bloom)\n```\n\n应在场景初始化阶段配置挂载，而不是在 `update` 中持续执行。\n\n## 材质与透明\n\n材质决定 Shader、属性、纹理、表面类型、Alpha 裁剪、深度、混合、剔除与渲染队列。默认使用不透明表面；透明混合具有排序和 overdraw 成本。可接受硬边时用 Alpha Clip 表现镂空形状。\n\n材质属性只有在 Shader 暴露对应名称时才生效。编写通用工具时可先检查 `has_property()`。\n\n## 排查顺序\n\n1. 确认场景只有一个活动 RenderStack，且管线可被发现。\n2. 确认活动 Camera 符合管线渲染条件。\n3. 检查材质、Shader、网格与纹理引用是否可解析。\n4. 检查 Pass 已启用且位于兼容注入点。\n5. 检查所需 ResourceBus 名称与 Pass 顺序。\n6. 配置改变后使 Graph 失效，但不要每帧执行。\n7. 逐一关闭可选效果，隔离第一个失败 Pass。\n\n## 相关参考\n\n- [RenderStack](../api/RenderStack.md)\n- [RenderPipeline](../api/RenderPipeline.md)\n- [RenderGraph](../api/RenderGraph.md)\n- [BloomEffect](../api/BloomEffect.md)\n- [ToneMappingEffect](../api/ToneMappingEffect.md)\n- [Material](../api/Material.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "manual",
+      "url": "wiki/site/zh/manual/rendering-and-renderstack.html",
+      "source": "zh/manual/rendering-and-renderstack.md",
+      "meta": {
+        "category": "手册",
+        "tags": [
+          "渲染",
+          "RenderStack",
+          "管线",
+          "RenderGraph",
+          "后处理"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "解释场景 RenderStack 单例、前向/延迟管线、注入点、Pass 顺序、Graph 失效、后处理效果与安全扩展边界。",
+        "source_paths": [
+          "python/Infernux/renderstack",
+          "python/Infernux/rendergraph",
+          "python/Infernux/core/material.py"
+        ]
+      }
+    },
+    {
+      "title": "场景与对象",
+      "summary": "Scene、GameObject、Transform 与组件共同构成运行时内容的所有权模型。明确每一层负责什么，可以避免脆弱的全局查找和跨场景悬空引用。",
+      "content": "\n# 场景与对象\n\nScene、GameObject、Transform 与组件共同构成运行时内容的所有权模型。明确每一层负责什么，可以避免脆弱的全局查找和跨场景悬空引用。\n\n## 所有权模型\n\n```text\nScene\n└─ GameObject\n   ├─ Transform\n   │  └─ 通过 Transform 层级连接的子 GameObject\n   ├─ 原生内置 Component\n   └─ Python InxComponent 实例\n```\n\n- **Scene** 是可加载的对象集合。\n- **GameObject** 提供身份、激活、标签、层级与组件所有权。\n- **Transform** 提供空间状态和父子关系。\n- **Component** 提供行为或数据，但不会成为第二套对象身份。\n\n不要把组件当成独立场景对象。它的生命周期和有效状态受所属 GameObject 约束。\n\n## GameObject 身份与激活\n\n`GameObject.name` 便于人类阅读，但不保证唯一。只有当项目的标签约定足够稳定时，才用 tag 做广义角色查询。逐帧逻辑应保存直接组件引用，不要每帧调用全局查找。\n\n激活状态有两个相关视角：\n\n- `active_self`：对象自身请求的状态；\n- `active_in_hierarchy`：考虑父对象之后的实际状态。\n\n子对象可能请求激活，却因为某个祖先未激活而仍然无效。排查组件不更新时，除了组件 `enabled`，还要检查层级中的实际激活状态。\n\n## Transform 层级\n\nTransform 同时暴露世界与局部值：\n\n| 空间 | 位置 | 旋转 | 缩放 |\n|---|---|---|---|\n| 世界 | `position` | `rotation` / `euler_angles` | `lossy_scale` |\n| 局部 | `local_position` | `local_rotation` / `local_euler_angles` | `local_scale` |\n\n重新设置父对象时使用 `set_parent(parent, world_position_stays=True)`。默认值会保持世界位置并重新计算局部值；如果真正需要保留的是局部关系，则传入 `False`。\n\n空间关系优先通过 Transform 的 `parent`、`get_child`、`find` 遍历；行为依赖优先保存组件引用。\n\n## 组件\n\n一个 GameObject 可以同时拥有内置组件与 Python 组件。常见操作包括：\n\n- `add_component(type)` 与 `remove_component(instance)`；\n- `get_component(type)` 获取一个兼容组件；\n- `get_components(type)` 获取全部兼容组件；\n- `get_component_in_children(type)` 与 `get_component_in_parent(type)` 做层级感知查询。\n\n如果引用在组件生命周期内保持有效，可在 `start()` 中缓存：\n\n```python\nfrom Infernux import InxComponent, Rigidbody\n\n\nclass Motor(InxComponent):\n    def start(self) -> None:\n        self.body = self.game_object.get_component(Rigidbody)\n\n    def fixed_update(self, fixed_delta_time: float) -> None:\n        if self.body is None:\n            return\n        # 在这里执行固定步长的马达逻辑。\n```\n\n如果某组件是必需依赖，应在初始化阶段明确失败，而不是每帧静默搜索整个场景。\n\n## 加载场景\n\n`SceneManager.load_scene(...)` 接受构建索引或场景标识。构建索引来自 Build Settings 中的有序场景列表。\n\n```python\nfrom Infernux import InxComponent\nfrom Infernux.scene import SceneManager\n\n\nclass ExitPortal(InxComponent):\n    next_scene_index: int = 1\n\n    def travel(self) -> None:\n        if not SceneManager.load_scene(self.next_scene_index):\n            raise RuntimeError(f\"无法加入场景加载请求：{self.next_scene_index}\")\n```\n\n加载请求可能在引擎安全点处理，而不是在组件回调中途立即替换活动场景。请求切换后，不要继续修改旧场景对象。\n\n只有会明确跨场景存在的对象，例如会话协调器，才使用 `dont_destroy_on_load(game_object)`。持久对象必须能够处理重复进入场景，避免复制自身。\n\n## 实用规则\n\n1. 场景保存后再加入 Build Settings。\n2. 不把 GameObject 名称当成唯一持久标识。\n3. 缓存频繁使用的组件引用。\n4. 赋值前区分 Transform 的局部值与世界值。\n5. 把场景加载视为所有权边界；旧引用可能失效。\n6. 跨场景持久对象应少而明确。\n\n## 相关参考\n\n- [GameObject](../api/GameObject.md)\n- [Transform](../api/Transform.md)\n- [Scene](../api/Scene.md)\n- [SceneManager](../api/SceneManager.md)\n- [InxComponent](../api/InxComponent.md)\n- [构建并分享项目](../learn/build-and-share.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "manual",
+      "url": "wiki/site/zh/manual/scenes-and-objects.html",
+      "source": "zh/manual/scenes-and-objects.md",
+      "meta": {
+        "category": "手册",
+        "tags": [
+          "场景",
+          "gameobject",
+          "transform",
+          "层级"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "解释 Infernux 的场景所有权、GameObject 身份、Transform 层级、组件查询、激活状态与按构建索引加载场景。",
+        "source_paths": [
+          "python/Infernux/scene",
+          "python/Infernux/components",
+          "python/Infernux/lib/_Infernux.pyi"
+        ]
+      }
+    },
+    {
+      "title": "屏幕空间 UI",
+      "summary": "Infernux UI 是以 UICanvas 为根的组件层级。其子 GameObject 挂载 UIText、UIImage、UIButton 等屏幕组件。布局使用 Canvas 设计像素，渲染与输入时再转换到当前 Game 视口。",
+      "content": "\n# 屏幕空间 UI\n\nInfernux UI 是以 `UICanvas` 为根的组件层级。其子 GameObject 挂载 `UIText`、`UIImage`、`UIButton` 等屏幕组件。布局使用 Canvas 设计像素，渲染与输入时再转换到当前 Game 视口。\n\n## 先确定 Canvas\n\n把 Canvas 参考分辨率视为界面的设计坐标系，默认值是 1920 × 1080。\n\n| 设置 | 作用 |\n|---|---|\n| `render_mode` | 使用 `ScreenOverlay`，或为特定相机使用 `CameraOverlay` |\n| `sort_order` | Canvas 间的顺序；数值较小者先绘制 |\n| `ui_scale_mode` | 保持像素大小，或从参考分辨率缩放 |\n| `screen_match_mode` | 决定如何处理宽高比例差异 |\n| `match_width_or_height` | 从匹配宽度（`0`）过渡到匹配高度（`1`） |\n| `pixel_perfect` | 条件允许时优先整数倍缩放 |\n\n游戏 HUD 可先采用 `ScaleWithScreenSize`，然后同时验证最窄和最宽的目标比例。`ConstantPhysicalSize` 目前是面向未来的选项，现阶段行为等同固定像素。\n\n屏幕 UI 还依赖当前渲染管线的 `enable_screen_ui` 设置。\n\n## 锚点与矩形\n\n每个 `InxUIScreenComponent` 都具有水平/垂直对齐锚点和 `x`、`y`、`width`、`height`。这些值相对于父 UI 元素；没有父元素时相对于 Canvas。\n\n- 根据用途选择边缘：生命值贴角，弹窗居中。\n- 把相关元素放在同一父节点下，使其作为一个布局单元移动。\n- `rotation` 负责视觉旋转，命中测试也会使用旋转后的矩形。\n- `opacity` 控制透明度，`raycast_target` 决定是否参与指针命中。\n- 装饰图片不要开启 raycast，否则可能挡住后方按钮。\n\n`UICanvas.raycast()` 返回最前方的可命中元素，`raycast_all()` 返回从前到后的完整列表。\n\n## 文本、图片与按钮\n\n`UIText` 支持水平/垂直对齐、行高、字距、溢出行为及三种尺寸模式。短标签使用 `AutoWidth`，自动换行段落使用 `AutoHeight`，布局不可移动时使用 `FixedSize`。\n\n`UIImage.texture_path` 指向纹理资源；其颜色是乘法色调，使用 `[1, 1, 1, 1]` 可保留原图颜色。\n\n`UIButton` 组合了背景、标签、选择状态颜色和 `on_click` 事件：\n\n```python\nfrom Infernux import GameObject, InxComponent\nfrom Infernux.ui import UIButton\n\n\nclass MainMenu(InxComponent):\n    def start(self) -> None:\n        button_object = GameObject.find(\"StartButton\")\n        if button_object is None:\n            return\n\n        button = button_object.get_component(UIButton)\n        if button is not None:\n            button.on_click.add_listener(self.start_game)\n\n    def start_game(self) -> None:\n        print(\"Start requested\")\n```\n\n如果之后需要 `remove_listener`，应保留稳定的方法回调。`ColorTint` 是当前已实现的选择过渡；Sprite Swap 与 Animation 标记为未来能力。\n\n## 响应式检查清单\n\n1. 在参考分辨率、16:9、16:10、超宽屏和窄竖屏中测试 Canvas。\n2. 使用最长的目标语言文本检查布局，不要只验证较短的英文。\n3. 确保缩放后交互目标仍足够大。\n4. 确认渲染顺序、命中顺序和视觉顺序一致。\n5. 模态 UI 获得焦点时禁用游戏输入。\n6. 确认当前渲染管线已启用屏幕 UI。\n\n## 相关参考\n\n- [UICanvas](../api/UICanvas.md)\n- [UIText](../api/UIText.md)\n- [UIImage](../api/UIImage.md)\n- [UIButton](../api/UIButton.md)\n- [UISelectable](../api/UISelectable.md)\n- [输入与时间](input-and-time.md)\n",
+      "groupKey": "manual",
+      "groupTitle": "manual",
+      "url": "wiki/site/zh/manual/ui.html",
+      "source": "zh/manual/ui.md",
+      "meta": {
+        "category": "手册",
+        "tags": [
+          "UI",
+          "Canvas",
+          "布局",
+          "事件",
+          "响应式"
+        ],
+        "status": "preview",
+        "since": "0.2.1",
+        "last_verified": "2026-07-15",
+        "audience": [
+          "user",
+          "agent"
+        ],
+        "agent_summary": "解释屏幕空间 UI 层级、Canvas 缩放、锚点、文本和图片布局、按钮事件、命中测试与当前过渡效果限制。",
+        "source_paths": [
+          "python/Infernux/ui",
+          "python/Infernux/renderstack/default_forward_pipeline.pyi",
+          "python/Infernux/renderstack/default_deferred_pipeline.pyi"
+        ]
       }
     }
   ]

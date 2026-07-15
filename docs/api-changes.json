@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "current_release": "0.2.1",
+  "previous_release": null,
+  "comparison_available": false,
+  "reason": "0.2.1 is the first recorded API snapshot; no earlier authoritative snapshot exists.",
+  "counts": {
+    "added": 0,
+    "removed": 0,
+    "changed": 0
+  },
+  "added": [],
+  "removed": [],
+  "changed": []
+}

@@ -67,7 +67,7 @@ static std::shared_ptr<ShaderAsset> CompileShaderAsset(const std::string &filePa
         loadMeta = *meta;
     } else {
         // Build minimal meta for compilation
-        loadMeta.AddMetadata("file_path", filePath);
+        loadMeta.AddMetadata("file_path", InxResourceMeta::NormalizeFilePath(filePath));
         loadMeta.AddMetadata("type", ext == ".vert" ? std::string("vertex") : std::string("fragment"));
         loadMeta.AddMetadata("shader_id", shaderId);
     }

@@ -1409,6 +1409,7 @@ def render_asset_inspector(ctx: InxGUIContext, panel,
             ctx, _state.is_dirty(),
             on_apply=lambda: _on_apply(),
             on_revert=_on_revert,
+            semantic_prefix=f"asset.{category}.import",
         )
     elif cat_def.access_mode == AssetAccessMode.READ_WRITE_RESOURCE:
         if _state.exec_layer:
@@ -1501,6 +1502,7 @@ def _render_import_fields(ctx: InxGUIContext, cat_def: AssetCategoryDef,
         for fdef in cat_def.editable_fields:
             cur = getattr(state.settings, fdef.key)
             wid = f"##{fdef.key}"
+            semantic_id = f"asset.{state.category}.import.{fdef.key}"
 
             if fdef.field_type == WidgetType.CHECKBOX:
                 # Disable sRGB when texture_type is NORMAL_MAP
@@ -1510,6 +1512,9 @@ def _render_import_fields(ctx: InxGUIContext, cat_def: AssetCategoryDef,
                 if disabled:
                     ctx.begin_disabled(True)
                 new_val = render_inspector_checkbox(ctx, t(fdef.label), cur)
+                ctx.record_semantic_item(
+                    "checkbox", t(fdef.label), not disabled, semantic_id, bool(new_val),
+                )
                 if new_val != cur:
                     setattr(state.settings, fdef.key, new_val)
                 if disabled:
@@ -1524,6 +1529,10 @@ def _render_import_fields(ctx: InxGUIContext, cat_def: AssetCategoryDef,
                 except ValueError:
                     idx = 0
                 new_idx = ctx.combo(wid, idx, display_labels)
+                display_value = display_labels[new_idx] if 0 <= new_idx < len(display_labels) else ""
+                ctx.record_semantic_item(
+                    "combo", f"{t(fdef.label)}: {display_value}", True, semantic_id,
+                )
                 if new_idx != idx:
                     setattr(state.settings, fdef.key, values[new_idx])
                     # Only sync derived fields when texture_type itself changes
@@ -1536,6 +1545,9 @@ def _render_import_fields(ctx: InxGUIContext, cat_def: AssetCategoryDef,
                 v_min = fdef.float_range[0] if fdef.float_range else 0.0
                 v_max = fdef.float_range[1] if fdef.float_range else 0.0
                 new_val = ctx.drag_float(wid, float(cur), speed, v_min, v_max)
+                ctx.record_semantic_item(
+                    "drag_float", f"{t(fdef.label)}: {new_val:g}", True, semantic_id,
+                )
                 if new_val != cur:
                     setattr(state.settings, fdef.key, new_val)
 
@@ -1821,12 +1833,23 @@ def _render_sprite_body(ctx: InxGUIContext, panel, state: _State):
     field_label(ctx, t("sprite.rows"), lw)
     ctx.set_next_item_width(120)
     ss.slice_rows = max(1, ctx.input_int("##sprite_rows", ss.slice_rows, 1, 1))
+    ctx.record_semantic_item(
+        "int_input", f"{t('sprite.rows')}: {ss.slice_rows}", True,
+        "asset.texture.sprite.rows",
+    )
 
     field_label(ctx, t("sprite.cols"), lw)
     ctx.set_next_item_width(120)
     ss.slice_cols = max(1, ctx.input_int("##sprite_cols", ss.slice_cols, 1, 1))
+    ctx.record_semantic_item(
+        "int_input", f"{t('sprite.cols')}: {ss.slice_cols}", True,
+        "asset.texture.sprite.columns",
+    )
 
     ctx.button(t("sprite.auto_slice"), lambda: _auto_slice(settings, ss))
+    ctx.record_semantic_item(
+        "button", t("sprite.auto_slice"), True, "asset.texture.sprite.auto_slice",
+    )
     ctx.dummy(0, 4)
 
     # ── Visual preview with divider lines ────────────────────────────────

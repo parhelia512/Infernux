@@ -286,6 +286,16 @@ class FieldMetadata:
     setter: Optional[Callable] = None
 
 
+def copy_serialized_field_default(metadata: FieldMetadata) -> Any:
+    """Return an independent default value for one serialized field."""
+    try:
+        return copy.deepcopy(metadata.default)
+    except Exception:
+        # Native-backed defaults are not always deepcopyable.  Preserve the
+        # established initialization behavior for those values.
+        return metadata.default
+
+
 class SerializedFieldDescriptor:
     """
     Descriptor that handles get/set for serialized fields.

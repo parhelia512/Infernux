@@ -273,7 +273,6 @@ class TestStrictSerializationFailures:
         [
             (lambda data: data.__setitem__("__schema_version__", 0), "requires schema"),
             (lambda data: data.__setitem__("__type_name__", "Other"), "type mismatch"),
-            (lambda data: data.pop("health"), "missing"),
             (lambda data: data.__setitem__("unknown", 1), "unknown"),
             (lambda data: data.__setitem__("health", "bad"), "requires an integer"),
         ],
@@ -296,6 +295,31 @@ class TestStrictSerializationFailures:
             target._deserialize_fields(json.dumps(document))
         assert target.health == 77
         assert target.title == "unchanged"
+
+    def test_missing_additive_field_uses_an_independent_declared_default(self):
+        import json
+
+        class AdditiveFields(InxComponent):
+            health: int = 10
+            tags: list = serialized_field(
+                default=[],
+                field_type=FieldType.LIST,
+                element_type=FieldType.STRING,
+            )
+
+        source = AdditiveFields()
+        source.health = 42
+        document = json.loads(source._serialize_fields())
+        document.pop("tags")
+
+        target = AdditiveFields()
+        target.tags = ["stale"]
+        target._deserialize_fields(json.dumps(document))
+
+        assert target.health == 42
+        assert target.tags == []
+        target.tags.append("local")
+        assert AdditiveFields().tags == []
 
     def test_runtime_schema_migration_hook_is_not_used(self):
         import json

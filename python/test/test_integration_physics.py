@@ -481,6 +481,30 @@ class TestRigidbodyNumerics:
         assert light.velocity.x == pytest.approx(expected_light, abs=1e-4)
         assert heavy.velocity.x == pytest.approx(expected_heavy, abs=1e-4)
 
+    def test_continuous_force_integrates_over_half_second(self, scene):
+        Physics.set_gravity(Vector3(0, 0, 0))
+        body = scene.create_game_object("ContinuousForceBox")
+        body.transform.position = Vector3(0, 2, 0)
+        body.transform.local_scale = Vector3(1.8, 0.7, 3.5)
+        body.add_component("BoxCollider")
+        rigidbody = body.add_component("Rigidbody")
+        rigidbody.mass = 1.0
+        rigidbody.use_gravity = False
+        rigidbody.drag = 0.0
+        rigidbody.max_linear_velocity = 500.0
+
+        manager = SceneManager.instance()
+        manager.play()
+        manager.pause()
+        manager.step()
+        start_z = body.transform.position.z
+        for _ in range(25):
+            rigidbody.add_force(Vector3(0, 0, 28), ForceMode.Force)
+            manager.step()
+
+        assert rigidbody.velocity.z == pytest.approx(14.0, abs=0.05)
+        assert body.transform.position.z - start_z == pytest.approx(3.64, abs=0.15)
+
     @pytest.mark.parametrize(
         "mode,input_value,expected_velocity",
         [

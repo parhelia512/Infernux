@@ -761,17 +761,6 @@ bool RenderGraph::Compile()
     // Step 3: Topological sort via Kahn's algorithm
     TopologicalSort();
 
-    // Debug: Log execution order after topological sort
-    {
-        std::string orderStr;
-        for (uint32_t idx : m_executionOrder) {
-            if (!orderStr.empty())
-                orderStr += " -> ";
-            orderStr += m_passes[idx].name;
-        }
-        INXLOG_DEBUG("RenderGraph::Compile - Execution order (", m_executionOrder.size(), " passes): ", orderStr);
-    }
-
     // Step 4: Allocate transient resources
     if (!AllocateResources()) {
         return false;
@@ -925,6 +914,17 @@ void RenderGraph::Execute(VkCommandBuffer commandBuffer)
 #endif
         }
     }
+}
+
+std::vector<std::string> RenderGraph::GetExecutionPassNames() const
+{
+    std::vector<std::string> names;
+    names.reserve(m_executionOrder.size());
+    for (uint32_t passIndex : m_executionOrder) {
+        if (passIndex < m_passes.size() && !m_passes[passIndex].culled)
+            names.push_back(m_passes[passIndex].name);
+    }
+    return names;
 }
 
 std::string RenderGraph::GetDebugString() const

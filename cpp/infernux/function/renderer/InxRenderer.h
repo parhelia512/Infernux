@@ -1,6 +1,7 @@
 #pragma once
 
 // Minimal includes required for public API value types and POD members
+#include "CaptureService.h"
 #include "GpuResidency.h"
 #include "InxRenderStruct.h"
 #include "ProfileConfig.h"
@@ -45,6 +46,39 @@ namespace vk
 {
 class ImageReadbackTicket;
 }
+
+struct RendererFrameTelemetrySnapshot
+{
+    uint64_t frame = 0;
+    bool sceneViewVisible = false;
+    bool sceneTargetReady = false;
+    bool gameCameraEnabled = false;
+    bool gameCameraAvailable = false;
+    bool gameTargetReady = false;
+    uint32_t sceneTargetWidth = 0;
+    uint32_t sceneTargetHeight = 0;
+    uint32_t gameTargetWidth = 0;
+    uint32_t gameTargetHeight = 0;
+    size_t sceneDrawCallCount = 0;
+    size_t sceneShadowDrawCallCount = 0;
+    size_t gameDrawCallCount = 0;
+    size_t gameShadowDrawCallCount = 0;
+    size_t lightCount = 0;
+    size_t particleCount = 0;
+    std::string sceneRenderGraphName;
+    std::string gameRenderGraphName;
+    uint64_t sceneRenderGraphExecutionCount = 0;
+    uint64_t gameRenderGraphExecutionCount = 0;
+    bool sceneRenderGraphCurrentExecuted = false;
+    bool gameRenderGraphCurrentExecuted = false;
+    std::vector<std::string> sceneRenderGraphPassNames;
+    std::vector<std::string> gameRenderGraphPassNames;
+    double gameRenderMs = 0.0;
+    double gameOnlyFrameMs = 0.0;
+    double sceneUpdateMs = 0.0;
+    double guiBuildMs = 0.0;
+    double prepareFrameMs = 0.0;
+};
 
 class InxRenderer
 {
@@ -106,6 +140,7 @@ class InxRenderer
     void SetMeshGpuBudgetBytes(uint64_t bytes);
     [[nodiscard]] size_t TrimMeshGpuBudget();
     [[nodiscard]] GpuResidencySnapshot GetGpuResidencySnapshot() const;
+    [[nodiscard]] RendererFrameTelemetrySnapshot GetFrameTelemetrySnapshot();
     [[nodiscard]] uint64_t GetGpuResidencyBudgetBytes() const;
     void SetGpuResidencyBudgetBytes(uint64_t bytes);
     [[nodiscard]] size_t TrimGpuResidencyBudget();
@@ -120,8 +155,17 @@ class InxRenderer
                                const std::string &passTag = "", const std::string &stencil = "",
                                const std::string &alphaClip = "");
     bool GetUserEvent();
+    uint64_t QueueSyntheticKeyInput(int scancode, bool pressed, bool repeat = false);
+    uint64_t QueueSyntheticMouseButtonInput(int button, bool pressed, float x, float y);
+    uint64_t QueueSyntheticMouseMotionInput(float x, float y, float deltaX, float deltaY);
+    uint64_t QueueSyntheticMouseWheelInput(float horizontal, float vertical);
+    uint64_t QueueSyntheticTextInput(const std::string &text);
+    uint64_t QueueSyntheticCloseRequest();
+    [[nodiscard]] uint64_t GetLastProcessedSyntheticInputSequence() const;
+    [[nodiscard]] size_t GetPendingSyntheticInputCount() const;
     void ShowWindow();
     void HideWindow();
+    [[nodiscard]] bool IsWindowMinimized() const;
     void SetWindowIcon(const std::string &iconPath);
     void SetWindowFullscreen(bool fullscreen);
     void SetWindowTitle(const std::string &title);
@@ -176,6 +220,9 @@ class InxRenderer
     uint64_t GetSceneTextureId() const;
     void ResizeSceneRenderTarget(uint32_t width, uint32_t height);
     [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket> RequestRenderTargetReadback(bool gameView);
+    [[nodiscard]] uint64_t RequestCapture(CaptureSource source, const std::string &outputPath);
+    [[nodiscard]] CaptureSnapshot QueryCapture(uint64_t captureId) const;
+    [[nodiscard]] bool CancelCapture(uint64_t captureId);
 
     // Editor gizmos
     void SetShowGrid(bool show);
@@ -411,8 +458,21 @@ class InxRenderer
     std::unique_ptr<InxVkCoreModular> m_vkCore;
     std::unique_ptr<InxGUI> m_gui;
     std::unique_ptr<InxView> m_view;
+    bool m_guiPlayerMode = false;
+    uint64_t m_lastSemanticSyntheticInputSequence = 0;
     std::unique_ptr<SceneRenderTarget> m_sceneRenderTarget;
     std::unique_ptr<SceneRenderGraph> m_sceneRenderGraph;
+    std::unique_ptr<CaptureService> m_captureService;
+    struct PendingCapture
+    {
+        uint64_t id = 0;
+        CaptureSource source = CaptureSource::Game;
+    };
+    [[nodiscard]] bool HasPendingCapture(CaptureSource source) const;
+    void SubmitPendingCaptureReadbacks();
+    std::vector<PendingCapture> m_pendingCaptures;
+    uint64_t m_sceneRenderTargetGeneration = 0;
+    uint64_t m_gameRenderTargetGeneration = 0;
     std::unique_ptr<EditorGizmos> m_editorGizmos;
     std::unique_ptr<EditorTools> m_editorTools;
     std::unique_ptr<GizmosDrawCallBuffer> m_componentGizmos;

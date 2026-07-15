@@ -1,0 +1,1007 @@
+{
+  "schema_version": 2,
+  "generated_for_release": "0.2.1",
+  "document_count": 36,
+  "documents": [
+    {
+      "id": "en.architecture.about",
+      "language": "en",
+      "layer": "architecture",
+      "title": "Why Infernux Exists",
+      "url": "/wiki/site/en/architecture/about.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/architecture/about.html",
+      "source": "docs/wiki/docs/en/architecture/about.md",
+      "status": "unversioned",
+      "since": null,
+      "last_verified": null,
+      "audience": [],
+      "tags": [
+        "vision"
+      ],
+      "summary": "> Nothing technical here—just a few stories. Along the way, I never found anyone else who wanted to poke at this old, capital‑market‑abandoned thing called a game engine. So I’m writing these thoughts down, hoping that ten years from now they’ll make me smile.",
+      "source_paths": []
+    },
+    {
+      "id": "en.architecture.jit",
+      "language": "en",
+      "layer": "architecture",
+      "title": "Deep Dive: JIT-Accelerated Scripting in Infernux",
+      "url": "/wiki/site/en/architecture/jit.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/architecture/jit.html",
+      "source": "docs/wiki/docs/en/architecture/jit.md",
+      "status": "unversioned",
+      "since": null,
+      "last_verified": null,
+      "audience": [],
+      "tags": [
+        "jit",
+        "performance",
+        "python",
+        "numba",
+        "parallel"
+      ],
+      "summary": "Infernux is a game engine whose entire gameplay layer is written in Python. That is a deliberate architectural choice — Python gives us hot reload, a massive ecosystem, and a low barrier to entry — but it also means that every per-frame update loop is, by default, interpreted. Wh",
+      "source_paths": []
+    },
+    {
+      "id": "en.learn.2d-foundations",
+      "language": "en",
+      "layer": "learn",
+      "title": "2D Foundations",
+      "url": "/wiki/site/en/learn/2d-foundations.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/learn/2d-foundations.html",
+      "source": "docs/wiki/docs/en/learn/2d-foundations.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "new-user",
+        "agent"
+      ],
+      "tags": [
+        "2d",
+        "sprite",
+        "camera",
+        "beginner"
+      ],
+      "summary": "Build a minimal 2D scene with an orthographic Camera, SpriteRenderer, imported texture, predictable world scale, and a frame-rate-independent movement check.",
+      "source_paths": [
+        "python/Infernux/components/builtin/sprite_renderer.py",
+        "python/Infernux/components/builtin/camera.pyi",
+        "python/Infernux/core/asset_types.py"
+      ]
+    },
+    {
+      "id": "en.learn.3d-foundations",
+      "language": "en",
+      "layer": "learn",
+      "title": "3D Foundations",
+      "url": "/wiki/site/en/learn/3d-foundations.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/learn/3d-foundations.html",
+      "source": "docs/wiki/docs/en/learn/3d-foundations.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "new-user",
+        "agent"
+      ],
+      "tags": [
+        "3d",
+        "mesh",
+        "material",
+        "light",
+        "camera"
+      ],
+      "summary": "Build and validate a minimal lit 3D scene using a perspective Camera, MeshRenderer, material, Light, shadows, and RenderStack.",
+      "source_paths": [
+        "python/Infernux/components/builtin/mesh_renderer.pyi",
+        "python/Infernux/components/builtin/camera.pyi",
+        "python/Infernux/components/builtin/light.pyi",
+        "python/Infernux/core/material.pyi",
+        "python/Infernux/renderstack"
+      ]
+    },
+    {
+      "id": "en.learn.animation-workflow",
+      "language": "en",
+      "layer": "learn",
+      "title": "Animation Workflow",
+      "url": "/wiki/site/en/learn/animation-workflow.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/learn/animation-workflow.html",
+      "source": "docs/wiki/docs/en/learn/animation-workflow.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "animation",
+        "2d",
+        "3d",
+        "fsm",
+        "animator"
+      ],
+      "summary": "Create 2D or 3D animation clips, place them in an .animfsm controller, attach SpiritAnimator or SkeletalAnimator, and verify state, transition, event, and playback behavior.",
+      "source_paths": [
+        "python/Infernux/engine/ui/animclip2d_editor_panel.py",
+        "python/Infernux/engine/ui/animfsm_editor_panel.py",
+        "python/Infernux/core/animation_clip.py",
+        "python/Infernux/core/animation_clip3d.py",
+        "python/Infernux/core/anim_state_machine.py",
+        "python/Infernux/components/spirit_animator.py",
+        "python/Infernux/components/skeletal_animator.py"
+      ]
+    },
+    {
+      "id": "en.learn.audio-workflow",
+      "language": "en",
+      "layer": "learn",
+      "title": "Audio Workflow",
+      "url": "/wiki/site/en/learn/audio-workflow.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/learn/audio-workflow.html",
+      "source": "docs/wiki/docs/en/learn/audio-workflow.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "audio",
+        "listener",
+        "source",
+        "wav",
+        "sfx"
+      ],
+      "summary": "Import a WAV clip, configure one AudioListener and a multi-track AudioSource, test looping and one-shot playback, and diagnose lifetime or spatial attenuation issues.",
+      "source_paths": [
+        "python/Infernux/core/audio_clip.pyi",
+        "python/Infernux/core/asset_types.py",
+        "python/Infernux/components/builtin/audio_source.pyi",
+        "python/Infernux/components/builtin/audio_listener.pyi"
+      ]
+    },
+    {
+      "id": "en.learn.build-and-share",
+      "language": "en",
+      "layer": "learn",
+      "title": "Build and Share a Project",
+      "url": "/wiki/site/en/learn/build-and-share.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/learn/build-and-share.html",
+      "source": "docs/wiki/docs/en/learn/build-and-share.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "new-user",
+        "agent"
+      ],
+      "tags": [
+        "beginner",
+        "build",
+        "windows",
+        "release"
+      ],
+      "summary": "Add saved scenes to Build Settings, configure a Windows standalone player, build it, and verify the result outside the editor.",
+      "source_paths": [
+        "python/Infernux/engine/ui/build_settings_panel.py",
+        "python/Infernux/engine/game_builder.py"
+      ]
+    },
+    {
+      "id": "en.learn.first-component",
+      "language": "en",
+      "layer": "learn",
+      "title": "Your First Component",
+      "url": "/wiki/site/en/learn/first-component.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/learn/first-component.html",
+      "source": "docs/wiki/docs/en/learn/first-component.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "new-user",
+        "agent"
+      ],
+      "tags": [
+        "beginner",
+        "python",
+        "component",
+        "inspector"
+      ],
+      "summary": "Create an InxComponent Python script, expose a serialized speed field, attach it to a GameObject, and verify lifecycle behavior in Play mode.",
+      "source_paths": [
+        "python/Infernux/components",
+        "python/Infernux/__init__.pyi"
+      ]
+    },
+    {
+      "id": "en.learn.getting-started",
+      "language": "en",
+      "layer": "learn",
+      "title": "Getting Started",
+      "url": "/wiki/site/en/learn/getting-started.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/learn/getting-started.html",
+      "source": "docs/wiki/docs/en/learn/getting-started.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "new-user",
+        "agent"
+      ],
+      "tags": [
+        "beginner",
+        "editor",
+        "installation"
+      ],
+      "summary": "Install an Infernux preview, create or open a project, identify the main editor panels, save a scene, and enter Play mode.",
+      "source_paths": [
+        "README.md",
+        "packaging",
+        "python/Infernux/engine/ui"
+      ]
+    },
+    {
+      "id": "en.manual.api-versioning",
+      "language": "en",
+      "layer": "manual",
+      "title": "API Versioning and Compatibility",
+      "url": "/wiki/site/en/manual/api-versioning.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/manual/api-versioning.html",
+      "source": "docs/wiki/docs/en/manual/api-versioning.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "api",
+        "version",
+        "compatibility",
+        "agent"
+      ],
+      "summary": "Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols.",
+      "source_paths": [
+        "docs/tools/build-api-diff.mjs",
+        "docs/api-snapshots",
+        "docs/api-changes.json",
+        "docs/api-index.json"
+      ]
+    },
+    {
+      "id": "en.manual.assets-and-meta",
+      "language": "en",
+      "layer": "manual",
+      "title": "Assets and `.meta` files",
+      "url": "/wiki/site/en/manual/assets-and-meta.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/manual/assets-and-meta.html",
+      "source": "docs/wiki/docs/en/manual/assets-and-meta.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "assets",
+        "guid",
+        "meta",
+        "import",
+        "material",
+        "texture"
+      ],
+      "summary": "Explain project assets, GUID and path identity, .meta sidecars, typed references, import settings, safe move/delete operations, caching, and runtime loading.",
+      "source_paths": [
+        "python/Infernux/core/assets.py",
+        "python/Infernux/core/asset_ref.py",
+        "python/Infernux/core/asset_types.py",
+        "python/Infernux/engine/asset_reference_cleanup.py"
+      ]
+    },
+    {
+      "id": "en.manual.debugging",
+      "language": "en",
+      "layer": "manual",
+      "title": "Debugging and the Console",
+      "url": "/wiki/site/en/manual/debugging.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/manual/debugging.html",
+      "source": "docs/wiki/docs/en/manual/debugging.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "debugging",
+        "console",
+        "logging",
+        "troubleshooting"
+      ],
+      "summary": "A repeatable Infernux debugging workflow using the Console, Debug logging, lifecycle checks, minimal reproduction, and evidence suitable for GitHub Issues.",
+      "source_paths": [
+        "python/Infernux/debug.py",
+        "python/Infernux/engine/ui/console_utils.py",
+        "python/Infernux/components/component.py"
+      ]
+    },
+    {
+      "id": "en.manual.engine-map",
+      "language": "en",
+      "layer": "manual",
+      "title": "Engine Map",
+      "url": "/wiki/site/en/manual/engine-map.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/manual/engine-map.html",
+      "source": "docs/wiki/docs/en/manual/engine-map.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "overview",
+        "systems",
+        "reference"
+      ],
+      "summary": "A routing map from common Infernux development tasks to the responsible engine systems and canonical API pages.",
+      "source_paths": [
+        "python/Infernux",
+        "docs/wiki/docs/en/api"
+      ]
+    },
+    {
+      "id": "en.manual.input-and-time",
+      "language": "en",
+      "layer": "manual",
+      "title": "Input and Time",
+      "url": "/wiki/site/en/manual/input-and-time.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/manual/input-and-time.html",
+      "source": "docs/wiki/docs/en/manual/input-and-time.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "input",
+        "time",
+        "keyboard",
+        "mouse",
+        "frame"
+      ],
+      "summary": "Explain held/down/up input semantics, game-view focus, mouse coordinates, delta time, fixed time, unscaled time, and frame-independent movement.",
+      "source_paths": [
+        "python/Infernux/input",
+        "python/Infernux/timing.pyi"
+      ]
+    },
+    {
+      "id": "en.manual.physics",
+      "language": "en",
+      "layer": "manual",
+      "title": "Physics",
+      "url": "/wiki/site/en/manual/physics.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/manual/physics.html",
+      "source": "docs/wiki/docs/en/manual/physics.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "physics",
+        "rigidbody",
+        "collider",
+        "raycast",
+        "trigger"
+      ],
+      "summary": "Explain Rigidbody and Collider roles, dynamic versus kinematic movement, fixed-step forces, collision/trigger callbacks, layers, and physics queries.",
+      "source_paths": [
+        "python/Infernux/physics",
+        "python/Infernux/components/builtin",
+        "python/Infernux/components/component.py"
+      ]
+    },
+    {
+      "id": "en.manual.rendering-and-renderstack",
+      "language": "en",
+      "layer": "manual",
+      "title": "Rendering and RenderStack",
+      "url": "/wiki/site/en/manual/rendering-and-renderstack.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/manual/rendering-and-renderstack.html",
+      "source": "docs/wiki/docs/en/manual/rendering-and-renderstack.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "rendering",
+        "renderstack",
+        "pipeline",
+        "rendergraph",
+        "post-processing"
+      ],
+      "summary": "Explain the scene RenderStack singleton, forward/deferred pipelines, injection points, pass ordering, graph invalidation, post-processing effects, and safe extension boundaries.",
+      "source_paths": [
+        "python/Infernux/renderstack",
+        "python/Infernux/rendergraph",
+        "python/Infernux/core/material.py"
+      ]
+    },
+    {
+      "id": "en.manual.scenes-and-objects",
+      "language": "en",
+      "layer": "manual",
+      "title": "Scenes and Objects",
+      "url": "/wiki/site/en/manual/scenes-and-objects.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/manual/scenes-and-objects.html",
+      "source": "docs/wiki/docs/en/manual/scenes-and-objects.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "scene",
+        "gameobject",
+        "transform",
+        "hierarchy"
+      ],
+      "summary": "Explain Infernux scene ownership, GameObject identity, Transform hierarchy, component lookup, activation, and build-index scene loading.",
+      "source_paths": [
+        "python/Infernux/scene",
+        "python/Infernux/components",
+        "python/Infernux/lib/_Infernux.pyi"
+      ]
+    },
+    {
+      "id": "en.manual.ui",
+      "language": "en",
+      "layer": "manual",
+      "title": "Screen-space UI",
+      "url": "/wiki/site/en/manual/ui.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/manual/ui.html",
+      "source": "docs/wiki/docs/en/manual/ui.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "ui",
+        "canvas",
+        "layout",
+        "events",
+        "responsive"
+      ],
+      "summary": "Explain the screen-space UI hierarchy, Canvas scaling, anchors, text and image layout, button events, hit testing, and current transition limitations.",
+      "source_paths": [
+        "python/Infernux/ui",
+        "python/Infernux/renderstack/default_forward_pipeline.pyi",
+        "python/Infernux/renderstack/default_deferred_pipeline.pyi"
+      ]
+    },
+    {
+      "id": "zh.architecture.about",
+      "language": "zh-CN",
+      "layer": "architecture",
+      "title": "为什么会有Infernux",
+      "url": "/wiki/site/zh/architecture/about.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/architecture/about.html",
+      "source": "docs/wiki/docs/zh/architecture/about.md",
+      "status": "unversioned",
+      "since": null,
+      "last_verified": null,
+      "audience": [],
+      "tags": [
+        "愿景"
+      ],
+      "summary": "> 和技术无关，讲一点小故事。做引擎的路上一直没遇到志同道合的、愿意一起研究这种资本市场都已经抛弃了的老古董的朋友，索性把一点这段时间的想法记在这里，希望十年之后回过头来看，能博我自己会心一笑吧。",
+      "source_paths": []
+    },
+    {
+      "id": "zh.architecture.jit",
+      "language": "zh-CN",
+      "layer": "architecture",
+      "title": "深入理解：Infernux 的 JIT 加速脚本系统",
+      "url": "/wiki/site/zh/architecture/jit.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/architecture/jit.html",
+      "source": "docs/wiki/docs/zh/architecture/jit.md",
+      "status": "unversioned",
+      "since": null,
+      "last_verified": null,
+      "audience": [],
+      "tags": [
+        "jit",
+        "性能",
+        "python",
+        "numba",
+        "并行"
+      ],
+      "summary": "Infernux 是一个把整个玩法层都写在 Python 里的游戏引擎。这是有意为之的架构选择——Python 带来了热重载、庞大的生态和极低的上手门槛——但它同时也意味着每一帧的更新循环默认都是解释执行的。当你需要在一帧内触碰十万个 Transform 时，解释执行的速度远远不够。这篇文档会完整地走一遍引擎 JIT 子系统是怎么解决这个问题的，它在底层做了哪些设计决策，以及这项工作接下来要往哪里走。",
+      "source_paths": []
+    },
+    {
+      "id": "zh.learn.2d-foundations",
+      "language": "zh-CN",
+      "layer": "learn",
+      "title": "2D 基础",
+      "url": "/wiki/site/zh/learn/2d-foundations.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/learn/2d-foundations.html",
+      "source": "docs/wiki/docs/zh/learn/2d-foundations.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "new-user",
+        "agent"
+      ],
+      "tags": [
+        "2D",
+        "Sprite",
+        "相机",
+        "入门"
+      ],
+      "summary": "使用正交 Camera、SpriteRenderer、导入纹理、明确世界尺度和帧率无关移动检查构建最小 2D 场景。",
+      "source_paths": [
+        "python/Infernux/components/builtin/sprite_renderer.py",
+        "python/Infernux/components/builtin/camera.pyi",
+        "python/Infernux/core/asset_types.py"
+      ]
+    },
+    {
+      "id": "zh.learn.3d-foundations",
+      "language": "zh-CN",
+      "layer": "learn",
+      "title": "3D 基础",
+      "url": "/wiki/site/zh/learn/3d-foundations.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/learn/3d-foundations.html",
+      "source": "docs/wiki/docs/zh/learn/3d-foundations.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "new-user",
+        "agent"
+      ],
+      "tags": [
+        "3D",
+        "网格",
+        "材质",
+        "灯光",
+        "相机"
+      ],
+      "summary": "使用透视 Camera、MeshRenderer、材质、Light、阴影与 RenderStack 构建并验证最小受光 3D 场景。",
+      "source_paths": [
+        "python/Infernux/components/builtin/mesh_renderer.pyi",
+        "python/Infernux/components/builtin/camera.pyi",
+        "python/Infernux/components/builtin/light.pyi",
+        "python/Infernux/core/material.pyi",
+        "python/Infernux/renderstack"
+      ]
+    },
+    {
+      "id": "zh.learn.animation-workflow",
+      "language": "zh-CN",
+      "layer": "learn",
+      "title": "动画工作流",
+      "url": "/wiki/site/zh/learn/animation-workflow.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/learn/animation-workflow.html",
+      "source": "docs/wiki/docs/zh/learn/animation-workflow.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "动画",
+        "2D",
+        "3D",
+        "FSM",
+        "Animator"
+      ],
+      "summary": "创建 2D 或 3D 动画 Clip，放入 .animfsm 控制器，挂载 SpiritAnimator 或 SkeletalAnimator，并验证状态、过渡、事件与播放行为。",
+      "source_paths": [
+        "python/Infernux/engine/ui/animclip2d_editor_panel.py",
+        "python/Infernux/engine/ui/animfsm_editor_panel.py",
+        "python/Infernux/core/animation_clip.py",
+        "python/Infernux/core/animation_clip3d.py",
+        "python/Infernux/core/anim_state_machine.py",
+        "python/Infernux/components/spirit_animator.py",
+        "python/Infernux/components/skeletal_animator.py"
+      ]
+    },
+    {
+      "id": "zh.learn.audio-workflow",
+      "language": "zh-CN",
+      "layer": "learn",
+      "title": "音频工作流",
+      "url": "/wiki/site/zh/learn/audio-workflow.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/learn/audio-workflow.html",
+      "source": "docs/wiki/docs/zh/learn/audio-workflow.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "音频",
+        "Listener",
+        "Source",
+        "WAV",
+        "音效"
+      ],
+      "summary": "导入 WAV，配置一个 AudioListener 和多轨 AudioSource，测试循环与 One-shot 播放，并排查生命周期或空间衰减问题。",
+      "source_paths": [
+        "python/Infernux/core/audio_clip.pyi",
+        "python/Infernux/core/asset_types.py",
+        "python/Infernux/components/builtin/audio_source.pyi",
+        "python/Infernux/components/builtin/audio_listener.pyi"
+      ]
+    },
+    {
+      "id": "zh.learn.build-and-share",
+      "language": "zh-CN",
+      "layer": "learn",
+      "title": "构建并分享项目",
+      "url": "/wiki/site/zh/learn/build-and-share.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/learn/build-and-share.html",
+      "source": "docs/wiki/docs/zh/learn/build-and-share.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "new-user",
+        "agent"
+      ],
+      "tags": [
+        "入门",
+        "构建",
+        "windows",
+        "发布"
+      ],
+      "summary": "把已保存场景加入 Build Settings，配置 Windows 独立播放器，执行构建，并在编辑器之外验证产物。",
+      "source_paths": [
+        "python/Infernux/engine/ui/build_settings_panel.py",
+        "python/Infernux/engine/game_builder.py"
+      ]
+    },
+    {
+      "id": "zh.learn.first-component",
+      "language": "zh-CN",
+      "layer": "learn",
+      "title": "第一个组件",
+      "url": "/wiki/site/zh/learn/first-component.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/learn/first-component.html",
+      "source": "docs/wiki/docs/zh/learn/first-component.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "new-user",
+        "agent"
+      ],
+      "tags": [
+        "入门",
+        "python",
+        "组件",
+        "inspector"
+      ],
+      "summary": "创建 InxComponent Python 脚本，暴露可序列化速度字段，把它挂到 GameObject，并在 Play 模式验证生命周期。",
+      "source_paths": [
+        "python/Infernux/components",
+        "python/Infernux/__init__.pyi"
+      ]
+    },
+    {
+      "id": "zh.learn.getting-started",
+      "language": "zh-CN",
+      "layer": "learn",
+      "title": "快速开始",
+      "url": "/wiki/site/zh/learn/getting-started.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/learn/getting-started.html",
+      "source": "docs/wiki/docs/zh/learn/getting-started.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "new-user",
+        "agent"
+      ],
+      "tags": [
+        "入门",
+        "编辑器",
+        "安装"
+      ],
+      "summary": "安装 Infernux 预览版，创建或打开项目，理解主要编辑器面板，保存场景并进入 Play 模式。",
+      "source_paths": [
+        "README-zh.md",
+        "packaging",
+        "python/Infernux/engine/ui"
+      ]
+    },
+    {
+      "id": "zh.manual.api-versioning",
+      "language": "zh-CN",
+      "layer": "manual",
+      "title": "API 版本与兼容性",
+      "url": "/wiki/site/zh/manual/api-versioning.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/manual/api-versioning.html",
+      "source": "docs/wiki/docs/zh/manual/api-versioning.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "API",
+        "版本",
+        "兼容性",
+        "Agent"
+      ],
+      "summary": "解释 API 快照不可变性、机器可读版本比较、当前 0.2.1 基线限制，以及如何理解新增、移除或改变的符号。",
+      "source_paths": [
+        "docs/tools/build-api-diff.mjs",
+        "docs/api-snapshots",
+        "docs/api-changes.json",
+        "docs/api-index.json"
+      ]
+    },
+    {
+      "id": "zh.manual.assets-and-meta",
+      "language": "zh-CN",
+      "layer": "manual",
+      "title": "资源与 `.meta` 文件",
+      "url": "/wiki/site/zh/manual/assets-and-meta.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/manual/assets-and-meta.html",
+      "source": "docs/wiki/docs/zh/manual/assets-and-meta.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "资源",
+        "GUID",
+        "meta",
+        "导入",
+        "材质",
+        "纹理"
+      ],
+      "summary": "解释项目资源、GUID 与路径身份、.meta 边车文件、类型化引用、导入设置、安全移动/删除、缓存和运行时加载。",
+      "source_paths": [
+        "python/Infernux/core/assets.py",
+        "python/Infernux/core/asset_ref.py",
+        "python/Infernux/core/asset_types.py",
+        "python/Infernux/engine/asset_reference_cleanup.py"
+      ]
+    },
+    {
+      "id": "zh.manual.debugging",
+      "language": "zh-CN",
+      "layer": "manual",
+      "title": "调试与 Console",
+      "url": "/wiki/site/zh/manual/debugging.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/manual/debugging.html",
+      "source": "docs/wiki/docs/zh/manual/debugging.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "调试",
+        "console",
+        "日志",
+        "故障排查"
+      ],
+      "summary": "使用 Console、Debug 日志、生命周期检查、最小复现与 GitHub Issue 证据进行可重复的 Infernux 调试。",
+      "source_paths": [
+        "python/Infernux/debug.py",
+        "python/Infernux/engine/ui/console_utils.py",
+        "python/Infernux/components/component.py"
+      ]
+    },
+    {
+      "id": "zh.manual.engine-map",
+      "language": "zh-CN",
+      "layer": "manual",
+      "title": "引擎地图",
+      "url": "/wiki/site/zh/manual/engine-map.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/manual/engine-map.html",
+      "source": "docs/wiki/docs/zh/manual/engine-map.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "总览",
+        "系统",
+        "参考"
+      ],
+      "summary": "把常见 Infernux 开发任务映射到对应引擎系统与权威 API 页的路由地图。",
+      "source_paths": [
+        "python/Infernux",
+        "docs/wiki/docs/zh/api"
+      ]
+    },
+    {
+      "id": "zh.manual.input-and-time",
+      "language": "zh-CN",
+      "layer": "manual",
+      "title": "输入与时间",
+      "url": "/wiki/site/zh/manual/input-and-time.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/manual/input-and-time.html",
+      "source": "docs/wiki/docs/zh/manual/input-and-time.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "输入",
+        "时间",
+        "键盘",
+        "鼠标",
+        "帧"
+      ],
+      "summary": "解释 held/down/up 输入语义、Game 视图焦点、鼠标坐标、帧时间、固定时间、非缩放时间与帧率无关移动。",
+      "source_paths": [
+        "python/Infernux/input",
+        "python/Infernux/timing.pyi"
+      ]
+    },
+    {
+      "id": "zh.manual.physics",
+      "language": "zh-CN",
+      "layer": "manual",
+      "title": "物理",
+      "url": "/wiki/site/zh/manual/physics.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/manual/physics.html",
+      "source": "docs/wiki/docs/zh/manual/physics.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "物理",
+        "rigidbody",
+        "collider",
+        "射线",
+        "触发器"
+      ],
+      "summary": "解释 Rigidbody 与 Collider 职责、动态和运动学移动、固定步力、碰撞/触发回调、层与物理查询。",
+      "source_paths": [
+        "python/Infernux/physics",
+        "python/Infernux/components/builtin",
+        "python/Infernux/components/component.py"
+      ]
+    },
+    {
+      "id": "zh.manual.rendering-and-renderstack",
+      "language": "zh-CN",
+      "layer": "manual",
+      "title": "渲染与 RenderStack",
+      "url": "/wiki/site/zh/manual/rendering-and-renderstack.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/manual/rendering-and-renderstack.html",
+      "source": "docs/wiki/docs/zh/manual/rendering-and-renderstack.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "渲染",
+        "RenderStack",
+        "管线",
+        "RenderGraph",
+        "后处理"
+      ],
+      "summary": "解释场景 RenderStack 单例、前向/延迟管线、注入点、Pass 顺序、Graph 失效、后处理效果与安全扩展边界。",
+      "source_paths": [
+        "python/Infernux/renderstack",
+        "python/Infernux/rendergraph",
+        "python/Infernux/core/material.py"
+      ]
+    },
+    {
+      "id": "zh.manual.scenes-and-objects",
+      "language": "zh-CN",
+      "layer": "manual",
+      "title": "场景与对象",
+      "url": "/wiki/site/zh/manual/scenes-and-objects.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/manual/scenes-and-objects.html",
+      "source": "docs/wiki/docs/zh/manual/scenes-and-objects.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "场景",
+        "gameobject",
+        "transform",
+        "层级"
+      ],
+      "summary": "解释 Infernux 的场景所有权、GameObject 身份、Transform 层级、组件查询、激活状态与按构建索引加载场景。",
+      "source_paths": [
+        "python/Infernux/scene",
+        "python/Infernux/components",
+        "python/Infernux/lib/_Infernux.pyi"
+      ]
+    },
+    {
+      "id": "zh.manual.ui",
+      "language": "zh-CN",
+      "layer": "manual",
+      "title": "屏幕空间 UI",
+      "url": "/wiki/site/zh/manual/ui.html",
+      "canonical_url": "https://infernux-engine.com/wiki/site/zh/manual/ui.html",
+      "source": "docs/wiki/docs/zh/manual/ui.md",
+      "status": "preview",
+      "since": "0.2.1",
+      "last_verified": "2026-07-15",
+      "audience": [
+        "user",
+        "agent"
+      ],
+      "tags": [
+        "UI",
+        "Canvas",
+        "布局",
+        "事件",
+        "响应式"
+      ],
+      "summary": "解释屏幕空间 UI 层级、Canvas 缩放、锚点、文本和图片布局、按钮事件、命中测试与当前过渡效果限制。",
+      "source_paths": [
+        "python/Infernux/ui",
+        "python/Infernux/renderstack/default_forward_pipeline.pyi",
+        "python/Infernux/renderstack/default_deferred_pipeline.pyi"
+      ]
+    }
+  ]
+}

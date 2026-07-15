@@ -78,9 +78,12 @@ class ResourceChangeHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         if self._is_meta_sidecar_path(event.src_path):
+            owner_path = self._owner_path_for_meta_sidecar(event.src_path)
+            if self._should_ignore(owner_path):
+                return
             self._coordinator.submit(
                 AssetFsEventKind.META_DELETED,
-                self._owner_path_for_meta_sidecar(event.src_path),
+                owner_path,
             )
             return
         if self._should_ignore(event.src_path):
@@ -182,7 +185,11 @@ class ResourceChangeHandler(FileSystemEventHandler):
             self._check_script(path, catalog_event="created")
 
     def _commit_modified(self, path: str) -> None:
-        if path.lower().endswith(".scene") and self._is_active_scene_file(path):
+        if (
+            path.lower().endswith(".scene")
+            and self._is_active_scene_file(path)
+            and self._asset_database.contains_path(path)
+        ):
             Debug.log_internal(f"[Scene Modified] ignored watcher echo for active scene: {os.path.basename(path)}")
             return
         if not os.path.isfile(path):

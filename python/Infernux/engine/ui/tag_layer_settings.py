@@ -97,6 +97,7 @@ class TagLayerSettingsPanel(EditorPanel):
             ctx.spacing()
 
     def _render_layers_section(self, ctx: InxGUIContext, mgr):
+        capture_semantics = bool(getattr(ctx, "semantic_capture_enabled", True))
         ctx.set_next_item_open(True, Theme.COND_FIRST_USE_EVER)
         if ctx.collapsing_header(t("tags.layers_header")):
             all_layers = list(mgr.get_all_layers())
@@ -115,20 +116,43 @@ class TagLayerSettingsPanel(EditorPanel):
                     ctx.same_line(ctx.get_window_width() - 80)
                     ctx.label(t("tags.built_in"))
                     ctx.pop_style_color(1)
+                    if capture_semantics:
+                        ctx.record_semantic_item(
+                            "status",
+                            f"Layer {i}",
+                            False,
+                            f"tag_layer_settings.layer.{i}.name",
+                            string_value=name,
+                        )
                 else:
                     ctx.set_next_item_width(ctx.get_content_region_avail_width() - 10)
                     new_name = ctx.text_input("##layer_name", name, 64)
                     if new_name != name:
                         mgr.set_layer_name(i, new_name)
                         self._auto_save(mgr)
+                        updated_layers = list(mgr.get_all_layers())
+                        name = updated_layers[i] if i < len(updated_layers) else ""
+                    if capture_semantics:
+                        ctx.record_semantic_item(
+                            "text_input",
+                            f"Layer {i}",
+                            True,
+                            f"tag_layer_settings.layer.{i}.name",
+                            string_value=name,
+                        )
 
                 ctx.pop_id()
 
             ctx.spacing()
 
     def _render_footer(self, ctx: InxGUIContext, mgr):
+        capture_semantics = bool(getattr(ctx, "semantic_capture_enabled", True))
         ctx.separator()
         ctx.button(t("tags.save_settings"), lambda: self._save(mgr))
+        if capture_semantics:
+            ctx.record_semantic_item(
+                "button", t("tags.save_settings"), True, "tag_layer_settings.save"
+            )
         ctx.same_line()
 
         def _reset():
@@ -136,6 +160,10 @@ class TagLayerSettingsPanel(EditorPanel):
             self._auto_save(mgr)
 
         ctx.button(t("tags.reset_defaults"), _reset)
+        if capture_semantics:
+            ctx.record_semantic_item(
+                "button", t("tags.reset_defaults"), True, "tag_layer_settings.reset"
+            )
 
     def _do_remove_tag(self, tag: str):
         mgr = self._get_mgr()
@@ -270,6 +298,11 @@ class PhysicsLayerMatrixPanel:
         ctx.pop_style_color(1)
         ctx.spacing()
 
+        self._render_collision_matrix(ctx, mgr)
+
+    def _render_collision_matrix(self, ctx: InxGUIContext, mgr):
+        capture_semantics = bool(getattr(ctx, "semantic_capture_enabled", True))
+
         all_layers = list(mgr.get_all_layers())
         visible_layers = []
         for i in range(32):
@@ -305,6 +338,14 @@ class PhysicsLayerMatrixPanel:
                 ctx.push_id_str(f"physics_matrix_row_{layer_a}")
                 ctx.begin_child(f"##physics_matrix_label_{layer_a}", name_col_w, 24, False)
                 ctx.label(f"{layer_a:2d} {name_a}")
+                if capture_semantics:
+                    ctx.record_semantic_item(
+                        "status",
+                        f"Layer {layer_a}",
+                        False,
+                        f"physics_layer_matrix.layer.{layer_a}.name",
+                        string_value=name_a,
+                    )
                 ctx.end_child()
 
                 for col_idx in range(len(visible_layers)):
@@ -318,6 +359,16 @@ class PhysicsLayerMatrixPanel:
                     if new_value != current:
                         mgr.set_layers_collide(layer_a, layer_b, new_value)
                         _save_mgr_to_project(mgr, self._project_path)
+                        new_value = mgr.get_layers_collide(layer_a, layer_b)
+                    if capture_semantics:
+                        low, high = sorted((layer_a, layer_b))
+                        ctx.record_semantic_item(
+                            "checkbox",
+                            f"{name_a} / {visible_layers[col_idx][1]}",
+                            True,
+                            f"physics_layer_matrix.collision.{low}.{high}",
+                            bool_value=new_value,
+                        )
                 ctx.pop_id()
         ctx.end_child()
 

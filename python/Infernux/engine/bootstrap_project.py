@@ -96,9 +96,8 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
     pp.move_item_to_directory = lambda item, dest: _safe_project_path(
         file_ops.move_item_to_directory, item, dest, adb)
 
-    # -- Delete (with Win32 confirmation dialog) --
+    # -- Delete (through an Editor-owned semantic modal) --
     def _delete_items(paths):
-        import ctypes, os
         valid = []
         seen = set()
         for p in paths or []:
@@ -109,24 +108,23 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
         if not valid:
             return
 
-        title = _t("project.delete_confirm_title")
-        if len(valid) == 1:
-            msg = _t("project.delete_confirm_msg").replace(
-                "{name}", os.path.basename(valid[0]))
-        else:
-            msg = _t("project.delete_confirm_multi_msg").replace(
-                "{count}", str(len(valid)))
-        # MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2
-        result = ctypes.windll.user32.MessageBoxW(
-            0, msg, title, 0x1 | 0x30 | 0x100)
-        if result != 1:  # IDOK
-            return
+        from Infernux.engine.ui.project_delete_confirmation import (
+            ProjectDeleteConfirmationCoordinator,
+        )
 
-        for item_path in sorted(
-            valid, key=lambda p: (p.count(os.sep), len(p)), reverse=True
-        ):
-            if os.path.exists(item_path):
-                file_ops.delete_item(item_path, adb)
+        def _delete_confirmed(confirmed_paths: list[str]) -> bool:
+            for item_path in sorted(
+                confirmed_paths,
+                key=lambda p: (p.count(os.sep), len(p)),
+                reverse=True,
+            ):
+                if os.path.exists(item_path) and not file_ops.delete_item(item_path, adb):
+                    return False
+            pp.clear_selection()
+            pp.invalidate_dir_cache()
+            return not any(os.path.exists(path) for path in confirmed_paths)
+
+        ProjectDeleteConfirmationCoordinator.instance().request(valid, _delete_confirmed)
 
     pp.delete_items = _delete_items
 

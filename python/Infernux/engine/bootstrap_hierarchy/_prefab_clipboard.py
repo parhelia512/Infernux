@@ -29,7 +29,11 @@ def wire_prefab_actions(ctx):
     def _save_as_prefab(oid):
         from Infernux.lib import SceneManager, AssetRegistry
         from Infernux.engine.project_context import get_project_root
-        from Infernux.engine.prefab_manager import save_prefab, PREFAB_EXTENSION
+        from Infernux.engine.prefab_manager import (
+            PREFAB_EXTENSION,
+            _link_created_prefab_source,
+            save_prefab,
+        )
         import os
         scene = SceneManager.instance().get_active_scene()
         if not scene:
@@ -50,7 +54,12 @@ def wire_prefab_actions(ctx):
         prefab_name = get_unique_name(assets_dir, go.name, PREFAB_EXTENSION)
         file_path = os.path.join(assets_dir, prefab_name + PREFAB_EXTENSION)
         if save_prefab(go, file_path, asset_database=adb):
-            Debug.log_internal(f"Prefab saved: {file_path}")
+            if _link_created_prefab_source(go, file_path, adb):
+                Debug.log_internal(f"Prefab saved: {file_path}")
+            else:
+                Debug.log_warning(
+                    "Prefab asset was saved, but its source hierarchy could not be linked"
+                )
 
     def _prefab_select_asset(oid):
         from Infernux.lib import SceneManager
@@ -80,6 +89,10 @@ def wire_prefab_actions(ctx):
         go = scene.find_by_id(oid) if scene else None
         if not go:
             return
+        from Infernux.engine.prefab_overrides import resolve_prefab_instance_root
+        go = resolve_prefab_instance_root(go)
+        if go is None:
+            return
         guid = getattr(go, 'prefab_guid', '')
         path = _resolve_prefab(guid)
         if path:
@@ -92,11 +105,25 @@ def wire_prefab_actions(ctx):
         go = scene.find_by_id(oid) if scene else None
         if not go:
             return
+        from Infernux.engine.prefab_overrides import resolve_prefab_instance_root
+        go = resolve_prefab_instance_root(go)
+        if go is None:
+            return
         guid = getattr(go, 'prefab_guid', '')
         path = _resolve_prefab(guid)
         if path:
-            from Infernux.engine.prefab_overrides import revert_overrides
-            revert_overrides(go, path)
+            from Infernux.engine.prefab_overrides import revert_overrides_with_undo
+            if revert_overrides_with_undo(go, path):
+                root_id = go.id
+                hp.invalidate_scene_structure_cache()
+                hp.set_selected_object_by_id(root_id, True)
+                hp.set_pending_expand_id(root_id)
+                if hp.on_selection_changed:
+                    hp.on_selection_changed(root_id)
+                from Infernux.engine.scene_manager import SceneFileManager
+                sfm = SceneFileManager.instance()
+                if sfm:
+                    sfm.mark_dirty()
 
     def _prefab_unpack(oid):
         from Infernux.lib import SceneManager
@@ -104,7 +131,20 @@ def wire_prefab_actions(ctx):
         go = scene.find_by_id(oid) if scene else None
         if not go:
             return
-        _unpack_recursive(go)
+        from Infernux.engine.prefab_overrides import resolve_prefab_instance_root
+        go = resolve_prefab_instance_root(go)
+        if go is None:
+            return
+        from Infernux.engine.undo import PrefabUnpackCommand, UndoManager
+        manager = UndoManager.instance()
+        if manager:
+            manager.execute(PrefabUnpackCommand(go.id))
+        else:
+            _unpack_recursive(go)
+            from Infernux.engine.scene_manager import SceneFileManager
+            sfm = SceneFileManager.instance()
+            if sfm:
+                sfm.mark_dirty()
         Debug.log_internal(f"Unpacked prefab instance: {go.name}")
 
     def _unpack_recursive(obj):

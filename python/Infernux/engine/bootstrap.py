@@ -155,7 +155,9 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
     def _start_mcp_http_server(self):
         try:
             from Infernux.mcp import start_server
-            start_server(self.project_path)
+            host = os.environ.get("INFERNUX_MCP_HOST", "127.0.0.1").strip() or "127.0.0.1"
+            port = int(os.environ.get("INFERNUX_MCP_PORT", "9713"))
+            start_server(self.project_path, host=host, port=port)
         except Exception as exc:
             Debug.log_warning(f"Failed to start Infernux MCP HTTP server: {exc}")
 

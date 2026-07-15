@@ -835,10 +835,15 @@ def _wire_prefab_and_misc(ctx):
         guid = getattr(obj, 'prefab_guid', '') or ''
         if not guid:
             return pinfo
-        from Infernux.engine.scene_manager import SceneFileManager
-        sfm = SceneFileManager.instance()
-        if sfm and not sfm.is_prefab_mode:
-            pinfo.is_readonly = True
+        from Infernux.engine.prefab_overrides import (
+            compute_overrides,
+            resolve_prefab_instance_root,
+        )
+        root = resolve_prefab_instance_root(obj)
+        adb = engine.get_asset_database()
+        path = adb.get_path_from_guid(guid) if adb else ""
+        if root is not None and path:
+            pinfo.override_count = len(compute_overrides(root, path, adb))
         return pinfo
 
     ip.get_prefab_info = _get_prefab_info
@@ -851,26 +856,36 @@ def _wire_prefab_and_misc(ctx):
         guid = getattr(obj, 'prefab_guid', '') or ''
         if not guid:
             return
+        from Infernux.engine.prefab_overrides import resolve_prefab_instance_root
+        root = resolve_prefab_instance_root(obj)
+        if root is None:
+            return
         adb = engine.get_asset_database()
+        path = adb.get_path_from_guid(guid) if adb else ""
         if action == "select":
-            if adb:
-                path = adb.get_path_from_guid(guid)
-                if path:
-                    bs.project_panel.set_current_path(
-                        __import__('os').path.dirname(path))
+            if path:
+                bs.project_panel.set_current_path(
+                    __import__('os').path.dirname(path))
         elif action == "open":
             from Infernux.engine.scene_manager import SceneFileManager
             sfm = SceneFileManager.instance()
-            if sfm and adb:
-                path = adb.get_path_from_guid(guid)
-                if path:
-                    sfm.open_prefab_mode_with_undo(path)
+            if sfm and path:
+                sfm.open_prefab_mode_with_undo(path)
         elif action == "apply":
-            from Infernux.engine.prefab import apply_prefab_overrides
-            apply_prefab_overrides(obj)
+            from Infernux.engine.prefab_overrides import apply_overrides_to_prefab
+            if path:
+                apply_overrides_to_prefab(root, path, adb)
         elif action == "revert":
-            from Infernux.engine.prefab import revert_prefab_overrides
-            revert_prefab_overrides(obj)
+            from Infernux.engine.prefab_overrides import revert_overrides_with_undo
+            if path and revert_overrides_with_undo(root, path, adb):
+                hierarchy = bs.hierarchy
+                hierarchy.invalidate_scene_structure_cache()
+                hierarchy.set_selected_object_by_id(root.id, True)
+                hierarchy.set_pending_expand_id(root.id)
+                if hierarchy.on_selection_changed:
+                    hierarchy.on_selection_changed(root.id)
+        _invalidate()
+        _bump()
 
     ip.prefab_action = _prefab_action
 

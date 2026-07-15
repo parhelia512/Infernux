@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QObject
 
 from version_manager import VersionManager, EngineVersion, DownloadCancelled
+from i18n import tr
 
 
 # ─── Version card (one per installed version) ────────────────────────
@@ -59,7 +60,7 @@ class _VersionCard(QFrame):
         layout.addLayout(info_col, 1)
 
         # Remove button
-        remove_btn = QPushButton("Remove")
+        remove_btn = QPushButton(tr("Remove"))
         remove_btn.setObjectName("dangerBtn")
         remove_btn.setFixedHeight(30)
         remove_btn.setFixedWidth(80)
@@ -418,24 +419,28 @@ class InstallsView(QWidget):
         runtime_info.addWidget(self._runtime_path)
         runtime_layout.addLayout(runtime_info, 1)
 
-        self._runtime_button = QPushButton("Install Python 3.12")
+        self._runtime_button = QPushButton(tr("Install Python 3.12"))
         self._runtime_button.setObjectName("primaryBtn")
         self._runtime_button.setFixedHeight(34)
         self._runtime_button.clicked.connect(self._on_install_python)
         runtime_layout.addWidget(self._runtime_button)
 
-        layout.addWidget(self._runtime_card)
-
         # ── Header ───────────────────────────────────────────────────
         header = QHBoxLayout()
         header.setContentsMargins(4, 0, 0, 12)
 
-        title = QLabel("Installs")
+        title_block = QVBoxLayout()
+        title_block.setSpacing(2)
+        title = QLabel(tr("Installs"))
         title.setObjectName("pageTitle")
-        header.addWidget(title, alignment=Qt.AlignmentFlag.AlignLeft)
+        title_block.addWidget(title)
+        subtitle = QLabel(tr("Installs and managed runtime"))
+        subtitle.setObjectName("pageSubtitle")
+        title_block.addWidget(subtitle)
+        header.addLayout(title_block)
         header.addStretch()
 
-        self.btn_locate = QPushButton("Locate")
+        self.btn_locate = QPushButton(tr("Locate"))
         self.btn_locate.setObjectName("normalBtn")
         self.btn_locate.setFixedHeight(36)
         self.btn_locate.setMinimumWidth(90)
@@ -446,7 +451,7 @@ class InstallsView(QWidget):
         spacer.setFixedWidth(8)
         header.addWidget(spacer)
 
-        self.btn_install = QPushButton("Install Editor")
+        self.btn_install = QPushButton(tr("Install Editor"))
         self.btn_install.setObjectName("primaryBtn")
         self.btn_install.setFixedHeight(36)
         self.btn_install.setMinimumWidth(130)
@@ -454,6 +459,7 @@ class InstallsView(QWidget):
         header.addWidget(self.btn_install)
 
         layout.addLayout(header)
+        layout.addWidget(self._runtime_card)
 
         # ── Version list (scrollable) ────────────────────────────────
         scroll = QScrollArea()
@@ -484,7 +490,7 @@ class InstallsView(QWidget):
 
         versions = self._vm.installed_versions()
         if not versions:
-            empty = QLabel("No engine versions installed.\nClick 'Install Editor' or 'Locate' to add one.")
+            empty = QLabel(tr("No engine versions installed.\nClick 'Install Editor' or 'Locate' to add one."))
             empty.setObjectName("emptyHint")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._card_layout.addWidget(empty)
@@ -505,15 +511,15 @@ class InstallsView(QWidget):
         self._runtime_card.show()
         runtime_path = self._runtime_manager.get_runtime_path()
         if runtime_path:
-            self._runtime_status.setText("Python 3.12 runtime is ready")
+            self._runtime_status.setText(tr("Python 3.12 runtime is ready"))
             self._runtime_path.setText(runtime_path)
-            self._runtime_button.setText("Reinstall Python 3.12")
+            self._runtime_button.setText(tr("Reinstall Python 3.12"))
         else:
-            self._runtime_status.setText("Python 3.12 runtime is missing")
+            self._runtime_status.setText(tr("Python 3.12 runtime is missing"))
             self._runtime_path.setText(
                 "The installed Hub is expected to prepare a managed full Python 3.12 runtime under C:\\Users\\Public\\InfernuxHub during setup. If it is still missing, Hub will download the matching Python 3.12 installer for this machine."
             )
-            self._runtime_button.setText("Install Python 3.12")
+            self._runtime_button.setText(tr("Install Python 3.12"))
 
     # ── Actions ──────────────────────────────────────────────────────
 

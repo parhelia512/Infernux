@@ -50,6 +50,7 @@ class BootstrapWiringMixin:
         # Scene file operations
         if sfm:
             mb.on_save = lambda: sfm.save_current_scene()
+            mb.on_save_as = lambda: sfm.save_scene_as()
             mb.on_new_scene = lambda: sfm.new_scene()
             mb.on_request_close = lambda: sfm.request_close()
 
@@ -156,14 +157,25 @@ class BootstrapWiringMixin:
         _pref = self._preferences
         _plm = self._physics_layer_matrix
         _sfm = sfm
+        from Infernux.engine.ui.dirty_panel_confirmation import (
+            DirtyPanelConfirmationCoordinator,
+        )
+        from Infernux.engine.ui.project_delete_confirmation import (
+            ProjectDeleteConfirmationCoordinator,
+        )
+        _dirty_panels = DirtyPanelConfirmationCoordinator.instance()
+        _project_delete = ProjectDeleteConfirmationCoordinator.instance()
 
         class _MenuBarFloatingPanels(InxGUIRenderable):
             def on_render(self, ctx: InxGUIContext):
                 _bs.render(ctx)
                 _pref.render(ctx)
                 _plm.render(ctx)
+                _dirty_panels.render(ctx)
+                _project_delete.render(ctx)
                 if _sfm:
                     _sfm.render_confirmation_popup(ctx)
+                    _sfm.render_save_as_popup(ctx)
 
         self._menu_bar_floats = _MenuBarFloatingPanels()
         engine.register_gui("menu_bar_floats", self._menu_bar_floats)

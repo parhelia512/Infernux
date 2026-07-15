@@ -153,9 +153,9 @@ struct UniformBufferObject
  * Represents a single draw call with its own material, transform,
  * and per-object mesh buffer references.
  *
- * Each DrawCall carries non-owning pointers to the
- * object's vertex/index data. The renderer creates persistent per-object
- * GPU buffers, eliminating the per-frame combined-buffer copy.
+ * Each DrawCall keeps its material alive while carrying non-owning pointers
+ * to the object's vertex/index data. The renderer creates persistent
+ * per-object GPU buffers, eliminating the per-frame combined-buffer copy.
  */
 struct DrawCall
 {
@@ -163,9 +163,10 @@ struct DrawCall
     uint32_t indexCount = 0;         // Number of indices to draw
     int32_t vertexStart = 0;         // Base vertex offset (for submesh rendering)
     glm::mat4 worldMatrix{1.0f};     // Object's world transform matrix
-    InxMaterial *material = nullptr; // Non-owning pointer (lifetime managed by MeshRenderer/AssetRegistry)
+    std::shared_ptr<InxMaterial> material; // Owns the material for the lifetime of cached/render-thread draw calls
     uint64_t objectId = 0;           // GameObject ID for buffer lookup
     bool frustumVisible = true;      // Whether object passed main-camera frustum culling
+    bool castsShadows = true;        // Whether the source renderer participates in shadow passes
     AABB worldBounds;                // World-space bounding box for shadow cascade culling
 
     // Per-object mesh data pointers

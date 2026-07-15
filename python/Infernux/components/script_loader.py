@@ -93,6 +93,32 @@ def _record_script_error(file_path: str, exc: Exception) -> None:
         print(tb_str, file=sys.stderr)
 
 
+def _load_script_module(file_path: str, primary_module_name: str, module_aliases: List[str]):
+    """Execute the exact script artifact resolved from its asset GUID.
+
+    ``import_module`` performs a second path search. That is unnecessary for
+    editor sources and unreliable for external sourceless modules in a Nuitka
+    standalone Player. Register aliases before execution so cyclic, absolute,
+    and legacy ``Assets.*`` imports still resolve to one module object.
+    """
+    spec = importlib.util.spec_from_file_location(primary_module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ScriptLoadError(f"Failed to create module spec for {file_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    registered_names = list(dict.fromkeys([primary_module_name, *module_aliases]))
+    for name in registered_names:
+        sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        for name in registered_names:
+            if sys.modules.get(name) is module:
+                sys.modules.pop(name, None)
+        raise
+    return module
+
+
 def set_script_error(file_path: str, message: str) -> None:
     """Record an error message for a script (no exception object needed)."""
     _script_errors[_normalize_script_path(file_path)] = message
@@ -206,14 +232,7 @@ def load_all_components_from_file(file_path: str) -> List[Type[InxComponent]]:
     # Execute the module — catch errors so a broken script never crashes the editor
     try:
         with temporary_script_import_paths(file_path):
-            if module_aliases:
-                module = importlib.import_module(primary_module_name)
-            else:
-                spec = importlib.util.spec_from_file_location(primary_module_name, file_path)
-                if spec is None or spec.loader is None:
-                    raise ScriptLoadError(f"Failed to create module spec for {file_path}")
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
+            module = _load_script_module(file_path, primary_module_name, module_aliases)
     except Exception as exc:
         # Track this script as having a load error
         _record_script_error(file_path, exc)
@@ -285,8 +304,13 @@ def create_component_instance(component_class: Type[InxComponent]) -> InxCompone
     return component_class()
 
 
-def load_and_create_component(file_path: str, asset_database=None,
-                              type_name: str = "") -> Optional[InxComponent]:
+def load_and_create_component(
+    file_path: str,
+    asset_database=None,
+    type_name: str = "",
+    *,
+    script_guid: str = "",
+) -> Optional[InxComponent]:
     """
     Convenience function: Load first component from file and create instance.
     
@@ -298,12 +322,14 @@ def load_and_create_component(file_path: str, asset_database=None,
         has errors (the error is already logged to Console).
         
     Note:
-        Requires AssetDatabase for GUID-only component references.
+        ``script_guid`` should be supplied when the caller already resolved
+        ``file_path`` from a stable component identity. Packaged ``.pyc``
+        artifacts do not necessarily support a reverse path-to-GUID lookup.
 
     Raises:
         ScriptLoadError: If AssetDatabase is missing or GUID cannot be resolved.
     """
-    if asset_database is None:
+    if asset_database is None and not script_guid:
         raise ScriptLoadError("AssetDatabase is required for script components (GUID-only mode)")
 
     if type_name:
@@ -317,8 +343,8 @@ def load_and_create_component(file_path: str, asset_database=None,
 
     instance = create_component_instance(component_class)
     # Resolve and store script GUID
-    guid = asset_database.get_guid_from_path(file_path)
-    if not guid:
+    guid = script_guid or asset_database.get_guid_from_path(file_path)
+    if not guid and asset_database is not None:
         from Infernux.core.assets import AssetManager
         mutation = AssetManager.import_asset(
             file_path,

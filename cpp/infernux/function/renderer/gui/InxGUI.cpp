@@ -1,5 +1,6 @@
 #include "InxGUI.h"
 #include "InxGUIContext.h"
+#include "InxGUISemantics.h"
 #include <function/editor/EditorTheme.h>
 #include <function/editor/EditorThemeRegistry.h>
 #include <function/renderer/vk/VkRenderUtils.h>
@@ -49,6 +50,9 @@ void InxGUI::Init(SDL_Window *window)
     IMGUI_CHECKVERSION();
     m_imguiContext_ptr = ImGui::CreateContext();
     ImGui::SetCurrentContext(m_imguiContext_ptr);
+    m_imguiContext_ptr->ErrorCallback = [](ImGuiContext *, void *, const char *message) {
+        INXLOG_ERROR("[ImGui] ", message ? message : "unknown recoverable error");
+    };
     ImGui::StyleColorsDark();
 
     // =========================================================================
@@ -364,7 +368,17 @@ void InxGUI::BuildFrame()
 
     ImGui_ImplSDL3_NewFrame();
     ImGui_ImplVulkan_NewFrame();
+
+    // ImGui's SDL backend may append a physical-cursor fallback position while
+    // starting a frame. Replay the trusted automation position afterwards so a
+    // synthetic mouse release lands on the same widget as its press.
+    float syntheticMouseX = 0.0f;
+    float syntheticMouseY = 0.0f;
+    if (InputManager::Instance().GetSyntheticMousePositionForFrame(syntheticMouseX, syntheticMouseY)) {
+        ImGui::GetIO().AddMousePosEvent(syntheticMouseX, syntheticMouseY);
+    }
     ImGui::NewFrame();
+    InxGUISemantics::BeginFrame(m_guiFrameCounter);
 
     // When the cursor is locked (game mode), suppress all mouse input from
     // reaching ImGui so editor panels (Inspector, Hierarchy, etc.) don't
@@ -498,6 +512,7 @@ void InxGUI::BuildFrame()
     }
 
     ApplyPendingDockTabSelections();
+    InxGUISemantics::EndFrame();
 }
 
 void InxGUI::QueueDockTabSelection(const std::string &windowId)

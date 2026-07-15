@@ -179,13 +179,15 @@ class TestMenuBarPanel:
         mb = MenuBarPanel()
         calls = []
         mb.on_save = lambda: calls.append("save")
+        mb.on_save_as = lambda: calls.append("save_as")
         mb.on_new_scene = lambda: calls.append("new")
         mb.on_request_close = lambda: calls.append("close")
 
         mb.on_save()
+        mb.on_save_as()
         mb.on_new_scene()
         mb.on_request_close()
-        assert calls == ["save", "new", "close"]
+        assert calls == ["save", "save_as", "new", "close"]
 
     def test_undo_callbacks(self):
         mb = MenuBarPanel()

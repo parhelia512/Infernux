@@ -1,4 +1,5 @@
 #include "ToolbarPanel.h"
+#include <function/renderer/gui/InxGUISemantics.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -85,6 +86,7 @@ void ToolbarPanel::PostRender(InxGUIContext * /*ctx*/)
 
 void ToolbarPanel::RenderPlayControls(InxGUIContext *ctx, float winW)
 {
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
     PlayState state = getPlayState ? getPlayState() : PlayState::Edit;
     bool isPlaying = (state == PlayState::Playing || state == PlayState::Paused);
     bool isPaused = (state == PlayState::Paused);
@@ -102,7 +104,10 @@ void ToolbarPanel::RenderPlayControls(InxGUIContext *ctx, float winW)
         EditorTheme::PushFlatButtonStyle(EditorTheme::BTN_IDLE);
 
     std::string playLabel = isPlaying ? T("toolbar.stop") : T("toolbar.play");
-    if (ImGui::Button(playLabel.c_str())) {
+    const bool playClicked = ImGui::Button(playLabel.c_str());
+    if (captureSemantics)
+        ctx->RecordSemanticItem("toolbar_play_stop", playLabel, true, "toolbar.play_stop");
+    if (playClicked) {
         if (onPlay)
             onPlay();
     }
@@ -119,7 +124,10 @@ void ToolbarPanel::RenderPlayControls(InxGUIContext *ctx, float winW)
         EditorTheme::PushFlatButtonStyle(EditorTheme::BTN_IDLE);
 
     std::string pauseLabel = isPaused ? T("toolbar.resume") : T("toolbar.pause");
-    if (ImGui::Button(pauseLabel.c_str())) {
+    const bool pauseClicked = ImGui::Button(pauseLabel.c_str());
+    if (captureSemantics)
+        ctx->RecordSemanticItem("toolbar_pause_resume", pauseLabel, isPlaying, "toolbar.pause_resume");
+    if (pauseClicked) {
         if (isPlaying && onPause)
             onPause();
     }
@@ -134,7 +142,10 @@ void ToolbarPanel::RenderPlayControls(InxGUIContext *ctx, float winW)
         EditorTheme::PushFlatButtonStyle(EditorTheme::BTN_DISABLED);
 
     std::string stepLabel = T("toolbar.step");
-    if (ImGui::Button(stepLabel.c_str())) {
+    const bool stepClicked = ImGui::Button(stepLabel.c_str());
+    if (captureSemantics)
+        ctx->RecordSemanticItem("toolbar_step", stepLabel, isPaused, "toolbar.step");
+    if (stepClicked) {
         if (isPaused && onStep)
             onStep();
     }
@@ -155,6 +166,7 @@ void ToolbarPanel::RenderPlayControls(InxGUIContext *ctx, float winW)
 
 void ToolbarPanel::RenderRightDropdowns(InxGUIContext *ctx, float winW)
 {
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
     float rightX = winW - 200.0f;
     if (rightX < 300.0f)
         rightX = 300.0f;
@@ -164,11 +176,16 @@ void ToolbarPanel::RenderRightDropdowns(InxGUIContext *ctx, float winW)
     // Gizmos dropdown
     EditorTheme::PushGhostButtonStyle();
     std::string gizLabel = T("toolbar.gizmos");
-    if (ImGui::Button(gizLabel.c_str()))
+    const bool gizmosClicked = ImGui::Button(gizLabel.c_str());
+    if (captureSemantics)
+        ctx->RecordSemanticItem("toolbar_gizmos", gizLabel, true, "toolbar.gizmos");
+    if (gizmosClicked)
         ImGui::OpenPopup("##giz");
     ImGui::PopStyleColor(3);
 
     if (ImGui::BeginPopup("##giz")) {
+        if (captureSemantics)
+            ctx->RecordSemanticWindow("toolbar_popup", gizLabel, "toolbar.gizmos.popup");
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, EditorTheme::POPUP_WIN_PAD);
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, EditorTheme::POPUP_ITEM_SPC);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, EditorTheme::POPUP_FRAME_PAD);
@@ -182,11 +199,16 @@ void ToolbarPanel::RenderRightDropdowns(InxGUIContext *ctx, float winW)
     // Camera dropdown
     EditorTheme::PushGhostButtonStyle();
     std::string camLabel = T("toolbar.camera");
-    if (ImGui::Button(camLabel.c_str()))
+    const bool cameraClicked = ImGui::Button(camLabel.c_str());
+    if (captureSemantics)
+        ctx->RecordSemanticItem("toolbar_camera", camLabel, true, "toolbar.camera");
+    if (cameraClicked)
         ImGui::OpenPopup("##cam");
     ImGui::PopStyleColor(3);
 
     if (ImGui::BeginPopup("##cam")) {
+        if (captureSemantics)
+            ctx->RecordSemanticWindow("toolbar_popup", camLabel, "toolbar.camera.popup");
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, EditorTheme::POPUP_WIN_PAD);
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, EditorTheme::POPUP_ITEM_SPC);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, EditorTheme::POPUP_FRAME_PAD);
@@ -213,7 +235,11 @@ void ToolbarPanel::PopupGizmos(InxGUIContext *ctx)
     ImGui::Dummy(ImVec2(0.0f, 4.0f));
 
     bool grid = isShowGrid();
-    if (ImGui::Checkbox(T("toolbar.show_grid").c_str(), &grid)) {
+    const std::string gridLabel = T("toolbar.show_grid");
+    const bool gridChanged = ImGui::Checkbox(gridLabel.c_str(), &grid);
+    if (InxGUISemantics::IsCaptureEnabled())
+        ctx->RecordSemanticItem("toolbar_show_grid", gridLabel, true, "toolbar.gizmos.show_grid");
+    if (gridChanged) {
         if (setShowGrid)
             setShowGrid(grid);
     }

@@ -391,7 +391,7 @@ class SceneManager:
             Debug.log_error(f"SceneManager: runtime scene load failed for {path}: {transaction.error}")
             return
         if sfm is not None:
-            sfm._finish_open_scene(path)
+            sfm._finish_open_scene(path, runtime_load=True)
 
         sm = _NativeSceneManager.instance()
         scene = sm.get_active_scene()

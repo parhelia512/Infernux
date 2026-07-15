@@ -256,28 +256,9 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
                 "Some write tools require a knowledge_token from the matching guide, e.g. shader_guide, audio_guide, or api_get('ui').",
                 "Use mcp_catalog_search or mcp_catalog_recommend before selecting MCP tools.",
             ],
-            "catalog": _catalog_tree(),
-            "groups": {
-                "foundation": ["mcp_ping", "mcp_version", "mcp_discovery", "mcp_health", "mcp_help", "mcp_catalog_list"],
-                "api": ["api_subsystems", "api_search", "api_get", "shader_guide", "audio_guide"],
-                "shader": ["shader_guide", "shader_catalog", "shader_describe"],
-                "audio": ["audio_guide", "component_describe_type"],
-                "self_description": ["engine_concepts", "engine_concept_get", "workflow_list", "workflow_help"],
-                "scene": ["scene_status", "scene_inspect", "scene_get_hierarchy", "scene_query_summary", "scene_query_objects"],
-                "scene_lifecycle": ["scene_save", "scene_open", "scene_new"],
-                "gameobject": ["hierarchy_create_object", "gameobject_find", "gameobject_get", "gameobject_describe_spatial"],
-                "component": ["component_list_types", "component_describe_type", "component_set_field"],
-                "asset": ["asset_ensure_folder", "asset_list", "asset_search", "asset_read_text", "asset_write_text", "asset_refresh"],
-                "camera": ["camera_find_main", "camera_describe_view", "camera_visibility_report", "camera_frame_targets"],
-                "renderstack": ["renderstack_inspect", "renderstack_list_pipelines", "renderstack_add_pass", "renderstack_set_pass_params"],
-                "runtime": ["editor_play", "runtime_wait", "runtime_run_for", "runtime_read_errors"],
-                "project_tools": ["project_tools_list", "project_tools_reload", "project_tools_validate", "project_tools_audit"],
-                "trace": ["mcp_trace_start", "mcp_trace_stop", "mcp_trace_current", "mcp_trace_list"],
-                "session_log": ["mcp_session_log_info", "mcp_session_log_read", "mcp_session_log_clear"],
-                "transactions": ["transaction_begin", "transaction_status", "transaction_commit", "transaction_rollback"],
-                "research": ["mcp_config_get", "mcp_contracts_list", "mcp_contracts_validate", "mcp_evolution_suggest_tools"],
-            },
-            "tools": [meta["name"] for meta in list_tool_metadata() if capabilities.tool_enabled(meta["name"])],
+            "catalog": _catalog_tree(mcp),
+            "groups": _visible_groups(mcp),
+            "tools": [meta["name"] for meta in _visible_metadata(mcp)],
             "config": capabilities.current_config(),
         })
 
@@ -317,22 +298,24 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
 
     @mcp.tool(name="mcp_list_tools_verbose")
     def mcp_list_tools_verbose() -> dict:
-        """Return registered tool metadata."""
-        return ok({"tools": _visible_metadata()})
+        """Return metadata for tools actually registered on this MCP server."""
+        return ok({"tools": _visible_metadata(mcp)})
 
     @mcp.tool(name="mcp_help")
     def mcp_help(tool_name: str = "") -> dict:
-        """Return detailed help for one tool or all tool groups."""
+        """Return detailed help for one available tool or all available tool groups."""
         if tool_name:
-            return ok({"tool": get_tool_metadata(tool_name)})
-        return ok({"tools": _visible_metadata(), "workflows": list(WORKFLOWS), "concepts": list(CONCEPTS)})
+            if not _tool_visible(mcp, tool_name):
+                return ok({"found": False, "tool": tool_name, "available": [meta["name"] for meta in _visible_metadata(mcp)]})
+            return ok({"found": True, "tool": get_tool_metadata(tool_name)})
+        return ok({"tools": _visible_metadata(mcp), "workflows": list(WORKFLOWS), "concepts": list(CONCEPTS)})
 
     @mcp.tool(name="mcp_catalog_list")
     def mcp_catalog_list() -> dict:
         """Return the hierarchical MCP tool catalog."""
         return ok({
-            "catalog": _catalog_tree(),
-            "categories": _catalog_categories(),
+            "catalog": _catalog_tree(mcp),
+            "categories": _catalog_categories(mcp),
             "recommend": "Use mcp_catalog_search(query) or mcp_catalog_recommend(intent) before choosing tools.",
         })
 
@@ -341,22 +324,22 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
         """Return tools under a category such as camera/framing or scene/query."""
         needle = str(category or "").strip().lower()
         tools = []
-        for meta in _visible_metadata():
+        for meta in _visible_metadata(mcp):
             meta_category = str(meta.get("category", ""))
             lower = meta_category.lower()
             if not needle or lower == needle or lower.startswith(needle + "/"):
                 tools.append(meta)
-        return ok({"category": category, "tools": tools, "count": len(tools), "categories": _catalog_categories()})
+        return ok({"category": category, "tools": tools, "count": len(tools), "categories": _catalog_categories(mcp)})
 
     @mcp.tool(name="mcp_catalog_search")
     def mcp_catalog_search(query: str, category: str = "", limit: int = 20) -> dict:
-        """Search tools by name, category, summary, tags, aliases, and concepts."""
-        matches = _search_catalog(str(query or ""), category=str(category or ""), limit=int(limit or 20))
+        """Search available tools by name, category, summary, tags, aliases, and concepts."""
+        matches = _search_catalog(mcp, str(query or ""), category=str(category or ""), limit=int(limit or 20))
         return ok({"query": query, "category": category, "matches": matches})
 
     @mcp.tool(name="mcp_catalog_recommend")
     def mcp_catalog_recommend(intent: str, limit: int = 12) -> dict:
-        """Recommend a tool chain for a natural-language intent."""
+        """Recommend an available tool chain for a natural-language intent."""
         lowered = str(intent or "").lower()
         recommendations = []
         for key, item in INTENT_RECOMMENDATIONS.items():
@@ -366,7 +349,7 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
                     "intent": key,
                     "score": score,
                     "summary": item["summary"],
-                    "tools": [get_tool_metadata(tool) for tool in item["tools"] if capabilities.tool_enabled(tool)],
+                    "tools": [get_tool_metadata(tool) for tool in item["tools"] if _tool_visible(mcp, tool)],
                 })
         recommendations.sort(key=lambda item: item["score"], reverse=True)
         if not recommendations:
@@ -374,7 +357,7 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
                 "intent": "catalog_search",
                 "score": 0,
                 "summary": "No intent template matched; use search results as candidates.",
-                "tools": _search_catalog(str(intent or ""), limit=int(limit or 12)),
+                "tools": _search_catalog(mcp, str(intent or ""), limit=int(limit or 12)),
             })
         return ok({"intent": intent, "recommendations": recommendations[: max(int(limit or 12), 1)]})
 
@@ -430,7 +413,7 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
         key = _lookup_key(CONCEPTS, name)
         if not key:
             return ok({"found": False, "available": sorted(CONCEPTS)})
-        return ok({"name": key, **CONCEPTS[key]})
+        return ok({"name": key, **_filter_reference_tools(mcp, CONCEPTS[key])})
 
     @mcp.tool(name="workflow_list")
     def workflow_list() -> dict:
@@ -439,21 +422,21 @@ def register_docs_tools(mcp, project_path: str, config: dict[str, Any] | None = 
 
     @mcp.tool(name="workflow_help")
     def workflow_help(name: str) -> dict:
-        """Return detailed workflow guidance."""
+        """Return detailed workflow guidance for tools available in this session."""
         key = _lookup_key(WORKFLOWS, name)
         if not key:
             return ok({"found": False, "available": sorted(WORKFLOWS)})
-        return ok({"name": key, **WORKFLOWS[key]})
+        return ok({"name": key, **_filter_reference_tools(mcp, WORKFLOWS[key])})
 
     @mcp.tool(name="workflow_examples")
     def workflow_examples(name: str = "") -> dict:
-        """Return compact workflow examples."""
+        """Return compact workflow examples filtered to available tools."""
         if name:
             key = _lookup_key(WORKFLOWS, name)
             if not key:
                 return ok({"found": False, "available": sorted(WORKFLOWS)})
-            return ok({"examples": [{key: WORKFLOWS[key]}]})
-        return ok({"examples": WORKFLOWS})
+            return ok({"examples": [{key: _filter_reference_tools(mcp, WORKFLOWS[key])}]})
+        return ok({"examples": {key: _filter_reference_tools(mcp, value) for key, value in WORKFLOWS.items()}})
 
 def _lookup_key(mapping: dict[str, Any], name: str) -> str:
     lowered = str(name).strip().lower()
@@ -463,13 +446,73 @@ def _lookup_key(mapping: dict[str, Any], name: str) -> str:
     return ""
 
 
-def _visible_metadata() -> list[dict[str, Any]]:
-    return [meta for meta in list_tool_metadata() if capabilities.tool_enabled(meta["name"])]
+def _registered_tool_names(mcp) -> frozenset[str] | None:
+    getter = getattr(mcp, "registered_tool_names", None)
+    if not callable(getter):
+        return None
+    return frozenset(str(name) for name in getter())
 
 
-def _catalog_categories() -> list[dict[str, Any]]:
+def _tool_visible(mcp, name: str) -> bool:
+    if not capabilities.tool_enabled(name):
+        return False
+    registered = _registered_tool_names(mcp)
+    return registered is None or str(name) in registered
+
+
+def _visible_metadata(mcp) -> list[dict[str, Any]]:
+    return [meta for meta in list_tool_metadata() if _tool_visible(mcp, meta["name"])]
+
+
+def _visible_groups(mcp) -> dict[str, list[str]]:
+    groups = {
+        "foundation": ["mcp_ping", "mcp_version", "mcp_discovery", "mcp_health", "mcp_help", "mcp_catalog_list"],
+        "api": ["api_subsystems", "api_search", "api_get", "shader_guide", "audio_guide"],
+        "shader": ["shader_guide", "shader_catalog", "shader_describe"],
+        "audio": ["audio_guide", "component_describe_type"],
+        "self_description": ["engine_concepts", "engine_concept_get", "workflow_list", "workflow_help"],
+        "scene": ["scene_status", "scene_inspect", "scene_get_hierarchy", "scene_query_summary", "scene_query_objects"],
+        "scene_lifecycle": ["scene_save", "scene_open", "scene_new"],
+        "gameobject": ["hierarchy_create_object", "gameobject_find", "gameobject_get", "gameobject_describe_spatial"],
+        "component": ["component_list_types", "component_describe_type", "component_set_field"],
+        "asset": ["asset_ensure_folder", "asset_list", "asset_search", "asset_read_text", "asset_write_text", "asset_refresh"],
+        "camera": ["camera_find_main", "camera_describe_view", "camera_visibility_report", "camera_frame_targets"],
+        "renderstack": ["renderstack_inspect", "renderstack_list_pipelines", "renderstack_add_pass", "renderstack_set_pass_params"],
+        "runtime": [
+            "editor_play", "runtime_wait", "runtime_run_for", "runtime_measure_motion",
+            "runtime_motion_capture_arm", "runtime_motion_capture_status", "runtime_motion_capture_cancel",
+            "runtime_input_state", "runtime_renderer_state", "runtime_read_errors",
+        ],
+        "player_validation": [
+            "player_validation_launch", "player_validation_status", "player_validation_observe",
+            "player_validation_key", "player_validation_press", "player_validation_motion_capture_arm",
+            "player_validation_motion_capture_status", "player_validation_motion_capture_cancel",
+            "player_validation_logs", "player_validation_shutdown",
+        ],
+        "project_tools": ["project_tools_list", "project_tools_reload", "project_tools_validate", "project_tools_audit"],
+        "trace": ["mcp_trace_start", "mcp_trace_stop", "mcp_trace_current", "mcp_trace_list"],
+        "session_log": ["mcp_session_log_info", "mcp_session_log_read", "mcp_session_log_clear"],
+        "transactions": ["transaction_begin", "transaction_status", "transaction_commit", "transaction_rollback"],
+        "research": ["mcp_config_get", "mcp_contracts_list", "mcp_contracts_validate", "mcp_evolution_suggest_tools"],
+    }
+    return {
+        group: [tool for tool in names if _tool_visible(mcp, tool)]
+        for group, names in groups.items()
+        if any(_tool_visible(mcp, tool) for tool in names)
+    }
+
+
+def _filter_reference_tools(mcp, value: dict[str, Any]) -> dict[str, Any]:
+    filtered = dict(value)
+    tools = filtered.get("tools")
+    if isinstance(tools, list):
+        filtered["tools"] = [tool for tool in tools if _tool_visible(mcp, str(tool))]
+    return filtered
+
+
+def _catalog_categories(mcp) -> list[dict[str, Any]]:
     counts: dict[str, int] = {}
-    for meta in _visible_metadata():
+    for meta in _visible_metadata(mcp):
         category = str(meta.get("category", "") or "misc/other")
         parts = category.split("/")
         for idx in range(1, len(parts) + 1):
@@ -478,9 +521,9 @@ def _catalog_categories() -> list[dict[str, Any]]:
     return [{"category": key, "tool_count": counts[key]} for key in sorted(counts)]
 
 
-def _catalog_tree() -> dict[str, Any]:
+def _catalog_tree(mcp) -> dict[str, Any]:
     root: dict[str, Any] = {}
-    for meta in _visible_metadata():
+    for meta in _visible_metadata(mcp):
         category = str(meta.get("category", "") or "misc/other")
         node = root
         for part in [p for p in category.split("/") if p]:
@@ -505,11 +548,11 @@ def _catalog_tree() -> dict[str, Any]:
     return root
 
 
-def _search_catalog(query: str, *, category: str = "", limit: int = 20) -> list[dict[str, Any]]:
+def _search_catalog(mcp, query: str, *, category: str = "", limit: int = 20) -> list[dict[str, Any]]:
     tokens = [token for token in str(query or "").lower().replace("/", " ").replace(".", " ").split() if token]
     category = str(category or "").lower().strip()
     scored = []
-    for meta in _visible_metadata():
+    for meta in _visible_metadata(mcp):
         meta_category = str(meta.get("category", ""))
         if category and not meta_category.lower().startswith(category):
             continue

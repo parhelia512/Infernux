@@ -171,3 +171,31 @@ class TestBuiltinComponent:
         BuiltinComponent._wrapper_cache.clear()
         BuiltinComponent._clear_cache()
         assert len(BuiltinComponent._wrapper_cache) == 0
+
+    def test_sprite_renderer_invalidation_releases_event_and_material_refs(self):
+        import gc
+        import weakref
+
+        from Infernux.components.builtin.sprite_renderer import SpriteRenderer
+        from Infernux.engine.ui.event_bus import EditorEvent, EditorEventBus
+
+        bus = EditorEventBus.instance()
+        baseline = bus.subscriber_count(EditorEvent.ASSET_CHANGED)
+        wrapper = SpriteRenderer()
+        wrapper._sprite_material = object()
+        wrapper._material_ready = True
+        wrapper._sprite_frames = [{"name": "frame"}]
+        wrapper._subscribe_asset_events()
+        wrapper_ref = weakref.ref(wrapper)
+
+        assert bus.subscriber_count(EditorEvent.ASSET_CHANGED) == baseline + 1
+
+        wrapper._invalidate_native_binding()
+        assert bus.subscriber_count(EditorEvent.ASSET_CHANGED) == baseline
+        assert wrapper._sprite_material is None
+        assert wrapper._material_ready is False
+        assert wrapper._sprite_frames == []
+
+        del wrapper
+        gc.collect()
+        assert wrapper_ref() is None

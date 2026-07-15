@@ -24,6 +24,15 @@
       }
     },
     {
+      "name": "debug-profile",
+      "displayName": "Debug Profile Preset (Windows, terminal frame profiling)",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/out/build-profile",
+      "cacheVariables": {
+        "INFERNUX_FRAME_PROFILE_TERMINAL": "ON"
+      }
+    },
+    {
       "name": "release-macos",
       "displayName": "Release Preset (macOS / Ninja)",
       "generator": "Ninja",
@@ -67,6 +76,11 @@
     {
       "name": "debug",
       "configurePreset": "debug",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "debug-profile",
+      "configurePreset": "debug-profile",
       "configuration": "RelWithDebInfo"
     },
     {

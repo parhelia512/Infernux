@@ -43,7 +43,9 @@ void SceneRenderer::PrepareFrame(bool useActiveCameraCulling)
 #endif
         CollectRenderables(0xFFFFFFFF);
         m_cachedMeshRendererVersion = currentVersion;
-        m_drawCallsCacheValid = false;
+        m_drawCallsCacheValid = m_renderables.empty();
+        if (m_drawCallsCacheValid)
+            m_cachedDrawCalls.drawCalls.clear();
 #if INFERNUX_FRAME_PROFILE
         m_profileSnapshot.collectMs += std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
         m_profileSnapshot.prepareSlowCalls += 1.0;
@@ -83,6 +85,8 @@ void SceneRenderer::PrepareFrame(Camera *camera)
 {
     if (!camera) {
         m_renderables.clear();
+        m_cachedDrawCalls.drawCalls.clear();
+        m_drawCallsCacheValid = true;
         m_visibleCount = 0;
         return;
     }
@@ -111,7 +115,9 @@ void SceneRenderer::PrepareFrame(Camera *camera)
 #endif
         CollectRenderables(camera->GetCullingMask());
         m_cachedMeshRendererVersion = currentVersion;
-        m_drawCallsCacheValid = false;
+        m_drawCallsCacheValid = m_renderables.empty();
+        if (m_drawCallsCacheValid)
+            m_cachedDrawCalls.drawCalls.clear();
 #if INFERNUX_FRAME_PROFILE
         m_profileSnapshot.collectMs += std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
         m_profileSnapshot.prepareSlowCalls += 1.0;
@@ -450,9 +456,10 @@ void SceneRenderer::EmitDrawCallsForRenderable(DrawCallResult &result, const Ren
             dc.indexCount = static_cast<uint32_t>(objIndices.size());
             dc.vertexStart = 0;
             dc.worldMatrix = worldMatrix;
-            dc.material = renderer->GetEffectiveMaterial(0).get();
+            dc.material = renderer->GetEffectiveMaterial(0);
             dc.objectId = renderable.objectId;
             dc.frustumVisible = visible;
+            dc.castsShadows = renderer->CastsShadows();
             dc.worldBounds = renderable.worldBounds;
             dc.meshVertices = &objVertices;
             dc.meshIndices = &objIndices;
@@ -474,9 +481,10 @@ void SceneRenderer::EmitDrawCallsForRenderable(DrawCallResult &result, const Ren
             dc.indexCount = sub.indexCount;
             dc.vertexStart = 0;
             dc.worldMatrix = effectiveMatrix;
-            dc.material = renderer->GetEffectiveMaterial(0).get();
+            dc.material = renderer->GetEffectiveMaterial(0);
             dc.objectId = renderable.objectId;
             dc.frustumVisible = visible;
+            dc.castsShadows = renderer->CastsShadows();
             dc.worldBounds = renderable.worldBounds;
             dc.meshVertices = &objVertices;
             dc.meshIndices = &objIndices;
@@ -514,9 +522,10 @@ void SceneRenderer::EmitDrawCallsForRenderable(DrawCallResult &result, const Ren
                 uint32_t matSlot = sub.materialSlot;
                 if (nodeGroup >= 0 && matSlot < SLOT_REMAP_CAP && slotRemap[matSlot] != 0xFFFFFFFF)
                     matSlot = slotRemap[matSlot];
-                dc.material = renderer->GetEffectiveMaterial(matSlot).get();
+                dc.material = renderer->GetEffectiveMaterial(matSlot);
                 dc.objectId = renderable.objectId;
                 dc.frustumVisible = visible;
+                dc.castsShadows = renderer->CastsShadows();
                 dc.worldBounds = renderable.worldBounds;
                 dc.meshVertices = &objVertices;
                 dc.meshIndices = &objIndices;
@@ -540,9 +549,10 @@ void SceneRenderer::EmitDrawCallsForRenderable(DrawCallResult &result, const Ren
         dc.indexCount = static_cast<uint32_t>(objIndices.size());
         dc.vertexStart = 0;
         dc.worldMatrix = worldMatrix;
-        dc.material = renderer->GetEffectiveMaterial(0).get();
+        dc.material = renderer->GetEffectiveMaterial(0);
         dc.objectId = renderable.objectId;
         dc.frustumVisible = visible;
+        dc.castsShadows = renderer->CastsShadows();
         dc.worldBounds = renderable.worldBounds;
         dc.meshVertices = &objVertices;
         dc.meshIndices = &objIndices;

@@ -12,6 +12,7 @@ from Infernux.debug import Debug
 HOST = "127.0.0.1"
 PORT = 9713
 PATH = "/mcp"
+HEALTH_PATH = "/health"
 SERVER_NAME = "Infernux Editor"
 
 _server_thread: Optional[threading.Thread] = None
@@ -41,6 +42,13 @@ def start_server(project_path: str, *, host: str = HOST, port: int = PORT) -> bo
     if not is_enabled():
         Debug.log_internal("Infernux MCP server disabled by ProjectSettings/mcp_capabilities.json")
         return False
+    from Infernux.mcp.session import configure as configure_session
+    session_state = configure_session(project_path, capability_config)
+    Debug.log_internal(
+        "Infernux MCP session configured: "
+        f"mode={session_state.mode}, build_profile={session_state.build_profile}, "
+        f"recording={session_state.recording_enabled}"
+    )
     if feature_enabled("session_call_log"):
         try:
             from Infernux.mcp.project_tools.trace import start_session_log
@@ -50,18 +58,19 @@ def start_server(project_path: str, *, host: str = HOST, port: int = PORT) -> bo
             Debug.log_suppressed("Infernux.mcp.start_session_log", exc)
     _server = FastMCP(SERVER_NAME)
 
-    # Friendly GET probe on PATH — avoids noisy 404 when IDEs/clients hit /mcp without POST.
+    # Keep health probing outside the streamable HTTP mount. A bare GET on
+    # /mcp is transport negotiation, not a stable readiness endpoint.
     from starlette.requests import Request
     from starlette.responses import JSONResponse
 
-    @_server.custom_route(PATH, methods=["GET"])  # type: ignore[attr-defined]
-    async def _mcp_get_probe(request: Request) -> JSONResponse:
+    @_server.custom_route(HEALTH_PATH, methods=["GET"])  # type: ignore[attr-defined]
+    async def _mcp_health_probe(request: Request) -> JSONResponse:
         return JSONResponse(
             {
                 "name": SERVER_NAME,
-                "message": "MCP endpoint is alive. Use POST/streamable-http for MCP calls.",
+                "message": "MCP endpoint is alive. Use streamable HTTP at /mcp for tool calls.",
                 "transport": "streamable-http",
-                "path": PATH,
+                "path": HEALTH_PATH,
                 "url": endpoint_url(host=host, port=int(port)),
             }
         )
@@ -99,6 +108,11 @@ def start_server(project_path: str, *, host: str = HOST, port: int = PORT) -> bo
 def stop_server() -> None:
     """Best-effort stop hook for editor shutdown."""
     global _server
+    try:
+        from Infernux.mcp.tools.editor_ui import set_semantic_capture_enabled
+        set_semantic_capture_enabled(False)
+    except Exception as exc:
+        Debug.log_suppressed("Infernux.mcp.stop_server.semantic_capture", exc)
     server = _server
     _server = None
     for method_name in ("stop", "shutdown", "close"):
@@ -119,6 +133,10 @@ def endpoint_url(*, host: str = HOST, port: int = PORT) -> str:
     return f"http://{host}:{int(port)}{PATH}"
 
 
+def health_url(*, host: str = HOST, port: int = PORT) -> str:
+    return f"http://{host}:{int(port)}{HEALTH_PATH}"
+
+
 def connection_info(*, host: str = HOST, port: int = PORT) -> dict:
     url = endpoint_url(host=host, port=int(port))
     return {
@@ -128,6 +146,7 @@ def connection_info(*, host: str = HOST, port: int = PORT) -> dict:
         "port": int(port),
         "path": PATH,
         "url": url,
+        "health_url": health_url(host=host, port=int(port)),
         "clients": _client_connection_configs(url),
     }
 

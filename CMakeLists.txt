@@ -155,12 +155,14 @@ endif()
 target_compile_definitions(_Infernux PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE GLM_FORCE_LEFT_HANDED)
 
 # Enable frame profiling instrumentation only in RelWithDebInfo builds.
-# Terminal output (stderr) is OFF by default — enable with -DINFERNUX_FRAME_PROFILE_TERMINAL=1
-# at CMake configure time if you need per-window dumps in the console.
+# Terminal output is OFF by default; the dedicated debug-profile preset enables
+# bounded profile dumps without changing the normal development build.
 #
 # File logging is independent from profiling:
 # - Debug / RelWithDebInfo: truncate Logs/engine.log on startup and write through.
 # - Release / MinSizeRel: keep only the last 100 log lines in memory and write them on exit.
+option(INFERNUX_FRAME_PROFILE_TERMINAL "Emit bounded frame-profile reports to stderr" OFF)
+
 target_compile_definitions(_Infernux PRIVATE
     $<$<CONFIG:RelWithDebInfo>:INFERNUX_FRAME_PROFILE=1>
     $<$<CONFIG:Debug>:INFERNUX_FILE_LOGGING=1>
@@ -174,6 +176,10 @@ target_compile_definitions(_Infernux PRIVATE
     $<$<CONFIG:Debug>:INFERNUX_VULKAN_VALIDATION_LAYERS=1>
     $<$<CONFIG:RelWithDebInfo>:INFERNUX_VULKAN_VALIDATION_LAYERS=1>
 )
+
+if(INFERNUX_FRAME_PROFILE_TERMINAL)
+    target_compile_definitions(_Infernux PRIVATE INFERNUX_FRAME_PROFILE_TERMINAL=1)
+endif()
 
 target_link_libraries(_Infernux PRIVATE
     assimp::assimp
@@ -500,48 +506,9 @@ else()
 endif()
 
 # ------------------------------------------------------------------------------
-# Infernux Hub — PyInstaller packaging
+# Infernux Hub standalone packaging targets
 # ------------------------------------------------------------------------------
-# Build the standalone Infernux Hub launcher.
-#   cmake --build --preset release --target infernux_hub
-# Output: ${CMAKE_SOURCE_DIR}/dist/Infernux Hub/
-# ------------------------------------------------------------------------------
-add_custom_target(prepare_bundled_python_runtime
-    COMMAND ${CMAKE_COMMAND} -E echo "Ensuring bundled Python 3.12 runtime is available..."
-    COMMAND ${Python3_EXECUTABLE}
-        "${CMAKE_SOURCE_DIR}/packaging/stage_bundled_python_runtime.py"
-        --dest-root "${CMAKE_SOURCE_DIR}/packaging/runtime/python312"
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Stage bundled full Python runtime assets"
-)
-
-add_custom_target(infernux_hub
-    COMMAND ${CMAKE_COMMAND} -E echo "Packaging Infernux Hub with PyInstaller..."
-    COMMAND ${Python3_EXECUTABLE} -m PyInstaller
-        "${CMAKE_SOURCE_DIR}/packaging/infernux_hub.spec"
-        --distpath "${CMAKE_SOURCE_DIR}/dist"
-        --workpath "${CMAKE_BINARY_DIR}/hub_build"
-        --clean
-        --noconfirm
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/packaging"
-    DEPENDS prepare_bundled_python_runtime
-    COMMENT "Build Infernux Hub standalone application → dist/Infernux Hub/"
-)
-
-add_custom_target(infernux_hub_installer
-    COMMAND ${CMAKE_COMMAND} -E echo "Building graphical Infernux Hub installer..."
-    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_SOURCE_DIR}/dist/installer"
-    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_SOURCE_DIR}/dist/installer_helper"
-    COMMAND ${Python3_EXECUTABLE} -m PyInstaller
-        "${CMAKE_SOURCE_DIR}/packaging/infernux_hub_installer.spec"
-        --distpath "${CMAKE_SOURCE_DIR}/dist/installer"
-        --workpath "${CMAKE_BINARY_DIR}/installer_build"
-        --clean
-        --noconfirm
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/packaging"
-    DEPENDS infernux_hub
-    COMMENT "Build graphical Infernux Hub installer → dist/installer/"
-)
+include("${CMAKE_SOURCE_DIR}/cmake/InfernuxHub.cmake")
 
 # ------------------------------------------------------------------------------
 # Code Formatting Target (clang-format)
@@ -560,6 +527,8 @@ add_custom_target(clang_format
 # ------------------------------------------------------------------------------
 # Python Packaging and Installation
 # ------------------------------------------------------------------------------
+set(INFERNUX_PYTHON_WHEEL_DIR "${CMAKE_BINARY_DIR}/python_wheel")
+
 add_custom_target(package_and_install_python ALL
     COMMAND ${CMAKE_COMMAND} -E echo "Ensuring Python packaging tools are available..."
     COMMAND ${CMAKE_COMMAND}
@@ -568,13 +537,30 @@ add_custom_target(package_and_install_python ALL
         -P "${CMAKE_SOURCE_DIR}/cmake/ensure_python_packaging_tools.cmake"
 
     COMMAND ${CMAKE_COMMAND} -E echo "Building Python wheel via '${Python3_EXECUTABLE} -m build --wheel'..."
+    # setuptools reuses python package files from this staging directory when
+    # their timestamps look current. Native dependencies can otherwise come
+    # from a previous CMake configuration (for example Release Jolt.dll beside
+    # a RelWithDebInfo _Infernux.pyd).
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_SOURCE_DIR}/build"
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${INFERNUX_PYTHON_WHEEL_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${INFERNUX_PYTHON_WHEEL_DIR}"
     COMMAND ${CMAKE_COMMAND} -E env
         "INFERNUX_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "${Python3_EXECUTABLE}" -m build --wheel --no-isolation --outdir "${CMAKE_SOURCE_DIR}/dist"
+        "${Python3_EXECUTABLE}" -m build --wheel --no-isolation --outdir "${INFERNUX_PYTHON_WHEEL_DIR}"
+
+    COMMAND ${CMAKE_COMMAND} -E echo "Verifying native wheel payload against the current build..."
+    COMMAND ${CMAKE_COMMAND}
+        -DINFERNUX_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DINFERNUX_WHEEL_DIR=${INFERNUX_PYTHON_WHEEL_DIR}
+        -P "${CMAKE_SOURCE_DIR}/cmake/verify_python_wheel.cmake"
+
+    COMMAND ${CMAKE_COMMAND} -E echo "Removing build metadata before wheel installation..."
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_SOURCE_DIR}/python/Infernux.egg-info"
 
     COMMAND ${CMAKE_COMMAND} -E echo "Installing built wheel via pip..."
     COMMAND ${CMAKE_COMMAND}
         -DINFERNUX_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DINFERNUX_WHEEL_DIR=${INFERNUX_PYTHON_WHEEL_DIR}
         -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
         -P "${CMAKE_SOURCE_DIR}/install_wheel.cmake"
 

@@ -2,9 +2,15 @@
 import os
 import json
 import tempfile
+from pathlib import Path
 import pytest
 from Infernux.lib import AssetMutationResult, ProjectPanel
-from Infernux.engine.ui.project_file_ops import create_physic_material, create_vfxsystem, create_material
+from Infernux.engine.ui.project_file_ops import (
+    create_material,
+    create_physic_material,
+    create_prefab_from_gameobject,
+    create_vfxsystem,
+)
 
 
 class TestProjectPanelCreation:
@@ -93,6 +99,25 @@ class TestProjectPanelCreation:
         material = InxMaterial()
         assert material.deserialize(json.dumps(document)) is True
         assert material.name == "NewMaterial"
+
+    def test_create_prefab_links_the_saved_source(self, tmp_path, monkeypatch):
+        from Infernux.engine import prefab_manager
+
+        source = type("GameObject", (), {"name": "CheckpointGate"})()
+        linked = []
+        monkeypatch.setattr(prefab_manager, "save_prefab", lambda *args, **kwargs: True)
+        monkeypatch.setattr(
+            prefab_manager,
+            "_link_created_prefab_source",
+            lambda game_object, path, database: linked.append((game_object, path, database)) or True,
+        )
+        database = object()
+
+        ok, path = create_prefab_from_gameobject(source, str(tmp_path), database)
+
+        assert ok is True
+        assert path == str(tmp_path / "CheckpointGate.prefab")
+        assert linked == [(source, path, database)]
 
 
 class TestProjectPanelPaths:
@@ -208,6 +233,42 @@ class TestProjectPanelCallbacks:
         pp.do_rename = lambda old, new_name: f"/dir/{new_name}"
         result = pp.do_rename("/dir/old.txt", "new.txt")
         assert result == "/dir/new.txt"
+
+    def test_project_asset_operations_publish_stable_semantics(self):
+        source = Path("cpp/infernux/function/editor/ProjectPanel.cpp").read_text(encoding="utf-8")
+        assert '"project.context.rename"' in source
+        assert '"project.context.delete"' in source
+        assert '"project.rename.input"' in source
+        assert 'itemSemanticId + ".expand"' in source
+        assert '"project_model_expand"' in source
+
+    def test_project_asset_selection_waits_for_non_drag_release(self):
+        source = Path("cpp/infernux/function/editor/ProjectPanel.cpp").read_text(encoding="utf-8")
+        icon_render = source[source.index("// ── Render icon"):source.index("// ── Drag-drop source")]
+
+        assert icon_render.count("ImGui::IsMouseReleased(ImGuiMouseButton_Left)") == 2
+        assert "const bool thumbClicked = ImGui::IsItemClicked(0)" not in icon_render
+
+    def test_empty_prefab_drop_area_is_an_actual_drag_drop_target(self):
+        source = Path("cpp/infernux/function/editor/ProjectPanel.cpp").read_text(encoding="utf-8")
+        drop_area = source.index('ctx->InvisibleButton("##drop_prefab_area"')
+        drop_target = source.index("ctx->BeginDragDropTarget()", drop_area)
+        accept_payload = source.index("ctx->AcceptDragDropPayload(DRAG_TYPE_HIERARCHY_GO", drop_target)
+        create_prefab = source.index("createPrefabFromHierarchy(objId, m_currentPath)", accept_payload)
+        click_handler = source.index("ctx->IsItemClicked(0)", create_prefab)
+
+        assert drop_area < drop_target < accept_payload < create_prefab < click_handler
+
+    def test_file_grid_background_semantic_survives_a_vertically_filled_grid(self):
+        source = Path("cpp/infernux/function/editor/ProjectPanel.cpp").read_text(encoding="utf-8")
+        gutter_capture = source.index("const float gutterWidth = cellW - iconSize")
+        bottom_area = source.index('ctx->InvisibleButton("##drop_prefab_area"')
+        fallback = source.index("} else if (captureSemantics && semanticBackgroundMax.x", bottom_area)
+
+        assert '"project.file_grid.background"' in source
+        assert source.count('"project.file_grid.background"') == 2
+        assert gutter_capture < bottom_area < fallback
+        assert source.count('ctx->RecordSemanticRect("project_background", "File Grid Background"') == 2
 
     def test_get_unique_name_callback(self):
         pp = ProjectPanel()

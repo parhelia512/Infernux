@@ -9,7 +9,9 @@
 时间管理器。掌管每一帧的时间节奏——引擎的心跳。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+玩法使用缩放时间；暂停后仍继续的 UI 或诊断使用非缩放时间。物理工作放入固定更新。
 <!-- USER CONTENT END -->
 
 ## 属性
@@ -36,12 +38,21 @@
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for Time
+from Infernux import InxComponent, Time
+
+
+class PauseClock(InxComponent):
+    def update(self, delta_time: float) -> None:
+        gameplay_seconds = Time.time
+        menu_step = Time.unscaled_delta_time
+        print(gameplay_seconds, menu_step)
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [输入与时间](../manual/input-and-time.md)
+- [InxComponent](InxComponent.md)
+- [Rigidbody](Rigidbody.md)
 <!-- USER CONTENT END -->

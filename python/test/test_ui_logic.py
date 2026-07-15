@@ -234,6 +234,43 @@ class TestWindowManager:
         finally:
             WindowManager._instance = previous
 
+    def test_window_menu_close_respects_panel_close_deferral(self):
+        from Infernux.engine.ui.window_manager import WindowManager, WindowState
+
+        class Engine:
+            @staticmethod
+            def unregister_gui(_window_id):
+                raise AssertionError("deferred window must remain registered")
+
+        class Panel:
+            def __init__(self):
+                self._is_open = True
+                self.close_requests = 0
+
+            @property
+            def is_open(self):
+                return self._is_open
+
+            def request_close(self):
+                self.close_requests += 1
+                return False
+
+        previous = WindowManager._instance
+        try:
+            manager = WindowManager(Engine())
+            panel = Panel()
+            manager._window_states["dirty"] = WindowState.OPEN
+            manager._window_instances["dirty"] = panel
+            manager._registered_instance_ids.add("dirty")
+
+            manager.close_window("dirty")
+
+            assert panel.close_requests == 1
+            assert panel.is_open is True
+            assert manager.get_window_state("dirty") is WindowState.OPEN
+        finally:
+            WindowManager._instance = previous
+
 
 # ── scene view math helpers ──────────────────────────────────────────────
 
@@ -281,4 +318,40 @@ class TestPanelFocusEvents:
             assert not hasattr(ClosablePanel, "set_on_panel_focus_changed")
         finally:
             bus.unsubscribe(EditorEvent.PANEL_FOCUSED, handler)
+            ClosablePanel._active_panel_id = previous_active
+
+    def test_closable_panel_keeps_child_window_focus_as_panel_focus(self):
+        from Infernux.engine.ui.closable_panel import ClosablePanel
+
+        class FocusContext:
+            def __init__(self):
+                self.focus_flags = []
+
+            @staticmethod
+            def begin_window_closable(_title, _open, _flags):
+                return True, True
+
+            @staticmethod
+            def is_window_hovered(_flags):
+                return False
+
+            @staticmethod
+            def is_mouse_button_clicked(_button):
+                return False
+
+            def is_window_focused(self, flags):
+                self.focus_flags.append(flags)
+                return flags == 3
+
+        panel = ClosablePanel("Child Focus Test", "child_focus_test")
+        ctx = FocusContext()
+        previous_active = ClosablePanel._active_panel_id
+        try:
+            ClosablePanel._active_panel_id = panel.window_id
+            panel._panel_was_focused = True
+
+            assert panel._begin_closable_window(ctx) is True
+            assert ClosablePanel.get_active_panel_id() == panel.window_id
+            assert ctx.focus_flags == [3]
+        finally:
             ClosablePanel._active_panel_id = previous_active

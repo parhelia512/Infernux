@@ -1,4 +1,5 @@
 #include "InxRenderer.h"
+#include "CaptureService.h"
 // Explicit includes for all subsystem types that were forward-declared in
 // InxRenderer.h. These are required here so that unique_ptr destructors,
 // make_unique calls, and member-function calls all have complete types.
@@ -14,6 +15,7 @@
 #include "TransientResourcePool.h"
 #include "gui/InxGUI.h"
 #include "gui/InxGUIContext.h"
+#include "gui/InxGUISemantics.h"
 #include "gui/InxScreenUIRenderer.h"
 #include "vk/RenderGraph.h"
 #include "vk/VmaContext.h"
@@ -47,6 +49,7 @@ InxRenderer::InxRenderer()
 {
     m_vkCore = std::make_unique<InxVkCoreModular>();
     m_view = std::make_unique<InxView>();
+    m_captureService = std::make_unique<CaptureService>();
 }
 
 InxRenderer::~InxRenderer()
@@ -72,6 +75,8 @@ InxRenderer::~InxRenderer()
     m_sceneRenderGraph.reset();
 
     m_screenUIRenderer.reset();
+
+    m_captureService.reset();
 
     m_gameRenderTarget.reset();
     m_sceneRenderTarget.reset();
@@ -211,6 +216,7 @@ void InxRenderer::PreparePipeline()
         // Initialize scene render target with default size
         m_sceneRenderTarget = std::make_unique<SceneRenderTarget>(m_vkCore.get());
         m_sceneRenderTarget->Initialize(800, 600);
+        ++m_sceneRenderTargetGeneration;
 
         // Set initial scene render target size for aspect ratio calculation
         m_vkCore->SetSceneRenderTargetSize(800, 600);
@@ -228,7 +234,8 @@ void InxRenderer::PreparePipeline()
 
         // Hook RenderGraph execution into the pre-render callback
         m_vkCore->SetRenderGraphExecutor([this](VkCommandBuffer cmdBuf) {
-            const bool sceneViewActive = (m_sceneViewVisible && m_sceneRenderTarget && m_sceneRenderTarget->IsReady() &&
+            const bool sceneViewActive = ((m_sceneViewVisible || HasPendingCapture(CaptureSource::Scene)) &&
+                                          m_sceneRenderTarget && m_sceneRenderTarget->IsReady() &&
                                           m_sceneRenderTarget->GetWidth() > 1 && m_sceneRenderTarget->GetHeight() > 1);
 
             // Pre-allocate instance SSBO for all graphs so the buffer (and its
@@ -420,7 +427,7 @@ void InxRenderer::DrawFrame()
         m_deltaTime = 0.1f;
 
     // ========================================================================
-    // Frame Profiler — prints per-phase timings every 120 frames.
+    // Frame Profiler - aggregates per-phase timings and reports at a bounded cadence.
     // Controlled by INFERNUX_FRAME_PROFILE in ProfileConfig.h (0 = off, 1 = on).
     // ========================================================================
 
@@ -443,6 +450,7 @@ void InxRenderer::DrawFrame()
     };
     FrameProfiler _fp;
     static int _fpCounter = 0;
+    static auto _fpLastReport = std::chrono::steady_clock::now();
     static double _fpAccum[12] = {};
     static double _deltaAccumMs = 0.0;
     static double _srpSceneViewMs = 0;
@@ -452,6 +460,7 @@ void InxRenderer::DrawFrame()
     static std::unordered_map<std::string, double> _guiAccum;
     static std::unordered_map<std::string, double> _inspSubAccum;
     static std::unordered_map<std::string, double> _hierSubAccum;
+    static std::unordered_map<std::string, double> _projectSubAccum;
     struct FramePacingAccum
     {
         double targetFps = 0.0;
@@ -484,6 +493,15 @@ void InxRenderer::DrawFrame()
 
     // Window events
     m_view->ProcessEvent();
+    if (!m_guiPlayerMode) {
+        const uint64_t syntheticSequence = m_view->GetLastProcessedSyntheticInputSequence();
+        if (syntheticSequence != 0 && syntheticSequence != m_lastSemanticSyntheticInputSequence) {
+            m_lastSemanticSyntheticInputSequence = syntheticSequence;
+            // Capture the exact GUI frame that consumes Agent input. Requesting
+            // from Python after delivery can race past this frame.
+            InxGUISemantics::RequestSnapshot(syntheticSequence);
+        }
+    }
 #if INFERNUX_FRAME_PROFILE
     _fp.stamp(); // [1] after input/event processing
     _deltaAccumMs += static_cast<double>(m_deltaTime) * 1000.0;
@@ -504,6 +522,14 @@ void InxRenderer::DrawFrame()
         _pacingAccum.playBypassFrames += pacing.playModeBypass ? 1 : 0;
     }
 #endif
+
+    // Run the pre-GUI callback after input processing, even while the window
+    // is minimized.  Remote MCP commands are drained there; returning before
+    // it would make a minimized Editor impossible to control or recover.
+    // Actual ImGui/Vulkan work remains below the minimized early return.
+    if (m_preGuiCallback) {
+        m_preGuiCallback();
+    }
 
     // Skip rendering while the window is minimized.
     // This avoids a deadlock in vkAcquireNextImageKHR when the
@@ -576,14 +602,6 @@ void InxRenderer::DrawFrame()
     _fp.stamp(); // [3] after WaitForCurrentFrame (GPU fence)
 #endif
 
-    // Run the pre-GUI callback (Python DeferredTaskRunner) BEFORE
-    // BuildFrame so that scene-mutating deferred steps (e.g. scene
-    // deserialize on play-mode Stop) complete before any ImGui panel
-    // renders.  This prevents panels from accessing destroyed objects.
-    if (m_preGuiCallback) {
-        m_preGuiCallback();
-    }
-
     auto _guiBuildStart = std::chrono::high_resolution_clock::now();
     m_gui->BuildFrame();
     auto _guiBuildEnd = std::chrono::high_resolution_clock::now();
@@ -592,8 +610,9 @@ void InxRenderer::DrawFrame()
     _fp.stamp(); // [4] after GUI::BuildFrame (ImGui → Python panels)
 #endif
 
-    const bool sceneViewActive = (m_sceneViewVisible && m_sceneRenderTarget && m_sceneRenderTarget->IsReady() &&
-                                  m_sceneRenderTarget->GetWidth() > 1 && m_sceneRenderTarget->GetHeight() > 1);
+    const bool sceneViewActive =
+        ((m_sceneViewVisible || HasPendingCapture(CaptureSource::Scene)) && m_sceneRenderTarget &&
+         m_sceneRenderTarget->IsReady() && m_sceneRenderTarget->GetWidth() > 1 && m_sceneRenderTarget->GetHeight() > 1);
 
     // Prepare scene rendering data (collect + cull + sort) AFTER GUI processing
     // so we always operate on the current scene state.
@@ -745,6 +764,9 @@ void InxRenderer::DrawFrame()
 
     // Render frame with scene camera
     m_vkCore->DrawFrame(m_cameraPos, m_cameraLookAt, m_cameraUp);
+    SubmitPendingCaptureReadbacks();
+    if (m_captureService)
+        m_captureService->Poll();
 #if INFERNUX_FRAME_PROFILE
     _fp.stamp(); // [10] after VkCore::DrawFrame (GPU submit + present)
 #endif
@@ -770,7 +792,8 @@ void InxRenderer::DrawFrame()
     }
 
     // ========================================================================
-    // Unified Frame Profiler output: print every 120 frames
+    // Unified Frame Profiler output. Require enough samples, then throttle by
+    // wall time so an uncapped Debug Player cannot flood the engine log.
     // ========================================================================
 #if INFERNUX_FRAME_PROFILE
     {
@@ -836,13 +859,20 @@ void InxRenderer::DrawFrame()
             for (const auto &kv : sub)
                 _hierSubAccum[kv.first] += kv.second;
         }
+        {
+            auto sub = m_gui->ConsumePanelSubTimings("project");
+            for (const auto &kv : sub)
+                _projectSubAccum[kv.first] += kv.second;
+        }
 
         ++_fpCounter;
-        if (_fpCounter % INFERNUX_FRAME_PROFILE_WINDOW == 0) {
-            constexpr double kWindow = static_cast<double>(INFERNUX_FRAME_PROFILE_WINDOW);
+        const auto _fpReportNow = std::chrono::steady_clock::now();
+        if (_fpCounter >= INFERNUX_FRAME_PROFILE_WINDOW &&
+            _fpReportNow - _fpLastReport >= std::chrono::seconds(INFERNUX_FRAME_PROFILE_REPORT_INTERVAL_SECONDS)) {
+            const double kWindow = static_cast<double>(_fpCounter);
             std::ostringstream oss;
             oss << std::fixed << std::setprecision(2);
-            oss << "[Profile] avg" << INFERNUX_FRAME_PROFILE_WINDOW << " frame=" << (_fpAccum[0] / kWindow) << "ms"
+            oss << "[Profile] avg" << _fpCounter << " frame=" << (_fpAccum[0] / kWindow) << "ms"
                 << " | Delta=" << (_deltaAccumMs / kWindow) << "ms" << " | Input=" << (_fpAccum[1] / kWindow) << "ms"
                 << " | Scene+Late=" << (_fpAccum[2] / kWindow) << "ms" << " | GPUFence=" << (_fpAccum[3] / kWindow)
                 << "ms" << " | UI=" << (_fpAccum[4] / kWindow) << "ms" << " | Prepare=" << (_fpAccum[5] / kWindow)
@@ -1039,6 +1069,15 @@ void InxRenderer::DrawFrame()
                 for (const auto &kv : hierItems)
                     oss << ' ' << kv.first << '=' << (kv.second / kWindow) << "ms";
             }
+            if (!_projectSubAccum.empty()) {
+                std::vector<std::pair<std::string, double>> projectItems(_projectSubAccum.begin(),
+                                                                         _projectSubAccum.end());
+                std::sort(projectItems.begin(), projectItems.end(),
+                          [](const auto &lhs, const auto &rhs) { return lhs.first < rhs.first; });
+                oss << "\n    Project:";
+                for (const auto &kv : projectItems)
+                    oss << ' ' << kv.first << '=' << (kv.second / kWindow) << "ms";
+            }
             INXLOG_WARN(oss.str());
 #if INFERNUX_FRAME_PROFILE_TERMINAL
             std::cerr << oss.str() << std::endl;
@@ -1054,6 +1093,7 @@ void InxRenderer::DrawFrame()
             _guiAccum.clear();
             _inspSubAccum.clear();
             _hierSubAccum.clear();
+            _projectSubAccum.clear();
             _pacingAccum = {};
             _detailAccum = {};
             if (m_vkCore) {
@@ -1063,6 +1103,8 @@ void InxRenderer::DrawFrame()
             SceneRenderBridge::Instance().GetSceneRenderer().ResetProfileSnapshot();
             ScriptableRenderContext::ResetProfileSnapshot();
             m_executorTiming = {};
+            _fpCounter = 0;
+            _fpLastReport = _fpReportNow;
         }
     }
 #endif
@@ -1514,6 +1556,46 @@ bool InxRenderer::GetUserEvent()
     return m_view->GetUserEvent();
 }
 
+uint64_t InxRenderer::QueueSyntheticKeyInput(int scancode, bool pressed, bool repeat)
+{
+    return m_view ? m_view->QueueSyntheticKeyInput(scancode, pressed, repeat) : 0;
+}
+
+uint64_t InxRenderer::QueueSyntheticMouseButtonInput(int button, bool pressed, float x, float y)
+{
+    return m_view ? m_view->QueueSyntheticMouseButtonInput(button, pressed, x, y) : 0;
+}
+
+uint64_t InxRenderer::QueueSyntheticMouseMotionInput(float x, float y, float deltaX, float deltaY)
+{
+    return m_view ? m_view->QueueSyntheticMouseMotionInput(x, y, deltaX, deltaY) : 0;
+}
+
+uint64_t InxRenderer::QueueSyntheticMouseWheelInput(float horizontal, float vertical)
+{
+    return m_view ? m_view->QueueSyntheticMouseWheelInput(horizontal, vertical) : 0;
+}
+
+uint64_t InxRenderer::QueueSyntheticTextInput(const std::string &text)
+{
+    return m_view ? m_view->QueueSyntheticTextInput(text) : 0;
+}
+
+uint64_t InxRenderer::QueueSyntheticCloseRequest()
+{
+    return m_view ? m_view->QueueSyntheticCloseRequest() : 0;
+}
+
+uint64_t InxRenderer::GetLastProcessedSyntheticInputSequence() const
+{
+    return m_view ? m_view->GetLastProcessedSyntheticInputSequence() : 0;
+}
+
+size_t InxRenderer::GetPendingSyntheticInputCount() const
+{
+    return m_view ? m_view->GetPendingSyntheticInputCount() : 0;
+}
+
 void InxRenderer::ShowWindow()
 {
     m_view->Show();
@@ -1522,6 +1604,11 @@ void InxRenderer::ShowWindow()
 void InxRenderer::HideWindow()
 {
     m_view->Hide();
+}
+
+bool InxRenderer::IsWindowMinimized() const
+{
+    return m_view && m_view->IsMinimized();
 }
 
 void InxRenderer::SetWindowIcon(const std::string &iconPath)
@@ -1615,6 +1702,7 @@ void InxRenderer::UnregisterGUIRenderable(const char *name)
 
 void InxRenderer::SetGUIPlayerMode(bool enabled)
 {
+    m_guiPlayerMode = enabled;
     if (m_gui) {
         m_gui->SetPlayerMode(enabled);
     }
@@ -1907,10 +1995,126 @@ std::shared_ptr<vk::ImageReadbackTicket> InxRenderer::RequestRenderTargetReadbac
         target->GetColorFormat());
 }
 
+RendererFrameTelemetrySnapshot InxRenderer::GetFrameTelemetrySnapshot()
+{
+    RendererFrameTelemetrySnapshot snapshot;
+    const auto countShadowCasters = [](const std::vector<DrawCall> &drawCalls) {
+        return static_cast<size_t>(std::count_if(drawCalls.begin(), drawCalls.end(),
+                                                 [](const DrawCall &drawCall) { return drawCall.castsShadows; }));
+    };
+    snapshot.frame = m_frameCount;
+    snapshot.sceneViewVisible = m_sceneViewVisible;
+    snapshot.gameCameraEnabled = m_gameCameraEnabled;
+    snapshot.gameCameraAvailable = FindGameCameraCached() != nullptr;
+    snapshot.sceneTargetReady = m_sceneRenderTarget && m_sceneRenderTarget->IsReady();
+    snapshot.gameTargetReady = m_gameRenderTarget && m_gameRenderTarget->IsReady();
+    if (m_sceneRenderTarget) {
+        snapshot.sceneTargetWidth = m_sceneRenderTarget->GetWidth();
+        snapshot.sceneTargetHeight = m_sceneRenderTarget->GetHeight();
+    }
+    if (m_gameRenderTarget) {
+        snapshot.gameTargetWidth = m_gameRenderTarget->GetWidth();
+        snapshot.gameTargetHeight = m_gameRenderTarget->GetHeight();
+    }
+    if (m_sceneRenderGraph) {
+        snapshot.sceneRenderGraphName = m_sceneRenderGraph->GetGraphName();
+        snapshot.sceneRenderGraphExecutionCount = m_sceneRenderGraph->GetExecutionCount();
+        snapshot.sceneRenderGraphCurrentExecuted = m_sceneRenderGraph->HasExecutedCurrentGraph();
+        snapshot.sceneRenderGraphPassNames = m_sceneRenderGraph->GetExecutedPassNames();
+        if (m_sceneRenderGraph->HasCachedDrawCalls())
+            snapshot.sceneDrawCallCount = m_sceneRenderGraph->GetCachedDrawCalls().size();
+        if (m_sceneRenderGraph->HasCachedShadowDrawCalls())
+            snapshot.sceneShadowDrawCallCount = countShadowCasters(m_sceneRenderGraph->GetCachedShadowDrawCalls());
+    }
+    if (m_gameRenderGraph) {
+        snapshot.gameRenderGraphName = m_gameRenderGraph->GetGraphName();
+        snapshot.gameRenderGraphExecutionCount = m_gameRenderGraph->GetExecutionCount();
+        snapshot.gameRenderGraphCurrentExecuted = m_gameRenderGraph->HasExecutedCurrentGraph();
+        snapshot.gameRenderGraphPassNames = m_gameRenderGraph->GetExecutedPassNames();
+        if (m_gameRenderGraph->HasCachedDrawCalls())
+            snapshot.gameDrawCallCount = m_gameRenderGraph->GetCachedDrawCalls().size();
+        if (m_gameRenderGraph->HasCachedShadowDrawCalls())
+            snapshot.gameShadowDrawCallCount = countShadowCasters(m_gameRenderGraph->GetCachedShadowDrawCalls());
+    }
+    if (m_vkCore)
+        snapshot.lightCount = m_vkCore->GetLightCollector().GetTotalLightCount();
+    if (m_particleDrawCalls)
+        snapshot.particleCount = m_particleDrawCalls->GetParticleCount();
+    snapshot.gameRenderMs = m_lastGameRenderMs;
+    snapshot.gameOnlyFrameMs = m_gameOnlyFrameMs;
+    snapshot.sceneUpdateMs = m_sceneUpdateMs;
+    snapshot.guiBuildMs = m_guiBuildMs;
+    snapshot.prepareFrameMs = m_prepareFrameMs;
+    return snapshot;
+}
+
+uint64_t InxRenderer::RequestCapture(CaptureSource source, const std::string &outputPath)
+{
+    if (!m_captureService)
+        throw std::logic_error("Capture service is not initialized");
+    const bool gameView = source == CaptureSource::Game;
+    const uint64_t generation = gameView ? m_gameRenderTargetGeneration : m_sceneRenderTargetGeneration;
+    SceneRenderTarget *target = gameView ? m_gameRenderTarget.get() : m_sceneRenderTarget.get();
+    if (!target || !target->IsReady())
+        throw std::logic_error(gameView ? "Game render target is not initialized"
+                                        : "Scene render target is not initialized");
+
+    const uint64_t captureId = m_captureService->Request(source, generation, m_frameCount, outputPath);
+    m_pendingCaptures.push_back({captureId, source});
+    return captureId;
+}
+
+bool InxRenderer::HasPendingCapture(CaptureSource source) const
+{
+    return std::any_of(m_pendingCaptures.begin(), m_pendingCaptures.end(),
+                       [source](const PendingCapture &capture) { return capture.source == source; });
+}
+
+void InxRenderer::SubmitPendingCaptureReadbacks()
+{
+    if (!m_captureService || m_pendingCaptures.empty())
+        return;
+
+    std::vector<PendingCapture> pending;
+    pending.swap(m_pendingCaptures);
+    for (const PendingCapture &capture : pending) {
+        try {
+            const bool gameView = capture.source == CaptureSource::Game;
+            (void)m_captureService->AttachReadback(capture.id, RequestRenderTargetReadback(gameView));
+        } catch (const std::exception &exc) {
+            const std::string error = std::string("Capture readback submission failed: ") + exc.what();
+            INXLOG_ERROR(error);
+            m_captureService->Fail(capture.id, error);
+        }
+    }
+}
+
+CaptureSnapshot InxRenderer::QueryCapture(uint64_t captureId) const
+{
+    if (!m_captureService)
+        throw std::logic_error("Capture service is not initialized");
+    return m_captureService->Query(captureId);
+}
+
+bool InxRenderer::CancelCapture(uint64_t captureId)
+{
+    if (!m_captureService || !m_captureService->Cancel(captureId))
+        return false;
+    m_pendingCaptures.erase(
+        std::remove_if(m_pendingCaptures.begin(), m_pendingCaptures.end(),
+                       [captureId](const PendingCapture &capture) { return capture.id == captureId; }),
+        m_pendingCaptures.end());
+    return true;
+}
+
 void InxRenderer::ResizeSceneRenderTarget(uint32_t width, uint32_t height)
 {
-    if (m_sceneRenderTarget && width > 0 && height > 0) {
+    if (m_sceneRenderTarget && width > 0 && height > 0 &&
+        (width != m_sceneRenderTarget->GetWidth() || height != m_sceneRenderTarget->GetHeight())) {
         m_sceneRenderTarget->Resize(width, height);
+        ++m_sceneRenderTargetGeneration;
+        if (m_captureService)
+            m_captureService->InvalidateSource(CaptureSource::Scene, m_sceneRenderTargetGeneration);
         if (m_sceneRenderGraph) {
             m_sceneRenderGraph->OnResize(width, height);
         }
@@ -2231,6 +2435,7 @@ void InxRenderer::ResizeGameRenderTarget(uint32_t width, uint32_t height)
             m_gameRenderTarget->SetMsaaSampleCount(m_sceneRenderTarget->GetMsaaSampleCount());
         }
         m_gameRenderTarget->Initialize(width, height);
+        ++m_gameRenderTargetGeneration;
 
         // Create a dedicated SceneRenderGraph for game camera
         m_gameRenderGraph = std::make_unique<SceneRenderGraph>();
@@ -2255,6 +2460,9 @@ void InxRenderer::ResizeGameRenderTarget(uint32_t width, uint32_t height)
 
     if (m_gameRenderTarget && (width != m_gameRenderTarget->GetWidth() || height != m_gameRenderTarget->GetHeight())) {
         m_gameRenderTarget->Resize(width, height);
+        ++m_gameRenderTargetGeneration;
+        if (m_captureService)
+            m_captureService->InvalidateSource(CaptureSource::Game, m_gameRenderTargetGeneration);
         if (m_gameRenderGraph) {
             m_gameRenderGraph->OnResize(width, height);
         }

@@ -13,10 +13,46 @@ theme:
 nav:
   - Home: index.md
   - English Guides:
+    - Learn:
+      - Getting Started: en/learn/getting-started.md
+      - Your First Component: en/learn/first-component.md
+      - 2D Foundations: en/learn/2d-foundations.md
+      - 3D Foundations: en/learn/3d-foundations.md
+      - Animation Workflow: en/learn/animation-workflow.md
+      - Audio Workflow: en/learn/audio-workflow.md
+      - Build and Share a Project: en/learn/build-and-share.md
+    - Manual:
+      - Engine Map: en/manual/engine-map.md
+      - Scenes and Objects: en/manual/scenes-and-objects.md
+      - Input and Time: en/manual/input-and-time.md
+      - Physics: en/manual/physics.md
+      - Screen-space UI: en/manual/ui.md
+      - Assets and Meta Files: en/manual/assets-and-meta.md
+      - Rendering and RenderStack: en/manual/rendering-and-renderstack.md
+      - API Versioning and Compatibility: en/manual/api-versioning.md
+      - Debugging and the Console: en/manual/debugging.md
     - Architecture:
       - Why Infernux Exists: en/architecture/about.md
       - "Deep Dive: JIT-Accelerated Scripting in Infernux": en/architecture/jit.md
   - 中文指南:
+    - 学习:
+      - 快速开始: zh/learn/getting-started.md
+      - 第一个组件: zh/learn/first-component.md
+      - 2D 基础: zh/learn/2d-foundations.md
+      - 3D 基础: zh/learn/3d-foundations.md
+      - 动画工作流: zh/learn/animation-workflow.md
+      - 音频工作流: zh/learn/audio-workflow.md
+      - 构建并分享项目: zh/learn/build-and-share.md
+    - 手册:
+      - 引擎地图: zh/manual/engine-map.md
+      - 场景与对象: zh/manual/scenes-and-objects.md
+      - 输入与时间: zh/manual/input-and-time.md
+      - 物理: zh/manual/physics.md
+      - 屏幕空间 UI: zh/manual/ui.md
+      - 资源与 Meta 文件: zh/manual/assets-and-meta.md
+      - 渲染与 RenderStack: zh/manual/rendering-and-renderstack.md
+      - API 版本与兼容性: zh/manual/api-versioning.md
+      - 调试与 Console: zh/manual/debugging.md
     - 架构:
       - 为什么会有Infernux: zh/architecture/about.md
       - 深入理解：Infernux 的 JIT 加速脚本系统: zh/architecture/jit.md

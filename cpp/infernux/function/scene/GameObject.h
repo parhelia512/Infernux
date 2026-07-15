@@ -436,7 +436,7 @@ class GameObject
     [[nodiscard]] nlohmann::json SerializeDocument() const;
 
     /// @brief Commit an already parsed and cross-language-preflighted document.
-    bool DeserializeDocument(const nlohmann::json &document);
+    bool DeserializeDocument(const nlohmann::json &document, bool preserveDocumentIds = true);
 
     /// @brief Deep clone this GameObject and all children (native, no JSON).
     /// Creates fresh IDs for all objects and components. Python components

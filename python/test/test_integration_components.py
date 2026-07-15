@@ -772,6 +772,28 @@ class TestComponentLifecycle:
             "spawned_late_update",
         ]
 
+    def test_python_proxy_reports_native_update_dispatch(self, scene):
+        sm = SceneManager.instance()
+
+        class ProbeComponent(InxComponent):
+            def update(self, delta_time: float):
+                self.last_delta_time = delta_time
+
+        component = scene.create_game_object("DispatchProbe").add_component(ProbeComponent)
+        proxy = component._cpp_component
+
+        sm.play()
+        sm.pause()
+        dispatch_before = proxy.update_dispatch_count
+        forward_before = proxy.update_forward_count
+
+        sm.step(1.0 / 60.0)
+
+        assert proxy.overrides_update is True
+        assert proxy.update_dispatch_count == dispatch_before + 1
+        assert proxy.update_forward_count == forward_before + 1
+        assert component.last_delta_time == pytest.approx(1.0 / 60.0)
+
     def test_disabling_component_does_not_stop_coroutines(self, scene):
         sm = SceneManager.instance()
         events = []

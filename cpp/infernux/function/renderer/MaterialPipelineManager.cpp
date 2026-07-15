@@ -829,6 +829,9 @@ size_t MaterialPipelineManager::CollectUnusedRenderData()
     for (const auto &[name, data] : m_renderDataMap) {
         if (!data || !data->material || data.get() == m_defaultRenderData)
             continue;
+        // Registry-owned builtins naturally have another strong owner. Do not
+        // use IsBuiltin() as a lifetime signal: runtime materials created from
+        // a built-in shader carry that flag too and still need reclamation.
         if (data->material.use_count() == 1)
             unused.push_back(name);
     }

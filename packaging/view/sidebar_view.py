@@ -8,6 +8,7 @@ from PySide6.QtCore import Signal, Qt, QPropertyAnimation, Property, QEasingCurv
 from PySide6.QtGui import QPainter, QColor, QBrush, QPaintEvent
 
 from style import StyleManager
+from i18n import tr
 
 
 class ToggleSwitch(QWidget):
@@ -57,8 +58,8 @@ class ToggleSwitch(QWidget):
         is_dark = getattr(app, "is_dark_theme", True)
 
         if self._checked:
-            bg_color = QColor("#ffffff") if is_dark else QColor("#37352f")
-            thumb_color = QColor("#191919") if is_dark else QColor("#ffffff")
+            bg_color = QColor("#6877ff") if is_dark else QColor("#5865f2")
+            thumb_color = QColor("#ffffff")
         else:
             bg_color = QColor("#555555") if is_dark else QColor("#e9e9e7")
             thumb_color = QColor("#cfcfcf") if is_dark else QColor("#ffffff")
@@ -78,7 +79,7 @@ class SidebarView(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(220)
+        self.setFixedWidth(232)
         self.setObjectName("sidebar")
 
         layout = QVBoxLayout(self)
@@ -96,7 +97,7 @@ class SidebarView(QWidget):
         title.setObjectName("sidebarTitle")
         title_layout.addWidget(title)
 
-        subtitle = QLabel("Hub")
+        subtitle = QLabel(tr("Hub"))
         subtitle.setObjectName("sidebarSubtitle")
         title_layout.addWidget(subtitle)
 
@@ -105,11 +106,11 @@ class SidebarView(QWidget):
         # ── Navigation ───────────────────────────────────────────────
         self._nav_buttons: list[QPushButton] = []
 
-        for label, index in [("Projects", 0), ("Installs", 1)]:
+        for label, index in [(tr("Projects"), 0), (tr("Installs"), 1), (tr("Settings"), 2)]:
             btn = QPushButton(label)
             btn.setObjectName("navItem")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFixedHeight(42)
+            btn.setFixedHeight(46)
             btn.setProperty("active", index == 0)
             btn.clicked.connect(lambda _checked, i=index: self._switch_page(i))
             layout.addWidget(btn)
@@ -122,7 +123,7 @@ class SidebarView(QWidget):
         theme_layout = QHBoxLayout(theme_container)
         theme_layout.setContentsMargins(20, 12, 20, 16)
 
-        theme_label = QLabel("Dark Mode")
+        theme_label = QLabel(tr("Dark Mode"))
         theme_label.setObjectName("themeLabel")
         theme_layout.addWidget(theme_label)
         theme_layout.addStretch()

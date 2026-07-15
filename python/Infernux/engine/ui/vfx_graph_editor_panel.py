@@ -40,6 +40,7 @@ class VfxGraphEditorPanel(EditorPanel):
         self._selected_node_uid = ""
 
         self._view = NodeGraphView()
+        self._view.semantic_namespace = "vfx.graph"
         self._view.on_node_add_request = self._on_node_add
         self._view.on_nodes_deleted = self._on_nodes_deleted
         self._view.on_link_created = self._on_link_created
@@ -91,6 +92,16 @@ class VfxGraphEditorPanel(EditorPanel):
             Debug.log_error(f"Failed to save VFX system '{self._file_path}': {exc}")
             return False
         self._dirty = False
+        self._sync_project_dirty_flag()
+        return True
+
+    def _discard_unsaved_changes(self) -> bool:
+        if self._file_path:
+            return self._open_vfxsystem(self._file_path)
+        self._system = VfxSystem()
+        self._emitter_index = 0
+        self._dirty = False
+        self._bind_selected_emitter()
         self._sync_project_dirty_flag()
         return True
 
@@ -183,6 +194,31 @@ class VfxGraphEditorPanel(EditorPanel):
     def _window_title_suffix(self) -> str:
         return " *" if self._dirty else ""
 
+    def _record_document_semantics(self, ctx: InxGUIContext) -> None:
+        if not bool(getattr(ctx, "semantic_capture_enabled", True)):
+            return
+        ctx.record_semantic_item(
+            "status",
+            self._system.name,
+            False,
+            "vfx.document.name",
+            string_value=self._system.name,
+        )
+        ctx.record_semantic_item(
+            "status",
+            "VFX Asset Path",
+            False,
+            "vfx.document.path",
+            string_value=self._file_path,
+        )
+        ctx.record_semantic_item(
+            "status",
+            "Unsaved Changes",
+            False,
+            "vfx.document.dirty",
+            bool_value=self._dirty,
+        )
+
     def _initial_size(self):
         return (960, 640)
 
@@ -226,6 +262,7 @@ class VfxGraphEditorPanel(EditorPanel):
             pass
 
     def on_render_content(self, ctx: InxGUIContext):
+        capture_semantics = bool(getattr(ctx, "semantic_capture_enabled", True))
         try:
             focused = ctx.is_window_focused(3)
         except Exception:
@@ -237,10 +274,14 @@ class VfxGraphEditorPanel(EditorPanel):
         ):
             self._do_save()
 
-        if ctx.button(t("vfx_editor.save")):
+        save_label = t("vfx_editor.save")
+        if ctx.button(save_label):
             self._do_save()
+        if capture_semantics:
+            ctx.record_semantic_item("button", save_label, True, "vfx.toolbar.save")
         ctx.same_line(0, 12)
         ctx.label(self._system.name)
+        self._record_document_semantics(ctx)
         ctx.separator()
 
         available_w = ctx.get_content_region_avail_width()
@@ -251,16 +292,28 @@ class VfxGraphEditorPanel(EditorPanel):
         if ctx.begin_child("##vfx_emitters", sidebar_w, available_h, True):
             ctx.label(t("vfx_editor.emitters"))
             for index, emitter in enumerate(self._system.emitters):
-                if ctx.selectable(f"{emitter.name}##vfx_emitter_{index}", index == self._emitter_index):
+                selected = index == self._emitter_index
+                if ctx.selectable(f"{emitter.name}##vfx_emitter_{index}", selected):
                     self._emitter_index = index
                     self._bind_selected_emitter()
-            if ctx.button(t("vfx_editor.add_emitter")):
+                if capture_semantics:
+                    ctx.record_semantic_item(
+                        "vfx_emitter",
+                        emitter.name,
+                        True,
+                        f"vfx.emitter.{index}",
+                        bool_value=selected,
+                    )
+            add_emitter_label = t("vfx_editor.add_emitter")
+            if ctx.button(add_emitter_label):
                 before = self._snapshot()
                 self._system.emitters.append(VfxEmitter(name=f"Emitter {len(self._system.emitters) + 1}"))
                 self._emitter_index = len(self._system.emitters) - 1
                 self._bind_selected_emitter()
                 self._mark_changed()
                 self._record("Add VFX emitter", before)
+            if capture_semantics:
+                ctx.record_semantic_item("button", add_emitter_label, True, "vfx.emitter.add")
         ctx.end_child()
 
         ctx.same_line()
@@ -288,30 +341,54 @@ class VfxGraphEditorPanel(EditorPanel):
             return
         ctx.label(spec.typedef.label)
         ctx.separator()
+        capture_semantics = bool(getattr(ctx, "semantic_capture_enabled", True))
         for key, default in spec.defaults.items():
             value = node.data.get(key, default)
-            ctx.label(key.replace("_", " ").title())
+            parameter_label = key.replace("_", " ").title()
+            semantic_base = f"vfx.graph.node.{node.uid}.parameter.{key}"
+            ctx.label(parameter_label)
             new_value = value
             if isinstance(default, bool):
                 new_value = bool(ctx.checkbox(f"##vfx_{node.uid}_{key}", bool(value)))
+                if capture_semantics:
+                    ctx.record_semantic_item(
+                        "checkbox", parameter_label, True, semantic_base, bool_value=new_value
+                    )
             elif isinstance(default, int):
                 new_value = int(ctx.drag_int(f"##vfx_{node.uid}_{key}", int(value), 1.0, 0, 1_000_000))
+                if capture_semantics:
+                    ctx.record_semantic_item(
+                        "drag_int", parameter_label, True, semantic_base, numeric_value=new_value
+                    )
             elif isinstance(default, float):
                 new_value = float(
                     ctx.drag_float(f"##vfx_{node.uid}_{key}", float(value), 0.05, -1.0e6, 1.0e6)
                 )
+                if capture_semantics:
+                    ctx.record_semantic_item(
+                        "drag_float", parameter_label, True, semantic_base, numeric_value=new_value
+                    )
             elif isinstance(default, list):
                 components = list(value)
                 for index in range(len(default)):
+                    axis = "XYZW"[index] if index < 4 else str(index)
                     components[index] = float(
                         ctx.drag_float(
-                            f"{('XYZW'[index] if index < 4 else index)}##vfx_{node.uid}_{key}_{index}",
+                            f"{axis}##vfx_{node.uid}_{key}_{index}",
                             float(components[index]),
                             0.02,
                             -1.0e6,
                             1.0e6,
                         )
                     )
+                    if capture_semantics:
+                        ctx.record_semantic_item(
+                            "drag_float",
+                            f"{parameter_label} {axis}",
+                            True,
+                            f"{semantic_base}.{axis.lower()}",
+                            numeric_value=components[index],
+                        )
                 new_value = components
             if new_value != value:
                 before = self._snapshot()

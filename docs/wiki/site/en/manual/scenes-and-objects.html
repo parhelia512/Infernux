@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scenes and Objects - Infernux Scripting API</title>
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="stylesheet" href="/css/style.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ======================================================
+           Infernux API Reference — Unity-Inspired Dark Theme
+           ====================================================== */
+
+        /* Layout */
+        .api-layout {
+            display: flex;
+            min-height: calc(100vh - var(--nav-height));
+            padding-top: var(--nav-height);
+        }
+
+        /* ---- Sidebar ---- */
+        .api-sidebar {
+            width: 280px;
+            background: #0b0b12;
+            border-right: 1px solid var(--border);
+            position: sticky;
+            top: var(--nav-height);
+            height: calc(100vh - var(--nav-height));
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        .api-sidebar::-webkit-scrollbar { width: 5px; }
+        .api-sidebar::-webkit-scrollbar-track { background: transparent; }
+        .api-sidebar::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+
+        .sidebar-hdr {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .sidebar-hdr h3 {
+            margin: 0;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+        }
+
+        /* Language toggle */
+        .lang-sw {
+            display: flex;
+            gap: 1px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .lang-sw a {
+            padding: 3px 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            background: var(--bg-elevated);
+            text-decoration: none;
+            transition: all 0.12s;
+        }
+        .lang-sw a.on {
+            background: var(--primary);
+            color: #fff;
+        }
+        .lang-sw a:hover:not(.on) {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+        }
+
+        /* Namespace tree */
+        .ns-tree { padding: 6px 0 20px; }
+
+        .ns-group { margin-bottom: 1px; }
+
+        .ns-hd {
+            display: flex;
+            align-items: center;
+            padding: 7px 16px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.1s;
+        }
+        .ns-hd:hover { background: rgba(255,255,255,0.025); }
+
+        .ns-arr {
+            width: 14px;
+            font-size: 0.5rem;
+            color: #555;
+            transition: transform 0.15s;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+        .ns-hd.open .ns-arr { transform: rotate(90deg); }
+
+        .ns-nm {
+            font-size: 0.84rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        .ns-hd.hi .ns-nm { color: var(--primary); }
+
+        .ns-ch {
+            display: none;
+            padding: 2px 0 4px;
+        }
+        .ns-hd.open + .ns-ch { display: block; }
+
+        .ns-ch a {
+            display: block;
+            padding: 3px 16px 3px 38px;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.1s, background 0.1s;
+            border-left: 2px solid transparent;
+        }
+        .ns-ch a:hover {
+            color: var(--text-primary);
+            background: rgba(255,255,255,0.02);
+        }
+        .ns-ch a.cur {
+            color: var(--text-primary);
+            background: rgba(255,107,53,0.07);
+            border-left-color: var(--primary);
+            font-weight: 600;
+        }
+
+        /* ---- Content ---- */
+        .api-main {
+            flex: 1;
+            padding: 36px 56px 80px;
+            max-width: 880px;
+            min-width: 0;
+        }
+
+        /* H1 — class name */
+        .api-main h1 {
+            font-size: 1.85rem;
+            font-weight: 700;
+            margin: 0 0 4px;
+            padding: 0;
+            border: none;
+            color: var(--text-primary);
+        }
+
+        /* "class in Package" subtitle */
+        .api-main .class-info {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            margin-bottom: 22px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--border);
+        }
+        .api-main .class-info b { color: var(--text-secondary); }
+        .api-main .class-info a { color: var(--primary); }
+
+        /* H2 — section headers */
+        .api-main h2 {
+            font-size: 0.92rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted);
+            margin: 30px 0 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .api-main h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin: 18px 0 6px;
+        }
+
+        /* Paragraphs */
+        .api-main p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.75;
+            margin-bottom: 12px;
+        }
+
+        .api-main blockquote {
+            margin: 12px 0;
+            padding: 10px 16px;
+            background: rgba(255,107,53,0.04);
+            border-left: 3px solid var(--primary);
+            border-radius: 0 4px 4px 0;
+        }
+        .api-main blockquote p { margin: 0; font-size: 0.85rem; }
+
+        /* Tables — Unity style: hidden header, 2-col */
+        .api-main table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 4px 0 18px;
+        }
+        .api-main thead { display: none; }
+
+        .api-main tbody tr {
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .api-main tbody tr:last-child { border-bottom: none; }
+
+        .api-main td {
+            padding: 7px 0;
+            font-size: 0.86rem;
+            vertical-align: top;
+        }
+        .api-main td:first-child {
+            width: 200px;
+            padding-right: 20px;
+            color: var(--primary);
+            font-size: 0.86rem;
+            font-weight: 500;
+        }
+        .api-main td:last-child { color: var(--text-secondary); }
+        .api-main td a { color: var(--primary); }
+        .api-main tbody tr:hover { background: rgba(255,255,255,0.012); }
+
+        /* Inline code — normal font, subtle highlight */
+        .api-main code {
+            font-family: inherit;
+            font-size: inherit;
+            background: rgba(255,255,255,0.06);
+            padding: 1px 5px;
+            border-radius: 3px;
+            color: var(--primary-light);
+        }
+
+        /* Code blocks */
+        .api-main pre {
+            background: #0d0d15;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px 20px;
+            overflow-x: auto;
+            margin: 10px 0 18px;
+        }
+        .api-main pre code {
+            font-family: var(--font-mono);
+            background: none;
+            padding: 0;
+            font-size: 0.83rem;
+            line-height: 1.65;
+            color: var(--text-secondary);
+        }
+
+        /* Lists */
+        .api-main ul, .api-main ol { padding-left: 18px; margin-bottom: 12px; }
+        .api-main li {
+            margin-bottom: 4px;
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+            line-height: 1.6;
+        }
+
+        .api-main hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 26px 0;
+        }
+
+        /* ---- Footer ---- */
+        .api-ft { margin-left: 280px; }
+        .api-ft .footer-bottom p { font-size: 0.8rem; }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 1024px) {
+            .api-sidebar { width: 240px; }
+            .api-main { padding: 28px 32px 60px; }
+            .api-ft { margin-left: 240px; }
+        }
+        @media (max-width: 768px) {
+            .api-layout { flex-direction: column; }
+            .api-sidebar {
+                width: 100%; position: relative; top: 0;
+                height: auto; max-height: 50vh;
+                border-right: none; border-bottom: 1px solid var(--border);
+            }
+            .api-main { padding: 20px; max-width: 100%; }
+            .api-ft { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links">
+                <a href="/index.html">Home</a>
+                <a href="/index.html#system">Features</a>
+                <a href="/index.html#capabilities">Showcase</a>
+                <a href="/roadmap.html">Roadmap</a>
+                <a href="/wiki.html" class="active">Docs</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank">
+                    <i class="fab fa-github"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell" style="padding-top: calc(var(--nav-height) + 60px); min-height: 80vh; padding-bottom: 80px;">
+        <div class="container" style="max-width: 860px; margin: 0 auto;">
+            <div class="api-main" style="padding: 0; max-width: none;">
+                <h1 id="scenes-and-objects">Scenes and Objects<a class="headerlink" href="#scenes-and-objects" title="Permanent link">&para;</a></h1>
+<p>Scenes, GameObjects, Transforms, and components form the ownership model for runtime content. Understanding which layer owns a value prevents fragile searches and cross-scene references.</p>
+<h2 id="ownership-model">Ownership model<a class="headerlink" href="#ownership-model" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Scene
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>└─ GameObject
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>   ├─ Transform
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>   │  └─ child GameObjects through Transform hierarchy
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>   ├─ built-in native Components
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>   └─ Python InxComponent instances
+</code></pre></div>
+<ul>
+<li>A <strong>Scene</strong> is a loadable collection of objects.</li>
+<li>A <strong>GameObject</strong> supplies identity, activation, tag, layer, and component ownership.</li>
+<li>A <strong>Transform</strong> supplies spatial state and parent/child hierarchy.</li>
+<li>A <strong>Component</strong> supplies behavior or data without becoming a second object identity.</li>
+</ul>
+<p>Do not treat a component as a free-standing scene object. Its lifetime and enabled state are constrained by its owning GameObject.</p>
+<h2 id="gameobject-identity-and-activation">GameObject identity and activation<a class="headerlink" href="#gameobject-identity-and-activation" title="Permanent link">&para;</a></h2>
+<p><code>GameObject.name</code> is useful to humans but is not guaranteed to be unique. Use tags for broad role queries only when the project's tag contract makes the role stable. Keep direct component references for repeated frame work instead of calling global find operations every frame.</p>
+<p>Activation has two related views:</p>
+<ul>
+<li><code>active_self</code>: the object's own requested state;</li>
+<li><code>active_in_hierarchy</code>: the effective state after parent activation is considered.</li>
+</ul>
+<p>A child may request active state while remaining inactive because an ancestor is inactive. When diagnosing a component that does not update, inspect the effective hierarchy state as well as the component's <code>enabled</code> property.</p>
+<h2 id="transform-hierarchy">Transform hierarchy<a class="headerlink" href="#transform-hierarchy" title="Permanent link">&para;</a></h2>
+<p>The Transform exposes world and local values:</p>
+<table>
+<thead>
+<tr>
+<th>Space</th>
+<th>Position</th>
+<th>Rotation</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>World</td>
+<td><code>position</code></td>
+<td><code>rotation</code> / <code>euler_angles</code></td>
+<td><code>lossy_scale</code></td>
+</tr>
+<tr>
+<td>Local</td>
+<td><code>local_position</code></td>
+<td><code>local_rotation</code> / <code>local_euler_angles</code></td>
+<td><code>local_scale</code></td>
+</tr>
+</tbody>
+</table>
+<p>Use <code>set_parent(parent, world_position_stays=True)</code> when reparenting. With the default, the engine preserves the object's world placement and recomputes local values. Use <code>False</code> when the local relationship is the value you intend to preserve.</p>
+<p>Prefer Transform traversal (<code>parent</code>, <code>get_child</code>, <code>find</code>) when the relationship is spatial. Prefer component references when the relationship is behavioral.</p>
+<h2 id="components">Components<a class="headerlink" href="#components" title="Permanent link">&para;</a></h2>
+<p>A GameObject can own built-in components and Python components. Common operations include:</p>
+<ul>
+<li><code>add_component(type)</code> and <code>remove_component(instance)</code>;</li>
+<li><code>get_component(type)</code> for one compatible component;</li>
+<li><code>get_components(type)</code> for all compatible components;</li>
+<li><code>get_component_in_children(type)</code> and <code>get_component_in_parent(type)</code> for hierarchy-aware lookup.</li>
+</ul>
+<p>Cache a required reference in <code>start()</code> when it remains valid for the component's lifetime:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux</span><span class="w"> </span><span class="kn">import</span> <span class="n">InxComponent</span><span class="p">,</span> <span class="n">Rigidbody</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">class</span><span class="w"> </span><span class="nc">Motor</span><span class="p">(</span><span class="n">InxComponent</span><span class="p">):</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">body</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">game_object</span><span class="o">.</span><span class="n">get_component</span><span class="p">(</span><span class="n">Rigidbody</span><span class="p">)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">fixed_update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">fixed_delta_time</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">body</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>            <span class="k">return</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>        <span class="c1"># Apply fixed-step motor logic here.</span>
+</code></pre></div>
+<p>When a component is mandatory, fail visibly during setup instead of silently searching the whole scene every frame.</p>
+<h2 id="loading-scenes">Loading scenes<a class="headerlink" href="#loading-scenes" title="Permanent link">&para;</a></h2>
+<p><code>SceneManager</code> accepts a build index or scene identifier through <code>load_scene(...)</code>. Build indexes come from the ordered scene list in Build Settings.</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux</span><span class="w"> </span><span class="kn">import</span> <span class="n">InxComponent</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux.scene</span><span class="w"> </span><span class="kn">import</span> <span class="n">SceneManager</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">class</span><span class="w"> </span><span class="nc">ExitPortal</span><span class="p">(</span><span class="n">InxComponent</span><span class="p">):</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">next_scene_index</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">travel</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">SceneManager</span><span class="o">.</span><span class="n">load_scene</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">next_scene_index</span><span class="p">):</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unable to queue scene </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">next_scene_index</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>The load request may be processed at an engine-safe point rather than replacing the active scene in the middle of a component callback. Do not continue mutating old-scene objects after requesting a transition.</p>
+<p>Use <code>dont_destroy_on_load(game_object)</code> only for deliberately persistent objects such as a session coordinator. Persistent objects must handle repeated scene entry without duplicating themselves.</p>
+<h2 id="practical-rules">Practical rules<a class="headerlink" href="#practical-rules" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Save scenes before adding them to Build Settings.</li>
+<li>Do not rely on GameObject names as unique persistent identifiers.</li>
+<li>Cache frequently used component references.</li>
+<li>Distinguish local and world Transform values before assigning them.</li>
+<li>Treat scene loads as ownership boundaries; old references may become invalid.</li>
+<li>Keep persistent cross-scene objects few and explicit.</li>
+</ol>
+<h2 id="related-reference">Related reference<a class="headerlink" href="#related-reference" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../api/GameObject.html">GameObject</a></li>
+<li><a href="../api/Transform.html">Transform</a></li>
+<li><a href="../api/Scene.html">Scene</a></li>
+<li><a href="../api/SceneManager.html">SceneManager</a></li>
+<li><a href="../api/InxComponent.html">InxComponent</a></li>
+<li><a href="../learn/build-and-share.html">Build and Share a Project</a></li>
+</ul>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <script src="/js/main.js?v=2"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.ns-hd').forEach(function(h) {
+            h.addEventListener('click', function() { this.classList.toggle('open'); });
+        });
+    });
+    </script>
+</body>
+</html>

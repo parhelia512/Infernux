@@ -2,8 +2,10 @@
 #include "platform/filesystem/DocumentStore.h"
 #include "platform/filesystem/InxPath.h"
 
+#include <array>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -46,6 +48,65 @@ AssetIndexEntry MakeEntry(size_t index)
 double Milliseconds(Clock::time_point start)
 {
     return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+}
+
+void TestResourceTypeMetadataRoundTrip()
+{
+    const std::array<std::pair<ResourceType, const char *>, 10> cases = {{
+        {ResourceType::Meta, "Meta"},
+        {ResourceType::Shader, "Shader"},
+        {ResourceType::Texture, "Texture"},
+        {ResourceType::Mesh, "Mesh"},
+        {ResourceType::Material, "Material"},
+        {ResourceType::Script, "Script"},
+        {ResourceType::Audio, "Audio"},
+        {ResourceType::DefaultText, "DefaultText"},
+        {ResourceType::DefaultBinary, "DefaultBinary"},
+        {ResourceType::PhysicMaterial, "PhysicMaterial"},
+    }};
+
+    for (const auto &[type, name] : cases) {
+        infernux::InxResourceMeta metadata;
+        metadata.AddMetadata("resource_type", type);
+        const auto document = metadata.SerializeDocument();
+        Require(document["metadata"]["resource_type"]["value"] == name,
+                "ResourceType metadata serialized to the wrong name");
+
+        infernux::InxResourceMeta restored;
+        restored.DeserializeDocument(document);
+        Require(restored.GetResourceType() == type, "ResourceType metadata failed strict round-trip");
+    }
+}
+
+void TestMetadataFilePathCanonicalization()
+{
+    const auto tempRoot = std::filesystem::temp_directory_path() / "infernux-meta-long-path-stability";
+    std::filesystem::create_directories(tempRoot);
+    const auto sourcePath = tempRoot / "Race.scene";
+    {
+        std::ofstream source(sourcePath, std::ios::binary | std::ios::trunc);
+        source << "{}\n";
+    }
+
+    std::filesystem::path aliasPath = sourcePath;
+#ifdef INX_PLATFORM_WINDOWS
+    const std::wstring native = sourcePath.native();
+    const DWORD required = GetShortPathNameW(native.c_str(), nullptr, 0);
+    Require(required > 0, "Windows failed to query a short path for metadata canonicalization");
+    std::wstring shortPath(static_cast<size_t>(required), L'\0');
+    const DWORD written = GetShortPathNameW(native.c_str(), shortPath.data(), required);
+    Require(written > 0 && written < required, "Windows failed to produce a short path for metadata canonicalization");
+    shortPath.resize(static_cast<size_t>(written));
+    aliasPath = std::filesystem::path(std::move(shortPath));
+#endif
+
+    infernux::InxResourceMeta metadata;
+    const std::string content = "{}\n";
+    metadata.Init(content.data(), content.size(), infernux::FromFsPath(aliasPath), ResourceType::DefaultText);
+    const auto canonical = std::filesystem::weakly_canonical(sourcePath).lexically_normal();
+    Require(metadata.GetDataAs<std::string>("file_path") == infernux::FromFsPath(canonical),
+            "Resource metadata retained a filesystem alias instead of the canonical long path");
+    std::filesystem::remove_all(tempRoot);
 }
 
 void TestScaleAndStrictRoundTrip()
@@ -113,6 +174,8 @@ void TestScaleAndStrictRoundTrip()
 int main()
 {
     try {
+        TestResourceTypeMetadataRoundTrip();
+        TestMetadataFilePathCanonicalization();
         TestScaleAndStrictRoundTrip();
         return 0;
     } catch (const std::exception &error) {

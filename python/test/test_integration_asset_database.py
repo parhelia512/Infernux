@@ -2,12 +2,87 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import shutil
 import time
 import threading
 
 import pytest
 
-from Infernux.lib import AssetDependencyGraph, AssetMutationErrorCode
+from Infernux.lib import AssetDependencyGraph, AssetMutationErrorCode, ResourceType
+
+
+def test_audio_import_repairs_legacy_default_text_metadata(engine, tmp_path: Path):
+    asset_db = engine.get_asset_database()
+    source = tmp_path / "legacy_audio.wav"
+    source.write_bytes(b"RIFF\x00\x00\x00\x00WAVE")
+    meta_path = Path(f"{source}.meta")
+    legacy_guid = "a" * 32
+    meta_path.write_text(
+        json.dumps({
+            "meta_version": 2,
+            "metadata": {
+                "guid": {"type": "string", "value": legacy_guid},
+                "resource_type": {
+                    "type": "enum infernux::ResourceType",
+                    "value": "DefaultText",
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    try:
+        result = asset_db.import_asset(str(source))
+
+        assert result
+        assert result.guid == legacy_guid
+        assert result.resource_type == ResourceType.Audio
+        assert asset_db.get_meta_by_path(str(source)).get_resource_type() == ResourceType.Audio
+        persisted = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert persisted["metadata"]["resource_type"]["value"] == "Audio"
+    finally:
+        if asset_db.contains_path(str(source)):
+            asset_db.delete_asset(str(source))
+
+
+def test_asset_database_never_indexes_python_bytecode_or_cache_paths(engine):
+    asset_db = engine.get_asset_database()
+    fixture = Path(asset_db.assets_root) / "python-bytecode-ignore-fixture"
+    cache = fixture / "__pycache__"
+    similarly_named = fixture / "my__pycache__data"
+    cache.mkdir(parents=True, exist_ok=True)
+    similarly_named.mkdir(parents=True, exist_ok=True)
+    cached_bytecode = cache / "Controller.cpython-312.pyc"
+    top_level_bytecode = fixture / "Legacy.PYC"
+    control = similarly_named / "control.txt"
+    cached_bytecode.write_bytes(b"not real bytecode")
+    top_level_bytecode.write_bytes(b"not real bytecode")
+    control.write_text("import me", encoding="utf-8")
+
+    try:
+        asset_db.refresh()
+
+        assert asset_db.contains_path(str(cached_bytecode)) is False
+        assert asset_db.contains_path(str(top_level_bytecode)) is False
+        assert asset_db.get_guid_from_path(str(cached_bytecode)) == ""
+        assert asset_db.get_guid_from_path(str(top_level_bytecode)) == ""
+        assert not Path(f"{cached_bytecode}.meta").exists()
+        assert not Path(f"{top_level_bytecode}.meta").exists()
+        assert cached_bytecode not in {Path(path) for path in asset_db.last_refresh_imported_paths}
+        assert top_level_bytecode not in {Path(path) for path in asset_db.last_refresh_imported_paths}
+
+        assert asset_db.contains_path(str(control)) is True
+        assert asset_db.get_guid_from_path(str(control))
+
+        explicit = asset_db.import_asset(str(top_level_bytecode))
+        assert not explicit
+        assert explicit.error_code == AssetMutationErrorCode.UNSUPPORTED_TYPE
+        assert not Path(f"{top_level_bytecode}.meta").exists()
+    finally:
+        if asset_db.contains_path(str(control)):
+            asset_db.delete_asset(str(control))
+        shutil.rmtree(fixture, ignore_errors=True)
+        asset_db.refresh()
 
 
 def test_dependency_graph_separates_asset_and_runtime_domains():

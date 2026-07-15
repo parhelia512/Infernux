@@ -19,7 +19,7 @@ from . import inspector_support as _inspector_support
 from .inspector_utils import (
     max_label_w, field_label, render_serialized_field, has_field_changed,
     render_compact_section_header, render_info_text, render_inspector_checkbox, pretty_field_name,
-    format_display_name,
+    format_display_name, inspector_component_semantic_id, semantic_capture_enabled,
     DRAG_SPEED_DEFAULT, MIN_LABEL_WIDTH,
 )
 from .theme import Theme, ImGuiCol, ImGuiStyleVar, ImGuiTreeNodeFlags
@@ -50,6 +50,56 @@ def _record_stack_field(stack: "RenderStack", target, field_name: str,
     mgr = _undo_manager()
     if mgr and not mgr.is_executing and mgr.enabled:
         mgr.record(RenderStackFieldCommand(stack, target, field_name, old_value, new_value, description))
+
+
+def _renderstack_semantic_id(stack: "RenderStack", suffix: str) -> str:
+    """Build a stable semantic ID for RenderStack-owned Inspector controls."""
+    return inspector_component_semantic_id(stack, f"renderstack.{suffix}")
+
+
+def _record_renderstack_field_semantic(
+    ctx: InxGUIContext,
+    stack: "RenderStack",
+    suffix: str,
+    display_name: str,
+    metadata,
+    value,
+) -> None:
+    """Describe the previously rendered serialized-field widget on capture frames."""
+    if not semantic_capture_enabled(ctx):
+        return
+
+    from Infernux.components.serialized_field import FieldType
+
+    semantic_id = _renderstack_semantic_id(stack, suffix)
+    if not semantic_id:
+        return
+
+    field_type = metadata.field_type
+    kind = {
+        FieldType.FLOAT: "float_slider" if getattr(metadata, "slider", False) else "drag_float",
+        FieldType.INT: "int_slider" if getattr(metadata, "slider", False) else "drag_int",
+        FieldType.BOOL: "checkbox",
+        FieldType.STRING: "text_area" if getattr(metadata, "multiline", False) else "text_input",
+        FieldType.VEC2: "vector",
+        FieldType.VEC3: "vector",
+        FieldType.VEC4: "vector",
+        FieldType.ENUM: "combo",
+        FieldType.COLOR: "color_edit",
+    }.get(field_type, "property")
+    enabled = not bool(getattr(metadata, "readonly", False))
+    bool_value = bool(value) if field_type == FieldType.BOOL else None
+    numeric_value = float(value) if field_type in (FieldType.FLOAT, FieldType.INT) else None
+    string_value = str(value) if field_type in (FieldType.STRING, FieldType.ENUM) else None
+    ctx.record_semantic_item(
+        kind,
+        display_name,
+        enabled,
+        semantic_id,
+        bool_value,
+        numeric_value,
+        string_value,
+    )
 
 
 def _snapshot_injection_orders(stack: "RenderStack", injection_point: str) -> Dict[str, int]:
@@ -340,6 +390,14 @@ def _render_pipeline_params(ctx: InxGUIContext, stack: "RenderStack") -> None:
         new_value = render_serialized_field(
             ctx, f"##pp_{field_name}", display_name, metadata, current_value, lw,
         )
+        _record_renderstack_field_semantic(
+            ctx,
+            stack,
+            f"pipeline.parameter.{field_name}",
+            display_name,
+            metadata,
+            new_value,
+        )
 
         if has_field_changed(metadata.field_type, current_value, new_value) and not metadata.readonly:
             setattr(pipeline, field_name, new_value)
@@ -473,6 +531,13 @@ def _render_injection_point_row(
         )
         if not has_addable_passes:
             ctx.end_disabled()
+        if semantic_capture_enabled(ctx):
+            ctx.record_semantic_item(
+                "button",
+                t("renderstack.add_pass"),
+                has_addable_passes,
+                _renderstack_semantic_id(stack, f"injection.{ip_name}.add"),
+            )
         ctx.set_cursor_pos_x(_btn_x)
         ctx.pop_style_var(1)
 
@@ -535,7 +600,18 @@ def _render_add_pass_popup(
             already = full_name in mounted_names
             if already:
                 ctx.begin_disabled(True)
-            if ctx.selectable(f"  {leaf}##add_{uid}_{full_name}"):
+            selected = ctx.selectable(f"  {leaf}##add_{uid}_{full_name}")
+            if semantic_capture_enabled(ctx):
+                ctx.record_semantic_item(
+                    "menu_item",
+                    leaf,
+                    not already,
+                    _renderstack_semantic_id(
+                        stack,
+                        f"injection.{ip_name}.candidate.{cls.__name__}",
+                    ),
+                )
+            if selected:
                 _add_pass(stack, cls)
                 ctx.close_current_popup()
             if already:
@@ -643,10 +719,22 @@ def _render_mounted_effect(
     rp = entry.render_pass
     effect_name = rp.name
     is_effect = isinstance(rp, FullScreenEffect)
+    display_name = format_display_name(effect_name)
 
     ctx.push_id_str(f"fx_{uid}_{effect_name}")
 
+    capture_semantics = semantic_capture_enabled(ctx)
+    semantic_base = f"pass.{type(rp).__name__}" if capture_semantics else ""
+
     new_enabled = render_inspector_checkbox(ctx, f"##en_{uid}_{effect_name}", entry.enabled)
+    if capture_semantics:
+        ctx.record_semantic_item(
+            "renderstack_pass_enabled",
+            f"{display_name} Enabled",
+            True,
+            _renderstack_semantic_id(stack, f"{semantic_base}.enabled"),
+            bool(new_enabled),
+        )
     if new_enabled != entry.enabled:
         from Infernux.engine.undo import RenderStackTogglePassCommand
 
@@ -658,13 +746,27 @@ def _render_mounted_effect(
 
     ctx.same_line(0, Theme.INSPECTOR_HEADER_ITEM_SPC[0])
     text_color = Theme.TEXT if entry.enabled else Theme.META_TEXT
-    display_name = format_display_name(effect_name)
     header_open = render_compact_section_header(
         ctx,
         f"{display_name}##hdr_{uid}",
         text_color=text_color,
         level="secondary",
     )
+    if capture_semantics:
+        ctx.record_semantic_item(
+            "renderstack_pass_header",
+            display_name,
+            True,
+            _renderstack_semantic_id(stack, f"{semantic_base}.header"),
+        )
+        ctx.record_semantic_item(
+            "status",
+            f"{display_name} Order",
+            False,
+            _renderstack_semantic_id(stack, f"{semantic_base}.order"),
+            None,
+            float(entry.order),
+        )
 
     # Drag source — start dragging this effect
     if ctx.begin_drag_drop_source(0):
@@ -674,7 +776,15 @@ def _render_mounted_effect(
 
     # Right-click context menu for removal
     if ctx.begin_popup_context_item(f"ctx_{uid}_{effect_name}"):
-        if ctx.selectable(f"{t('renderstack.remove')}##{uid}"):
+        remove_selected = ctx.selectable(f"{t('renderstack.remove')}##{uid}")
+        if capture_semantics:
+            ctx.record_semantic_item(
+                "menu_item",
+                t("renderstack.remove"),
+                True,
+                _renderstack_semantic_id(stack, f"{semantic_base}.remove"),
+            )
+        if remove_selected:
             from Infernux.engine.undo import RenderStackRemovePassCommand
 
             mgr = _undo_manager()
@@ -736,6 +846,14 @@ def _render_effect_params(
         # ── Unified field renderer ──
         new_value = render_serialized_field(
             ctx, wid, display_name, metadata, current_value, lw,
+        )
+        _record_renderstack_field_semantic(
+            ctx,
+            stack,
+            f"pass.{type(effect).__name__}.parameter.{field_name}",
+            display_name,
+            metadata,
+            new_value,
         )
 
         if has_field_changed(metadata.field_type, current_value, new_value) and not metadata.readonly:

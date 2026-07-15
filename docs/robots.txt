@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://infernux-engine.com/sitemap.xml
+Sitemap: https://infernux-engine.com/wiki/site/sitemap.xml

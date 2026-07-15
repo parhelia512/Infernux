@@ -1,6 +1,30 @@
-# Infernux Wiki
+# Infernux Documentation
 
-Welcome to the Infernux documentation wiki.
+Learn Infernux by completing a small task, look up a system in the manual, or jump directly to the generated Python API reference.
+
+中文入口：[快速开始](zh/learn/getting-started.md) · [第一个组件](zh/learn/first-component.md) · [2D](zh/learn/2d-foundations.md) · [3D](zh/learn/3d-foundations.md) · [动画](zh/learn/animation-workflow.md) · [音频](zh/learn/audio-workflow.md) · [构建并分享](zh/learn/build-and-share.md) · [引擎地图](zh/manual/engine-map.md)
+
+## Start here
+
+| If you want to… | Go to |
+|---|---|
+| Install the preview and understand the editor | [Getting Started](en/learn/getting-started.md) |
+| Write and attach gameplay logic | [Your First Component](en/learn/first-component.md) |
+| Build an orthographic sprite scene | [2D Foundations](en/learn/2d-foundations.md) |
+| Build a minimal lit mesh scene | [3D Foundations](en/learn/3d-foundations.md) |
+| Create clips and Animator transitions | [Animation Workflow](en/learn/animation-workflow.md) |
+| Configure persistent and one-shot sound | [Audio Workflow](en/learn/audio-workflow.md) |
+| Build and validate a standalone player | [Build and Share a Project](en/learn/build-and-share.md) |
+| Find the right engine system | [Engine Map](en/manual/engine-map.md) |
+| Understand scene and object ownership | [Scenes and Objects](en/manual/scenes-and-objects.md) |
+| Handle input and frame-independent motion | [Input and Time](en/manual/input-and-time.md) |
+| Configure collisions, forces, and queries | [Physics](en/manual/physics.md) |
+| Build responsive game interfaces | [Screen-space UI](en/manual/ui.md) |
+| Import, reference, and move content safely | [Assets and `.meta` Files](en/manual/assets-and-meta.md) |
+| Select pipelines and order render effects | [Rendering and RenderStack](en/manual/rendering-and-renderstack.md) |
+| Check API release compatibility | [API Versioning and Compatibility](en/manual/api-versioning.md) |
+| Diagnose errors and report evidence | [Debugging and the Console](en/manual/debugging.md) |
+| Look up an exact class or method | [API Reference](en/api/index.md) |
 
 ## Quick Links
 
@@ -23,7 +47,7 @@ Project context and the current performance story live here:
 
 中文内容：[为什么会有 Infernux](zh/architecture/about.md) · [JIT 加速脚本](zh/architecture/jit.md) · [技术报告](https://arxiv.org/pdf/2604.10263)
 
-## Getting Started
+## A minimal component
 
 Infernux is an open-source game engine with a C++17 / Vulkan runtime and a Python production layer. Use Python for gameplay, tools, and iteration-heavy workflows while the engine handles rendering, physics, audio, and runtime ownership.
 
@@ -38,9 +62,11 @@ class HelloWorld(InxComponent):
     def start(self):
         Debug.log("Hello, Infernux!")
     
-    def update(self):
-        self.transform.rotate(vector3(0, self.speed * Time.delta_time, 0))
+    def update(self, delta_time: float):
+        self.transform.rotate(Vector3(0, self.speed * delta_time, 0))
 ```
+
+See [Your First Component](en/learn/first-component.md) for where this file belongs, how to attach it, and how to verify the result.
 
 ## Modules
 

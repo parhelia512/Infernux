@@ -7,13 +7,15 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import uuid
 
-from PySide6.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout, QGraphicsDropShadowEffect, QProgressBar, QMessageBox
-from PySide6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QPixmap, QFont, QPainter, QColor, QPen, QBrush
+from PySide6.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout, QProgressBar, QMessageBox
+from PySide6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve, QUrl
+from PySide6.QtGui import QPixmap, QFont, QPainter, QColor, QPen, QBrush, QDesktopServices
 
 from hub_utils import get_project_lock_path, merge_child_env_utf8, remove_project_lock, write_project_lock
+from i18n import tr
 
 
 _WIN_CRASH_CODES = {
@@ -85,6 +87,7 @@ class EngineSplashScreen(QWidget):
     _SPLASH_SIZE = 420
     _FADE_IN_MS = 150
     _FADE_OUT_MS = 200
+    _STARTUP_TIMEOUT_SECONDS = 90
 
     def __init__(self, icon_path: str, project_name: str, parent=None):
         super().__init__(parent)
@@ -102,6 +105,9 @@ class EngineSplashScreen(QWidget):
         self._lock_token: str = ""
         self._angle = 0  # spinner angle
         self._closing = False
+        self._terminal_handled = False
+        self._launch_started_at = 0.0
+        self._launch_args = None
 
         # Center on screen
         screen = QApplication.primaryScreen()
@@ -145,7 +151,7 @@ class EngineSplashScreen(QWidget):
         layout.addSpacing(20)
 
         # Status label
-        self._status = QLabel("Initializing engine…", self)
+        self._status = QLabel(tr("Initializing engine..."), self)
         self._status.setAlignment(Qt.AlignCenter)
         self._status.setFont(QFont("Segoe UI", 10))
         self._status.setStyleSheet("color: #666666; background: transparent;")
@@ -158,7 +164,7 @@ class EngineSplashScreen(QWidget):
         self._progress_bar.setFixedHeight(4)
         self._progress_bar.setStyleSheet(
             "QProgressBar { background: #333333; border: none; border-radius: 2px; }"
-            "QProgressBar::chunk { background: #e0e0e0; border-radius: 2px; }"
+            "QProgressBar::chunk { background: #6d7cff; border-radius: 2px; }"
         )
         layout.addWidget(self._progress_bar)
         # Spinner animation timer
@@ -189,11 +195,11 @@ class EngineSplashScreen(QWidget):
 
         # Dark rounded-rect background
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(QColor(25, 25, 25, 245)))
+        p.setBrush(QBrush(QColor(13, 15, 20, 248)))
         p.drawRoundedRect(self.rect(), 18, 18)
 
         # Subtle border
-        p.setPen(QPen(QColor(60, 60, 60, 180), 1))
+        p.setPen(QPen(QColor(58, 67, 91, 210), 1))
         p.setBrush(Qt.NoBrush)
         p.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 18, 18)
 
@@ -201,7 +207,7 @@ class EngineSplashScreen(QWidget):
         spinner_size = 28
         sx = (self.width() - spinner_size) // 2
         sy = self.height() - 52
-        pen = QPen(QColor(180, 180, 180), 3)
+        pen = QPen(QColor(104, 119, 255), 3)
         pen.setCapStyle(Qt.RoundCap)
         p.setPen(pen)
         p.drawArc(sx, sy, spinner_size, spinner_size, self._angle * 16, 270 * 16)
@@ -233,18 +239,21 @@ class EngineSplashScreen(QWidget):
 
     def launch(self, python_exe: str, script: str, project_path: str,
                *, detached: bool = True, extra_env: dict[str, str] | None = None):
-        """Start the engine process and poll a ready-file for progress.
-
-        Args:
-            detached: If *True* (packaged mode), the engine runs as a fully
-                detached process with no console.  If *False* (dev mode),
-                stdout/stderr are inherited so logs remain visible.
-        """
+        """Start the engine without blocking the UI and monitor readiness."""
+        self._launch_args = (python_exe, script, project_path, detached, extra_env)
+        self._terminal_handled = False
+        self._closing = False
+        self._poll_timer.stop()
+        self._cleanup_ready_file()
         self._ready_file = os.path.join(
             tempfile.gettempdir(), f"infernux_ready_{uuid.uuid4().hex}.flag"
         )
         self._project_path = project_path
         self._lock_token = uuid.uuid4().hex
+        self._process = None
+        self._stderr_chunks = []
+        self._status.setText(tr("Checking project..."))
+        self._progress_bar.setValue(5)
         env = os.environ.copy()
         env["_INFERNUX_READY_FILE"] = self._ready_file
         env["_INFERNUX_PROJECT_LOCK_PATH"] = get_project_lock_path(project_path)
@@ -252,7 +261,6 @@ class EngineSplashScreen(QWidget):
         if extra_env:
             env.update(extra_env)
         env = merge_child_env_utf8(env)
-        write_project_lock(project_path, os.getpid(), self._lock_token, "editor", "launching")
 
         popen_kwargs: dict = {"cwd": project_path, "env": env}
 
@@ -282,27 +290,42 @@ class EngineSplashScreen(QWidget):
             if sys.platform == "win32":
                 popen_kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
 
+        self._status.setText(tr("Starting engine process..."))
+        self._progress_bar.setValue(10)
         try:
             with _suppress_windows_error_dialogs():
                 self._process = subprocess.Popen(
                     [python_exe, "-u", "-c", script, project_path],
                     **popen_kwargs,
                 )
-        except OSError:
+        except OSError as exc:
             remove_project_lock(project_path, self._lock_token)
-            self._status.setText("Launch failed")
-            QTimer.singleShot(250, self._fade_out_and_close)
+            self._status.setText(tr("Launch failed"))
+            QTimer.singleShot(
+                0,
+                lambda: self._show_failure(
+                    tr("Engine Launch Failed"),
+                    f"The engine process could not be started.\n\n{exc}",
+                ),
+            )
             return
+
+        # The lock must refer to the engine process, not the still-running Hub.
+        write_project_lock(
+            project_path, self._process.pid, self._lock_token, "editor", "launching",
+        )
 
         # Drain stderr in a background thread so the pipe buffer never
         # fills up (which would block the engine's sys.stderr.write).
-        self._stderr_chunks: list[bytes] = []
         self._stderr_thread = threading.Thread(
             target=self._drain_stderr, daemon=True
         )
         self._stderr_thread.start()
 
-        self._poll_timer.start(100)
+        self._launch_started_at = time.monotonic()
+        self._status.setText(tr("Waiting for the editor..."))
+        self._progress_bar.setValue(15)
+        self._poll_timer.start(150)
 
     def _drain_stderr(self):
         """Read stderr until EOF so the pipe buffer never stalls the engine."""
@@ -326,6 +349,8 @@ class EngineSplashScreen(QWidget):
                 pass
 
     def _poll_launch_state(self):
+        if self._terminal_handled:
+            return
         if self._ready_file and os.path.isfile(self._ready_file):
             try:
                 with open(self._ready_file, "r", encoding="utf-8") as f:
@@ -339,9 +364,16 @@ class EngineSplashScreen(QWidget):
                 return
 
             if content.startswith("ENGINE_LOADED"):
-                self._status.setText("Ready")
+                self._status.setText(tr("Ready"))
                 self._progress_bar.setValue(100)
                 self._fade_out_and_close()
+                return
+
+            if content.startswith("ERROR:"):
+                self._show_failure(
+                    tr("Engine Launch Failed"),
+                    content.partition(":")[2].strip() or "The editor reported a startup error.",
+                )
                 return
 
             if content.startswith("LOADING:"):
@@ -355,36 +387,118 @@ class EngineSplashScreen(QWidget):
                 except (ValueError, ZeroDivisionError) as _exc:
                     logging.getLogger(__name__).debug("[Suppressed] %s: %s", type(_exc).__name__, _exc)
                     pass
-            return
 
         if self._process is not None and self._process.poll() is not None:
-            # Engine exited before signalling readiness — show the error.
-            # Collect stderr from the drain thread's buffer.
-            if hasattr(self, '_stderr_thread'):
-                self._stderr_thread.join(timeout=2.0)
             stderr_text = b"".join(
                 getattr(self, '_stderr_chunks', [])
             ).decode("utf-8", errors="replace").strip()
-
-            self._status.setText("Launch failed")
-            self._fade_out_and_close()
-
             if stderr_text:
-                QMessageBox.critical(
-                    None,
-                    "Engine Launch Failed",
-                    f"The engine process exited with an error:\n\n"
-                    f"{stderr_text[:2000]}",
+                detail = (
+                    "The engine process exited with an error:\n\n"
+                    f"{stderr_text[:4000]}"
                 )
             else:
-                QMessageBox.critical(
-                    None,
-                    "Engine Launch Failed",
-                    f"The engine process exited unexpectedly "
+                detail = (
+                    "The engine process exited unexpectedly "
                     f"before the editor finished loading.\n\n"
                     f"{_format_exit_code(self._process.returncode)}\n\n"
-                    "Check the project's Logs/ folder for details.",
+                    "Check the project's Logs/ folder for details."
                 )
+            self._show_failure(tr("Engine Launch Failed"), detail)
+            return
+
+        elapsed = time.monotonic() - self._launch_started_at
+        if elapsed >= self._STARTUP_TIMEOUT_SECONDS:
+            self._show_timeout()
+
+    def _show_timeout(self):
+        if self._terminal_handled:
+            return
+        self._terminal_handled = True
+        self._poll_timer.stop()
+        box = QMessageBox(QMessageBox.Warning, tr("Engine Launch Timed Out"),
+                          tr("The editor did not become ready within {seconds} seconds.",
+                             seconds=self._STARTUP_TIMEOUT_SECONDS))
+        retry = box.addButton(tr("Retry"), QMessageBox.AcceptRole)
+        keep_waiting = box.addButton(tr("Keep Waiting"), QMessageBox.ActionRole)
+        open_logs = box.addButton(tr("Open Logs"), QMessageBox.ActionRole)
+        stop = box.addButton(tr("Stop"), QMessageBox.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is retry:
+            self._retry_launch()
+        elif clicked is stop:
+            self._stop_process()
+            self._fade_out_and_close()
+        else:
+            if clicked is open_logs:
+                self._open_logs()
+            self._terminal_handled = False
+            self._launch_started_at = time.monotonic()
+            self._poll_timer.start(150)
+
+    def _show_failure(self, title: str, detail: str):
+        if self._terminal_handled:
+            return
+        self._terminal_handled = True
+        self._poll_timer.stop()
+        self._status.setText(tr("Launch failed"))
+        remove_project_lock(self._project_path, self._lock_token or None)
+        box = QMessageBox(QMessageBox.Critical, title, detail)
+        retry = box.addButton(tr("Retry"), QMessageBox.AcceptRole)
+        open_logs = box.addButton(tr("Open Logs"), QMessageBox.ActionRole)
+        close = box.addButton(tr("Stop"), QMessageBox.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is retry:
+            self._retry_launch()
+            return
+        if clicked is open_logs:
+            self._open_logs()
+        elif clicked is close:
+            pass
+        self._fade_out_and_close()
+
+    def _retry_launch(self):
+        args = self._launch_args
+        self._stop_process()
+        if args is None:
+            self._fade_out_and_close()
+            return
+        python_exe, script, project_path, detached, extra_env = args
+        self.launch(
+            python_exe,
+            script,
+            project_path,
+            detached=detached,
+            extra_env=extra_env,
+        )
+
+    def _stop_process(self):
+        process = self._process
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+        if self._project_path:
+            remove_project_lock(self._project_path, self._lock_token or None)
+
+    def _open_logs(self):
+        if not self._project_path:
+            return
+        logs_dir = os.path.join(self._project_path, "Logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(logs_dir))
+
+    def _cleanup_ready_file(self):
+        if not self._ready_file:
+            return
+        try:
+            os.remove(self._ready_file)
+        except OSError:
+            pass
+        self._ready_file = ""
 
     def close(self):
         self._fade_out_and_close()
@@ -392,13 +506,7 @@ class EngineSplashScreen(QWidget):
     def _finish_close(self):
         if self._process is not None and self._process.poll() is not None and self._project_path:
             remove_project_lock(self._project_path, self._lock_token or None)
-        if self._ready_file:
-            try:
-                os.remove(self._ready_file)
-            except OSError as _exc:
-                logging.getLogger(__name__).debug("[Suppressed] %s: %s", type(_exc).__name__, _exc)
-                pass
-            self._ready_file = ""
+        self._cleanup_ready_file()
         self.hide()
         super().close()
         self.deleteLater()

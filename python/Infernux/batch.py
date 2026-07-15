@@ -37,7 +37,8 @@ if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
 
-# Lazy numpy import — numpy may not be available in non-JIT packaged builds.
+# NumPy is a required engine runtime dependency. Import it on first batch API
+# use so importing this module itself stays lightweight.
 _np = None
 
 

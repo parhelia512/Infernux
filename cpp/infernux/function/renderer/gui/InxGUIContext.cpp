@@ -1,4 +1,5 @@
 #include "InxGUIContext.h"
+#include "InxGUISemantics.h"
 #include "InxTextLayout.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -29,6 +30,65 @@ float ResolveFontSize(float fontSize)
 {
     return textlayout::ResolveFontSize(fontSize);
 }
+
+ImGuiPopupFlags ContextPopupFlagsForMouseButton(int mouseButton)
+{
+    switch (mouseButton) {
+    case 0:
+        return ImGuiPopupFlags_MouseButtonLeft;
+    case 1:
+        return ImGuiPopupFlags_MouseButtonRight;
+    case 2:
+        return ImGuiPopupFlags_MouseButtonMiddle;
+    default:
+        return ImGuiPopupFlags_MouseButtonRight;
+    }
+}
+
+std::string WindowSemanticId(const std::string &name)
+{
+    const size_t separator = name.rfind("###");
+    if (separator == std::string::npos || separator + 3 >= name.size())
+        return name;
+    return name.substr(separator + 3);
+}
+
+void ConstrainNextFloatingWindowToMainViewport(const std::string &name, int flags)
+{
+    ImGuiViewport *viewport = ImGui::GetMainViewport();
+    if (!viewport || (flags & ImGuiWindowFlags_ChildWindow) != 0)
+        return;
+
+    ImGuiWindow *window = ImGui::FindWindowByName(name.c_str());
+    if (!window)
+        return;
+
+#ifdef IMGUI_HAS_DOCK
+    if (window->DockNode != nullptr)
+        return;
+#endif
+
+    const ImVec2 workMin = viewport->WorkPos;
+    const ImVec2 workSize = viewport->WorkSize;
+    if (workSize.x <= 0.0f || workSize.y <= 0.0f)
+        return;
+
+    ImVec2 size = window->SizeFull;
+    const ImVec2 constrainedSize(std::min(size.x, workSize.x), std::min(size.y, workSize.y));
+    const bool sizeChanged = std::abs(constrainedSize.x - size.x) > 0.5f || std::abs(constrainedSize.y - size.y) > 0.5f;
+    if (sizeChanged)
+        size = constrainedSize;
+
+    const ImVec2 maxPos(workMin.x + workSize.x - size.x, workMin.y + workSize.y - size.y);
+    const ImVec2 constrainedPos(std::clamp(window->Pos.x, workMin.x, maxPos.x),
+                                std::clamp(window->Pos.y, workMin.y, maxPos.y));
+    const bool positionChanged =
+        std::abs(constrainedPos.x - window->Pos.x) > 0.5f || std::abs(constrainedPos.y - window->Pos.y) > 0.5f;
+    if (sizeChanged)
+        ImGui::SetNextWindowSize(constrainedSize, ImGuiCond_Always);
+    if (positionChanged || sizeChanged)
+        ImGui::SetNextWindowPos(constrainedPos, ImGuiCond_Always);
+}
 } // namespace
 
 /* basic text & labels */
@@ -47,6 +107,8 @@ void InxGUIContext::TextWrapped(const std::string &text)
 bool InxGUIContext::Button(const std::string &label, std::function<void()> onClick, float width, float height)
 {
     bool clicked = ImGui::Button(label.c_str(), ImVec2(width, height));
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("button", label);
     if (clicked && onClick)
         onClick();
     return clicked;
@@ -54,28 +116,40 @@ bool InxGUIContext::Button(const std::string &label, std::function<void()> onCli
 
 bool InxGUIContext::RadioButton(const std::string &label, bool active)
 {
-    return ImGui::RadioButton(label.c_str(), active);
+    const bool clicked = ImGui::RadioButton(label.c_str(), active);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("radio_button", label);
+    return clicked;
 }
 
 bool InxGUIContext::Selectable(const std::string &label, bool selected, int flags, float width, float height)
 {
-    return ImGui::Selectable(label.c_str(), selected, flags, ImVec2(width, height));
+    const bool clicked = ImGui::Selectable(label.c_str(), selected, flags, ImVec2(width, height));
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("selectable", label);
+    return clicked;
 }
 
 /* value editors */
 void InxGUIContext::Checkbox(const std::string &label, bool *value)
 {
     ImGui::Checkbox(label.c_str(), value);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("checkbox", label, true, "", *value);
 }
 
 void InxGUIContext::IntSlider(const std::string &label, int *value, int min, int max)
 {
     ImGui::SliderInt(label.c_str(), value, min, max);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("int_slider", label, true, "", std::nullopt, static_cast<double>(*value));
 }
 
 void InxGUIContext::FloatSlider(const std::string &label, float *value, float min, float max)
 {
     ImGui::SliderFloat(label.c_str(), value, min, max);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("float_slider", label, true, "", std::nullopt, static_cast<double>(*value));
 }
 
 bool InxGUIContext::DragFloat(const std::string &label, float *value, float speed, float min, float max,
@@ -83,6 +157,8 @@ bool InxGUIContext::DragFloat(const std::string &label, float *value, float spee
 {
     CompensateWarp();
     bool changed = ImGui::DragFloat(label.c_str(), value, speed, min, max, fmt, power);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("drag_float", label, true, "", std::nullopt, static_cast<double>(*value));
     HandleDragCapture();
     return changed;
 }
@@ -91,6 +167,8 @@ bool InxGUIContext::DragInt(const std::string &label, int *value, float speed, i
 {
     CompensateWarp();
     bool changed = ImGui::DragInt(label.c_str(), value, speed, min, max, fmt);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("drag_int", label, true, "", std::nullopt, static_cast<double>(*value));
     HandleDragCapture();
     return changed;
 }
@@ -98,40 +176,61 @@ bool InxGUIContext::DragInt(const std::string &label, int *value, float speed, i
 void InxGUIContext::TextInput(const std::string &label, char *buffer, size_t bufferSize)
 {
     ImGui::InputText(label.c_str(), buffer, bufferSize);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("text_input", label, true, "", std::nullopt, std::nullopt, std::string(buffer));
 }
 
 void InxGUIContext::TextArea(const std::string &label, char *buffer, size_t bufferSize)
 {
     ImGui::InputTextMultiline(label.c_str(), buffer, bufferSize, ImVec2(-FLT_MIN, 100));
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("text_area", label, true, "", std::nullopt, std::nullopt, std::string(buffer));
 }
 
 bool InxGUIContext::InputTextWithHint(const std::string &label, const std::string &hint, char *buffer,
                                       size_t bufferSize, int flags)
 {
-    return ImGui::InputTextWithHint(label.c_str(), hint.c_str(), buffer, bufferSize, flags);
+    const bool changed = ImGui::InputTextWithHint(label.c_str(), hint.c_str(), buffer, bufferSize, flags);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("text_input", label.empty() || label.rfind("##", 0) == 0 ? hint : label, true, label,
+                           std::nullopt, std::nullopt, std::string(buffer));
+    return changed;
 }
 
 bool InxGUIContext::InputInt(const std::string &label, int *value, int step, int stepFast, int flags)
 {
-    return ImGui::InputInt(label.c_str(), value, step, stepFast, flags);
+    const bool changed = ImGui::InputInt(label.c_str(), value, step, stepFast, flags);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("int_input", label, true, "", std::nullopt, static_cast<double>(*value));
+    return changed;
 }
 
 bool InxGUIContext::InputFloat(const std::string &label, float *value, float step, float stepFast, int flags)
 {
-    return ImGui::InputFloat(label.c_str(), value, step, stepFast, "%.3f", static_cast<ImGuiInputTextFlags>(flags));
+    const bool changed =
+        ImGui::InputFloat(label.c_str(), value, step, stepFast, "%.3f", static_cast<ImGuiInputTextFlags>(flags));
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("float_input", label, true, "", std::nullopt, static_cast<double>(*value));
+    return changed;
 }
 void InxGUIContext::ColorEdit(const std::string &label, float color[4])
 {
     ImGui::ColorEdit4(label.c_str(), color);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("color_edit", label);
 }
 
 bool InxGUIContext::ColorPicker(const std::string &label, float color[4], int flags)
 {
-    return ImGui::ColorPicker4(label.c_str(), color, static_cast<ImGuiColorEditFlags>(flags));
+    const bool changed = ImGui::ColorPicker4(label.c_str(), color, static_cast<ImGuiColorEditFlags>(flags));
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("color_picker", label);
+    return changed;
 }
 
-// Unity-style helper: label on the left, DragFloatN on the right
-static void LabeledDragFloatN(const char *label, float *value, int components, float speed, float labelWidth = 0.0f)
+// Unity-style helper: label on the left, DragFloatN on the right.
+static void LabeledDragFloatN(InxGUIContext &ctx, const char *label, float *value, int components, float speed,
+                              float labelWidth = 0.0f, const std::string &axisSemanticBase = "")
 {
     if (labelWidth <= 0.0f)
         labelWidth = ImGui::CalcTextSize(label).x + 20.0f;
@@ -141,40 +240,68 @@ static void LabeledDragFloatN(const char *label, float *value, int components, f
     float avail = ImGui::GetContentRegionAvail().x;
     ImGui::SetNextItemWidth(avail);
     std::string hiddenLabel = std::string("##") + label;
-    switch (components) {
-    case 2:
-        ImGui::DragFloat2(hiddenLabel.c_str(), value, speed);
-        break;
-    case 3:
-        ImGui::DragFloat3(hiddenLabel.c_str(), value, speed);
-        break;
-    case 4:
-        ImGui::DragFloat4(hiddenLabel.c_str(), value, speed);
-        break;
-    default:
-        ImGui::DragFloat(hiddenLabel.c_str(), value, speed);
-        break;
+
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
+    if (captureSemantics && components >= 2 && components <= 4 && !axisSemanticBase.empty()) {
+        // Match ImGui::DragFloatN's layout so each actual field has a stable,
+        // focusable semantic target instead of exposing only the aggregate row.
+        static constexpr const char *kAxisNames[] = {"x", "y", "z", "w"};
+        static constexpr const char *kAxisLabels[] = {"X", "Y", "Z", "W"};
+        ImGui::BeginGroup();
+        ImGui::PushID(hiddenLabel.c_str());
+        ImGui::PushMultiItemsWidths(components, ImGui::CalcItemWidth());
+        for (int axis = 0; axis < components; ++axis) {
+            ImGui::PushID(axis);
+            if (axis > 0)
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+            ImGui::DragFloat("", &value[axis], speed);
+            ctx.RecordSemanticItem("vector_axis", kAxisLabels[axis], true, axisSemanticBase + "." + kAxisNames[axis],
+                                   std::nullopt, static_cast<double>(value[axis]));
+            ImGui::PopID();
+            ImGui::PopItemWidth();
+        }
+        ImGui::PopID();
+        ImGui::EndGroup();
+    } else {
+        switch (components) {
+        case 2:
+            ImGui::DragFloat2(hiddenLabel.c_str(), value, speed);
+            break;
+        case 3:
+            ImGui::DragFloat3(hiddenLabel.c_str(), value, speed);
+            break;
+        case 4:
+            ImGui::DragFloat4(hiddenLabel.c_str(), value, speed);
+            break;
+        default:
+            ImGui::DragFloat(hiddenLabel.c_str(), value, speed);
+            break;
+        }
     }
+    if (captureSemantics)
+        ctx.RecordSemanticItem("vector", label);
 }
 
-void InxGUIContext::Vector2Control(const std::string &label, float value[2], float speed, float labelWidth)
+void InxGUIContext::Vector2Control(const std::string &label, float value[2], float speed, float labelWidth,
+                                   const std::string &axisSemanticBase)
 {
     CompensateWarp();
-    LabeledDragFloatN(label.c_str(), value, 2, speed, labelWidth);
+    LabeledDragFloatN(*this, label.c_str(), value, 2, speed, labelWidth, axisSemanticBase);
     HandleDragCapture();
 }
 
-void InxGUIContext::Vector3Control(const std::string &label, float value[3], float speed, float labelWidth)
+void InxGUIContext::Vector3Control(const std::string &label, float value[3], float speed, float labelWidth,
+                                   const std::string &axisSemanticBase)
 {
     CompensateWarp();
-    LabeledDragFloatN(label.c_str(), value, 3, speed, labelWidth);
+    LabeledDragFloatN(*this, label.c_str(), value, 3, speed, labelWidth, axisSemanticBase);
     HandleDragCapture();
 }
 
 void InxGUIContext::Vector4Control(const std::string &label, float value[4], float speed, float labelWidth)
 {
     CompensateWarp();
-    LabeledDragFloatN(label.c_str(), value, 4, speed, labelWidth);
+    LabeledDragFloatN(*this, label.c_str(), value, 4, speed, labelWidth);
     HandleDragCapture();
 }
 
@@ -182,12 +309,56 @@ void InxGUIContext::Vector4Control(const std::string &label, float value[4], flo
 bool InxGUIContext::Combo(const std::string &label, int *currentItem, const std::vector<std::string> &items,
                           int popupMaxHeightInItems)
 {
-    std::vector<const char *> cstrs;
-    cstrs.reserve(items.size());
-    for (const auto &s : items)
-        cstrs.push_back(s.c_str());
-    return ImGui::Combo(label.c_str(), currentItem, cstrs.data(), static_cast<int>(cstrs.size()),
-                        popupMaxHeightInItems);
+    if (currentItem == nullptr)
+        return false;
+
+    ImGuiContext &context = *ImGui::GetCurrentContext();
+    if (popupMaxHeightInItems >= 0 &&
+        (context.NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasSizeConstraint) == 0) {
+        const float popupMaxHeight =
+            (context.FontSize + context.Style.ItemSpacing.y) * static_cast<float>(popupMaxHeightInItems) -
+            context.Style.ItemSpacing.y + context.Style.WindowPadding.y * 2.0f;
+        ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, std::max(0.0f, popupMaxHeight)));
+    }
+
+    const bool hasSelection = *currentItem >= 0 && *currentItem < static_cast<int>(items.size());
+    const std::string preview = hasSelection ? items[*currentItem] : std::string{};
+    const bool open = ImGui::BeginCombo(label.c_str(), preview.c_str());
+    const ImGuiLastItemData triggerItem = context.LastItemData;
+
+    const size_t hiddenMarker = label.find("##");
+    const std::string semanticBase =
+        hiddenMarker != std::string::npos && hiddenMarker + 2 < label.size() ? label.substr(hiddenMarker + 2) : label;
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
+    if (captureSemantics)
+        RecordSemanticItem("combo", preview.empty() ? label : preview, true, semanticBase, std::nullopt, std::nullopt,
+                           preview);
+    if (!open)
+        return false;
+
+    if (captureSemantics)
+        RecordSemanticWindow("combo_popup", preview.empty() ? label : preview, semanticBase);
+    bool changed = false;
+    for (int index = 0; index < static_cast<int>(items.size()); ++index) {
+        ImGui::PushID(index);
+        const bool selected = index == *currentItem;
+        if (ImGui::Selectable(items[index].c_str(), selected)) {
+            *currentItem = index;
+            changed = true;
+        }
+        if (captureSemantics)
+            RecordSemanticItem("combo_option", items[index], true, semanticBase + ":option:" + std::to_string(index));
+        if (selected)
+            ImGui::SetItemDefaultFocus();
+        ImGui::PopID();
+    }
+    ImGui::EndCombo();
+
+    // Python panels commonly add a domain-specific semantic alias immediately
+    // after combo() returns. Keep that alias attached to the trigger, rather
+    // than to the final selectable rendered inside the popup.
+    context.LastItemData = triggerItem;
+    return changed;
 }
 
 bool InxGUIContext::ListBox(const std::string &label, int *currentItem, const std::vector<std::string> &items,
@@ -197,7 +368,11 @@ bool InxGUIContext::ListBox(const std::string &label, int *currentItem, const st
     cstrs.reserve(items.size());
     for (const auto &s : items)
         cstrs.push_back(s.c_str());
-    return ImGui::ListBox(label.c_str(), currentItem, cstrs.data(), static_cast<int>(cstrs.size()), heightInItems);
+    const bool changed =
+        ImGui::ListBox(label.c_str(), currentItem, cstrs.data(), static_cast<int>(cstrs.size()), heightInItems);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("list_box", label);
+    return changed;
 }
 
 /* progress & indicators */
@@ -272,12 +447,18 @@ void InxGUIContext::NewLine()
 /* tree & collapsing */
 bool InxGUIContext::TreeNode(const std::string &label)
 {
-    return ImGui::TreeNode(label.c_str());
+    const bool open = ImGui::TreeNode(label.c_str());
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("tree_node", label);
+    return open;
 }
 
 bool InxGUIContext::TreeNodeEx(const std::string &label, int flags)
 {
-    return ImGui::TreeNodeEx(label.c_str(), static_cast<ImGuiTreeNodeFlags>(flags));
+    const bool open = ImGui::TreeNodeEx(label.c_str(), static_cast<ImGuiTreeNodeFlags>(flags));
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("tree_node", label);
+    return open;
 }
 
 void InxGUIContext::TreePop()
@@ -297,7 +478,10 @@ void InxGUIContext::SetNextItemAllowOverlap()
 
 bool InxGUIContext::CollapsingHeader(const std::string &label)
 {
-    return ImGui::CollapsingHeader(label.c_str());
+    const bool open = ImGui::CollapsingHeader(label.c_str());
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("collapsing_header", label);
+    return open;
 }
 
 bool InxGUIContext::IsItemClicked(int mouseButton)
@@ -318,7 +502,10 @@ void InxGUIContext::EndTabBar()
 
 bool InxGUIContext::BeginTabItem(const std::string &label, bool *open)
 {
-    return ImGui::BeginTabItem(label.c_str(), open);
+    const bool visible = ImGui::BeginTabItem(label.c_str(), open);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("tab", label, open == nullptr || *open);
+    return visible;
 }
 
 void InxGUIContext::EndTabItem()
@@ -339,7 +526,10 @@ void InxGUIContext::EndMainMenuBar()
 
 bool InxGUIContext::BeginMenu(const std::string &label, bool enabled)
 {
-    return ImGui::BeginMenu(label.c_str(), enabled);
+    const bool open = ImGui::BeginMenu(label.c_str(), enabled);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("menu", label, enabled, "", open);
+    return open;
 }
 
 void InxGUIContext::EndMenu()
@@ -349,7 +539,11 @@ void InxGUIContext::EndMenu()
 
 bool InxGUIContext::MenuItem(const std::string &label, const std::string &shortcut, bool selected, bool enabled)
 {
-    return ImGui::MenuItem(label.c_str(), shortcut.empty() ? nullptr : shortcut.c_str(), selected, enabled);
+    const bool clicked =
+        ImGui::MenuItem(label.c_str(), shortcut.empty() ? nullptr : shortcut.c_str(), selected, enabled);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("menu_item", label, enabled);
+    return clicked;
 }
 
 /* child & windows */
@@ -371,22 +565,38 @@ void InxGUIContext::OpenPopup(const std::string &id)
 
 bool InxGUIContext::BeginPopup(const std::string &id)
 {
-    return ImGui::BeginPopup(id.c_str());
+    const bool open = ImGui::BeginPopup(id.c_str());
+    if (open)
+        RecordSemanticWindow("popup", id, id);
+    return open;
 }
 
 bool InxGUIContext::BeginPopupModal(const std::string &title, int flags)
 {
-    return ImGui::BeginPopupModal(title.c_str(), nullptr, static_cast<ImGuiWindowFlags>(flags));
+    const bool open = ImGui::BeginPopupModal(title.c_str(), nullptr, static_cast<ImGuiWindowFlags>(flags));
+    if (open)
+        RecordSemanticWindow("modal", title, title);
+    return open;
 }
 
 bool InxGUIContext::BeginPopupContextItem(const std::string &id, int mouseButton)
 {
-    return ImGui::BeginPopupContextItem(id.empty() ? nullptr : id.c_str(), static_cast<ImGuiPopupFlags>(mouseButton));
+    const bool open =
+        ImGui::BeginPopupContextItem(id.empty() ? nullptr : id.c_str(), ContextPopupFlagsForMouseButton(mouseButton));
+    if (open)
+        RecordSemanticWindow("context_menu", id, id);
+    return open;
 }
 
-bool InxGUIContext::BeginPopupContextWindow(const std::string &id, int mouseButton)
+bool InxGUIContext::BeginPopupContextWindow(const std::string &id, int mouseButton, bool noOpenOverItems)
 {
-    return ImGui::BeginPopupContextWindow(id.empty() ? nullptr : id.c_str(), static_cast<ImGuiPopupFlags>(mouseButton));
+    ImGuiPopupFlags flags = ContextPopupFlagsForMouseButton(mouseButton);
+    if (noOpenOverItems)
+        flags |= ImGuiPopupFlags_NoOpenOverItems;
+    const bool open = ImGui::BeginPopupContextWindow(id.empty() ? nullptr : id.c_str(), flags);
+    if (open)
+        RecordSemanticWindow("context_menu", id, id);
+    return open;
 }
 
 void InxGUIContext::EndPopup()
@@ -424,8 +634,11 @@ bool InxGUIContext::ImageButton(const std::string &id, void *textureId, float wi
 {
     if (!textureId)
         return false;
-    return ImGui::ImageButton(id.c_str(), reinterpret_cast<ImTextureID>(textureId), ImVec2(width, height),
-                              ImVec2(uv0_x, uv0_y), ImVec2(uv1_x, uv1_y));
+    const bool clicked = ImGui::ImageButton(id.c_str(), reinterpret_cast<ImTextureID>(textureId), ImVec2(width, height),
+                                            ImVec2(uv0_x, uv0_y), ImVec2(uv1_x, uv1_y));
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("image_button", id, true, id);
+    return clicked;
 }
 
 /* tables */
@@ -467,7 +680,10 @@ bool InxGUIContext::TableNextColumn()
 /* misc helpers */
 bool InxGUIContext::CheckboxFlags(const std::string &label, unsigned int *flags, unsigned int flagValue)
 {
-    return ImGui::CheckboxFlags(label.c_str(), flags, flagValue);
+    const bool changed = ImGui::CheckboxFlags(label.c_str(), flags, flagValue);
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("checkbox", label, true, "", (*flags & flagValue) == flagValue);
+    return changed;
 }
 
 void InxGUIContext::SetNextItemWidth(float width)
@@ -497,7 +713,14 @@ void InxGUIContext::SetWindowFocus()
 
 bool InxGUIContext::BeginWindow(const std::string &name, bool *open, int flags)
 {
-    return ImGui::Begin(name.c_str(), open, flags);
+    ConstrainNextFloatingWindowToMainViewport(name, flags);
+    const bool visible = ImGui::Begin(name.c_str(), open, flags);
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
+    if (captureSemantics)
+        RecordSemanticWindow("window", name, WindowSemanticId(name));
+    if (captureSemantics && open != nullptr)
+        InxGUISemantics::RecordCurrentWindowCloseButton(WindowSemanticId(name) + ".close");
+    return visible;
 }
 
 void InxGUIContext::EndWindow()
@@ -576,10 +799,32 @@ float InxGUIContext::GetItemRectMaxY()
     return ImGui::GetItemRectMax().y;
 }
 
+void InxGUIContext::RecordSemanticItem(const std::string &kind, const std::string &label, bool enabled,
+                                       const std::string &semanticId, std::optional<bool> boolValue,
+                                       std::optional<double> numericValue, std::optional<std::string> stringValue)
+{
+    InxGUISemantics::RecordLastItem(kind, label, enabled, semanticId, boolValue, numericValue, stringValue);
+}
+
+void InxGUIContext::RecordSemanticRect(const std::string &kind, const std::string &label, float x, float y, float width,
+                                       float height, bool enabled, const std::string &semanticId)
+{
+    InxGUISemantics::RecordRect(kind, label, x, y, width, height, enabled, semanticId);
+}
+
+void InxGUIContext::RecordSemanticWindow(const std::string &kind, const std::string &label,
+                                         const std::string &semanticId)
+{
+    InxGUISemantics::RecordCurrentWindow(kind, label, semanticId);
+}
+
 /* invisible button (for splitter) */
 bool InxGUIContext::InvisibleButton(const std::string &id, float width, float height)
 {
-    return ImGui::InvisibleButton(id.c_str(), ImVec2(width, height));
+    const bool clicked = ImGui::InvisibleButton(id.c_str(), ImVec2(width, height));
+    if (InxGUISemantics::IsCaptureEnabled())
+        RecordSemanticItem("invisible_button", id, true, id);
+    return clicked;
 }
 
 bool InxGUIContext::IsItemActive()
@@ -612,7 +857,12 @@ int InxGUIContext::SearchableCombo(const std::string &id, int currentItem, const
     int result = currentItem;
 
     ImGui::PushID(id.c_str());
-    if (ImGui::Button((display + "##trigger").c_str(), ImVec2(width > 0.0f ? width : 0.0f, 0.0f))) {
+    const bool triggerClicked =
+        ImGui::Button((display + "##trigger").c_str(), ImVec2(width > 0.0f ? width : 0.0f, 0.0f));
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
+    if (captureSemantics)
+        RecordSemanticItem("searchable_combo", display, true, id);
+    if (triggerClicked) {
         state.filter.fill('\0');
         state.highlightedItem = safeCurrent;
         state.needsSearchFocus = true;
@@ -629,6 +879,8 @@ int InxGUIContext::SearchableCombo(const std::string &id, int currentItem, const
     const float listHeight = rowHeight * static_cast<float>(maxVisibleItems) + ImGui::GetStyle().WindowPadding.y * 2.0f;
     ImGui::SetNextWindowSizeConstraints(ImVec2(popupWidth, 0.0f), ImVec2(popupWidth, FLT_MAX));
     if (ImGui::BeginPopup("##popup")) {
+        if (captureSemantics)
+            RecordSemanticWindow("combo_popup", id, id);
         state.wasOpen = true;
         if (state.needsSearchFocus) {
             ImGui::SetKeyboardFocusHere();
@@ -640,6 +892,8 @@ int InxGUIContext::SearchableCombo(const std::string &id, int currentItem, const
         const bool submitted =
             ImGui::InputTextWithHint("##search", searchHint.c_str(), state.filter.data(), state.filter.size(),
                                      ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_EnterReturnsTrue);
+        if (captureSemantics)
+            RecordSemanticItem("text_input", searchHint, true, id + ":search");
         const bool searchFocused = ImGui::IsItemFocused();
         const bool filterChanged = previousFilter != state.filter.data();
 
@@ -693,7 +947,10 @@ int InxGUIContext::SearchableCombo(const std::string &id, int currentItem, const
                 for (int index : filtered) {
                     const bool highlightedItem = index == state.highlightedItem;
                     ImGui::PushID(index);
-                    if (ImGui::Selectable((items[index] + "##item").c_str(), highlightedItem)) {
+                    const bool selected = ImGui::Selectable((items[index] + "##item").c_str(), highlightedItem);
+                    if (captureSemantics)
+                        RecordSemanticItem("combo_option", items[index], true, id + ":option:" + std::to_string(index));
+                    if (selected) {
                         result = index;
                         closePopup = true;
                     }
@@ -1498,9 +1755,11 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
         drawList->AddText(textPos, ImGui::GetColorU32(ImGuiCol_Text), "--");
     };
 
+    const bool captureSemantics = InxGUISemantics::IsCaptureEnabled();
     const int count = static_cast<int>(descriptors.size());
     for (int i = 0; i < count; ++i) {
         const auto &d = descriptors[i];
+        const std::string &semanticId = d.semanticId.empty() ? d.widgetId : d.semanticId;
 
         // Layout: header / space
         if (!d.header.empty()) {
@@ -1521,6 +1780,9 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
                 ImGui::SliderFloat(d.widgetId.c_str(), &val, d.rangeMin, d.rangeMax);
             else
                 ImGui::DragFloat(d.widgetId.c_str(), &val, d.speed, d.rangeMin, d.rangeMax);
+            if (captureSemantics)
+                RecordSemanticItem(d.slider ? "float_slider" : "drag_float", d.label, true, semanticId, std::nullopt,
+                                   static_cast<double>(val));
             HandleDragCapture();
             drawMixedOverlay(d.mixed);
             if (val != orig) {
@@ -1542,6 +1804,9 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
             else
                 ImGui::DragInt(d.widgetId.c_str(), &val, d.speed, static_cast<int>(d.rangeMin),
                                static_cast<int>(d.rangeMax));
+            if (captureSemantics)
+                RecordSemanticItem(d.slider ? "int_slider" : "drag_int", d.label, true, semanticId, std::nullopt,
+                                   static_cast<double>(val));
             HandleDragCapture();
             drawMixedOverlay(d.mixed);
             if (val != orig) {
@@ -1562,6 +1827,8 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
             if (d.mixed)
                 ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
             ImGui::Checkbox(cbLabel.c_str(), &val);
+            if (captureSemantics)
+                RecordSemanticItem("checkbox", cbLabel, true, semanticId, val);
             if (d.mixed)
                 ImGui::PopItemFlag();
             ImGui::SetWindowFontScale(1.0f);
@@ -1586,6 +1853,8 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
                 ImGui::InputTextMultiline(d.widgetId.c_str(), buf, sizeof(buf), ImVec2(-1, 80));
             else
                 ImGui::InputText(d.widgetId.c_str(), buf, 256);
+            if (captureSemantics)
+                RecordSemanticItem(d.multiline ? "text_area" : "text_input", d.label, true, semanticId);
             std::string newStr(buf);
             if ((!d.mixed && newStr != d.sVal) || (d.mixed && newStr != "--")) {
                 PropertyChange c;
@@ -1600,6 +1869,8 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
             float v[2] = {d.fVal[0], d.fVal[1]};
             float lw = d.label.empty() ? 1.0f : labelWidth;
             Vector2Control(d.label.empty() ? " " : d.label, v, d.speed, lw);
+            if (captureSemantics)
+                RecordSemanticItem("vector", d.label, true, semanticId);
             drawMixedOverlay(d.mixed);
             if (v[0] != d.fVal[0] || v[1] != d.fVal[1]) {
                 PropertyChange c;
@@ -1615,6 +1886,8 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
             float v[3] = {d.fVal[0], d.fVal[1], d.fVal[2]};
             float lw = d.label.empty() ? 1.0f : labelWidth;
             Vector3Control(d.label.empty() ? " " : d.label, v, d.speed, lw);
+            if (captureSemantics)
+                RecordSemanticItem("vector", d.label, true, semanticId);
             drawMixedOverlay(d.mixed);
             if (v[0] != d.fVal[0] || v[1] != d.fVal[1] || v[2] != d.fVal[2]) {
                 PropertyChange c;
@@ -1631,6 +1904,8 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
             float v[4] = {d.fVal[0], d.fVal[1], d.fVal[2], d.fVal[3]};
             float lw = d.label.empty() ? 1.0f : labelWidth;
             Vector4Control(d.label.empty() ? " " : d.label, v, d.speed, lw);
+            if (captureSemantics)
+                RecordSemanticItem("vector", d.label, true, semanticId);
             drawMixedOverlay(d.mixed);
             if (v[0] != d.fVal[0] || v[1] != d.fVal[1] || v[2] != d.fVal[2] || v[3] != d.fVal[3]) {
                 PropertyChange c;
@@ -1648,11 +1923,9 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
             doLabel(d.label);
             int idx = d.iVal;
             int orig = idx;
-            std::vector<const char *> cstrs;
-            cstrs.reserve(d.enumNames.size());
-            for (const auto &s : d.enumNames)
-                cstrs.push_back(s.c_str());
-            ImGui::Combo(d.widgetId.c_str(), &idx, cstrs.data(), static_cast<int>(cstrs.size()));
+            Combo(d.widgetId, &idx, d.enumNames);
+            if (captureSemantics)
+                RecordSemanticItem("combo", d.label, true, semanticId);
             drawMixedOverlay(d.mixed);
             if (idx != orig) {
                 PropertyChange c;
@@ -1676,6 +1949,8 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
                 c.fVal[3] = col[3];
                 changes.push_back(c);
             }
+            if (captureSemantics)
+                RecordSemanticItem("color_edit", d.label, true, semanticId);
             drawMixedOverlay(d.mixed);
             break;
         }

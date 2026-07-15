@@ -338,6 +338,7 @@ void SceneManager::Play()
 
     m_isPlaying = true;
     m_isPaused = false;
+    AudioEngine::Instance().ResumeAll();
 
     // Notify renderer to exit idle mode immediately.
     if (m_onPlayStateChanged)
@@ -376,6 +377,7 @@ void SceneManager::Stop()
 {
     m_isPlaying = false;
     m_isPaused = false;
+    AudioEngine::Instance().ResumeAll();
     m_fixedTimeAccumulator = 0.0f;
     m_fixedTime = 0.0;
     m_fixedUnscaledTime = 0.0;
@@ -399,6 +401,10 @@ void SceneManager::Stop()
 void SceneManager::Pause()
 {
     m_isPaused = !m_isPaused;
+    if (m_isPaused)
+        AudioEngine::Instance().PauseAll();
+    else
+        AudioEngine::Instance().ResumeAll();
 }
 
 void SceneManager::Step(float deltaTime)

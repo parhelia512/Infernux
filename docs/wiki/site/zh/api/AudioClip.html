@@ -452,7 +452,9 @@
 <h2 id="_1">描述<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
 <p>音频剪辑资源。</p>
 <!-- USER CONTENT START -->
-<p>description</p>
+<p>description
+<strong>状态：</strong> Preview · <strong>验证版本：</strong> 0.2.1</p>
+<p>当前可靠解码器支持 WAV。当 AudioSource Track 或 One-shot 仍可能引用时，应保持 Clip 已加载。</p>
 <!-- USER CONTENT END -->
 
 <h2 id="_2">构造函数<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
@@ -594,13 +596,20 @@
 <h2 id="_7">示例<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
 <!-- USER CONTENT START -->
 <p>example
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># TODO: Add example for AudioClip</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux.core.audio_clip</span><span class="w"> </span><span class="kn">import</span> <span class="n">AudioClip</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">clip</span> <span class="o">=</span> <span class="n">AudioClip</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;Assets/Audio/click.wav&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">if</span> <span class="n">clip</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">clip</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">clip</span><span class="o">.</span><span class="n">duration</span><span class="p">,</span> <span class="n">clip</span><span class="o">.</span><span class="n">sample_rate</span><span class="p">,</span> <span class="n">clip</span><span class="o">.</span><span class="n">channels</span><span class="p">)</span>
 </code></pre></div></p>
 <!-- USER CONTENT END -->
 
 <h2 id="_8">另请参阅<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
 <!-- USER CONTENT START -->
-<p>see_also</p>
+<p>see_also
+- <a href="../learn/audio-workflow.html">音频工作流</a>
+- <a href="AudioSource.html">AudioSource</a>
+- <a href="../manual/assets-and-meta.html">资源与 Meta 文件</a></p>
 <!-- USER CONTENT END -->
         </main>
     </div>

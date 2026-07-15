@@ -31,9 +31,17 @@ function getWikiText(key) {
     return wikiUiText[getWikiLang()][key];
 }
 
+function getWikiGroupTitle(groupKey, fallback) {
+    const titles = {
+        en: { learn: "Learn", manual: "Manual", architecture: "Architecture" },
+        zh: { learn: "学习", manual: "手册", architecture: "架构" }
+    };
+    return titles[getWikiLang()][groupKey] || fallback;
+}
+
 function loadWikiDocsManifest() {
     if (!wikiDocsManifestPromise) {
-        wikiDocsManifestPromise = fetch("assets/wiki-docs.json", { cache: "no-cache" }).then((response) => {
+        wikiDocsManifestPromise = fetch("assets/wiki-docs.json?v=7").then((response) => {
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }
@@ -105,8 +113,10 @@ function renderTagsFilter() {
         const catRow = document.createElement("div");
         catRow.className = "wiki-filter-row wiki-categories";
 
-        const allBtn = document.createElement("span");
+        const allBtn = document.createElement("button");
+        allBtn.type = "button";
         allBtn.className = "wiki-category-btn" + (!currentSelectedCategory && !currentSelectedTag ? " active" : "");
+        allBtn.setAttribute("aria-pressed", String(!currentSelectedCategory && !currentSelectedTag));
         allBtn.textContent = getWikiText("allCategories");
         allBtn.onclick = () => {
             currentSelectedCategory = null;
@@ -116,8 +126,10 @@ function renderTagsFilter() {
         catRow.appendChild(allBtn);
         
         Array.from(categories).sort().forEach(cat => {
-            const btn = document.createElement("span");
+            const btn = document.createElement("button");
+            btn.type = "button";
             btn.className = "wiki-category-btn" + (currentSelectedCategory === cat ? " active" : "");
+            btn.setAttribute("aria-pressed", String(currentSelectedCategory === cat));
             btn.textContent = cat;
             btn.onclick = () => {
                 currentSelectedCategory = (currentSelectedCategory === cat) ? null : cat;
@@ -133,8 +145,10 @@ function renderTagsFilter() {
         tagRow.className = "wiki-filter-row wiki-tags";
 
         Array.from(tags).sort().forEach(tag => {
-            const btn = document.createElement("span");
+            const btn = document.createElement("button");
+            btn.type = "button";
             btn.className = "wiki-tag" + (currentSelectedTag === tag ? " active" : "");
+            btn.setAttribute("aria-pressed", String(currentSelectedTag === tag));
             btn.textContent = "#" + tag;
             btn.onclick = () => {
                 currentSelectedTag = (currentSelectedTag === tag) ? null : tag;
@@ -204,7 +218,7 @@ function renderWikiDocsCatalog() {
             const groups = new Map();
             filteredDocs.forEach((doc) => {
                 const groupKey = currentSelectedCategory || doc.groupKey;
-                const groupTitle = currentSelectedCategory || doc.groupTitle;
+                const groupTitle = currentSelectedCategory || getWikiGroupTitle(doc.groupKey, doc.groupTitle);
                 
                 if (!groups.has(groupKey)) {
                     groups.set(groupKey, { title: groupTitle, items: [] });
@@ -256,6 +270,8 @@ document.addEventListener("DOMContentLoaded", () => {
             renderWikiDocsCatalog();
         });
     }
+    const filters = document.getElementById("wiki-tags-filter");
+    if (filters) filters.setAttribute("aria-label", getWikiLang() === "zh" ? "文档筛选" : "Documentation filters");
     renderWikiDocsCatalog();
 });
 document.addEventListener("site:language-changed", () => {
@@ -264,6 +280,8 @@ document.addEventListener("site:language-changed", () => {
     currentSelectedTag = null;
     const searchInput = document.getElementById("wiki-search-input");
     if (searchInput) searchInput.value = "";
+    const filters = document.getElementById("wiki-tags-filter");
+    if (filters) filters.setAttribute("aria-label", getWikiLang() === "zh" ? "文档筛选" : "Documentation filters");
     renderWikiDocsCatalog();
 });
 

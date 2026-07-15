@@ -816,6 +816,8 @@ void Infernux::DrainPreviewJobs()
     m_materialPreviewStates.clear();
     m_texturePreviewStates.clear();
     m_meshPreviewStates.clear();
+    m_hasPendingPreviewUploads.store(false, std::memory_order_release);
+    m_hasPreviewPumpWork.store(false, std::memory_order_release);
 }
 
 void Infernux::EnqueuePreviewTask(std::function<void()> fn)
@@ -1025,6 +1027,7 @@ uint64_t Infernux::QueryOrScheduleMaterialPreview(const std::string &resourceKey
     if (!state.inFlight && state.readyGeneration < state.generation) {
         state.inFlight = true;
         m_previewRequestQueue.push(MaterialPreviewRequest{key, matFilePath, state.generation, renderJson});
+        m_hasPreviewPumpWork.store(true, std::memory_order_release);
     }
 
     // Stale-return: keep showing old preview while new one renders (no flicker).
@@ -1091,6 +1094,8 @@ int Infernux::PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown)
                 it->second.pendingUploadVersion = uploadVersion;
                 it->second.pendingPreviewGeneration = completed.generation;
                 it->second.pendingSize = kMaterialPreviewSize;
+                m_hasPendingPreviewUploads.store(true, std::memory_order_release);
+                m_hasPreviewPumpWork.store(true, std::memory_order_release);
             }
             ++consumed;
         } catch (const std::exception &error) {
@@ -1110,14 +1115,18 @@ int Infernux::PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown)
                                  [](const auto &entry) { return static_cast<bool>(entry.second.renderTicket); });
         queueSize = m_previewRequestQueue.size();
     }
+    if (renderBusy)
+        m_hasPreviewPumpWork.store(true, std::memory_order_release);
     if (renderBusy || queueSize == 0)
         return consumed;
 
     constexpr int kMaterialCooldownMs = 100;
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastMaterialRenderTime);
-    if (!ignoreCooldown && queueSize < 2 && elapsed.count() < kMaterialCooldownMs)
+    if (!ignoreCooldown && queueSize < 2 && elapsed.count() < kMaterialCooldownMs) {
+        m_hasPreviewPumpWork.store(true, std::memory_order_release);
         return consumed;
+    }
 
     MaterialPreviewRequest request;
     {
@@ -1184,6 +1193,8 @@ int Infernux::PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown)
                 it->second.pendingUploadVersion = uploadVersion;
                 it->second.pendingPreviewGeneration = request.generation;
                 it->second.pendingSize = kMaterialPreviewSize;
+                m_hasPendingPreviewUploads.store(true, std::memory_order_release);
+                m_hasPreviewPumpWork.store(true, std::memory_order_release);
             }
             ++consumed;
         } catch (const std::exception &error) {
@@ -1200,6 +1211,7 @@ int Infernux::PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown)
             it->second.renderTicket = std::move(ticket);
             it->second.renderMaterial = std::move(material);
             it->second.renderGeneration = request.generation;
+            m_hasPreviewPumpWork.store(true, std::memory_order_release);
         }
     }
     m_lastMaterialRenderTime = now;
@@ -1209,6 +1221,9 @@ int Infernux::PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown)
 
 void Infernux::CommitPublishedPreviewTextures()
 {
+    if (!m_hasPendingPreviewUploads.exchange(false, std::memory_order_acq_rel))
+        return;
+
     std::lock_guard<std::mutex> lock(m_previewResultMutex);
     auto commitMaterial = [this](MaterialPreviewState &state) {
         if (state.pendingUploadVersion != 0 &&
@@ -1217,11 +1232,12 @@ void Infernux::CommitPublishedPreviewTextures()
             state.pendingPreviewGeneration = 0;
             state.pendingSize = 0;
             state.inFlight = false;
-            return;
+            return false;
         }
-        if (state.pendingUploadVersion == 0 ||
-            m_renderer->GetImGuiTextureVersion(state.textureName) < state.pendingUploadVersion)
-            return;
+        if (state.pendingUploadVersion == 0)
+            return false;
+        if (m_renderer->GetImGuiTextureVersion(state.textureName) < state.pendingUploadVersion)
+            return true;
         state.textureId = m_renderer->GetImGuiTextureId(state.textureName);
         state.readyGeneration = state.pendingPreviewGeneration;
         state.readySize = state.pendingSize;
@@ -1229,6 +1245,7 @@ void Infernux::CommitPublishedPreviewTextures()
         state.pendingPreviewGeneration = 0;
         state.pendingSize = 0;
         state.inFlight = false;
+        return false;
     };
     auto commitTexture = [this](TexturePreviewState &state) {
         if (state.pendingUploadVersion != 0 &&
@@ -1238,11 +1255,12 @@ void Infernux::CommitPublishedPreviewTextures()
             state.pendingWidth = 0;
             state.pendingHeight = 0;
             state.inFlight = false;
-            return;
+            return false;
         }
-        if (state.pendingUploadVersion == 0 ||
-            m_renderer->GetImGuiTextureVersion(state.textureName) < state.pendingUploadVersion)
-            return;
+        if (state.pendingUploadVersion == 0)
+            return false;
+        if (m_renderer->GetImGuiTextureVersion(state.textureName) < state.pendingUploadVersion)
+            return true;
         state.textureId = m_renderer->GetImGuiTextureId(state.textureName);
         state.readyGeneration = state.pendingPreviewGeneration;
         state.readyWidth = state.pendingWidth;
@@ -1252,6 +1270,7 @@ void Infernux::CommitPublishedPreviewTextures()
         state.pendingWidth = 0;
         state.pendingHeight = 0;
         state.inFlight = false;
+        return false;
     };
     auto commitMesh = [this](MeshPreviewState &state) {
         if (state.pendingUploadVersion != 0 &&
@@ -1260,11 +1279,12 @@ void Infernux::CommitPublishedPreviewTextures()
             state.pendingPreviewGeneration = 0;
             state.pendingSize = 0;
             state.inFlight = false;
-            return;
+            return false;
         }
-        if (state.pendingUploadVersion == 0 ||
-            m_renderer->GetImGuiTextureVersion(state.textureName) < state.pendingUploadVersion)
-            return;
+        if (state.pendingUploadVersion == 0)
+            return false;
+        if (m_renderer->GetImGuiTextureVersion(state.textureName) < state.pendingUploadVersion)
+            return true;
         state.textureId = m_renderer->GetImGuiTextureId(state.textureName);
         state.readyGeneration = state.pendingPreviewGeneration;
         state.readySize = state.pendingSize;
@@ -1272,25 +1292,36 @@ void Infernux::CommitPublishedPreviewTextures()
         state.pendingPreviewGeneration = 0;
         state.pendingSize = 0;
         state.inFlight = false;
+        return false;
     };
+    bool hasUnpublishedUploads = false;
     for (auto &[key, state] : m_materialPreviewStates) {
         (void)key;
-        commitMaterial(state);
+        hasUnpublishedUploads |= commitMaterial(state);
     }
     for (auto &[key, state] : m_texturePreviewStates) {
         (void)key;
-        commitTexture(state);
+        hasUnpublishedUploads |= commitTexture(state);
     }
     for (auto &[key, state] : m_meshPreviewStates) {
         (void)key;
-        commitMesh(state);
+        hasUnpublishedUploads |= commitMesh(state);
     }
+    if (hasUnpublishedUploads)
+        m_hasPendingPreviewUploads.store(true, std::memory_order_release);
+    if (hasUnpublishedUploads)
+        m_hasPreviewPumpWork.store(true, std::memory_order_release);
 }
 
 void Infernux::PumpPreviewTasks()
 {
     if (!m_renderer)
         return;
+
+    if (!m_hasPreviewPumpWork.exchange(false, std::memory_order_acq_rel)) {
+        PumpTimelineCubePreviewIfDirty();
+        return;
+    }
 
     CommitPublishedPreviewTextures();
 
@@ -1372,6 +1403,8 @@ void Infernux::PumpPreviewTasks()
                 it->second.pendingPreviewGeneration = completed.generation;
                 it->second.pendingWidth = completed.width;
                 it->second.pendingHeight = completed.height;
+                m_hasPendingPreviewUploads.store(true, std::memory_order_release);
+                m_hasPreviewPumpWork.store(true, std::memory_order_release);
             }
             --uploadBudget;
         }
@@ -1379,6 +1412,7 @@ void Infernux::PumpPreviewTasks()
         // Put unconsumed items back for next frame.
         if (!texLocal.empty()) {
             std::lock_guard<std::mutex> lock(m_previewResultMutex);
+            m_hasPreviewPumpWork.store(true, std::memory_order_release);
             while (!texLocal.empty()) {
                 m_texturePreviewCompletedQueue.push(std::move(texLocal.front()));
                 texLocal.pop();
@@ -1436,6 +1470,8 @@ void Infernux::PumpPreviewTasks()
                         it->second.pendingUploadVersion = uploadVersion;
                         it->second.pendingPreviewGeneration = completed.generation;
                         it->second.pendingSize = kMeshPreviewSize;
+                        m_hasPendingPreviewUploads.store(true, std::memory_order_release);
+                        m_hasPreviewPumpWork.store(true, std::memory_order_release);
                     }
                 }
                 --uploadBudget;
@@ -1454,6 +1490,8 @@ void Infernux::PumpPreviewTasks()
             std::lock_guard<std::mutex> lock(m_previewResultMutex);
             renderBusy = std::any_of(m_meshPreviewStates.begin(), m_meshPreviewStates.end(),
                                      [](const auto &entry) { return static_cast<bool>(entry.second.renderTicket); });
+            if (renderBusy)
+                m_hasPreviewPumpWork.store(true, std::memory_order_release);
             if (!renderBusy && !m_meshPreviewRequestQueue.empty()) {
                 request = std::move(m_meshPreviewRequestQueue.front());
                 m_meshPreviewRequestQueue.pop();
@@ -1486,12 +1524,14 @@ void Infernux::PumpPreviewTasks()
                 if (!ticket) {
                     std::lock_guard<std::mutex> lock(m_previewResultMutex);
                     m_meshPreviewRequestQueue.push(std::move(request));
+                    m_hasPreviewPumpWork.store(true, std::memory_order_release);
                 } else {
                     std::lock_guard<std::mutex> lock(m_previewResultMutex);
                     auto it = m_meshPreviewStates.find(request.resourceKey);
                     if (it != m_meshPreviewStates.end()) {
                         it->second.renderTicket = std::move(ticket);
                         it->second.renderGeneration = request.generation;
+                        m_hasPreviewPumpWork.store(true, std::memory_order_release);
                     }
                 }
             }
@@ -1656,6 +1696,7 @@ std::tuple<uint64_t, int, int> Infernux::QueryOrScheduleTexturePreview(const std
 
             std::lock_guard<std::mutex> lock(m_previewResultMutex);
             m_texturePreviewCompletedQueue.push(std::move(completed));
+            m_hasPreviewPumpWork.store(true, std::memory_order_release);
         });
     }
 
@@ -1721,6 +1762,7 @@ bool Infernux::ScheduleTexturePreviewFromMemory(const std::string &resourceKey, 
 
         std::lock_guard<std::mutex> lock(m_previewResultMutex);
         m_texturePreviewCompletedQueue.push(std::move(completed));
+        m_hasPreviewPumpWork.store(true, std::memory_order_release);
     });
 
     return true;
@@ -1759,6 +1801,7 @@ uint64_t Infernux::QueryOrScheduleMeshPreview(const std::string &resourceKey, co
     if (!state.inFlight && state.readyGeneration < state.generation) {
         state.inFlight = true;
         m_meshPreviewRequestQueue.push(MeshPreviewRequest{resourceKey, meshFilePath, state.generation});
+        m_hasPreviewPumpWork.store(true, std::memory_order_release);
     }
 
     // Stale-return: keep showing old preview while new one renders (no flicker).
@@ -2906,6 +2949,54 @@ void Infernux::SelectDockedWindow(const std::string &windowId)
         return;
     }
     renderer->QueueDockTabSelection(windowId.c_str());
+}
+
+uint64_t Infernux::QueueSyntheticKeyInput(int scancode, bool pressed, bool repeat)
+{
+    auto *renderer = GetRenderer();
+    return renderer ? renderer->QueueSyntheticKeyInput(scancode, pressed, repeat) : 0;
+}
+
+uint64_t Infernux::QueueSyntheticMouseButtonInput(int button, bool pressed, float x, float y)
+{
+    auto *renderer = GetRenderer();
+    return renderer ? renderer->QueueSyntheticMouseButtonInput(button, pressed, x, y) : 0;
+}
+
+uint64_t Infernux::QueueSyntheticMouseMotionInput(float x, float y, float deltaX, float deltaY)
+{
+    auto *renderer = GetRenderer();
+    return renderer ? renderer->QueueSyntheticMouseMotionInput(x, y, deltaX, deltaY) : 0;
+}
+
+uint64_t Infernux::QueueSyntheticMouseWheelInput(float horizontal, float vertical)
+{
+    auto *renderer = GetRenderer();
+    return renderer ? renderer->QueueSyntheticMouseWheelInput(horizontal, vertical) : 0;
+}
+
+uint64_t Infernux::QueueSyntheticTextInput(const std::string &text)
+{
+    auto *renderer = GetRenderer();
+    return renderer ? renderer->QueueSyntheticTextInput(text) : 0;
+}
+
+uint64_t Infernux::QueueSyntheticCloseRequest()
+{
+    auto *renderer = GetRenderer();
+    return renderer ? renderer->QueueSyntheticCloseRequest() : 0;
+}
+
+uint64_t Infernux::GetLastProcessedSyntheticInputSequence() const
+{
+    auto *renderer = GetRenderer();
+    return renderer ? renderer->GetLastProcessedSyntheticInputSequence() : 0;
+}
+
+size_t Infernux::GetPendingSyntheticInputCount() const
+{
+    auto *renderer = GetRenderer();
+    return renderer ? renderer->GetPendingSyntheticInputCount() : 0;
 }
 
 void Infernux::LoadImGuiLayout()

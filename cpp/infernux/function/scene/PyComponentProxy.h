@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Component.h"
+#include <cstdint>
 #include <pybind11/pybind11.h>
 #include <string>
 
@@ -97,12 +98,14 @@ class PyComponentProxy : public Component
     /// @brief Get the underlying Python component object
     [[nodiscard]] py::object GetPyComponent() const
     {
+        py::gil_scoped_acquire acquire;
         return m_pyComponent;
     }
 
     /// @brief Check if this proxy holds a valid Python component
     [[nodiscard]] bool IsValid() const
     {
+        py::gil_scoped_acquire acquire;
         return !m_pyComponent.is_none();
     }
 
@@ -126,6 +129,26 @@ class PyComponentProxy : public Component
     [[nodiscard]] const std::string &GetQualifiedName() const
     {
         return m_qualifiedName;
+    }
+
+    [[nodiscard]] bool OverridesUpdate() const
+    {
+        return m_overridesUpdate;
+    }
+
+    [[nodiscard]] bool HasCoroutineScheduler() const
+    {
+        return m_hasCoroutineScheduler;
+    }
+
+    [[nodiscard]] uint64_t GetUpdateDispatchCount() const
+    {
+        return m_updateDispatchCount;
+    }
+
+    [[nodiscard]] uint64_t GetUpdateForwardCount() const
+    {
+        return m_updateForwardCount;
     }
 
     // ========================================================================
@@ -167,6 +190,8 @@ class PyComponentProxy : public Component
     bool m_overridesFixedUpdate = true;
     bool m_overridesLateUpdate = true;
     bool m_hasCoroutineScheduler = false;
+    uint64_t m_updateDispatchCount = 0;
+    uint64_t m_updateForwardCount = 0;
 };
 
 } // namespace infernux

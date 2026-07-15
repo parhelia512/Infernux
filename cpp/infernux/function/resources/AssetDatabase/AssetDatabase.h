@@ -566,6 +566,7 @@ class AssetDatabase
     void BeginPendingIndexBuild(const std::shared_ptr<PendingRefreshCommit> &state);
     void FinalizePendingRefreshCommit(const std::shared_ptr<PendingRefreshCommit> &state);
     void WaitForPendingWork() const noexcept;
+    [[nodiscard]] static bool IsIgnoredImportPath(const std::filesystem::path &path);
     [[nodiscard]] bool IsMetaFile(const std::filesystem::path &path) const;
     void UpdateMapping(const std::string &guid, const std::string &path);
     void RemoveMappingByGuid(const std::string &guid);

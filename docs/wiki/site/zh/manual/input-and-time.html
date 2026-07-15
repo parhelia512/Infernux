@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>输入与时间 - Infernux Scripting API</title>
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="stylesheet" href="/css/style.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ======================================================
+           Infernux API Reference — Unity-Inspired Dark Theme
+           ====================================================== */
+
+        /* Layout */
+        .api-layout {
+            display: flex;
+            min-height: calc(100vh - var(--nav-height));
+            padding-top: var(--nav-height);
+        }
+
+        /* ---- Sidebar ---- */
+        .api-sidebar {
+            width: 280px;
+            background: #0b0b12;
+            border-right: 1px solid var(--border);
+            position: sticky;
+            top: var(--nav-height);
+            height: calc(100vh - var(--nav-height));
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        .api-sidebar::-webkit-scrollbar { width: 5px; }
+        .api-sidebar::-webkit-scrollbar-track { background: transparent; }
+        .api-sidebar::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+
+        .sidebar-hdr {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .sidebar-hdr h3 {
+            margin: 0;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+        }
+
+        /* Language toggle */
+        .lang-sw {
+            display: flex;
+            gap: 1px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .lang-sw a {
+            padding: 3px 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            background: var(--bg-elevated);
+            text-decoration: none;
+            transition: all 0.12s;
+        }
+        .lang-sw a.on {
+            background: var(--primary);
+            color: #fff;
+        }
+        .lang-sw a:hover:not(.on) {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+        }
+
+        /* Namespace tree */
+        .ns-tree { padding: 6px 0 20px; }
+
+        .ns-group { margin-bottom: 1px; }
+
+        .ns-hd {
+            display: flex;
+            align-items: center;
+            padding: 7px 16px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.1s;
+        }
+        .ns-hd:hover { background: rgba(255,255,255,0.025); }
+
+        .ns-arr {
+            width: 14px;
+            font-size: 0.5rem;
+            color: #555;
+            transition: transform 0.15s;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+        .ns-hd.open .ns-arr { transform: rotate(90deg); }
+
+        .ns-nm {
+            font-size: 0.84rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        .ns-hd.hi .ns-nm { color: var(--primary); }
+
+        .ns-ch {
+            display: none;
+            padding: 2px 0 4px;
+        }
+        .ns-hd.open + .ns-ch { display: block; }
+
+        .ns-ch a {
+            display: block;
+            padding: 3px 16px 3px 38px;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.1s, background 0.1s;
+            border-left: 2px solid transparent;
+        }
+        .ns-ch a:hover {
+            color: var(--text-primary);
+            background: rgba(255,255,255,0.02);
+        }
+        .ns-ch a.cur {
+            color: var(--text-primary);
+            background: rgba(255,107,53,0.07);
+            border-left-color: var(--primary);
+            font-weight: 600;
+        }
+
+        /* ---- Content ---- */
+        .api-main {
+            flex: 1;
+            padding: 36px 56px 80px;
+            max-width: 880px;
+            min-width: 0;
+        }
+
+        /* H1 — class name */
+        .api-main h1 {
+            font-size: 1.85rem;
+            font-weight: 700;
+            margin: 0 0 4px;
+            padding: 0;
+            border: none;
+            color: var(--text-primary);
+        }
+
+        /* "class in Package" subtitle */
+        .api-main .class-info {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            margin-bottom: 22px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--border);
+        }
+        .api-main .class-info b { color: var(--text-secondary); }
+        .api-main .class-info a { color: var(--primary); }
+
+        /* H2 — section headers */
+        .api-main h2 {
+            font-size: 0.92rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted);
+            margin: 30px 0 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .api-main h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin: 18px 0 6px;
+        }
+
+        /* Paragraphs */
+        .api-main p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.75;
+            margin-bottom: 12px;
+        }
+
+        .api-main blockquote {
+            margin: 12px 0;
+            padding: 10px 16px;
+            background: rgba(255,107,53,0.04);
+            border-left: 3px solid var(--primary);
+            border-radius: 0 4px 4px 0;
+        }
+        .api-main blockquote p { margin: 0; font-size: 0.85rem; }
+
+        /* Tables — Unity style: hidden header, 2-col */
+        .api-main table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 4px 0 18px;
+        }
+        .api-main thead { display: none; }
+
+        .api-main tbody tr {
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .api-main tbody tr:last-child { border-bottom: none; }
+
+        .api-main td {
+            padding: 7px 0;
+            font-size: 0.86rem;
+            vertical-align: top;
+        }
+        .api-main td:first-child {
+            width: 200px;
+            padding-right: 20px;
+            color: var(--primary);
+            font-size: 0.86rem;
+            font-weight: 500;
+        }
+        .api-main td:last-child { color: var(--text-secondary); }
+        .api-main td a { color: var(--primary); }
+        .api-main tbody tr:hover { background: rgba(255,255,255,0.012); }
+
+        /* Inline code — normal font, subtle highlight */
+        .api-main code {
+            font-family: inherit;
+            font-size: inherit;
+            background: rgba(255,255,255,0.06);
+            padding: 1px 5px;
+            border-radius: 3px;
+            color: var(--primary-light);
+        }
+
+        /* Code blocks */
+        .api-main pre {
+            background: #0d0d15;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px 20px;
+            overflow-x: auto;
+            margin: 10px 0 18px;
+        }
+        .api-main pre code {
+            font-family: var(--font-mono);
+            background: none;
+            padding: 0;
+            font-size: 0.83rem;
+            line-height: 1.65;
+            color: var(--text-secondary);
+        }
+
+        /* Lists */
+        .api-main ul, .api-main ol { padding-left: 18px; margin-bottom: 12px; }
+        .api-main li {
+            margin-bottom: 4px;
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+            line-height: 1.6;
+        }
+
+        .api-main hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 26px 0;
+        }
+
+        /* ---- Footer ---- */
+        .api-ft { margin-left: 280px; }
+        .api-ft .footer-bottom p { font-size: 0.8rem; }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 1024px) {
+            .api-sidebar { width: 240px; }
+            .api-main { padding: 28px 32px 60px; }
+            .api-ft { margin-left: 240px; }
+        }
+        @media (max-width: 768px) {
+            .api-layout { flex-direction: column; }
+            .api-sidebar {
+                width: 100%; position: relative; top: 0;
+                height: auto; max-height: 50vh;
+                border-right: none; border-bottom: 1px solid var(--border);
+            }
+            .api-main { padding: 20px; max-width: 100%; }
+            .api-ft { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links">
+                <a href="/index.html">首页</a>
+                <a href="/index.html#system">特性</a>
+                <a href="/index.html#capabilities">能力</a>
+                <a href="/roadmap.html">路线图</a>
+                <a href="/wiki.html" class="active">文档</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank">
+                    <i class="fab fa-github"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell" style="padding-top: calc(var(--nav-height) + 60px); min-height: 80vh; padding-bottom: 80px;">
+        <div class="container" style="max-width: 860px; margin: 0 auto;">
+            <div class="api-main" style="padding: 0; max-width: none;">
+                <h1 id="_1">输入与时间<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>Input 描述当前帧发生了什么，Time 决定这一帧对连续行为贡献多少。把二者职责分开，控制逻辑才能适应帧率变化和编辑器焦点。</p>
+<h2 id="_2">按键状态是三段契约<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>查询</th>
+<th>何时为 True</th>
+<th>常见用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>get_key(key)</code></td>
+<td>按键持续按下</td>
+<td>连续移动、蓄力</td>
+</tr>
+<tr>
+<td><code>get_key_down(key)</code></td>
+<td>本帧刚刚按下</td>
+<td>跳跃、打开、确认</td>
+</tr>
+<tr>
+<td><code>get_key_up(key)</code></td>
+<td>本帧刚刚释放</td>
+<td>释放、结束蓄力</td>
+</tr>
+</tbody>
+</table>
+<p>鼠标按钮也有相同区分。<code>down</code> 与 <code>up</code> 是边沿事件，应在普通逐帧更新中读取，不能当成持续状态。</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux</span><span class="w"> </span><span class="kn">import</span> <span class="n">InxComponent</span><span class="p">,</span> <span class="n">Vector3</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux.input</span><span class="w"> </span><span class="kn">import</span> <span class="n">Input</span><span class="p">,</span> <span class="n">KeyCode</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">class</span><span class="w"> </span><span class="nc">KeyboardMover</span><span class="p">(</span><span class="n">InxComponent</span><span class="p">):</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">speed</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">4.0</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">delta_time</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="n">direction</span> <span class="o">=</span> <span class="mf">0.0</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="k">if</span> <span class="n">Input</span><span class="o">.</span><span class="n">get_key</span><span class="p">(</span><span class="n">KeyCode</span><span class="o">.</span><span class="n">A</span><span class="p">):</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>            <span class="n">direction</span> <span class="o">-=</span> <span class="mf">1.0</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        <span class="k">if</span> <span class="n">Input</span><span class="o">.</span><span class="n">get_key</span><span class="p">(</span><span class="n">KeyCode</span><span class="o">.</span><span class="n">D</span><span class="p">):</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>            <span class="n">direction</span> <span class="o">+=</span> <span class="mf">1.0</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span><span class="n">Vector3</span><span class="p">(</span><span class="n">direction</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">speed</span> <span class="o">*</span> <span class="n">delta_time</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
+</code></pre></div>
+<p>乘以 <code>delta_time</code>，可以把“每秒速度”换算成本帧距离。</p>
+<h2 id="_3">焦点与鼠标坐标<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>编辑器与运行中的游戏可能争夺键鼠输入。<code>Input.is_game_focused()</code> 表示 Game 视口是否拥有玩法焦点。不要把点击编辑器面板解释成游戏操作。</p>
+<ul>
+<li><code>mouse_position</code> 使用屏幕坐标。</li>
+<li><code>game_mouse_position</code> 相对于 Game 视口。</li>
+<li><code>get_game_mouse_frame_state(...)</code> 一次返回视口位置、增量、滚轮与按钮状态。</li>
+</ul>
+<p>运行时 UI 和相机拾取使用 Game 视口坐标。需要把屏幕点转换为世界射线时，再交给活动 Camera。</p>
+<p>光标锁定是一种明确状态：相对视角控制时锁定，菜单中解锁，并始终保留可预测的退出方式。</p>
+<h2 id="_4">时间域<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>值</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>回调参数 <code>delta_time</code></td>
+<td>当前渲染帧经过的缩放时间</td>
+</tr>
+<tr>
+<td><code>Time.fixed_delta_time</code></td>
+<td>固定模拟间隔</td>
+</tr>
+<tr>
+<td><code>Time.unscaled_delta_time</code></td>
+<td>不受 <code>time_scale</code> 影响的帧时长</td>
+</tr>
+<tr>
+<td><code>Time.time</code></td>
+<td>游戏开始后的缩放时间</td>
+</tr>
+<tr>
+<td><code>Time.realtime_since_startup</code></td>
+<td>不受暂停影响的实际运行时间</td>
+</tr>
+<tr>
+<td><code>Time.time_scale</code></td>
+<td>缩放玩法时间的倍率</td>
+</tr>
+</tbody>
+</table>
+<p>会随游戏减速或暂停的行为使用缩放时间；暂停菜单、无障碍提示等在玩法暂停时仍需运行的 UI 使用非缩放时间。</p>
+<h2 id="update-fixed_update">update 还是 fixed_update？<a class="headerlink" href="#update-fixed_update" title="Permanent link">&para;</a></h2>
+<ul>
+<li>在 <code>update(delta_time)</code> 读取即时输入边沿。</li>
+<li>在 <code>fixed_update(fixed_delta_time)</code> 执行物理决策。</li>
+<li>输入需要驱动物理时，在 <code>update</code> 保存意图，再在 <code>fixed_update</code> 消费该状态。</li>
+</ul>
+<p>不要假设一个渲染帧等于一个物理步。慢帧可能执行多个固定步，快帧也可能在下一个固定步之前完成渲染。</p>
+<h2 id="_5">常见失败<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<h3 id="_6">按住按键后跳跃反复触发<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p>一次性动作使用 <code>get_key_down</code>，而不是 <code>get_key</code>。</p>
+<h3 id="_7">移动速度随帧率变化<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<p>把速度表示为每秒单位，并乘以回调提供的 <code>delta_time</code>。</p>
+<h3 id="_8">点击编辑器面板也触发游戏输入<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
+<p>检查 Game 焦点，并使用 Game 视口鼠标坐标。</p>
+<h3 id="_9">暂停菜单动画也停止了<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h3>
+<p>使用非缩放时间驱动，而不是缩放玩法时间。</p>
+<h2 id="_10">相关参考<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../api/Input.html">Input</a></li>
+<li><a href="../api/KeyCode.html">KeyCode</a></li>
+<li><a href="../api/Time.html">Time</a></li>
+<li><a href="../api/Camera.html">Camera</a></li>
+<li><a href="../api/InxComponent.html">InxComponent 生命周期</a></li>
+</ul>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <script src="/js/main.js?v=2"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.ns-hd').forEach(function(h) {
+            h.addEventListener('click', function() { this.classList.toggle('open'); });
+        });
+    });
+    </script>
+</body>
+</html>

@@ -542,13 +542,19 @@ def create_prefab_from_gameobject(game_object, current_path: str,
     if game_object is None or not current_path:
         return False, "Invalid parameters"
 
-    from Infernux.engine.prefab_manager import save_prefab, PREFAB_EXTENSION
+    from Infernux.engine.prefab_manager import (
+        PREFAB_EXTENSION,
+        _link_created_prefab_source,
+        save_prefab,
+    )
 
     prefab_name = get_unique_name(current_path, game_object.name, PREFAB_EXTENSION)
     file_path = os.path.join(current_path, prefab_name + PREFAB_EXTENSION)
 
     if save_prefab(game_object, file_path, asset_database=asset_database,
                    source_canvas_name=source_canvas_name):
+        if not _link_created_prefab_source(game_object, file_path, asset_database):
+            return False, "Prefab asset was saved, but its source hierarchy could not be linked"
         return True, file_path
     return False, "Failed to save prefab"
 
@@ -754,7 +760,7 @@ def create_timelinefsm(current_path: str, fsm_name: str, asset_database=None):
 # ---------------------------------------------------------------------------
 
 def _detach_prefab_instances(prefab_path: str, asset_database=None):
-    """Clear prefab_guid/prefab_root on all scene objects linked to this prefab."""
+    """Clear prefab linkage for live instances and return the changed count."""
     guid = ""
     if asset_database:
         try:
@@ -762,20 +768,24 @@ def _detach_prefab_instances(prefab_path: str, asset_database=None):
         except Exception:
             pass
     if not guid:
-        return
+        return 0
 
     from Infernux.lib import SceneManager
     scene = SceneManager.instance().get_active_scene()
     if scene is None:
-        return
+        return 0
+
+    detached = 0
 
     def _walk(objects):
+        nonlocal detached
         for obj in objects:
             try:
                 obj_guid = getattr(obj, 'prefab_guid', '')
                 if obj_guid == guid:
                     obj.prefab_guid = ""
                     obj.prefab_root = False
+                    detached += 1
                 children = list(obj.get_children()) if hasattr(obj, 'get_children') else []
                 _walk(children)
             except Exception:
@@ -786,12 +796,19 @@ def _detach_prefab_instances(prefab_path: str, asset_database=None):
         _walk(roots)
     except Exception as _exc:
         Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+    if detached:
+        from Infernux.engine.scene_manager import SceneFileManager
+
+        manager = SceneFileManager.instance()
+        if manager is not None:
+            manager.mark_dirty()
+    return detached
 
 
 def delete_item(item_path: str, asset_database=None):
     """Delete a file or directory from the filesystem and notify AssetDatabase."""
     if not item_path or not os.path.exists(item_path):
-        return
+        return False
 
     is_dir = os.path.isdir(item_path)
     if is_dir or item_path.lower().endswith('.py'):
@@ -834,14 +851,15 @@ def delete_item(item_path: str, asset_database=None):
                     f"Cannot delete '{os.path.basename(item_path)}': "
                     f"file may be in use by another process. ({last_exc})"
                 )
-                return
+                return False
     except OSError as _exc:
         Debug.log_warning(f"Delete failed: {type(_exc).__name__}: {_exc}")
-        return
+        return False
 
     # Invalidate inspector cache so a recreated file won't reuse stale data
     from . import asset_details_renderer
     asset_details_renderer.invalidate_asset(item_path)
+    return True
 
 
 def do_rename(old_path: str, new_name: str, asset_database=None):

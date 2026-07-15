@@ -19,7 +19,6 @@ Example:
 """
 
 from typing import Optional, Dict, Any, Type, TYPE_CHECKING, List
-import copy
 import threading
 import weakref
 
@@ -318,18 +317,18 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
 
     def _init_serialized_fields(self):
         """Initialize all serialized fields with their default values."""
-        from .serialized_field import get_serialized_fields, SerializedFieldDescriptor
+        from .serialized_field import (
+            SerializedFieldDescriptor,
+            copy_serialized_field_default,
+            get_serialized_fields,
+        )
         fields = get_serialized_fields(self.__class__)
         for name, metadata in fields.items():
             descriptor = next(
                 (base.__dict__[name] for base in self.__class__.__mro__ if name in base.__dict__),
                 None,
             )
-            try:
-                default_value = copy.deepcopy(metadata.default)
-            except Exception as exc:
-                # Some defaults (e.g. lambdas, C++ objects) can't be deepcopied
-                default_value = metadata.default
+            default_value = copy_serialized_field_default(metadata)
 
             if isinstance(descriptor, SerializedFieldDescriptor):
                 # CDS-backed fields: write default to C++ store.

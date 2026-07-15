@@ -274,7 +274,16 @@ class WindowManager:
         instance = self._window_instances.get(window_id)
         if instance is None:
             raise RuntimeError(f"Window '{window_id}' has no instance to close")
+        request_close = getattr(instance, "request_close", None)
+        if callable(request_close) and not bool(request_close()):
+            return
         self._set_instance_open(instance, False)
+        try:
+            from Infernux.engine.project_context import clear_panel_tracking
+
+            clear_panel_tracking(window_id)
+        except Exception:
+            pass
         self._notify_state_changed()
 
         if state is WindowState.OPENING and window_id not in self._registered_instance_ids:

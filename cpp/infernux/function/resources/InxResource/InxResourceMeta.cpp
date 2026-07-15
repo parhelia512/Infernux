@@ -5,6 +5,7 @@
 #include <platform/filesystem/DocumentStore.h>
 #include <platform/filesystem/InxPath.h>
 
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -12,6 +13,7 @@
 #include <functional>
 #include <iomanip>
 #include <limits>
+#include <mutex>
 #include <random>
 #include <sstream>
 
@@ -39,6 +41,72 @@ std::string ComputeContentHashHex(const char *content, size_t contentSize)
     ss << std::hex << std::setfill('0') << std::setw(16) << hash;
     return ss.str();
 }
+
+std::string GenerateGuid()
+{
+    static std::mutex mutex;
+    static std::mt19937_64 generator = [] {
+        std::random_device device;
+        std::array<uint32_t, 10> seedData{};
+        for (auto &value : seedData)
+            value = device();
+
+        const auto timestamp =
+            static_cast<uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+        seedData[8] ^= static_cast<uint32_t>(timestamp);
+        seedData[9] ^= static_cast<uint32_t>(timestamp >> 32u);
+        std::seed_seq seed(seedData.begin(), seedData.end());
+        return std::mt19937_64(seed);
+    }();
+
+    uint64_t hi = 0;
+    uint64_t lo = 0;
+    {
+        std::lock_guard lock(mutex);
+        hi = generator();
+        lo = generator();
+    }
+
+    std::stringstream stream;
+    stream << std::hex << std::setfill('0') << std::setw(16) << hi << std::setw(16) << lo;
+    return stream.str();
+}
+
+std::string NormalizeMetadataFilePath(const std::string &filePath)
+{
+    if (filePath.empty())
+        return {};
+
+    std::error_code error;
+    std::filesystem::path normalized = ToFsPath(filePath);
+    if (normalized.is_relative()) {
+        auto absolute = std::filesystem::absolute(normalized, error);
+        if (!error)
+            normalized = std::move(absolute);
+        error.clear();
+    }
+    if (std::filesystem::exists(normalized, error)) {
+        auto canonical = std::filesystem::weakly_canonical(normalized, error);
+        if (!error)
+            normalized = std::move(canonical);
+        error.clear();
+    }
+
+#ifdef INX_PLATFORM_WINDOWS
+    const std::wstring native = normalized.native();
+    const DWORD required = GetLongPathNameW(native.c_str(), nullptr, 0);
+    if (required > 0) {
+        std::wstring expanded(static_cast<size_t>(required), L'\0');
+        const DWORD written = GetLongPathNameW(native.c_str(), expanded.data(), required);
+        if (written > 0 && written < required) {
+            expanded.resize(static_cast<size_t>(written));
+            normalized = std::filesystem::path(std::move(expanded));
+        }
+    }
+#endif
+
+    return FromFsPath(normalized.lexically_normal());
+}
 } // namespace
 
 // ----------------------------------
@@ -47,7 +115,7 @@ std::string ComputeContentHashHex(const char *content, size_t contentSize)
 void InxResourceMeta::Init(const char *content, size_t contentSize, const std::string &filePath, ResourceType type)
 {
     // Store resource path in metadata (always forward-slash UTF-8 for stable lookups)
-    AddMetadata("file_path", FromFsPath(ToFsPath(filePath)));
+    AddMetadata("file_path", NormalizeFilePath(filePath));
     // Set resource type
     AddMetadata("resource_type", type);
 
@@ -56,16 +124,7 @@ void InxResourceMeta::Init(const char *content, size_t contentSize, const std::s
 
     // Generate a random GUID (stable once stored in .meta)
     // This remains unchanged across moves/renames because the meta is preserved.
-    std::random_device rd;
-    std::mt19937_64 gen(rd());
-    std::uniform_int_distribution<uint64_t> dist;
-    uint64_t hi = dist(gen);
-    uint64_t lo = dist(gen);
-    std::stringstream guidSs;
-    guidSs << std::hex << std::setfill('0') << std::setw(16) << hi << std::setw(16) << lo;
-    std::string guid = guidSs.str();
-
-    AddMetadata("guid", guid);
+    AddMetadata("guid", GenerateGuid());
 
     AddMetadata("importer_version", ImporterVersion);
 
@@ -136,7 +195,7 @@ void InxResourceMeta::UpdateFilePath(const std::string &newFilePath)
 {
     // Update file_path but keep the same GUID
     // This is used for move/rename operations
-    AddMetadata("file_path", newFilePath);
+    AddMetadata("file_path", NormalizeFilePath(newFilePath));
 
     // Update last_modified time
     try {
@@ -170,6 +229,11 @@ const ResourceType &InxResourceMeta::GetResourceType() const
 std::string InxResourceMeta::GetMetaFilePath(const std::string &resourceFilePath)
 {
     return resourceFilePath + ".meta";
+}
+
+std::string InxResourceMeta::NormalizeFilePath(const std::string &filePath)
+{
+    return NormalizeMetadataFilePath(filePath);
 }
 
 nlohmann::json InxResourceMeta::SerializeDocument() const

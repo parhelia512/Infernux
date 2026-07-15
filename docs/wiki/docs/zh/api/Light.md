@@ -11,7 +11,9 @@
 为场景提供照明的光源组件。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+根据场景尺度选择 Light 类型、范围、强度、颜色和阴影。先确认无阴影光照，再启用阴影并调整 Bias。
 <!-- USER CONTENT END -->
 
 ## 属性
@@ -58,12 +60,23 @@
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for Light
+from Infernux import GameObject, Light, LightType
+
+light_object = GameObject.find("Key Light")
+if light_object is not None:
+    light = light_object.get_component(Light)
+    if light is not None:
+        light.light_type = LightType.Point
+        light.intensity = 2.0
+        light.range = 12.0
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [3D 基础](../learn/3d-foundations.md)
+- [LightType](LightType.md)
+- [MeshRenderer](MeshRenderer.md)
+- [渲染与 RenderStack](../manual/rendering-and-renderstack.md)
 <!-- USER CONTENT END -->

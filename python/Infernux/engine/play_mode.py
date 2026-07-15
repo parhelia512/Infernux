@@ -106,6 +106,9 @@ class PlayModeManager(PlayModeSerializationMixin):
 
         # C++ engine handle for renderer-level play mode signalling
         self._native_engine = None
+        # Debug automation installs this gate only while a bounded frame task
+        # is active. Normal editor frames pay only the inactive None check.
+        self._debug_frame_pause_gate: Optional[dict] = None
     
     @classmethod
     def instance(cls) -> Optional['PlayModeManager']:
@@ -346,6 +349,7 @@ class PlayModeManager(PlayModeSerializationMixin):
         #    - Toolbar shows "Play" right away
         #    - No deferred scene loads from user scripts are processed
         self._state = PlayModeState.EDIT
+        self._cancel_debug_frame_pause_gate()
 
         # Re-enable material auto-save now that play mode is over.
         try:
@@ -487,6 +491,70 @@ class PlayModeManager(PlayModeSerializationMixin):
             dt = self._delta_time if self._delta_time > 0 else (1.0 / 60.0)
             scene_manager.step(dt)
             Debug.log_internal(f"[Step] Stepped one frame (dt={dt:.4f}s)")
+
+    def _arm_debug_frame_pause_gate(
+        self,
+        frame_count: int,
+        completion_event,
+        *,
+        pause_on_complete: bool,
+        hold_frame_count: int = 0,
+        hold_complete_event=None,
+        hold_complete_callback=None,
+    ) -> None:
+        frames = int(frame_count)
+        if frames < 1:
+            raise ValueError("frame_count must be positive")
+        hold_frames = int(hold_frame_count)
+        if hold_frames < 0 or hold_frames > frames:
+            raise ValueError("hold_frame_count must be between 0 and frame_count")
+        self._cancel_debug_frame_pause_gate()
+        self._debug_frame_pause_gate = {
+            "remaining": frames,
+            "target": frames,
+            "completion_event": completion_event,
+            "pause_on_complete": bool(pause_on_complete),
+            "hold_frame_count": hold_frames,
+            "hold_complete_event": hold_complete_event,
+            "hold_complete_callback": hold_complete_callback,
+            "hold_complete": False,
+        }
+
+    def _cancel_debug_frame_pause_gate(self) -> None:
+        gate = self._debug_frame_pause_gate
+        self._debug_frame_pause_gate = None
+        if gate is not None:
+            event = gate.get("completion_event")
+            if event is not None:
+                event.set()
+
+    def _advance_debug_frame_pause_gate(self) -> bool:
+        gate = self._debug_frame_pause_gate
+        if gate is None or self._state != PlayModeState.PLAYING:
+            return False
+        remaining = int(gate.get("remaining", 0))
+        if remaining > 0:
+            remaining -= 1
+            gate["remaining"] = remaining
+            completed = int(gate.get("target", 0)) - remaining
+            hold_frames = int(gate.get("hold_frame_count", 0))
+            if hold_frames and completed >= hold_frames and not bool(gate.get("hold_complete")):
+                gate["hold_complete"] = True
+                callback = gate.get("hold_complete_callback")
+                if callback is not None:
+                    callback()
+                event = gate.get("hold_complete_event")
+                if event is not None:
+                    event.set()
+            return False
+
+        self._debug_frame_pause_gate = None
+        if bool(gate.get("pause_on_complete")):
+            self.pause()
+        event = gate.get("completion_event")
+        if event is not None:
+            event.set()
+        return True
     
     # ========================================================================
     # Game Loop Integration
@@ -503,6 +571,10 @@ class PlayModeManager(PlayModeSerializationMixin):
         """
         if self._state == PlayModeState.EDIT:
             return
+
+        if self._debug_frame_pause_gate is not None:
+            if self._advance_debug_frame_pause_gate() and self._state == PlayModeState.PAUSED:
+                return
 
         # --- Process deferred scene loads (must run outside C++ iteration) ---
         from Infernux.scene import SceneManager as _SceneMgr
@@ -787,17 +859,24 @@ class PlayModeManager(PlayModeSerializationMixin):
             return
         from Infernux.engine.scene_manager import SceneFileManager
         sfm = SceneFileManager.instance()
-        if sfm and sfm.current_scene_path != self._scene_path_backup:
+        if sfm is None:
+            return
+        path_changed = sfm.current_scene_path != self._scene_path_backup
+        if path_changed:
             Debug.log_internal(
                 f"Restoring editor scene path: "
                 f"{os.path.basename(self._scene_path_backup)}"
             )
-            sfm._current_scene_path = self._scene_path_backup
-            sfm._dirty = self._scene_dirty_backup
-            # Restore the editor camera to the position saved for this scene
+        sfm._current_scene_path = self._scene_path_backup
+        sfm._dirty = self._scene_dirty_backup
+        if path_changed:
             sfm._restore_camera_state(self._scene_path_backup)
             if sfm._on_scene_changed:
                 sfm._on_scene_changed()
+        # A runtime transition from an older engine may already have persisted
+        # its destination. Always reassert the authored scene at the Stop
+        # boundary so the next Editor launch returns to the pre-play document.
+        sfm._remember_last_scene(self._scene_path_backup)
     
     # ========================================================================
     # Event System

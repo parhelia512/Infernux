@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>构建并分享项目 - Infernux Scripting API</title>
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="stylesheet" href="/css/style.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ======================================================
+           Infernux API Reference — Unity-Inspired Dark Theme
+           ====================================================== */
+
+        /* Layout */
+        .api-layout {
+            display: flex;
+            min-height: calc(100vh - var(--nav-height));
+            padding-top: var(--nav-height);
+        }
+
+        /* ---- Sidebar ---- */
+        .api-sidebar {
+            width: 280px;
+            background: #0b0b12;
+            border-right: 1px solid var(--border);
+            position: sticky;
+            top: var(--nav-height);
+            height: calc(100vh - var(--nav-height));
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        .api-sidebar::-webkit-scrollbar { width: 5px; }
+        .api-sidebar::-webkit-scrollbar-track { background: transparent; }
+        .api-sidebar::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+
+        .sidebar-hdr {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .sidebar-hdr h3 {
+            margin: 0;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+        }
+
+        /* Language toggle */
+        .lang-sw {
+            display: flex;
+            gap: 1px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .lang-sw a {
+            padding: 3px 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            background: var(--bg-elevated);
+            text-decoration: none;
+            transition: all 0.12s;
+        }
+        .lang-sw a.on {
+            background: var(--primary);
+            color: #fff;
+        }
+        .lang-sw a:hover:not(.on) {
+            color: var(--text-primary);
+            background: var(--bg-hover);
+        }
+
+        /* Namespace tree */
+        .ns-tree { padding: 6px 0 20px; }
+
+        .ns-group { margin-bottom: 1px; }
+
+        .ns-hd {
+            display: flex;
+            align-items: center;
+            padding: 7px 16px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.1s;
+        }
+        .ns-hd:hover { background: rgba(255,255,255,0.025); }
+
+        .ns-arr {
+            width: 14px;
+            font-size: 0.5rem;
+            color: #555;
+            transition: transform 0.15s;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+        .ns-hd.open .ns-arr { transform: rotate(90deg); }
+
+        .ns-nm {
+            font-size: 0.84rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        .ns-hd.hi .ns-nm { color: var(--primary); }
+
+        .ns-ch {
+            display: none;
+            padding: 2px 0 4px;
+        }
+        .ns-hd.open + .ns-ch { display: block; }
+
+        .ns-ch a {
+            display: block;
+            padding: 3px 16px 3px 38px;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.1s, background 0.1s;
+            border-left: 2px solid transparent;
+        }
+        .ns-ch a:hover {
+            color: var(--text-primary);
+            background: rgba(255,255,255,0.02);
+        }
+        .ns-ch a.cur {
+            color: var(--text-primary);
+            background: rgba(255,107,53,0.07);
+            border-left-color: var(--primary);
+            font-weight: 600;
+        }
+
+        /* ---- Content ---- */
+        .api-main {
+            flex: 1;
+            padding: 36px 56px 80px;
+            max-width: 880px;
+            min-width: 0;
+        }
+
+        /* H1 — class name */
+        .api-main h1 {
+            font-size: 1.85rem;
+            font-weight: 700;
+            margin: 0 0 4px;
+            padding: 0;
+            border: none;
+            color: var(--text-primary);
+        }
+
+        /* "class in Package" subtitle */
+        .api-main .class-info {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            margin-bottom: 22px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--border);
+        }
+        .api-main .class-info b { color: var(--text-secondary); }
+        .api-main .class-info a { color: var(--primary); }
+
+        /* H2 — section headers */
+        .api-main h2 {
+            font-size: 0.92rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted);
+            margin: 30px 0 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .api-main h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin: 18px 0 6px;
+        }
+
+        /* Paragraphs */
+        .api-main p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.75;
+            margin-bottom: 12px;
+        }
+
+        .api-main blockquote {
+            margin: 12px 0;
+            padding: 10px 16px;
+            background: rgba(255,107,53,0.04);
+            border-left: 3px solid var(--primary);
+            border-radius: 0 4px 4px 0;
+        }
+        .api-main blockquote p { margin: 0; font-size: 0.85rem; }
+
+        /* Tables — Unity style: hidden header, 2-col */
+        .api-main table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 4px 0 18px;
+        }
+        .api-main thead { display: none; }
+
+        .api-main tbody tr {
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .api-main tbody tr:last-child { border-bottom: none; }
+
+        .api-main td {
+            padding: 7px 0;
+            font-size: 0.86rem;
+            vertical-align: top;
+        }
+        .api-main td:first-child {
+            width: 200px;
+            padding-right: 20px;
+            color: var(--primary);
+            font-size: 0.86rem;
+            font-weight: 500;
+        }
+        .api-main td:last-child { color: var(--text-secondary); }
+        .api-main td a { color: var(--primary); }
+        .api-main tbody tr:hover { background: rgba(255,255,255,0.012); }
+
+        /* Inline code — normal font, subtle highlight */
+        .api-main code {
+            font-family: inherit;
+            font-size: inherit;
+            background: rgba(255,255,255,0.06);
+            padding: 1px 5px;
+            border-radius: 3px;
+            color: var(--primary-light);
+        }
+
+        /* Code blocks */
+        .api-main pre {
+            background: #0d0d15;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px 20px;
+            overflow-x: auto;
+            margin: 10px 0 18px;
+        }
+        .api-main pre code {
+            font-family: var(--font-mono);
+            background: none;
+            padding: 0;
+            font-size: 0.83rem;
+            line-height: 1.65;
+            color: var(--text-secondary);
+        }
+
+        /* Lists */
+        .api-main ul, .api-main ol { padding-left: 18px; margin-bottom: 12px; }
+        .api-main li {
+            margin-bottom: 4px;
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+            line-height: 1.6;
+        }
+
+        .api-main hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 26px 0;
+        }
+
+        /* ---- Footer ---- */
+        .api-ft { margin-left: 280px; }
+        .api-ft .footer-bottom p { font-size: 0.8rem; }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 1024px) {
+            .api-sidebar { width: 240px; }
+            .api-main { padding: 28px 32px 60px; }
+            .api-ft { margin-left: 240px; }
+        }
+        @media (max-width: 768px) {
+            .api-layout { flex-direction: column; }
+            .api-sidebar {
+                width: 100%; position: relative; top: 0;
+                height: auto; max-height: 50vh;
+                border-right: none; border-bottom: 1px solid var(--border);
+            }
+            .api-main { padding: 20px; max-width: 100%; }
+            .api-ft { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Top Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links">
+                <a href="/index.html">首页</a>
+                <a href="/index.html#system">特性</a>
+                <a href="/index.html#capabilities">能力</a>
+                <a href="/roadmap.html">路线图</a>
+                <a href="/wiki.html" class="active">文档</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank">
+                    <i class="fab fa-github"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell" style="padding-top: calc(var(--nav-height) + 60px); min-height: 80vh; padding-bottom: 80px;">
+        <div class="container" style="max-width: 860px; margin: 0 auto;">
+            <div class="api-main" style="padding: 0; max-width: none;">
+                <h1 id="_1">构建并分享项目<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>这份教程会把已在编辑器中验证的项目变成 Windows 独立构建，当前针对 <strong>0.2.1 预览版</strong>构建流程。</p>
+<p><strong>预计时间：</strong> 构建依赖可用后约 10–20 分钟。</p>
+<h2 id="_2">开始之前<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<ul>
+<li>项目能够打开，Console 不反复输出异常。</li>
+<li>至少有一个场景已保存到项目中。</li>
+<li>场景能够在 Play 模式正常运行。</li>
+<li>有一个空间充足、可写的输出目录。</li>
+</ul>
+<h2 id="1-build-settings">1. 打开 Build Settings<a class="headerlink" href="#1-build-settings" title="Permanent link">&para;</a></h2>
+<p>打开编辑器的 <strong>Build Settings</strong> 窗口。它负责有序场景列表与独立播放器配置。</p>
+<p>把当前打开的场景加入列表。未保存的场景无法加入，因为构建需要稳定的项目相对路径。把运行时可能加载的所有场景都加入列表，并主动安排顺序：构建索引 <code>0</code> 是启动场景。</p>
+<h3 id="_3">检查点<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>场景列表至少包含一个有效的已保存场景，并且没有路径缺失警告。</p>
+<h2 id="2">2. 配置播放器<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<p>第一次构建需要设置：</p>
+<ul>
+<li><strong>游戏名称：</strong> 可执行文件和面向用户的产品名。</li>
+<li><strong>输出目录：</strong> 独立、空白或可随时清理的构建目录。</li>
+<li><strong>显示模式：</strong> 窗口或适合项目的全屏模式。</li>
+<li><strong>窗口大小与可调整状态：</strong> 首次运行时的窗口行为。</li>
+<li><strong>图标与启动画面：</strong> 第一次验证构建可以暂时省略。</li>
+<li><strong>Debug / JIT / LTO：</strong> 基础构建成功前保持预览版默认设置。</li>
+</ul>
+<p>不要把项目目录本身选作输出目录。构建流程会创建并清理生成文件；分离输出能保护项目资源，也能清楚展示真正需要分发的内容。</p>
+<h2 id="3">3. 执行构建<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<p>选择 <strong>Build</strong> 只生成独立产物，或选择 <strong>Build and Run</strong> 在打包后由编辑器启动结果。</p>
+<p>流水线会验证项目与场景列表、编译播放器、复制资源、处理启动内容、写入构建清单并完成最终清理。构建停止时优先处理第一条错误；后续消息可能只是失败后的清理结果。</p>
+<h3 id="_4">预期结果<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>Build Settings 报告成功并给出最终输出目录。目录中包含可执行文件及其需要的运行时文件。</p>
+<h2 id="4">4. 在编辑器之外测试<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
+<p>关闭或最小化编辑器，直接从输出目录启动可执行文件。</p>
+<p>逐项验证：</p>
+<ul>
+<li>启动场景正确；</li>
+<li>编辑器不占用焦点时输入仍然工作；</li>
+<li>场景切换能加载 Build Settings 中的全部场景；</li>
+<li>纹理、音频、脚本与其他必要资源都存在；</li>
+<li>窗口大小、全屏行为、标题与图标符合配置；</li>
+<li>干净启动不依赖输出目录之外的文件。</li>
+</ul>
+<p>只测试 <strong>Build and Run</strong> 不够。可分享构建还必须能从打包目录直接运行。</p>
+<h2 id="5">5. 制作分享压缩包<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<p>退出游戏，压缩<strong>完整输出目录</strong>，不要只复制 <code>.exe</code>。保持目录结构不变。发布前：</p>
+<ol>
+<li>把压缩包解压到另一个本地目录；</li>
+<li>启动解压后的副本；</li>
+<li>测试启动场景与至少一次场景切换；</li>
+<li>在发布说明中注明引擎版本与已知预览限制。</li>
+</ol>
+<h2 id="_5">常见失败<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<h3 id="build">Build 按钮不可用<a class="headerlink" href="#build" title="Permanent link">&para;</a></h3>
+<ul>
+<li>保存当前场景。</li>
+<li>至少把一个场景加入 Build Settings。</li>
+<li>选择有效且可写的输出目录。</li>
+</ul>
+<h3 id="_6">运行时打开了错误场景<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p>把目标启动场景移动到构建索引 <code>0</code>，保存 Build Settings 后重新构建。</p>
+<h3 id="_7">资源在编辑器中正常，但构建后缺失<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li>确认资源位于项目内部，并使用项目相对引用。</li>
+<li>阅读最早出现的资源复制或加载错误。</li>
+<li>输出到干净目录，避免旧文件干扰判断。</li>
+</ul>
+<h3 id="_8">可执行文件只能在开发机器上运行<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
+<p>在干净的 Windows 环境测试完整输出目录。不要从运行时目录中单独拿走可执行文件分发。</p>
+<h2 id="_9">完成标准<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<p>把压缩包重新解压后，不启动编辑器也能运行；启动场景、输入、资源加载和退出都正常，才算完成。</p>
+<p>接下来可返回<a href="../manual/engine-map.html">引擎地图</a>，或在制作多关卡前阅读<a href="../manual/scenes-and-objects.html">场景与对象</a>。</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <script src="/js/main.js?v=2"></script>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.ns-hd').forEach(function(h) {
+            h.addEventListener('click', function() { this.classList.toggle('open'); });
+        });
+    });
+    </script>
+</body>
+</html>

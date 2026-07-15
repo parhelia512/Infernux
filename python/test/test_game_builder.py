@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import sys
+import threading
+import time
+from types import SimpleNamespace
 
 import pytest
 
+from Infernux.engine.build_cancellation import BuildCancelled
 from Infernux.engine.game_builder import BuildOutputDirectoryError, GameBuilder
 from Infernux.engine import nuitka_builder as nuitka_builder_module
 from Infernux.engine.nuitka_builder import NuitkaBuilder
@@ -34,7 +40,151 @@ def _write_asset_script(project_root, relative_path: str, source: str) -> None:
     script_path.write_text(source, encoding="utf-8")
 
 
+def test_build_cancellation_is_not_reported_as_a_build_failure(tmp_path, monkeypatch):
+    builder = _make_builder(tmp_path, tmp_path / "build_output")
+    error_messages: list[str] = []
+    monkeypatch.setattr(builder, "_build_inner", lambda *_args, **_kwargs: (_ for _ in ()).throw(BuildCancelled()))
+    monkeypatch.setattr("Infernux.engine.game_builder.Debug.log_error", error_messages.append)
+
+    with pytest.raises(BuildCancelled):
+        builder.build()
+
+    build_log = (tmp_path / "project" / "Logs" / "build.log").read_text(encoding="utf-8")
+    assert "Build cancelled by user." in build_log
+    assert "BUILD FAILED" not in build_log
+    assert error_messages == []
+
+
+def test_nuitka_cancellation_does_not_wait_for_the_next_stdout_line(tmp_path, monkeypatch):
+    monkeypatch.setattr(nuitka_builder_module, "_ensure_windows_msvc_environment", lambda env: env)
+    builder = object.__new__(NuitkaBuilder)
+    builder._staging_dir = str(tmp_path)
+    cancelled = threading.Event()
+    cancelled.set()
+
+    started = time.perf_counter()
+    with pytest.raises(BuildCancelled):
+        builder._run_nuitka(
+            [sys.executable, "-u", "-c", "import time; time.sleep(30)"],
+            on_progress=None,
+            cancel_event=cancelled,
+        )
+
+    assert time.perf_counter() - started < 2.5
+
+
+def test_player_always_raw_copies_numpy_when_jit_is_disabled(tmp_path, monkeypatch):
+    captured: dict = {}
+
+    class _FakeNuitkaBuilder:
+        _JIT_NOFOLLOW_PACKAGES = NuitkaBuilder._JIT_NOFOLLOW_PACKAGES
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def build(self, **_kwargs):
+            return str(tmp_path / "dist")
+
+    monkeypatch.setattr("Infernux.engine.game_builder.NuitkaBuilder", _FakeNuitkaBuilder)
+    builder = _make_builder(tmp_path, tmp_path / "build_output")
+    builder.enable_jit = False
+
+    result = builder._run_nuitka(
+        str(tmp_path / "boot.py"),
+        on_progress=None,
+        user_packages=[],
+    )
+
+    assert result == str(tmp_path / "dist")
+    assert captured["raw_copy_packages"] == ["numpy"]
+
+
+def test_player_cleanup_preserves_engine_icon_resources(tmp_path):
+    builder = _make_builder(tmp_path, tmp_path / "build_output")
+    final_dir = tmp_path / "dist"
+    icons = final_dir / "Infernux" / "resources" / "icons"
+    icons.mkdir(parents=True)
+    camera_icon = icons / "gizmo_camera.png"
+    light_icon = icons / "gizmo_light.png"
+    camera_icon.write_bytes(b"camera")
+    light_icon.write_bytes(b"light")
+
+    builder._cleanup_dist(str(final_dir))
+
+    assert camera_icon.read_bytes() == b"camera"
+    assert light_icon.read_bytes() == b"light"
+
+
+def test_code_signing_isolates_windows_powershell_modules(tmp_path, monkeypatch):
+    system_root = tmp_path / "Windows"
+    powershell_root = system_root / "System32" / "WindowsPowerShell" / "v1.0"
+    powershell_exe = powershell_root / "powershell.exe"
+    powershell_exe.parent.mkdir(parents=True)
+    powershell_exe.write_bytes(b"")
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+    (dist_dir / "Game.exe").write_bytes(b"exe")
+
+    monkeypatch.setenv("SystemRoot", str(system_root))
+    monkeypatch.setenv("PSModulePath", "C:/Program Files/PowerShell/7/Modules")
+    observed: dict = {}
+    internal_messages: list[str] = []
+    warnings: list[str] = []
+
+    def _run(command, **kwargs):
+        observed["command"] = command
+        observed.update(kwargs)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "STATUS:UnknownError\n"
+                "MESSAGE:A certificate chain terminated in an untrusted root\n"
+                "SIGNER:AABBCC\n"
+                "CERT:AABBCC\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(nuitka_builder_module.subprocess, "run", _run)
+    monkeypatch.setattr(nuitka_builder_module.Debug, "log_internal", internal_messages.append)
+    monkeypatch.setattr(nuitka_builder_module.Debug, "log_warning", warnings.append)
+    builder = object.__new__(NuitkaBuilder)
+    builder.output_filename = "Game.exe"
+
+    builder._sign_executable(str(dist_dir))
+
+    assert observed["command"][0] == str(powershell_exe)
+    assert "-NoProfile" in observed["command"]
+    assert "-NonInteractive" in observed["command"]
+    assert observed["env"]["PSModulePath"] == str(powershell_root / "Modules")
+    assert "PowerShell/7/Modules" not in observed["env"]["PSModulePath"]
+    assert "Microsoft.PowerShell.Security.psd1" in observed["command"][-1]
+    assert any("local root is not trusted" in message for message in internal_messages)
+    assert warnings == []
+
+
 class TestGameBuilderOutputSafety:
+    def test_debug_player_boot_and_manifest_mark_validation_capability(self, tmp_path):
+        output_dir = tmp_path / "build_output"
+        builder = GameBuilder(
+            str(_make_project(tmp_path)),
+            str(output_dir),
+            game_name="TestGame",
+            debug_mode=True,
+        )
+
+        boot_path = builder._generate_boot_script()
+        boot_source = open(boot_path, "r", encoding="utf-8").read()
+        assert 'os.environ["_INFERNUX_PLAYER_DEBUG_BUILD"] = "1" if _DEBUG_MODE else "0"' in boot_source
+        assert 'if os.environ.get("_INFERNUX_PLAYER_CONTROL_FILE"):' in boot_source
+
+        settings = output_dir / "Data" / "ProjectSettings"
+        settings.mkdir(parents=True)
+        (settings / "BuildSettings.json").write_text(json.dumps({"scenes": ["Assets/Main.scene"]}), encoding="utf-8")
+        builder._generate_manifest(str(output_dir))
+        manifest = json.loads((output_dir / "Data" / "BuildManifest.json").read_text(encoding="utf-8"))
+        assert manifest["debug_build"] is True
+
     def test_validate_rejects_non_empty_unmarked_output_dir(self, tmp_path):
         output_dir = tmp_path / "build_output"
         output_dir.mkdir()

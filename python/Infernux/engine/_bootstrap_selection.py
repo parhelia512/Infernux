@@ -10,32 +10,7 @@ methods, and panel/manager references live on the bootstrap instance.
 """
 
 
-import logging
-import os
-import pathlib
-from typing import Optional
-
-from Infernux.lib import TagLayerManager
-import Infernux.resources as _resources
-from Infernux.engine.engine import Engine, LogLevel
-from Infernux.engine.resources_manager import ResourcesManager
-from Infernux.engine.play_mode import PlayModeManager, PlayModeState
-from Infernux.engine.scene_manager import SceneFileManager
-from Infernux.engine.ui import (
-    SceneViewPanel,
-    GameViewPanel,
-    WindowManager,
-    TagLayerSettingsPanel,
-    BuildSettingsPanel,
-    UIEditorPanel,
-    EditorPanel,
-    EditorServices,
-    EditorEventBus,
-    EditorEvent,
-    PanelRegistry,
-    editor_panel,
-)
-from Infernux.engine.ui import panel_state as _panel_state
+from Infernux.engine.ui.event_bus import EditorEvent
 
 
 class BootstrapSelectionMixin:
@@ -98,7 +73,8 @@ class BootstrapSelectionMixin:
         new_ids = sel.get_ids()
         primary_id = sel.get_primary()
 
-        # Record selection change for undo (skip if caused by undo/redo itself)
+        # Track selection state for structural command restoration. Pure
+        # navigation does not occupy the scene-edit Undo stack.
         self._record_editor_selection_change(new_ids, "")
 
         # Resolve ID → game object for inspector & event bus
@@ -140,7 +116,7 @@ class BootstrapSelectionMixin:
         new_ids = sel.get_ids()
         primary = sel.get_primary()
 
-        # Record selection change for undo
+        # Track selection without adding a scene-edit Undo entry.
         self._record_editor_selection_change(new_ids, "")
 
         self._set_outline(primary, new_ids)
@@ -203,60 +179,14 @@ class BootstrapSelectionMixin:
 
         return True
 
-    @classmethod
-    def _get_structural_types(cls):
-        if cls._STRUCTURAL_CMD_TYPES is None:
-            from Infernux.engine.undo import (
-                CompoundCommand,
-                CreateGameObjectCommand, DeleteGameObjectCommand,
-                ReparentCommand, MoveGameObjectCommand,
-                AddNativeComponentCommand, RemoveNativeComponentCommand,
-                AddPyComponentCommand, RemovePyComponentCommand,
-            )
-            cls._STRUCTURAL_CMD_TYPES = (
-                CompoundCommand,
-                CreateGameObjectCommand, DeleteGameObjectCommand,
-                ReparentCommand, MoveGameObjectCommand,
-                AddNativeComponentCommand, RemoveNativeComponentCommand,
-                AddPyComponentCommand, RemovePyComponentCommand,
-            )
-        return cls._STRUCTURAL_CMD_TYPES
-
     def _record_editor_selection_change(self, new_ids: list, file_path: str):
-        """Push an EditorSelectionCommand when hierarchy/project selection changes.
+        """Track editor navigation without polluting the scene-edit Undo stack.
 
-        Skipped when:
-        - The change is triggered by undo/redo (``is_executing``).
-        - A structural command (create/delete/…) was just pushed in the
-          same synchronous call chain, i.e. the stack top is a structural
-          command with a timestamp < 50 ms ago.  This avoids recording a
-          spurious SelectionCommand that is really a side-effect of the
-          structural operation.
+        Create/delete/reparent commands already restore their relevant
+        selection explicitly. Recording every click here makes Ctrl+Z undo
+        navigation before the property edit the user is trying to revert.
         """
-        import time
-        from Infernux.engine.undo import UndoManager, EditorSelectionCommand
-        mgr = UndoManager.instance()
         next_file = file_path or ""
-        if not mgr or mgr.is_executing:
-            self._prev_selection_ids = list(new_ids)
-            self._prev_selected_file = next_file
-            return
-        if new_ids == self._prev_selection_ids and next_file == self._prev_selected_file:
-            return
-
-        # Skip if the stack top is a structural command from this frame.
-        if mgr._undo_stack:
-            top = mgr._undo_stack[-1]
-            if (isinstance(top, self._get_structural_types())
-                    and (time.time() - top.timestamp) < 0.05):
-                self._prev_selection_ids = list(new_ids)
-                self._prev_selected_file = next_file
-                return
-
-        mgr.record(EditorSelectionCommand(
-            self._prev_selection_ids, self._prev_selected_file,
-            new_ids, next_file,
-            self._apply_editor_selection_undo))
         self._prev_selection_ids = list(new_ids)
         self._prev_selected_file = next_file
 

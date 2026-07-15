@@ -126,6 +126,7 @@ std::shared_ptr<DocumentWriteTicket> DocumentStore::Submit(const std::string &pa
                                                            DocumentWriteOptions options)
 {
     const std::string normalizedPath = NormalizePath(path);
+    const std::string resolvedPath = ResolvePath(path);
     std::shared_ptr<DocumentWriteTicket> superseded;
     std::shared_ptr<DocumentWriteTicket> ticket;
 
@@ -142,7 +143,7 @@ std::shared_ptr<DocumentWriteTicket> DocumentStore::Submit(const std::string &pa
             superseded = existing->second.ticket;
 
         m_pending.insert_or_assign(normalizedPath,
-                                   Request{normalizedPath, normalizedPath, std::move(content), options, ticket});
+                                   Request{normalizedPath, resolvedPath, std::move(content), options, ticket});
         if (m_activePaths.find(normalizedPath) == m_activePaths.end() &&
             m_queuedPaths.find(normalizedPath) == m_queuedPaths.end()) {
             m_readyPaths.push_back(normalizedPath);
@@ -253,7 +254,7 @@ void DocumentStore::Shutdown()
     m_condition.notify_all();
 }
 
-std::string DocumentStore::NormalizePath(const std::string &path)
+std::string DocumentStore::ResolvePath(const std::string &path)
 {
     if (path.empty())
         throw std::invalid_argument("document path must not be empty");
@@ -261,7 +262,12 @@ std::string DocumentStore::NormalizePath(const std::string &path)
     auto absolute = std::filesystem::absolute(std::filesystem::u8path(path), error);
     if (error)
         throw std::invalid_argument("failed to normalize document path '" + path + "': " + error.message());
-    std::string normalized = absolute.lexically_normal().generic_u8string();
+    return absolute.lexically_normal().generic_u8string();
+}
+
+std::string DocumentStore::NormalizePath(const std::string &path)
+{
+    std::string normalized = ResolvePath(path);
 #ifdef _WIN32
     std::transform(normalized.begin(), normalized.end(), normalized.begin(),
                    [](unsigned char value) { return static_cast<char>(std::tolower(value)); });

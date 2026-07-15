@@ -136,6 +136,22 @@ void TestWriterFailurePropagates()
             "failed generation metric was not recorded");
 }
 
+void TestWriterPreservesPathCasing()
+{
+    std::string writtenPath;
+    DocumentStore store([&](const std::string &path, const std::string &, const infernux::DocumentWriteOptions &) {
+        writtenPath = path;
+    });
+    auto ticket = store.Submit("ResultsLightLift.animtimeline", "content");
+    ticket->Wait();
+    store.Shutdown();
+    const std::string expectedSuffix = "ResultsLightLift.animtimeline";
+    Require(
+        writtenPath.size() >= expectedSuffix.size() &&
+            writtenPath.compare(writtenPath.size() - expectedSuffix.size(), expectedSuffix.size(), expectedSuffix) == 0,
+        "writer path casing was not preserved");
+}
+
 void TestQueuedCancellationAndGenerationMetrics()
 {
     std::mutex mutex;
@@ -203,6 +219,7 @@ int main()
         TestShutdownDrainsAndRestarts();
         TestDifferentPathsRunConcurrently();
         TestWriterFailurePropagates();
+        TestWriterPreservesPathCasing();
         TestQueuedCancellationAndGenerationMetrics();
         std::cout << "DocumentStore tests passed\n";
         return 0;

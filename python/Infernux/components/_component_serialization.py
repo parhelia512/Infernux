@@ -9,7 +9,7 @@ class ComponentSerializationMixin:
 
     def _serialize_fields_document(self) -> dict[str, Any]:
         """Encode all serialized fields into the current typed document."""
-        from .serialized_field import get_serialized_fields, get_raw_field_value
+        from .serialized_field import get_raw_field_value, get_serialized_fields
         from .value_codec import VALUE_CODECS
         
         # Call on_before_serialize hook
@@ -42,7 +42,11 @@ class ComponentSerializationMixin:
         _skip_on_after_deserialize: bool = False,
     ) -> None:
         """Restore fields from a typed document, transactionally per component."""
-        from .serialized_field import get_serialized_fields, get_raw_field_value
+        from .serialized_field import (
+            copy_serialized_field_default,
+            get_raw_field_value,
+            get_serialized_fields,
+        )
 
         if not isinstance(data, dict):
             raise TypeError("Python component fields document must be an object")
@@ -65,15 +69,14 @@ class ComponentSerializationMixin:
         metadata_keys = {"__schema_version__", "__type_name__", "__component_id__"}
         document_fields = set(data) - metadata_keys
         expected_fields = set(fields)
-        missing = sorted(expected_fields - document_fields)
         unknown = sorted(document_fields - expected_fields)
         unknown_metadata = sorted(
             key for key in data if key.startswith("__") and key not in metadata_keys
         )
-        if missing or unknown or unknown_metadata:
+        if unknown or unknown_metadata:
             raise ValueError(
                 f"{self.__class__.__name__} field schema mismatch: "
-                f"missing={missing}, unknown={unknown + unknown_metadata}"
+                f"unknown={unknown + unknown_metadata}"
             )
 
         saved_id = data.get("__component_id__")
@@ -82,10 +85,15 @@ class ComponentSerializationMixin:
 
         from .value_codec import VALUE_CODECS
         for name, meta in fields.items():
-            VALUE_CODECS.validate(data[name], meta, f"{self.__class__.__name__}.{name}")
+            if name in data:
+                VALUE_CODECS.validate(data[name], meta, f"{self.__class__.__name__}.{name}")
 
         decoded = {
-            name: self._deserialize_value(data[name], meta)
+            name: (
+                self._deserialize_value(data[name], meta)
+                if name in data
+                else copy_serialized_field_default(meta)
+            )
             for name, meta in fields.items()
         }
         previous_values = {

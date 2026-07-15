@@ -16,6 +16,17 @@ from Infernux.core.vfx_system import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_vfx_panel_dirty_tracking():
+    from Infernux.engine.project_context import clear_panel_tracking
+
+    clear_panel_tracking("vfx_graph_editor")
+    try:
+        yield
+    finally:
+        clear_panel_tracking("vfx_graph_editor")
+
+
 def test_default_vfx_system_has_real_vfx_graph_domain():
     system = VfxSystem()
     assert "vfx" in node_catalog.graph_kinds()
@@ -105,3 +116,121 @@ def test_vfx_editor_shell_opens_and_saves_asset(tmp_path):
     panel._mark_changed()
     assert panel._do_save()
     assert VfxSystem.load(str(path)).name == "Dense Smoke"
+
+
+class _VfxDetailContext:
+    semantic_capture_enabled = True
+
+    def __init__(self, values):
+        self.values = iter(values)
+        self.semantics = []
+
+    def label(self, _label):
+        pass
+
+    def separator(self):
+        pass
+
+    def drag_float(self, *_args):
+        return next(self.values)
+
+    def drag_int(self, *_args):
+        return int(next(self.values))
+
+    def checkbox(self, *_args):
+        return bool(next(self.values))
+
+    def record_semantic_item(self, *args, **kwargs):
+        self.semantics.append((args, kwargs))
+
+
+def test_vfx_node_detail_publishes_stable_typed_parameter_semantics():
+    from Infernux.engine.ui.vfx_graph_editor_panel import VfxGraphEditorPanel
+
+    panel = VfxGraphEditorPanel()
+    emitter = panel.system.emitters[0]
+    spawn = next(node for node in emitter.graph.nodes if node.type_id == "vfx_spawn_rate")
+    velocity = next(node for node in emitter.graph.nodes if node.type_id == "vfx_set_velocity")
+
+    panel._selected_node_uid = spawn.uid
+    scalar_ctx = _VfxDetailContext([24.0])
+    panel._render_node_detail(scalar_ctx)
+    assert scalar_ctx.semantics == [
+        (
+            ("drag_float", "Rate", True, f"vfx.graph.node.{spawn.uid}.parameter.rate"),
+            {"numeric_value": 24.0},
+        )
+    ]
+
+    panel._selected_node_uid = velocity.uid
+    vector_ctx = _VfxDetailContext([0.0, 1.5, -0.5])
+    panel._render_node_detail(vector_ctx)
+    assert [entry[0][3] for entry in vector_ctx.semantics] == [
+        f"vfx.graph.node.{velocity.uid}.parameter.value.x",
+        f"vfx.graph.node.{velocity.uid}.parameter.value.y",
+        f"vfx.graph.node.{velocity.uid}.parameter.value.z",
+    ]
+    assert [entry[1]["numeric_value"] for entry in vector_ctx.semantics] == [0.0, 1.5, -0.5]
+
+
+def test_vfx_node_detail_skips_semantic_string_work_on_ordinary_frames():
+    from Infernux.engine.ui.vfx_graph_editor_panel import VfxGraphEditorPanel
+
+    panel = VfxGraphEditorPanel()
+    spawn = next(
+        node for node in panel.system.emitters[0].graph.nodes if node.type_id == "vfx_spawn_rate"
+    )
+    panel._selected_node_uid = spawn.uid
+    ctx = _VfxDetailContext([10.0])
+    ctx.semantic_capture_enabled = False
+
+    panel._render_node_detail(ctx)
+
+    assert ctx.semantics == []
+
+
+def test_vfx_document_publishes_authoritative_name_path_and_dirty_state(tmp_path):
+    from Infernux.engine.ui.vfx_graph_editor_panel import VfxGraphEditorPanel
+
+    panel = VfxGraphEditorPanel()
+    panel._system.name = "RaceDust"
+    panel._file_path = str(tmp_path / "RaceDust.vfxsystem")
+    panel._dirty = True
+    ctx = _VfxDetailContext([])
+
+    panel._record_document_semantics(ctx)
+
+    by_id = {entry[0][3]: entry for entry in ctx.semantics}
+    assert {entry[0][0] for entry in ctx.semantics} == {"status"}
+    assert by_id["vfx.document.name"][1]["string_value"] == "RaceDust"
+    assert by_id["vfx.document.path"][1]["string_value"] == panel._file_path
+    assert by_id["vfx.document.dirty"][1]["bool_value"] is True
+
+
+def test_deleted_vfx_asset_clears_live_particle_reference_and_marks_scene_dirty(monkeypatch, tmp_path):
+    from Infernux.components.component import InxComponent
+    from Infernux.components.particle_system import ParticleSystem
+    from Infernux.components.serialized_field import get_raw_field_value
+    from Infernux.core.asset_ref import VfxSystemRef
+    from Infernux.engine import asset_reference_cleanup
+
+    path = tmp_path / "RaceDust.vfxsystem"
+    reference = VfxSystemRef(guid="race-dust-guid", path_hint=str(path))
+    reference._cached = VfxSystem(name="RaceDust")
+    particle = ParticleSystem()
+    particle.system = reference
+    particle._runtime = object()
+    dirty_calls = []
+    monkeypatch.setattr(InxComponent, "_active_instances", {11: [particle]})
+    monkeypatch.setattr(asset_reference_cleanup, "_mark_active_scene_dirty", lambda: dirty_calls.append(True))
+
+    result = asset_reference_cleanup.clear_deleted_asset_references("race-dust-guid", str(path))
+
+    raw = get_raw_field_value(particle, "system")
+    assert result["references_cleared"] == 1
+    assert result["components_changed"] == 1
+    assert result["fields"] == [f"ParticleSystem:{particle.component_id}.system"]
+    assert raw.guid == ""
+    assert particle.system is None
+    assert particle._runtime is None
+    assert dirty_calls == [True]

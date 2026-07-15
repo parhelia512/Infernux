@@ -9,7 +9,9 @@ class in <b>Infernux.physics</b>
 Global physics system for raycasting and spatial queries.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+Spatial queries accept layer masks and explicit trigger handling. Keep query volumes and distances bounded, and use the simplest query that answers the gameplay question.
 <!-- USER CONTENT END -->
 
 ## Properties
@@ -45,12 +47,26 @@ Global physics system for raycasting and spatial queries.
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for Physics
+from Infernux import InxComponent, Vector3
+from Infernux.physics import Physics
+
+
+class GroundProbe(InxComponent):
+    def is_grounded(self) -> bool:
+        hit = Physics.raycast(
+            self.transform.position,
+            Vector3(0.0, -1.0, 0.0),
+            max_distance=1.1,
+        )
+        return hit is not None
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [Physics Manual](../manual/physics.md)
+- [Rigidbody](Rigidbody.md)
+- [Collider](Collider.md)
+- [BoxCollider](BoxCollider.md)
 <!-- USER CONTENT END -->

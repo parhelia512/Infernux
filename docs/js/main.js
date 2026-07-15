@@ -11,12 +11,25 @@ function toggleTheme() {
     localStorage.setItem('theme', next);
     updateThemeIcon(next);
     applyNavbarBackground();
+    document.dispatchEvent(new CustomEvent('site:theme-changed', { detail: { theme: next } }));
 }
 
 function updateThemeIcon(theme) {
     const icon = document.getElementById('theme-icon');
-    if (!icon) return;
-    icon.className = theme === 'light' ? 'fas fa-sun' : 'fas fa-moon';
+    const button = document.querySelector('.theme-toggle');
+    if (icon) {
+        icon.className = theme === 'light' ? 'fas fa-sun' : 'fas fa-moon';
+    }
+    if (button) {
+        const isLight = theme === 'light';
+        const zh = document.documentElement.lang?.toLowerCase().startsWith('zh');
+        button.setAttribute('aria-pressed', String(isLight));
+        const label = isLight
+            ? (zh ? '切换到深色主题' : 'Switch to dark theme')
+            : (zh ? '切换到浅色主题' : 'Switch to light theme');
+        button.setAttribute('aria-label', label);
+        button.title = label;
+    }
 }
 
 // Apply saved theme on load
@@ -33,7 +46,21 @@ function updateThemeIcon(theme) {
 // Mobile menu toggle
 function toggleMobileMenu() {
     const navLinks = document.querySelector('.nav-links');
-    navLinks.classList.toggle('mobile-open');
+    if (!navLinks) return;
+    setMobileMenuState(!navLinks.classList.contains('mobile-open'));
+}
+function setMobileMenuState(open) {
+    const navLinks = document.querySelector('.nav-links');
+    const button = document.querySelector('.mobile-menu-btn');
+    if (!navLinks || !button) return;
+    navLinks.classList.toggle('mobile-open', open);
+    button.setAttribute('aria-expanded', String(open));
+    const zh = document.documentElement.lang?.toLowerCase().startsWith('zh');
+    button.setAttribute('aria-label', open
+        ? (zh ? '关闭导航菜单' : 'Close navigation menu')
+        : (zh ? '打开导航菜单' : 'Open navigation menu'));
+    const icon = button.querySelector('i');
+    if (icon) icon.className = open ? 'fas fa-xmark' : 'fas fa-bars';
 }
 
 // Copy code to clipboard
@@ -57,6 +84,9 @@ function copyCode(button) {
 // Smooth scroll for anchor links
 document.addEventListener('DOMContentLoaded', function() {
     applyNavbarBackground();
+    document.querySelectorAll('.nav-links a').forEach(link => {
+        link.addEventListener('click', () => setMobileMenuState(false));
+    });
     const links = document.querySelectorAll('a[href^="#"]');
     
     links.forEach(link => {
@@ -72,7 +102,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 window.scrollTo({
                     top: targetPosition,
-                    behavior: 'smooth'
+                    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
                 });
             }
         });
@@ -94,6 +124,26 @@ function applyNavbarBackground() {
 }
 
 window.addEventListener('scroll', applyNavbarBackground);
+window.addEventListener('resize', () => {
+    if (window.innerWidth > 820) setMobileMenuState(false);
+});
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+        const wasOpen = document.querySelector('.nav-links')?.classList.contains('mobile-open');
+        setMobileMenuState(false);
+        if (wasOpen) document.querySelector('.mobile-menu-btn')?.focus();
+    }
+});
+document.addEventListener('site:language-changed', () => {
+    const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    updateThemeIcon(theme);
+    const zh = document.documentElement.lang?.toLowerCase().startsWith('zh');
+    const languageButton = document.querySelector('.lang-toggle');
+    if (languageButton) languageButton.setAttribute('aria-label', zh ? '切换到英文' : 'Switch to Chinese');
+    const skipLink = document.querySelector('.skip-link');
+    if (skipLink) skipLink.textContent = zh ? '跳到正文' : 'Skip to content';
+    setMobileMenuState(false);
+});
 
 // Add animation classes when elements come into view
 const observerOptions = {
@@ -102,18 +152,25 @@ const observerOptions = {
     threshold: 0.1
 };
 
-const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-        if (entry.isIntersecting) {
-            entry.target.classList.add('animate-in');
-            observer.unobserve(entry.target);
-        }
-    });
-}, observerOptions);
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const observer = !reduceMotion && 'IntersectionObserver' in window
+    ? new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('animate-in');
+                observer.unobserve(entry.target);
+            }
+        });
+    }, observerOptions)
+    : null;
 
 document.addEventListener('DOMContentLoaded', function() {
     const animatedElements = document.querySelectorAll('[data-reveal], .hero-slab, .subpage-hero, .hub-hero, .cta-panel');
     animatedElements.forEach(el => {
+        if (!observer) {
+            el.classList.add('animate-in');
+            return;
+        }
         el.style.opacity = '0';
         el.style.transform = 'translateY(20px)';
         el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
@@ -136,28 +193,3 @@ function showTab(tabId) {
         });
     }
 }
-
-// Add animate-in styles
-document.head.insertAdjacentHTML('beforeend', `
-<style>
-.animate-in {
-    opacity: 1 !important;
-    transform: translateY(0) !important;
-}
-
-.nav-links.mobile-open {
-    display: flex !important;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: var(--bg-panel);
-    flex-direction: column;
-    padding: 20px;
-    gap: 16px;
-    border: 1px solid var(--border);
-    border-radius: 22px;
-    box-shadow: var(--shadow);
-}
-</style>
-`);

@@ -71,6 +71,17 @@ class Infernux
     void ResetImGuiLayout();
     void SelectDockedWindow(const std::string &windowId);
 
+    // Automation input is queued and consumed by the graphical event loop.
+    // It is kept separate from gameplay's InputManager query API.
+    uint64_t QueueSyntheticKeyInput(int scancode, bool pressed, bool repeat = false);
+    uint64_t QueueSyntheticMouseButtonInput(int button, bool pressed, float x, float y);
+    uint64_t QueueSyntheticMouseMotionInput(float x, float y, float deltaX, float deltaY);
+    uint64_t QueueSyntheticMouseWheelInput(float horizontal, float vertical);
+    uint64_t QueueSyntheticTextInput(const std::string &text);
+    uint64_t QueueSyntheticCloseRequest();
+    [[nodiscard]] uint64_t GetLastProcessedSyntheticInputSequence() const;
+    [[nodiscard]] size_t GetPendingSyntheticInputCount() const;
+
     /// @brief Get the asset database instance
     /// @return Pointer to AssetDatabase, or nullptr if not initialized
     AssetDatabase *GetAssetDatabase() const;
@@ -457,6 +468,8 @@ class Infernux
     std::unordered_map<std::string, MaterialPreviewState> m_materialPreviewStates;
     std::unordered_map<std::string, TexturePreviewState> m_texturePreviewStates;
     std::unordered_map<std::string, MeshPreviewState> m_meshPreviewStates;
+    std::atomic_bool m_hasPendingPreviewUploads{false};
+    std::atomic_bool m_hasPreviewPumpWork{false};
     int m_lastPumpFrame = -1;
     std::chrono::steady_clock::time_point m_lastMaterialRenderTime{};
 

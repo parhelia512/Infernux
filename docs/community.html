@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en" data-title-i18n="pageTitle.community">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Join the Infernux community forum, ask questions, share projects, propose ideas, and report reproducible engine bugs through GitHub Discussions and Issues.">
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <link rel="canonical" href="https://infernux-engine.com/community.html">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Infernux · 熔炉">
+    <meta property="og:title" content="Infernux Community">
+    <meta property="og:description" content="A lightweight community forum backed by GitHub Discussions and Issues.">
+    <meta property="og:url" content="https://infernux-engine.com/community.html">
+    <meta property="og:image" content="https://infernux-engine.com/assets/demo.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <title>Infernux · 熔炉 — Community</title>
+    <link rel="icon" type="image/png" href="assets/logo.png">
+    <link rel="apple-touch-icon" href="assets/logo.png">
+    <link rel="manifest" href="site.webmanifest">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+    <link rel="stylesheet" href="css/style.css?v=7">
+    <link rel="stylesheet" href="css/mission.css?v=2">
+    <link rel="stylesheet" href="css/community.css?v=1">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="site-header" role="banner">
+        <div class="mission-ribbon" aria-label="Engine identity strip">
+            <div class="mission-ribbon-inner">
+                <span class="mission-kicker" data-i18n="brand.ribbonKicker">Open engine · release 0.2.1 online</span>
+                <span class="mission-name" data-i18n="brand.ribbonName">INFER<span class="mission-accent">NUX</span></span>
+                <span class="mission-sub" data-i18n="brand.ribbonSub">熔炉 · ENG-CORE</span>
+            </div>
+        </div>
+        <nav class="navbar" aria-label="Primary navigation">
+            <div class="nav-container">
+                <a href="index.html" class="nav-logo">
+                    <span class="logo-icon"><img src="assets/logo.png" alt="Infernux logo"></span>
+                    <span class="logo-text" data-i18n="brand.navShort">熔炉 · INFERNUX</span>
+                </a>
+                <div class="nav-links" id="primary-navigation">
+                    <a href="index.html" data-i18n="nav.home">Home</a>
+                    <a href="index.html#system" data-i18n="nav.features">Principles</a>
+                    <a href="index.html#capabilities" data-i18n="nav.showcase">Capabilities</a>
+                    <a href="roadmap.html" data-i18n="nav.roadmap">Roadmap</a>
+                    <a href="wiki.html" data-i18n="nav.learn">Learn &amp; Docs</a>
+                    <a href="community.html" class="active" data-i18n="nav.community">Community</a>
+                    <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener"><i class="fab fa-github"></i> GitHub</a>
+                </div>
+                <div class="nav-right">
+                    <button class="theme-toggle" type="button" onclick="toggleTheme()" title="Toggle theme" aria-label="Switch color theme" aria-pressed="false"><i class="fas fa-moon" id="theme-icon" aria-hidden="true"></i></button>
+                    <button class="lang-toggle" type="button" onclick="toggleLanguage()" aria-label="Switch language"><span id="lang-text">中文</span></button>
+                    <button class="mobile-menu-btn" type="button" onclick="toggleMobileMenu()" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false"><i class="fas fa-bars" aria-hidden="true"></i></button>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <main class="page-shell community-layout" id="main-content">
+        <div class="container">
+            <section class="subpage-hero community-hero">
+                <div class="hero-codename">
+                    <span class="badge" data-i18n="community.hero.badge">COMMUNITY UPLINK · GITHUB-BACKED</span>
+                    <span data-i18n="community.hero.kicker">Talk · ask · propose · report</span>
+                </div>
+                <h1 data-i18n="community.hero.title">A small forum without a shadow database.</h1>
+                <p data-i18n="community.hero.description">Topics, replies, moderation, and identity remain on GitHub. The website provides a focused doorway; Discussions stores conversations and Issues stores reproducible work.</p>
+                <div class="hub-actions">
+                    <a class="btn btn-primary" href="https://github.com/ChenlizheMe/Infernux/discussions/new/choose" target="_blank" rel="noopener"><i class="fas fa-message"></i><span data-i18n="community.hero.primary">Start a discussion</span></a>
+                    <a class="btn btn-secondary" href="https://github.com/ChenlizheMe/Infernux/issues/new/choose" target="_blank" rel="noopener"><i class="fas fa-bug"></i><span data-i18n="community.hero.secondary">Report an issue</span></a>
+                </div>
+                <p class="identity-note"><i class="fab fa-github" aria-hidden="true"></i> <span data-i18n="community.identity">Reading is public. Posting and replying require GitHub sign-in; the website never receives your GitHub password.</span></p>
+            </section>
+
+            <section class="section" aria-labelledby="channels-title">
+                <div class="section-head">
+                    <div>
+                        <div class="section-kicker" data-i18n="community.channels.kicker">Choose a channel</div>
+                        <h2 class="section-title" id="channels-title" data-i18n="community.channels.title">Put the conversation where future readers will look for it.</h2>
+                    </div>
+                    <p class="section-intro" data-i18n="community.channels.intro">Discussions are for conversation and support. Issues are for reproducible defects and accepted implementation work.</p>
+                </div>
+                <div class="community-channel-grid">
+                    <a class="channel-card" href="https://github.com/ChenlizheMe/Infernux/discussions/categories/general" target="_blank" rel="noopener"><span class="channel-code">COM-01</span><i class="fas fa-comments"></i><h3 data-i18n="community.channel.general.title">General</h3><p data-i18n="community.channel.general.body">Open-ended engine and project conversation.</p></a>
+                    <a class="channel-card" href="https://github.com/ChenlizheMe/Infernux/discussions/categories/q-a" target="_blank" rel="noopener"><span class="channel-code">COM-02</span><i class="fas fa-circle-question"></i><h3 data-i18n="community.channel.qa.title">Q&amp;A</h3><p data-i18n="community.channel.qa.body">Ask a focused question and mark the answer that solved it.</p></a>
+                    <a class="channel-card" href="https://github.com/ChenlizheMe/Infernux/discussions/categories/ideas" target="_blank" rel="noopener"><span class="channel-code">COM-03</span><i class="fas fa-lightbulb"></i><h3 data-i18n="community.channel.ideas.title">Ideas</h3><p data-i18n="community.channel.ideas.body">Explore proposals before they become roadmap work.</p></a>
+                    <a class="channel-card" href="https://github.com/ChenlizheMe/Infernux/discussions/categories/show-and-tell" target="_blank" rel="noopener"><span class="channel-code">COM-04</span><i class="fas fa-satellite-dish"></i><h3 data-i18n="community.channel.show.title">Show and tell</h3><p data-i18n="community.channel.show.body">Share scenes, tools, experiments, and lessons learned.</p></a>
+                </div>
+            </section>
+
+            <section class="section forum-feed" aria-labelledby="latest-topics-title">
+                <div class="section-head">
+                    <div>
+                        <div class="section-kicker" data-i18n="community.feed.kicker">Live relay</div>
+                        <h2 class="section-title" id="latest-topics-title" data-i18n="community.feed.title">Latest public discussions.</h2>
+                    </div>
+                    <p class="section-intro" data-i18n="community.feed.intro">Loaded directly from GitHub's public API. No access token or private profile data is stored in this page.</p>
+                </div>
+                <div id="community-feed" class="topic-list" aria-live="polite" aria-busy="true">
+                    <div class="topic-status" data-i18n="community.feed.loading">Contacting the GitHub relay…</div>
+                </div>
+                <noscript><p class="topic-status">JavaScript is disabled. <a href="https://github.com/ChenlizheMe/Infernux/discussions">Open Discussions on GitHub</a>.</p></noscript>
+            </section>
+
+            <section class="section community-wall" aria-labelledby="community-wall-title">
+                <div class="section-head">
+                    <div>
+                        <div class="section-kicker" data-i18n="community.wall.kicker">Community wall</div>
+                        <h2 class="section-title" id="community-wall-title" data-i18n="community.wall.title">Leave a short note without leaving the site.</h2>
+                    </div>
+                    <p class="section-intro" data-i18n="community.wall.intro">Giscus connects this panel to one GitHub Discussion. Sign-in and moderation stay on GitHub.</p>
+                </div>
+                <div class="giscus-shell">
+                    <div class="giscus"></div>
+                    <p class="giscus-fallback" data-i18n="community.wall.fallback">If the panel is unavailable, the repository administrator must install the Giscus GitHub App. You can still use Discussions directly.</p>
+                </div>
+            </section>
+
+            <section class="community-contract" aria-labelledby="community-contract-title">
+                <div>
+                    <span class="mini-tag">DATA CONTRACT</span>
+                    <h2 id="community-contract-title" data-i18n="community.contract.title">One identity, one moderation surface, no duplicate content store.</h2>
+                </div>
+                <ul>
+                    <li data-i18n="community.contract.item1">GitHub Discussions stores topics, answers, reactions, and the embedded wall.</li>
+                    <li data-i18n="community.contract.item2">GitHub Issues stores reproducible bugs and actionable engineering tasks.</li>
+                    <li data-i18n="community.contract.item3">GitHub permissions and moderation remain the authority; the website is a presentation layer.</li>
+                </ul>
+            </section>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <div class="nav-logo"><span class="logo-icon"><img src="assets/logo.png" alt="Infernux logo"></span><span class="logo-text" data-i18n="brand.footerTitle">熔炉 · INFERNUX</span></div>
+                    <p data-i18n="footer.tagline">Open code, explicit architecture, and a render stack you can actually reason about.</p>
+                </div>
+                <div class="footer-links">
+                    <div class="footer-column"><h4 data-i18n="footer.resources">Resources</h4><a href="wiki.html" data-i18n="nav.docs">Docs</a><a href="roadmap.html" data-i18n="nav.roadmap">Roadmap</a></div>
+                    <div class="footer-column"><h4 data-i18n="footer.community">Community</h4><a href="https://github.com/ChenlizheMe/Infernux/issues" target="_blank" rel="noopener" data-i18n="footer.issues">Issues</a><a href="https://github.com/ChenlizheMe/Infernux/discussions" target="_blank" rel="noopener" data-i18n="footer.discussions">Discussions</a></div>
+                </div>
+            </div>
+            <div class="footer-bottom">© 2024–2026 Lizhe Chen · MIT License · 熔炉 · INFERNUX</div>
+        </div>
+    </footer>
+
+    <script src="js/i18n.js?v=7"></script>
+    <script src="js/main.js?v=6"></script>
+    <script src="js/community.js?v=1"></script>
+    <script src="https://giscus.app/client.js"
+            data-repo="ChenlizheMe/Infernux"
+            data-repo-id="R_kgDOO_wV3A"
+            data-category="General"
+            data-category-id="DIC_kwDOO_wV3M4C5oaC"
+            data-mapping="specific"
+            data-term="Infernux Community Wall"
+            data-strict="1"
+            data-reactions-enabled="1"
+            data-emit-metadata="0"
+            data-input-position="top"
+            data-theme="dark_dimmed"
+            data-lang="en"
+            crossorigin="anonymous"
+            async></script>
+</body>
+</html>
+

@@ -1217,6 +1217,12 @@ bool Scene::DeserializeDocument(const nlohmann::json &j)
             m_rootObjects.push_back(std::move(root));
         }
 
+        // Documents preserve GameObject IDs. Advance the process-wide allocator
+        // before Awake can create more objects, otherwise a fresh object after
+        // loading can overwrite an existing ID in m_objectsById.
+        for (const uint64_t objectId : objectIds)
+            GameObject::EnsureNextID(objectId);
+
         // ── Step 5: native Awake pass. ──
         // PyComponentProxy instances are NOT in m_rootObjects yet — they live
         // in m_pendingPyComponents and the Python side restores them after we

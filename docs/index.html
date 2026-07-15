@@ -3,16 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Infernux is an MIT-licensed C++17/Vulkan game engine with a Python production layer for gameplay, editor tooling, assets, physics, and render authoring.">
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <link rel="canonical" href="https://infernux-engine.com/">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Infernux · 熔炉">
+    <meta property="og:title" content="Infernux · 熔炉 — Open game engine">
+    <meta property="og:description" content="A C++17/Vulkan native runtime with a Python production layer, an integrated editor, and an inspectable MIT-licensed architecture.">
+    <meta property="og:url" content="https://infernux-engine.com/">
+    <meta property="og:image" content="https://infernux-engine.com/assets/demo.png">
+    <meta property="og:image:width" content="1245">
+    <meta property="og:image:height" content="653">
+    <meta property="og:image:alt" content="Infernux editor running a voxel scene">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Infernux · 熔炉 — Open game engine">
+    <meta name="twitter:description" content="C++17/Vulkan runtime · Python production layer · MIT licensed.">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/demo.png">
     <title>Infernux · 熔炉 — Open game engine</title>
     <link rel="icon" type="image/png" href="assets/logo.png">
+    <link rel="apple-touch-icon" href="assets/logo.png">
+    <link rel="manifest" href="site.webmanifest">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
-    <link rel="stylesheet" href="css/style.css?v=6">
+    <link rel="stylesheet" href="css/style.css?v=7">
     <link rel="stylesheet" href="css/mission.css?v=2">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header" role="banner">
         <div class="mission-ribbon" aria-label="Engine identity strip">
             <div class="mission-ribbon-inner">
@@ -21,38 +41,39 @@
                 <span class="mission-sub" data-i18n="brand.ribbonSub">熔炉 · ENG-CORE</span>
             </div>
         </div>
-        <nav class="navbar">
+        <nav class="navbar" aria-label="Primary navigation">
             <div class="nav-container">
                 <a href="#home" class="nav-logo">
                     <span class="logo-icon"><img src="assets/logo.png" alt="Infernux logo"></span>
                     <span class="logo-text" data-i18n="brand.navShort">熔炉 · INFERNUX</span>
                 </a>
-                <div class="nav-links">
+                <div class="nav-links" id="primary-navigation">
                     <a href="#home" class="active" data-i18n="nav.home">Home</a>
                     <a href="#system" data-i18n="nav.features">Principles</a>
                     <a href="#capabilities" data-i18n="nav.showcase">Capabilities</a>
                     <a href="roadmap.html" data-i18n="nav.roadmap">Roadmap</a>
-                    <a href="wiki.html" data-i18n="nav.docs">Docs</a>
+                    <a href="wiki.html" data-i18n="nav.learn">Learn &amp; Docs</a>
+                    <a href="community.html" data-i18n="nav.community">Community</a>
                     <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
                         <i class="fab fa-github"></i> GitHub
                     </a>
                 </div>
                 <div class="nav-right">
-                    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
-                        <i class="fas fa-moon" id="theme-icon"></i>
+                    <button class="theme-toggle" type="button" onclick="toggleTheme()" title="Toggle theme" aria-label="Switch color theme" aria-pressed="false">
+                        <i class="fas fa-moon" id="theme-icon" aria-hidden="true"></i>
                     </button>
-                    <button class="lang-toggle" onclick="toggleLanguage()">
+                    <button class="lang-toggle" type="button" onclick="toggleLanguage()" aria-label="Switch language">
                         <span id="lang-text">中文</span>
                     </button>
-                    <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
-                        <i class="fas fa-bars"></i>
+                    <button class="mobile-menu-btn" type="button" onclick="toggleMobileMenu()" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                        <i class="fas fa-bars" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>
         </nav>
     </header>
 
-    <main class="page-shell home-shell">
+    <main class="page-shell home-shell" id="main-content">
         <div class="container">
             <section id="home" class="hero-slab">
                 <div class="hero-grid">
@@ -73,7 +94,7 @@
                                 <i class="fab fa-github"></i>
                                 <span data-i18n="hero.viewGithub">Inspect the repository</span>
                             </a>
-                            <a href="wiki.html" class="btn btn-secondary" data-i18n="home.hero.docs">Open the docs</a>
+                            <a href="wiki.html#start-here" class="btn btn-secondary" data-i18n="home.hero.docs">Start learning</a>
                         </div>
                         <div class="hero-meta">
                             <div class="metric-card">
@@ -136,7 +157,7 @@
                 </div>
                 <div class="stack-layout demo-layout">
                     <div class="demo-frame" data-reveal>
-                        <img src="assets/demo.png" alt="Infernux 0.2.1 editor running a height-shaded voxel scene at runtime">
+                        <img src="assets/demo.png" width="1245" height="653" alt="Infernux 0.2.1 editor running a height-shaded voxel scene at runtime" decoding="async">
                     </div>
                     <div class="stack-board" data-reveal>
                         <h3 data-i18n="home.demo.panel.title">What this capture proves</h3>
@@ -229,7 +250,7 @@
                         <div class="section-kicker" data-i18n="home.status.kicker">Project status</div>
                         <h2 class="section-title" data-i18n="home.status.title">Release 0.2.1: animation controllers, Timeline, and validated MCP workflows.</h2>
                     </div>
-                    <p class="section-intro" data-i18n="home.status.intro">The engine now includes a Godot 1.0-level animation controller stack, basic Timeline workflows, and a research-grade MCP control plane for agents; the roadmap still calls out what needs production hardening.</p>
+                    <p class="section-intro" data-i18n="home.status.intro">The engine now includes preview animation controllers, basic Timeline workflows, and a validated MCP control plane for agents; the roadmap still calls out what needs production hardening.</p>
                 </div>
                 <div class="status-grid">
                     <article class="status-card" data-reveal>
@@ -296,7 +317,23 @@
         </div>
     </footer>
 
-    <script src="js/i18n.js?v=6"></script>
-    <script src="js/main.js?v=4"></script>
+    <script src="js/i18n.js?v=7"></script>
+    <script src="js/main.js?v=6"></script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Infernux",
+      "alternateName": "熔炉",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Windows 10, Windows 11",
+      "softwareVersion": "0.2.1",
+      "license": "https://opensource.org/licenses/MIT",
+      "url": "https://infernux-engine.com/",
+      "downloadUrl": "https://github.com/ChenlizheMe/Infernux/releases/latest",
+      "codeRepository": "https://github.com/ChenlizheMe/Infernux",
+      "isAccessibleForFree": true
+    }
+    </script>
 </body>
 </html>

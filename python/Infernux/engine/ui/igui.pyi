@@ -53,6 +53,7 @@ class IGUI:
         picker_asset_items: Optional[Sequence] = None,
         on_pick: Optional[Callable] = None,
         on_clear: Optional[Callable] = None,
+        semantic_id: str = "",
     ) -> bool:
         """Render an object reference field with optional picker popup."""
         ...

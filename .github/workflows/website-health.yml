@@ -1,0 +1,32 @@
+name: Website Health
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-production-health
+  cancel-in-progress: true
+
+jobs:
+  health:
+    name: Check deployed GitHub Pages site
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check production routes and machine indexes
+        run: node docs/tools/check-deployed-site.mjs --base-url https://infernux-engine.com
+

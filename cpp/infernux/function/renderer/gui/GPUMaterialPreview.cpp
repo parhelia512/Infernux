@@ -162,7 +162,7 @@ std::shared_ptr<vk::ImageReadbackTicket> GPUMaterialPreview::BeginRenderToPixels
     const glm::mat4 previewNormal = glm::transpose(glm::inverse(previewModel));
 
     std::vector<std::shared_ptr<InxMaterial>> ownedPreviewMaterials;
-    std::vector<InxMaterial *> previewPassMaterials;
+    std::vector<std::shared_ptr<InxMaterial>> previewPassMaterials;
 
     // Always isolate preview rendering from the caller's material instance.
     // Even opaque previews can otherwise overwrite or invalidate the live
@@ -181,7 +181,7 @@ std::shared_ptr<vk::ImageReadbackTicket> GPUMaterialPreview::BeginRenderToPixels
         return nullptr;
     }
     ownedPreviewMaterials.push_back(basePreviewMaterial);
-    previewPassMaterials.push_back(basePreviewMaterial.get());
+    previewPassMaterials.push_back(basePreviewMaterial);
 
     const RenderState &baseState = basePreviewMaterial->GetRenderState();
     if (baseState.blendEnable) {
@@ -221,8 +221,8 @@ std::shared_ptr<vk::ImageReadbackTicket> GPUMaterialPreview::BeginRenderToPixels
                 ownedPreviewMaterials.push_back(backFacePass);
                 ownedPreviewMaterials.push_back(frontFacePass);
                 previewPassMaterials.clear();
-                previewPassMaterials.push_back(backFacePass.get());
-                previewPassMaterials.push_back(frontFacePass.get());
+                previewPassMaterials.push_back(backFacePass);
+                previewPassMaterials.push_back(frontFacePass);
             } else {
                 INXLOG_DEBUG("GPUMaterialPreview: transparent two-pass preview unavailable, using original pipeline");
             }
@@ -231,7 +231,7 @@ std::shared_ptr<vk::ImageReadbackTicket> GPUMaterialPreview::BeginRenderToPixels
             if (singlePass) {
                 ownedPreviewMaterials.push_back(singlePass);
                 previewPassMaterials.clear();
-                previewPassMaterials.push_back(singlePass.get());
+                previewPassMaterials.push_back(singlePass);
             } else {
                 INXLOG_DEBUG(
                     "GPUMaterialPreview: transparent preview alpha override unavailable, using original pipeline");
@@ -241,7 +241,7 @@ std::shared_ptr<vk::ImageReadbackTicket> GPUMaterialPreview::BeginRenderToPixels
 
     struct PreviewPassBinding
     {
-        InxMaterial *material = nullptr;
+        std::shared_ptr<InxMaterial> material;
         VkPipeline pipeline = VK_NULL_HANDLE;
         VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
         VkDescriptorSet materialDescSet = VK_NULL_HANDLE;
@@ -249,15 +249,14 @@ std::shared_ptr<vk::ImageReadbackTicket> GPUMaterialPreview::BeginRenderToPixels
     };
 
     auto refreshPassBinding = [&](PreviewPassBinding &binding) -> bool {
-        InxMaterial *passMat = binding.material;
+        InxMaterial *passMat = binding.material.get();
         if (!passMat) {
             return false;
         }
 
         MaterialRenderData *rd = m_vkCore->GetMaterialPipelineManager().GetRenderData(passMat->GetMaterialKey());
         if (!rd || !rd->isValid || rd->descriptorSet == VK_NULL_HANDLE) {
-            auto matShared = std::shared_ptr<InxMaterial>(passMat, [](InxMaterial *) {});
-            if (!m_vkCore->RefreshPreviewMaterialPipeline(matShared, passMat->GetVertShaderName(),
+            if (!m_vkCore->RefreshPreviewMaterialPipeline(binding.material, passMat->GetVertShaderName(),
                                                           passMat->GetFragShaderName(), m_previewSceneUbo->GetBuffer(),
                                                           m_previewLightingUbo->GetBuffer())) {
                 return false;
@@ -283,7 +282,7 @@ std::shared_ptr<vk::ImageReadbackTicket> GPUMaterialPreview::BeginRenderToPixels
 
     std::vector<PreviewPassBinding> passBindings;
     passBindings.reserve(previewPassMaterials.size());
-    for (InxMaterial *passMat : previewPassMaterials) {
+    for (const auto &passMat : previewPassMaterials) {
         PreviewPassBinding binding{};
         binding.material = passMat;
         if (!refreshPassBinding(binding)) {

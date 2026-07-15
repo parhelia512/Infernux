@@ -745,13 +745,89 @@ def deserialize_game_object_document_transactionally(
         asset_database,
         preserve_document_ids=preserve_document_ids,
     )
-    return commit_prepared_game_object_document(game_object, document, prepared)
+    return commit_prepared_game_object_document(
+        game_object,
+        document,
+        prepared,
+        preserve_document_ids=preserve_document_ids,
+    )
+
+
+def serialize_game_object_document_authoritatively(game_object) -> dict:
+    """Snapshot an ObjectGraph with current live wrapper field values.
+
+    Native GameObject aggregation can lag behind Inspector-bound wrapper
+    state until the next synchronization point. Structural Undo snapshots
+    must capture the values the Inspector currently exposes.
+    """
+    document = game_object.serialize_document()
+    native_metadata = {
+        "schema_version",
+        "type",
+        "component_id",
+        "enabled",
+        "execution_order",
+    }
+    python_metadata = {
+        "__schema_version__",
+        "__type_name__",
+        "__component_id__",
+    }
+
+    def visit(obj, node: dict) -> None:
+        components = {}
+        for component in obj.get_components():
+            component_id = getattr(component, "component_id", 0) or 0
+            if component_id:
+                components[int(component_id)] = component
+
+        for record in node.get("components", []):
+            component_id = record.get("component_id")
+            component = components.get(component_id)
+            if component is None:
+                continue
+            try:
+                type_id = record.get("type_id", "")
+                if type_id.startswith("native:"):
+                    serialized = component.serialize_document()
+                    record["data"] = {
+                        key: value for key, value in serialized.items()
+                        if key not in native_metadata
+                    }
+                elif type_id.startswith("python:"):
+                    serialized = component._serialize_fields_document()
+                    record["data"] = {
+                        key: value for key, value in serialized.items()
+                        if key not in python_metadata
+                    }
+                record["enabled"] = bool(getattr(component, "enabled", True))
+                record["execution_order"] = int(getattr(component, "execution_order", 0))
+            except Exception as exc:
+                from Infernux.debug import Debug
+                Debug.log_suppressed(
+                    f"component_restore.authoritative_snapshot[{component_id}]",
+                    exc,
+                )
+
+        children = obj.get_children()
+        child_documents = node.get("children", [])
+        if len(children) != len(child_documents):
+            raise PythonComponentRestoreError(
+                "ObjectGraph shape changed during authoritative snapshot"
+            )
+        for child, child_document in zip(children, child_documents):
+            visit(child, child_document)
+
+    visit(game_object, document)
+    return document
 
 
 def commit_prepared_game_object_document(
     game_object,
     document: dict,
     prepared: PreparedPythonComponentGraph,
+    *,
+    preserve_document_ids: bool = True,
 ) -> bool:
     """Commit one already preflighted in-place ObjectGraph replacement."""
     scene = game_object.scene
@@ -772,7 +848,10 @@ def commit_prepared_game_object_document(
                 collect_native_component_ids(child)
 
     collect_native_component_ids(game_object.serialize_document())
-    if not game_object._commit_document(_native_object_graph_document(document)):
+    if not game_object._commit_document(
+        _native_object_graph_document(document),
+        preserve_document_ids,
+    ):
         prepared.discard()
         return False
     from Infernux.components.builtin_component import BuiltinComponent
@@ -918,6 +997,7 @@ def create_component_instance(
                 script_path,
                 asset_database=asset_database,
                 type_name=type_name,
+                script_guid=script_guid,
             )
         else:
             from Infernux.components.script_loader import (

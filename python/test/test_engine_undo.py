@@ -96,6 +96,8 @@ CompoundCommand = _undo_mod.CompoundCommand
 SelectionCommand = _undo_mod.SelectionCommand
 EditorSelectionCommand = _undo_mod.EditorSelectionCommand
 PrefabModeCommand = _undo_mod.PrefabModeCommand
+PrefabUnpackCommand = _undo_mod.PrefabUnpackCommand
+PrefabRevertCommand = _undo_mod.PrefabRevertCommand
 InspectorSnapshotCommand = _undo_mod.InspectorSnapshotCommand
 InspectorUndoTracker = _undo_mod.InspectorUndoTracker
 RenderStackFieldCommand = _undo_mod.RenderStackFieldCommand
@@ -624,6 +626,49 @@ class TestEditorSelectionCommand:
         assert applied == [([1], ""), ([], "Assets/test.mat")]
 
 
+class TestPrefabUnpackCommand:
+    def test_execute_undo_redo_restore_complete_linkage(self, monkeypatch):
+        class _GameObject:
+            def __init__(self, object_id, guid, is_root=False, children=None):
+                self.id = object_id
+                self.prefab_guid = guid
+                self.prefab_root = is_root
+                self._children = list(children or [])
+
+            def get_children(self):
+                return list(self._children)
+
+        left = _GameObject(2, "prefab-guid")
+        right = _GameObject(3, "prefab-guid")
+        root = _GameObject(1, "prefab-guid", True, [left, right])
+        objects = {obj.id: obj for obj in (root, left, right)}
+
+        class _Scene:
+            @staticmethod
+            def find_by_id(object_id):
+                return objects.get(object_id)
+
+        monkeypatch.setattr(_structural_mod, "_get_active_scene", lambda: _Scene())
+
+        cmd = PrefabUnpackCommand(root.id)
+        cmd.execute()
+        assert [(obj.prefab_guid, obj.prefab_root) for obj in (root, left, right)] == [
+            ("", False), ("", False), ("", False),
+        ]
+
+        cmd.undo()
+        assert [(obj.prefab_guid, obj.prefab_root) for obj in (root, left, right)] == [
+            ("prefab-guid", True),
+            ("prefab-guid", False),
+            ("prefab-guid", False),
+        ]
+
+        cmd.redo()
+        assert [(obj.prefab_guid, obj.prefab_root) for obj in (root, left, right)] == [
+            ("", False), ("", False), ("", False),
+        ]
+
+
 class TestPrefabModeCommand:
     def test_enter_undo_redo_call_scene_manager(self, monkeypatch):
         calls = []
@@ -861,6 +906,19 @@ class TestUndoManager:
     def test_suppress_context_manager(self, _reset_undo_manager):
         mgr = _reset_undo_manager
         assert not mgr.is_executing
+
+    def test_execute_reports_failure_without_recording(self, _reset_undo_manager):
+        mgr = _reset_undo_manager
+
+        class FailingCommand(UndoCommand):
+            def execute(self):
+                raise RuntimeError("expected test failure")
+
+            def undo(self):
+                pass
+
+        assert mgr.execute(FailingCommand("fail")) is False
+        assert not mgr.can_undo
         with mgr.suppress():
             assert mgr.is_executing
         assert not mgr.is_executing
@@ -1169,6 +1227,20 @@ class TestSelectionUndoIntegration:
 
     def _apply_fn(self, ids):
         self.sel.set_ids(ids)
+
+    def test_editor_navigation_does_not_push_main_undo(self, _reset_undo_manager):
+        module = _direct_import(
+            "Infernux.engine._bootstrap_selection",
+            "engine/_bootstrap_selection.py",
+        )
+
+        selection = module.BootstrapSelectionMixin()
+        selection._prev_selection_ids = []
+        selection._prev_selected_file = ""
+        selection._record_editor_selection_change([42], "")
+
+        assert _reset_undo_manager._undo_stack == []
+        assert selection._prev_selection_ids == [42]
 
     def test_select_undo_redo_cycle(self, _reset_undo_manager, _fresh_selection):
         mgr = _reset_undo_manager

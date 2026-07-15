@@ -233,7 +233,7 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
             dc.indexStart = 0;
             dc.indexCount = static_cast<uint32_t>(PrimitiveMeshes::GetSkyboxCubeIndices().size());
             dc.worldMatrix = glm::mat4(1.0f);
-            dc.material = skyboxMat.get();
+            dc.material = skyboxMat;
             dc.objectId = SKYBOX_OBJECT_ID;
             dc.meshVertices = &PrimitiveMeshes::GetSkyboxCubeVertices();
             dc.meshIndices = &PrimitiveMeshes::GetSkyboxCubeIndices();

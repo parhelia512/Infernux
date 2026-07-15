@@ -26,6 +26,11 @@ from Infernux.lib import Physics as _CppPhysics
 
 class _PhysicsMeta(type):
     @property
+    def body_count(cls) -> int:
+        """Number of native physics bodies currently owned by the world."""
+        return int(_CppPhysics.body_count)
+
+    @property
     def gravity(cls):
         return _CppPhysics.get_gravity()
 

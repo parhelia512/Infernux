@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import ast
 import os
+import threading
 from typing import Any
 
 from Infernux.mcp.tools.common import issue_knowledge_token, ok, register_tool_metadata, serialize_value
@@ -39,6 +40,43 @@ SUBSYSTEM_GUIDES: dict[str, dict[str, Any]] = {
             "4. Validate: use runtime_read_errors, console_read, or subsystem-specific describe/report tools.",
         ],
         "symbols": ["api_search", "api_get", "mcp_catalog_search", "component_describe_type", "shader_guide"],
+    },
+    "scripting": {
+        "summary": "Stable public Python surface for ordinary game-component scripts.",
+        "concepts": [
+            "Game scripts must import from documented public modules, never from private underscore modules or wheel internals.",
+            "Use InxComponent lifecycle methods such as start(), update(delta_time), and fixed_update(fixed_delta_time).",
+            "Use the delta_time argument supplied to update instead of inventing a frame timer.",
+            "Persistent scene content must be created through the Editor UI in global-validation work; scripts should define behavior for components already attached there.",
+        ],
+        "stable_imports": [
+            "from Infernux import InxComponent, Vector3, Time, serialized_field",
+            "from Infernux.input import Input, KeyCode",
+            "from Infernux.components import InxComponent, serialized_field",
+            "from Infernux.math import Vector3",
+        ],
+        "workflow": [
+            "Call api_get('scripting'), api_get('input'), api_get('Transform'), and api_get('InxComponent') before writing a behavior script.",
+            "Write only under Assets/ with project_script_write, then run public_api_validate_script before attaching the component through the Editor UI.",
+            "Use Debug feedback to report an unavailable public API instead of inspecting wheel internals or guessing an equivalent API.",
+        ],
+        "symbols": ["InxComponent", "serialized_field", "Vector3", "Time", "Transform", "Input", "KeyCode"],
+    },
+    "input": {
+        "summary": "Public keyboard, mouse, and virtual-axis queries for game scripts.",
+        "stable_imports": ["from Infernux.input import Input, KeyCode"],
+        "concepts": [
+            "Input.get_key() accepts either a KeyCode constant or a documented string such as 'w', 'space', 'left', or 'right'.",
+            "Use Input.get_key_down() for a first-press action and Input.get_key() for held movement.",
+            "KeyCode.W, KeyCode.A, KeyCode.S, KeyCode.D, KeyCode.SPACE, and arrow-key constants are public SDL-scancode values.",
+            "Input.get_axis_raw('Horizontal') maps A/D and left/right; Input.get_axis_raw('Vertical') maps W/S and up/down.",
+            "Input values are idle until the Game View has focus during Play Mode.",
+        ],
+        "examples": [
+            "if Input.get_key(KeyCode.W): self.transform.translate_local(Vector3(0.0, 0.0, speed * delta_time))",
+            "steering = Input.get_axis_raw('Horizontal')",
+        ],
+        "symbols": ["Input", "KeyCode", "Input.get_key", "Input.get_key_down", "Input.get_axis_raw"],
     },
     "shader": {
         "summary": "Three-layer shader authoring model: surface fragment/vertex shaders, shading models, and GLSL libraries/templates.",
@@ -167,6 +205,14 @@ SUBSYSTEM_GUIDES: dict[str, dict[str, Any]] = {
 
 
 _API_INDEX: dict[str, Any] | None = None
+_API_INDEX_LOCK = threading.Lock()
+_GUIDE_ALIASES = {
+    "inxcomponent": "scripting",
+    "keycode": "input",
+    "time": "scripting",
+    "transform": "scripting",
+    "vector3": "scripting",
+}
 
 
 def register_api_tools(mcp) -> None:
@@ -181,7 +227,7 @@ def register_api_tools(mcp) -> None:
                 {"name": name, "summary": guide["summary"], "symbols": guide.get("symbols", [])}
                 for name, guide in sorted(SUBSYSTEM_GUIDES.items())
             ],
-            "python_api": _api_index_summary(),
+            "python_api": _api_index_status(),
         })
 
     @mcp.tool(name="api_get")
@@ -205,14 +251,32 @@ def register_api_tools(mcp) -> None:
         return ok({
             "found": False,
             "available_subsystems": sorted(SUBSYSTEM_GUIDES),
-            "available_symbols": sorted(index["symbols"]),
-            "available_modules": sorted(index["modules"]),
+            "available_symbol_count": len(index["symbols"]),
+            "available_module_count": len(index["modules"]),
+            "sample_symbols": sorted(index["symbols"])[:80],
+            "sample_modules": sorted(index["modules"])[:40],
+            "hint": "Use api_search with a focused term or api_get with a module-qualified symbol name.",
         })
 
     @mcp.tool(name="api_search")
     def api_search(query: str, limit: int = 20) -> dict:
         """Search subsystem guides, symbols, shader IDs, and component names."""
         query_l = str(query or "").lower()
+        safe_limit = max(1, min(int(limit or 20), 100))
+        guide_name = _GUIDE_ALIASES.get(query_l.strip(), query_l.strip())
+        exact_guide = SUBSYSTEM_GUIDES.get(guide_name)
+        if exact_guide is not None:
+            return ok({
+                "query": query,
+                "matches": [{
+                    "kind": "subsystem",
+                    "name": guide_name,
+                    "summary": exact_guide["summary"],
+                    "score": 100,
+                }],
+                "search_mode": "guide_exact",
+            })
+
         matches = []
         for name, guide in SUBSYSTEM_GUIDES.items():
             haystack = " ".join([
@@ -225,8 +289,13 @@ def register_api_tools(mcp) -> None:
             if score:
                 matches.append({"kind": "subsystem", "name": name, "summary": guide["summary"], "score": score})
         index = _api_index()
-        for name in index["symbols"]:
-            doc = _symbol_doc(name)
+        seen_symbols: set[str] = set()
+        for doc in index["symbols"].values():
+            qualname = str(doc.get("qualname") or "")
+            if not qualname or qualname in seen_symbols:
+                continue
+            seen_symbols.add(qualname)
+            name = str(doc.get("name") or qualname)
             haystack = " ".join([
                 name,
                 doc.get("doc", ""),
@@ -248,13 +317,25 @@ def register_api_tools(mcp) -> None:
             score = _score(query_l, haystack)
             if score:
                 matches.append({"kind": "module", "name": name, "summary": module.get("path", ""), "score": score})
-        for shader in _scan_shaders():
-            haystack = " ".join([shader["shader_id"], shader["kind"], shader.get("path", ""), " ".join(shader.get("imports", []))]).lower()
-            score = _score(query_l, haystack)
-            if score:
-                matches.append({"kind": "shader", "name": shader["shader_id"], "shader_kind": shader["kind"], "summary": shader.get("path", ""), "score": score})
+        if _search_needs_shader_scan(query_l):
+            for shader in _scan_shaders():
+                haystack = " ".join([
+                    shader["shader_id"],
+                    shader["kind"],
+                    shader.get("path", ""),
+                    " ".join(shader.get("imports", [])),
+                ]).lower()
+                score = _score(query_l, haystack)
+                if score:
+                    matches.append({
+                        "kind": "shader",
+                        "name": shader["shader_id"],
+                        "shader_kind": shader["kind"],
+                        "summary": shader.get("path", ""),
+                        "score": score,
+                    })
         matches.sort(key=lambda item: (-item["score"], item["kind"], item["name"]))
-        return ok({"query": query, "matches": matches[: max(int(limit or 20), 1)]})
+        return ok({"query": query, "matches": matches[:safe_limit], "search_mode": "static_index"})
 
     @mcp.tool(name="shader_guide")
     def shader_guide(topic: str = "") -> dict:
@@ -415,9 +496,15 @@ def _module_doc(name: str) -> dict[str, Any]:
     return dict(module) if module else {}
 
 
-def _api_index_summary() -> dict[str, int]:
-    index = _api_index()
+def _api_index_status() -> dict[str, Any]:
+    index = _API_INDEX
+    if index is None:
+        return {
+            "state": "cold",
+            "scope": "The static Python API index is built lazily by focused api_search/api_get requests.",
+        }
     return {
+        "state": "ready",
         "module_count": len(index["modules"]),
         "symbol_count": len(index["symbols"]),
         "stub_symbol_count": sum(1 for item in index["symbols"].values() if item.get("source") == "stub"),
@@ -428,33 +515,41 @@ def _api_index() -> dict[str, Any]:
     global _API_INDEX
     if _API_INDEX is not None:
         return _API_INDEX
-    modules: dict[str, Any] = {}
-    symbols: dict[str, Any] = {}
-    roots = _python_api_roots()
-    seen_stems: set[str] = set()
-    for root in roots:
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [name for name in dirnames if name not in {"__pycache__", ".mypy_cache"} and not name.startswith(".")]
-            for filename in filenames:
-                if not filename.endswith(".pyi"):
-                    continue
-                path = os.path.join(dirpath, filename)
-                module_name = _module_name_for_path(path)
-                seen_stems.add(os.path.splitext(path)[0])
-                _merge_module_api(modules, symbols, module_name, path, source="stub")
-    for root in roots:
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [name for name in dirnames if name not in {"__pycache__", ".mypy_cache"} and not name.startswith(".")]
-            for filename in filenames:
-                if not filename.endswith(".py") or filename.startswith("_"):
-                    continue
-                path = os.path.join(dirpath, filename)
-                if os.path.splitext(path)[0] in seen_stems:
-                    continue
-                module_name = _module_name_for_path(path)
-                _merge_module_api(modules, symbols, module_name, path, source="python")
-    _API_INDEX = {"modules": modules, "symbols": symbols}
-    return _API_INDEX
+    with _API_INDEX_LOCK:
+        if _API_INDEX is not None:
+            return _API_INDEX
+        modules: dict[str, Any] = {}
+        symbols: dict[str, Any] = {}
+        roots = _python_api_roots()
+        seen_stems: set[str] = set()
+        for root in roots:
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = _public_api_dirnames(dirnames)
+                for filename in filenames:
+                    if not filename.endswith(".pyi"):
+                        continue
+                    path = os.path.join(dirpath, filename)
+                    module_name = _module_name_for_path(path)
+                    seen_stems.add(os.path.splitext(path)[0])
+                    _merge_module_api(modules, symbols, module_name, path, source="stub")
+        for root in roots:
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = _public_api_dirnames(dirnames)
+                for filename in filenames:
+                    if not filename.endswith(".py") or filename.startswith("_"):
+                        continue
+                    path = os.path.join(dirpath, filename)
+                    if os.path.splitext(path)[0] in seen_stems:
+                        continue
+                    module_name = _module_name_for_path(path)
+                    _merge_module_api(modules, symbols, module_name, path, source="python")
+        _API_INDEX = {"modules": modules, "symbols": symbols}
+        return _API_INDEX
+
+
+def _public_api_dirnames(names: list[str]) -> list[str]:
+    excluded = {"__pycache__", ".mypy_cache", "mcp", "test"}
+    return [name for name in names if name not in excluded and not name.startswith(".")]
 
 
 def _python_api_roots() -> list[str]:
@@ -804,9 +899,15 @@ def _score(query: str, haystack: str) -> int:
     return sum(1 for token in tokens if token in haystack)
 
 
+def _search_needs_shader_scan(query: str) -> bool:
+    shader_terms = ("shader", "glsl", "fragment", "vertex", "shading", "shadingmodel")
+    return any(term in query for term in shader_terms)
+
+
 def _agent_api_guidance() -> list[str]:
     return [
         "Infernux is new and changes quickly. Do not infer unknown APIs from Unity; query them first.",
+        "For an ordinary behavior script, start with api_get('scripting') and api_get('input') for stable imports and input conventions.",
         "Use api_search(query) for Python/stub-backed APIs, then api_get(symbol_or_module) for signatures and docstrings.",
         "Use component_describe_type(component_type) before component_set_field/component_set_fields.",
         "Use shader_guide, shader_catalog, and shader_describe for shader authoring because shader behavior is C++/annotation/compiler-backed.",

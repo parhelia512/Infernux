@@ -39,6 +39,7 @@ from view.control_pane_view import ControlPane
 from view.sidebar_view import SidebarView
 from view.installs_view import InstallsView, PythonRuntimeInstallDialog
 from installer_safety import can_remove_install_dir
+from i18n import configure_language, tr
 import logging
 
 
@@ -53,6 +54,10 @@ class GameEngineLauncher(QMainWindow):
 
         super().__init__()
 
+        # Configure localization before constructing any visible widget.
+        self.db = ProjectDatabase()
+        configure_language(self.db.get_setting("language", "system"))
+
         # Load custom engine font
         font_id = QFontDatabase.addApplicationFont(FONT_PATH)
         if font_id >= 0:
@@ -66,8 +71,7 @@ class GameEngineLauncher(QMainWindow):
         self.setWindowIcon(QIcon(ICON_PATH))
         self.resize(1080, 720)
 
-        # Database & version manager
-        self.db = ProjectDatabase()
+        # Version and runtime managers
         self.version_manager = VersionManager()
         self.runtime_manager = PythonRuntimeManager()
 
@@ -93,7 +97,9 @@ class GameEngineLauncher(QMainWindow):
         projects_layout.setContentsMargins(28, 24, 28, 24)
         projects_layout.setSpacing(16)
 
-        self.project_list = ProjectListPane(self.db, parent=projects_page)
+        self.project_list = ProjectListPane(
+            self.db, self.version_manager, parent=projects_page,
+        )
         model = ProjectModel(self.db, self.version_manager, self.runtime_manager)
         viewmodel = ControlPaneViewModel(
             model,
@@ -121,6 +127,16 @@ class GameEngineLauncher(QMainWindow):
         installs_layout.addWidget(self.installs_view)
 
         self.pages.addWidget(installs_page)
+
+        # ── Page 2: Settings ─────────────────────────────────────────
+        from view.settings_view import SettingsView
+
+        settings_page = QWidget()
+        settings_layout = QVBoxLayout(settings_page)
+        settings_layout.setContentsMargins(32, 30, 32, 30)
+        self.settings_view = SettingsView(self.db, parent=settings_page)
+        settings_layout.addWidget(self.settings_view)
+        self.pages.addWidget(settings_page)
 
         # ── Sidebar → page switching ─────────────────────────────────
         self.sidebar.page_changed.connect(self._on_page_changed)

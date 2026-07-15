@@ -8,6 +8,12 @@ class Physics:
 
     @classmethod
     @property
+    def body_count(cls) -> int:
+        """Number of native physics bodies currently owned by the world."""
+        ...
+
+    @classmethod
+    @property
     def gravity(cls) -> Any:
         """The global gravity vector applied to all rigidbodies."""
         ...

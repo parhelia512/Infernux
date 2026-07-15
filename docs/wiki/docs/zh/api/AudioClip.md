@@ -9,7 +9,9 @@
 音频剪辑资源。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+当前可靠解码器支持 WAV。当 AudioSource Track 或 One-shot 仍可能引用时，应保持 Clip 已加载。
 <!-- USER CONTENT END -->
 
 ## 构造函数
@@ -74,12 +76,18 @@
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for AudioClip
+from Infernux.core.audio_clip import AudioClip
+
+clip = AudioClip.load("Assets/Audio/click.wav")
+if clip is not None:
+    print(clip.name, clip.duration, clip.sample_rate, clip.channels)
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [音频工作流](../learn/audio-workflow.md)
+- [AudioSource](AudioSource.md)
+- [资源与 Meta 文件](../manual/assets-and-meta.md)
 <!-- USER CONTENT END -->

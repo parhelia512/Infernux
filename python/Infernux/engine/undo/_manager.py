@@ -96,7 +96,7 @@ class UndoManager:
 
     # -- Core operations --
 
-    def execute(self, cmd: UndoCommand) -> None:
+    def execute(self, cmd: UndoCommand) -> bool:
         from Infernux.debug import Debug
 
         if not self._enabled:
@@ -105,7 +105,8 @@ class UndoManager:
                 _bump_inspector_values()
             except Exception as exc:
                 Debug.log_exception(exc)
-            return
+                return False
+            return True
 
         self._is_executing = True
         try:
@@ -114,14 +115,15 @@ class UndoManager:
             self._is_executing = False
             Debug.log_exception(exc)
             self._debug_dump_stack("execute-failed")
-            return
+            return False
         self._is_executing = False
         _bump_inspector_values()
 
         if self._suppress_property_recording and cmd._is_property_edit:
-            return
+            return True
 
         self._push(cmd)
+        return True
 
     def record(self, cmd: UndoCommand) -> None:
         if not self._enabled:

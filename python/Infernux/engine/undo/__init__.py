@@ -42,6 +42,8 @@ from Infernux.engine.undo._structural_commands import (
     SelectionCommand,
     EditorSelectionCommand,
     PrefabModeCommand,
+    PrefabUnpackCommand,
+    PrefabRevertCommand,
 )
 
 # -- Component commands --
@@ -114,7 +116,8 @@ __all__ = [
     "GenericComponentCommand", "MaterialDocumentCommand", "ResourceDocumentCommand", "SetMaterialSlotCommand",
     "CreateGameObjectCommand", "DeleteGameObjectCommand",
     "ReparentCommand", "MoveGameObjectCommand",
-    "SelectionCommand", "EditorSelectionCommand", "PrefabModeCommand",
+    "SelectionCommand", "EditorSelectionCommand", "PrefabModeCommand", "PrefabUnpackCommand",
+    "PrefabRevertCommand",
     "AddNativeComponentCommand", "RemoveNativeComponentCommand",
     "AddPyComponentCommand", "RemovePyComponentCommand",
     "UndoManager",

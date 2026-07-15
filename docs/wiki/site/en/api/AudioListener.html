@@ -456,7 +456,9 @@ class in <b>Infernux.components.builtin</b>
 one active listener; additional enabled listeners remain registered but can
 be standby instead of immediately replacing the active listener.</p>
 <!-- USER CONTENT START -->
-<p>description</p>
+<p>description
+<strong>Status:</strong> Preview · <strong>Verified with:</strong> 0.2.1</p>
+<p>Place one intended active listener at the scene's listening position, normally on the active Camera or player head. Source distance is measured relative to it.</p>
 <!-- USER CONTENT END -->
 
 <h2 id="properties">Properties<a class="headerlink" href="#properties" title="Permanent link">&para;</a></h2>
@@ -506,13 +508,22 @@ be standby instead of immediately replacing the active listener.</p>
 <h2 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h2>
 <!-- USER CONTENT START -->
 <p>example
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># TODO: Add example for AudioListener</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux</span><span class="w"> </span><span class="kn">import</span> <span class="n">AudioListener</span><span class="p">,</span> <span class="n">GameObject</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">camera_object</span> <span class="o">=</span> <span class="n">GameObject</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;Main Camera&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">if</span> <span class="n">camera_object</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">listener</span> <span class="o">=</span> <span class="n">camera_object</span><span class="o">.</span><span class="n">get_component</span><span class="p">(</span><span class="n">AudioListener</span><span class="p">)</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="k">if</span> <span class="n">listener</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="n">listener</span> <span class="o">=</span> <span class="n">camera_object</span><span class="o">.</span><span class="n">add_component</span><span class="p">(</span><span class="n">AudioListener</span><span class="p">)</span>
 </code></pre></div></p>
 <!-- USER CONTENT END -->
 
 <h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <!-- USER CONTENT START -->
-<p>see_also</p>
+<p>see_also
+- <a href="../learn/audio-workflow.html">Audio Workflow</a>
+- <a href="AudioSource.html">AudioSource</a>
+- <a href="Camera.html">Camera</a></p>
 <!-- USER CONTENT END -->
         </main>
     </div>

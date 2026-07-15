@@ -7,21 +7,33 @@ import json
 import pytest
 
 from Infernux.components import FieldType, InxComponent, serialized_field
+from Infernux.components.builtin import BoxCollider
 from Infernux.components.ref_wrappers import ComponentRef, GameObjectRef
 from Infernux.components.value_document import make_game_object_ref
 from Infernux.engine.prefab_manager import (
     PREFAB_VERSION,
     PrefabDocumentError,
     _PREFAB_TEMPLATE_CACHE,
+    _link_created_prefab_source,
     _read_prefab_document,
     instantiate_prefab,
     save_prefab,
 )
 from Infernux.engine.prefab_overrides import (
+    _build_reverted_prefab_document,
     apply_overrides_to_prefab,
     compute_overrides,
+    resolve_prefab_instance_root,
     revert_overrides,
+    revert_overrides_with_undo,
 )
+from Infernux.engine.undo import (
+    BuiltinPropertyCommand,
+    PrefabRevertCommand,
+    UndoManager,
+)
+from Infernux.math import Vector3
+from Infernux.engine.component_restore import serialize_game_object_document_authoritatively
 
 
 class _PrefabTargetComponent(InxComponent):
@@ -31,6 +43,113 @@ class _PrefabTargetComponent(InxComponent):
 class _PrefabReferenceComponent(InxComponent):
     target_object = serialized_field(default=None, field_type=FieldType.GAME_OBJECT)
     target_component = serialized_field(default=None, field_type=FieldType.COMPONENT)
+
+
+def test_link_created_prefab_source_stamps_root_and_children(scene, tmp_path):
+    root = scene.create_game_object("CheckpointGate")
+    child = scene.create_game_object("LeftPost")
+    child.set_parent(root)
+    prefab_path = str(tmp_path / "CheckpointGate.prefab")
+
+    class AssetDatabase:
+        @staticmethod
+        def get_guid_from_path(path):
+            return "checkpoint-guid" if path == prefab_path else ""
+
+    assert _link_created_prefab_source(root, prefab_path, AssetDatabase()) is True
+    assert root.prefab_guid == "checkpoint-guid"
+    assert root.prefab_root is True
+    assert child.prefab_guid == "checkpoint-guid"
+    assert child.prefab_root is False
+
+
+def test_authoritative_object_snapshot_overlays_live_component_data():
+    class _Component:
+        component_id = 7
+        enabled = True
+        execution_order = 3
+        _cpp_type_name = "BoxCollider"
+
+        @staticmethod
+        def serialize_document():
+            return {
+                "schema_version": 1,
+                "type": "BoxCollider",
+                "component_id": 7,
+                "enabled": True,
+                "execution_order": 3,
+                "is_trigger": True,
+            }
+
+    class _Object:
+        @staticmethod
+        def serialize_document():
+            return {
+                "components": [{
+                    "component_id": 7,
+                    "type_id": "native:BoxCollider",
+                    "enabled": True,
+                    "execution_order": 0,
+                    "data": {"is_trigger": False},
+                }],
+                "children": [],
+            }
+
+        @staticmethod
+        def get_components():
+            return [_Component()]
+
+        @staticmethod
+        def get_children():
+            return []
+
+    snapshot = serialize_game_object_document_authoritatively(_Object())
+    assert snapshot["components"][0]["data"] == {"is_trigger": True}
+    assert snapshot["components"][0]["execution_order"] == 3
+
+
+def test_authoritative_object_snapshot_strips_python_identity_metadata():
+    class _Component:
+        component_id = 11
+        enabled = False
+        execution_order = -2
+
+        @staticmethod
+        def _serialize_fields_document():
+            return {
+                "__schema_version__": 3,
+                "__type_name__": "RaceController",
+                "__component_id__": 11,
+                "lap_count": 4,
+            }
+
+    class _Object:
+        @staticmethod
+        def serialize_document():
+            return {
+                "components": [{
+                    "component_id": 11,
+                    "type_id": "python:script:type:race:RaceController",
+                    "enabled": True,
+                    "execution_order": 0,
+                    "data": {"lap_count": 1},
+                }],
+                "children": [],
+            }
+
+        @staticmethod
+        def get_components():
+            return [_Component()]
+
+        @staticmethod
+        def get_children():
+            return []
+
+    snapshot = serialize_game_object_document_authoritatively(_Object())
+    record = snapshot["components"][0]
+    assert record["data"] == {"lap_count": 4}
+    assert record["enabled"] is False
+    assert record["execution_order"] == -2
 
 
 def _assert_runtime_ids_removed(document: dict) -> None:
@@ -124,15 +243,196 @@ def test_prefab_overrides_use_typed_documents(scene, tmp_path):
     assert save_prefab(source, str(path)) is True
 
     instance = instantiate_prefab(file_path=str(path), scene=scene)
-    instance.active = False
-    assert any(override.key == "active" for override in compute_overrides(instance, str(path)))
+    instance.transform.local_scale = Vector3(2.0, 2.0, 2.0)
+    assert any(override.key == "transform.scale" for override in compute_overrides(instance, str(path)))
 
     assert revert_overrides(instance, str(path)) is True
-    assert instance.active is True
+    assert instance.transform.local_scale.x == pytest.approx(1.0)
 
-    instance.active = False
+    instance.transform.local_scale = Vector3(2.0, 2.0, 2.0)
     assert apply_overrides_to_prefab(instance, str(path)) is True
-    assert _read_prefab_document(str(path))["root_object"]["active"] is False
+    assert _read_prefab_document(str(path))["root_object"]["transform"]["scale"][0] == pytest.approx(2.0)
+
+
+def test_prefab_child_overrides_resolve_instance_root(scene, tmp_path):
+    _PREFAB_TEMPLATE_CACHE.clear()
+    source = scene.create_game_object("CheckpointGate")
+    child = scene.create_game_object("LeftPost")
+    child.add_component("BoxCollider")
+    child.set_parent(source)
+    path = tmp_path / "checkpoint.prefab"
+    assert save_prefab(source, str(path)) is True
+
+    instance = instantiate_prefab(file_path=str(path), scene=scene)
+    instance.prefab_guid = "checkpoint-guid"
+    instance.prefab_root = True
+    instance_child = instance.get_child(0)
+    instance_child.prefab_guid = "checkpoint-guid"
+
+    assert resolve_prefab_instance_root(instance_child) is instance
+    instance.name = "CheckpointGate_B"
+    instance.active = False
+    instance.is_static = True
+    instance.tag = "Checkpoint"
+    instance.layer = 3
+    instance.transform.position = Vector3(5.0, 0.0, 0.0)
+    assert compute_overrides(instance_child, str(path)) == []
+
+    instance_child.get_component("BoxCollider").is_trigger = True
+    overrides = compute_overrides(instance_child, str(path))
+    assert any("BoxCollider" in override.key for override in overrides)
+
+    assert revert_overrides(instance_child, str(path)) is True
+    assert instance.name == "CheckpointGate_B"
+    assert instance.active is False
+    assert instance.is_static is True
+    assert instance.tag == "Checkpoint"
+    assert instance.layer == 3
+    assert instance.transform.position.x == pytest.approx(5.0)
+    assert instance.get_child(0).get_component("BoxCollider").is_trigger is False
+    assert compute_overrides(instance, str(path)) == []
+
+
+def test_prefab_revert_command_restores_complete_subtree_on_undo(scene, tmp_path):
+    _PREFAB_TEMPLATE_CACHE.clear()
+    source = scene.create_game_object("CheckpointGate")
+    child = scene.create_game_object("LeftPost")
+    child.add_component("BoxCollider")
+    child.set_parent(source)
+    path = tmp_path / "checkpoint-revert-undo.prefab"
+    assert save_prefab(source, str(path)) is True
+
+    instance = instantiate_prefab(file_path=str(path), scene=scene)
+    instance.prefab_guid = "checkpoint-guid"
+    instance.prefab_root = True
+    instance.get_child(0).prefab_guid = "checkpoint-guid"
+    instance.get_child(0).get_component("BoxCollider").is_trigger = True
+
+    before_document = serialize_game_object_document_authoritatively(instance)
+    before_data = before_document["children"][0]["components"][0]["data"]
+    assert before_data["is_trigger"] is True
+    assert "schema_version" not in before_data
+    assert "component_id" not in before_data
+    reverted_document = _build_reverted_prefab_document(instance, str(path))
+    command = PrefabRevertCommand(
+        instance.id,
+        before_document,
+        reverted_document,
+    )
+
+    command.execute()
+    assert instance.get_child(0).get_component("BoxCollider").is_trigger is False
+    command.undo()
+    assert instance.get_child(0).get_component("BoxCollider").is_trigger is True
+    command.redo()
+    assert instance.get_child(0).get_component("BoxCollider").is_trigger is False
+
+
+def test_prefab_revert_undo_captures_inspector_builtin_wrapper_edit(scene, tmp_path):
+    _PREFAB_TEMPLATE_CACHE.clear()
+    source = scene.create_game_object("CheckpointGate")
+    source_child = scene.create_game_object("LeftPost")
+    source_child.add_component("BoxCollider")
+    source_child.set_parent(source)
+    path = tmp_path / "checkpoint-inspector-revert-undo.prefab"
+    assert save_prefab(source, str(path)) is True
+
+    instance = instantiate_prefab(file_path=str(path), scene=scene)
+    instance.prefab_guid = "checkpoint-guid"
+    instance.prefab_root = True
+    child = instance.get_child(0)
+    child.prefab_guid = "checkpoint-guid"
+    raw_collider = child.get_component("BoxCollider")
+    collider = BoxCollider._get_or_create_wrapper(raw_collider, child)
+
+    previous_manager = UndoManager._instance
+    manager = UndoManager()
+    try:
+        assert manager.execute(BuiltinPropertyCommand(
+            collider,
+            "is_trigger",
+            False,
+            True,
+            "Set is_trigger",
+        )) is True
+        assert collider.is_trigger is True
+        assert compute_overrides(instance, str(path))
+
+        assert revert_overrides_with_undo(instance, str(path)) is True
+        assert instance.get_child(0).get_component("BoxCollider").is_trigger is False
+
+        manager.undo()
+        restored = instance.get_child(0).get_component("BoxCollider")
+        assert restored.is_trigger is True
+        assert compute_overrides(instance, str(path))
+    finally:
+        UndoManager._instance = previous_manager
+
+
+def test_apply_child_override_does_not_bake_root_scene_placement(scene, tmp_path):
+    _PREFAB_TEMPLATE_CACHE.clear()
+    source = scene.create_game_object("CheckpointGate")
+    child = scene.create_game_object("LeftPost")
+    child.add_component("BoxCollider")
+    child.set_parent(source)
+    path = tmp_path / "checkpoint-apply.prefab"
+    assert save_prefab(source, str(path)) is True
+
+    instance = instantiate_prefab(file_path=str(path), scene=scene)
+    instance.prefab_guid = "checkpoint-guid"
+    instance.prefab_root = True
+    instance_child = instance.get_child(0)
+    instance_child.prefab_guid = "checkpoint-guid"
+    instance.transform.position = Vector3(8.0, 0.0, 0.0)
+    instance_child.get_component("BoxCollider").is_trigger = True
+
+    assert apply_overrides_to_prefab(instance_child, str(path)) is True
+    saved_root = _read_prefab_document(str(path))["root_object"]
+    assert saved_root["transform"]["position"][0] == pytest.approx(0.0)
+    saved_collider = saved_root["children"][0]["components"][0]
+    assert saved_collider["data"]["is_trigger"] is True
+    assert compute_overrides(instance, str(path)) == []
+
+
+def test_apply_propagates_to_existing_instances_and_preserves_overrides(scene, tmp_path):
+    _PREFAB_TEMPLATE_CACHE.clear()
+    source = scene.create_game_object("CheckpointGate")
+    child = scene.create_game_object("LeftPost")
+    child.add_component("BoxCollider")
+    child.set_parent(source)
+    path = tmp_path / "checkpoint-propagate.prefab"
+    assert save_prefab(source, str(path)) is True
+
+    first = instantiate_prefab(file_path=str(path), scene=scene)
+    second = instantiate_prefab(file_path=str(path), scene=scene)
+    for instance in (first, second):
+        instance.prefab_guid = "checkpoint-guid"
+        instance.prefab_root = True
+        instance.get_child(0).prefab_guid = "checkpoint-guid"
+
+    first.name = "CheckpointGate_A"
+    first.transform.position = Vector3(1.0, 0.0, 0.0)
+    first_collider = first.get_child(0).get_component("BoxCollider")
+    first_collider.size = Vector3(2.0, 1.0, 1.0)
+
+    second.name = "CheckpointGate_B"
+    second.transform.position = Vector3(5.0, 0.0, 0.0)
+    second.get_child(0).get_component("BoxCollider").is_trigger = True
+
+    assert apply_overrides_to_prefab(second, str(path)) is True
+
+    refreshed_first = first.get_child(0).get_component("BoxCollider")
+    refreshed_second = second.get_child(0).get_component("BoxCollider")
+    assert refreshed_first.is_trigger is True
+    assert refreshed_first.size.x == pytest.approx(2.0)
+    assert refreshed_second.is_trigger is True
+    assert first.name == "CheckpointGate_A"
+    assert first.transform.position.x == pytest.approx(1.0)
+    assert second.name == "CheckpointGate_B"
+    assert second.transform.position.x == pytest.approx(5.0)
+    first_overrides = compute_overrides(first, str(path))
+    assert any("BoxCollider" in override.key for override in first_overrides)
+    assert compute_overrides(second, str(path)) == []
 
 
 @pytest.mark.parametrize(

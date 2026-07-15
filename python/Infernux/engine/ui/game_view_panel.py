@@ -20,6 +20,7 @@ from Infernux.ui.ui_texture_cache import get_shared_cache as _get_tex_cache
 from Infernux.ui.ui_render_dispatch import dispatch as _ui_dispatch
 from Infernux.ui.ui_event_system import UIEventProcessor
 from Infernux.ui.ui_canvas_utils import collect_sorted_canvases
+from Infernux.ui.ui_button import UIButton
 from Infernux.ui.inx_ui_screen_component import clear_rect_cache
 from .game_input_policy import should_process_game_ui_events, should_route_game_input
 from .editor_panel import EditorPanel
@@ -30,6 +31,8 @@ from .viewport_utils import capture_viewport_info
 from Infernux.debug import Debug
 
 _sort_by_sort_order = attrgetter('sort_order')
+_GAME_VIEWPORT_SEMANTIC_ID = "game_view.viewport"
+_GAME_UI_BUTTON_SEMANTIC_PREFIX = "game_view.ui_button."
 
 
 @editor_panel("Game", type_id="game_view", title_key="panel.game")
@@ -289,7 +292,7 @@ class GameViewPanel(EditorPanel):
         self._set_game_render_active(False)
 
     def _on_visible_pre(self, ctx):
-        focused = (ClosablePanel.get_active_panel_id() == self.window_id) or ctx.is_window_focused(0)
+        focused = (ClosablePanel.get_active_panel_id() == self.window_id) or self._is_window_or_child_focused(ctx)
         if focused and not self._was_focused:
             if self._on_focus_gained:
                 self._on_focus_gained()
@@ -413,7 +416,7 @@ class GameViewPanel(EditorPanel):
             self._activate_panel(ctx, focus_window=True)
 
         is_playing = self._is_playing()
-        panel_focused = (ClosablePanel.get_active_panel_id() == self.window_id) or ctx.is_window_focused(0)
+        panel_focused = (ClosablePanel.get_active_panel_id() == self.window_id) or self._is_window_or_child_focused(ctx)
 
         cursor_locked = Input.is_cursor_locked()
         if cursor_locked:
@@ -421,20 +424,22 @@ class GameViewPanel(EditorPanel):
                 Input.set_cursor_locked(False)
                 cursor_locked = False
 
-        Input.set_game_focused(
-            should_route_game_input(
-                is_playing=is_playing,
-                panel_focused=panel_focused,
-                cursor_locked=cursor_locked,
-            )
+        game_input_active = should_route_game_input(
+            is_playing=is_playing,
+            panel_focused=panel_focused,
+            cursor_locked=cursor_locked,
         )
+        # Focus must be visible to Input before querying the screen UI mouse
+        # state below. Otherwise a Game View's first pointer down/up can be
+        # gated away while the invisible viewport overlay owns the ImGui item.
+        Input.set_game_focused(game_input_active)
 
         if not is_playing and cursor_locked:
             Input.set_cursor_locked(False)
 
         if should_process_game_ui_events(
             is_playing=is_playing,
-            viewport_hovered=viewport_hovered,
+            panel_focused=panel_focused,
             cursor_locked=cursor_locked,
         ):
             self._process_ui_events(target_w, target_h, canvases=canvases)
@@ -491,11 +496,25 @@ class GameViewPanel(EditorPanel):
                 ctx.set_cursor_pos_y(cursor_start_y + pad_y)
                 ctx.image(game_texture_id, float(draw_w), float(draw_h), 0.0, 0.0, 1.0, 1.0)
 
-                vp = capture_viewport_info(ctx)
-                viewport_hovered = vp.is_hovered
-                viewport_clicked = vp.is_hovered and any(
-                    ctx.is_mouse_button_clicked(button) for button in (0, 1, 2)
+                # Images are visual-only ImGui items. Overlay an invisible
+                # button on the same rectangle so real clicks, including MCP
+                # synthetic input, activate the Game View's interaction item.
+                ctx.set_cursor_pos_x(cursor_start_x + pad_x)
+                ctx.set_cursor_pos_y(cursor_start_y + pad_y)
+                viewport_clicked = ctx.invisible_button(
+                    "##GameViewportInput", float(draw_w), float(draw_h)
                 )
+                vp = capture_viewport_info(ctx)
+                # Expose the interactive overlay, so MCP focuses the same
+                # surface a player clicks before sending game input.
+                ctx.record_semantic_item(
+                    "viewport", "Game Viewport", True, _GAME_VIEWPORT_SEMANTIC_ID
+                )
+                # The overlay has a stable item id. The child-window check
+                # still prevents input from reaching this panel through a
+                # floating Editor window.
+                viewport_hovered = ctx.is_item_hovered() and ctx.is_window_hovered()
+                viewport_clicked = viewport_clicked and viewport_hovered
                 Input.set_game_viewport_origin(vp.image_min_x, vp.image_min_y)
 
                 self._render_screen_ui(ctx, vp.image_min_x, vp.image_min_y,
@@ -600,6 +619,7 @@ class GameViewPanel(EditorPanel):
         scale_x, scale_y, text_scale = canvas.compute_scale(float(game_w), float(game_h))
         offset_x = (float(game_w) - ref_w * scale_x) * 0.5
         offset_y = (float(game_h) - ref_h * scale_y) * 0.5
+        semantic_capture_enabled = bool(getattr(ctx, "semantic_capture_enabled", False))
 
         for elem in canvas._get_elements():
             elem_go = elem.game_object
@@ -609,6 +629,16 @@ class GameViewPanel(EditorPanel):
                 continue
 
             ex, ey, ew, eh = elem.get_rect(ref_w, ref_h)
+            if semantic_capture_enabled:
+                vx, vy, vw, vh = elem.get_visual_rect(ref_w, ref_h)
+                self._record_game_ui_button_semantic(
+                    ctx,
+                    elem,
+                    vp_x + (offset_x + vx * scale_x) * (vp_w / float(game_w)),
+                    vp_y + (offset_y + vy * scale_y) * (vp_h / float(game_h)),
+                    vw * scale_x * (vp_w / float(game_w)),
+                    vh * scale_y * (vp_h / float(game_h)),
+                )
 
             if use_overlay:
                 ovl_scale_x = vp_w / ref_w
@@ -637,6 +667,30 @@ class GameViewPanel(EditorPanel):
                     text_scale=text_scale,
                     get_tex_id=_get_tid,
                 )
+
+    def _record_game_ui_button_semantic(self, ctx, elem, x, y, width, height):
+        if not isinstance(elem, UIButton):
+            return
+        recorder = getattr(ctx, "record_semantic_rect", None)
+        if not callable(recorder):
+            return
+        go = getattr(elem, "game_object", None)
+        object_id = int(getattr(go, "id", 0) or 0)
+        if object_id <= 0:
+            return
+        label = str(getattr(elem, "label", "") or getattr(go, "name", "Button")).strip() or "Button"
+        enabled = self._is_playing() and bool(getattr(elem, "interactable", True))
+        enabled = enabled and bool(getattr(elem, "raycast_target", True))
+        recorder(
+            "game_ui_button",
+            label,
+            float(x),
+            float(y),
+            max(float(width), 0.0),
+            max(float(height), 0.0),
+            enabled,
+            f"{_GAME_UI_BUTTON_SEMANTIC_PREFIX}{object_id}",
+        )
 
     # ------------------------------------------------------------------
     # UI event processing

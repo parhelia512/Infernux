@@ -94,13 +94,9 @@ def _skinned_mismatch_message(
     if k_clip or k_rend:
         return ""
 
-    p_clip_n = os.path.normcase(os.path.normpath(p_clip)) if p_clip else ""
-    p_rend_n = os.path.normcase(os.path.normpath(p_rend)) if p_rend else ""
-    if p_clip and p_rend and p_clip_n and p_rend_n and p_clip_n != p_rend_n:
-        return (
-            f"[SkeletalAnimator] Clip source path does not match renderer source, and "
-            f"neither could be resolved to a GUID. clip='{p_clip}' vs renderer='{p_rend}'"
-        )
+    # SkinnedMeshRenderer intentionally exposes only the source-model GUID. If
+    # neither side can provide a GUID, there is no renderer path to compare and
+    # therefore no definite mismatch to report.
     return ""
 
 

@@ -40,6 +40,7 @@ from typing import Callable, Dict, List, Optional
 
 import Infernux._jit_kernels as _jit_kernels
 from Infernux.debug import Debug
+from Infernux.engine.build_cancellation import BuildCancelled
 from Infernux.engine.i18n import t
 from Infernux.engine.nuitka_builder import NuitkaBuilder
 
@@ -61,8 +62,7 @@ def _ensure_video_splash_packages() -> None:
     import av  # noqa: F401
 
 
-class _BuildCancelled(Exception):
-    """Raised when the user cancels the build."""
+_BuildCancelled = BuildCancelled
 
 
 class BuildOutputDirectoryError(ValueError):
@@ -416,13 +416,14 @@ import traceback
 os.environ["_INFERNUX_PLAYER_MODE"] = "1"
 
 _DEBUG_MODE = {_debug_mode!r}
+os.environ["_INFERNUX_PLAYER_DEBUG_BUILD"] = "1" if _DEBUG_MODE else "0"
 
 # Determine the directory containing the executable
 _DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 if not os.path.isdir(os.path.join(_DIR, "Data")):
     _DIR = os.path.dirname(os.path.abspath(sys.executable))
 
-# Ensure raw-copied JIT packages (numba, numpy, llvmlite) are importable.
+# Ensure the raw-copied NumPy runtime and optional JIT packages are importable.
 # Nuitka standalone may not include the exe directory in sys.path by default.
 if _DIR not in sys.path:
     sys.path.insert(0, _DIR)
@@ -487,6 +488,10 @@ def _crash_report(exc):
             _f.write(tb_text)
     except OSError:
         pass
+    # Supervisor-managed Debug validation must remain remotely recoverable.
+    # The process exits after logging instead of blocking on a platform modal.
+    if os.environ.get("_INFERNUX_PLAYER_CONTROL_FILE"):
+        return
     # Try to show a native message box (works even without console)
     try:
         import ctypes
@@ -541,13 +546,16 @@ finally:
 
         selected_icon = self.icon_path if self.icon_path else icon_path
 
-        # Separate JIT-related packages that must be raw-copied (not
-        # compiled by Nuitka) from ordinary packages that Nuitka should
-        # compile normally.
+        # NumPy is part of the engine runtime (batch APIs, textures, VFX and
+        # native ndarray bindings), so every Player must carry it. Numba and
+        # llvmlite remain conditional because only the public JIT path needs
+        # their bytecode-preserving raw package copies.
         jit_set = NuitkaBuilder._JIT_NOFOLLOW_PACKAGES
         all_pkgs = user_packages or []
         compiled_pkgs = [p for p in all_pkgs if p not in jit_set]
-        jit_pkgs = [p for p in all_pkgs if p in jit_set] if self.enable_jit else []
+        raw_pkgs = {"numpy"}
+        if self.enable_jit:
+            raw_pkgs.update(p for p in all_pkgs if p in jit_set)
 
         nk = NuitkaBuilder(
             entry_script=boot_script,
@@ -557,7 +565,7 @@ finally:
             icon_path=selected_icon if selected_icon and os.path.isfile(selected_icon) else None,
             extra_include_packages=compiled_pkgs,
             extra_requirements_files=self._project_requirement_files(),
-            raw_copy_packages=jit_pkgs,
+            raw_copy_packages=sorted(raw_pkgs),
             console_mode="force" if self.debug_mode else "disable",
             lto=self.lto,
         )
@@ -876,6 +884,7 @@ finally:
 
         manifest = {
             "game_name": self.project_name,
+            "debug_build": bool(self.debug_mode),
             "display_mode": self.display_mode,
             "window_width": self.window_width,
             "window_height": self.window_height,
@@ -909,7 +918,10 @@ finally:
 
         # Directories that are entirely unnecessary at runtime
         _queue_dir(os.path.join(final_dir, "Infernux", "lib", "_player_runtime"))
-        _queue_dir(os.path.join(final_dir, "Infernux", "resources", "icons"))
+        # Keep engine icons. Built-in renderer materials resolve camera/light
+        # gizmo textures during native startup, before Player mode is applied.
+        # The complete directory is small and is an engine resource contract,
+        # not disposable Editor cache data.
         _queue_dir(os.path.join(final_dir, "Infernux", "resources", "supports"))
 
         # Build-time-only video packages — av (PyAV/ffmpeg) and imageio

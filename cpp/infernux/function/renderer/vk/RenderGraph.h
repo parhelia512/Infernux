@@ -697,6 +697,9 @@ class RenderGraph
         return m_passes.size();
     }
 
+    /// Passes in the compiled execution order, excluding culled passes.
+    [[nodiscard]] std::vector<std::string> GetExecutionPassNames() const;
+
     /**
      * @brief Get resource count
      */

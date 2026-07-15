@@ -8,8 +8,8 @@ Per-function ``scene`` fixture creates a fresh Scene for each test.
 """
 from __future__ import annotations
 
-import glob
 import os
+import shutil
 import tempfile
 
 import pytest
@@ -43,15 +43,22 @@ def engine():
     eng = NativeEngine(lib_dir)
     eng.set_log_level(LogLevel.Warn)
     eng.init_renderer(64, 64, project, resources_path)
-    yield eng
-    # Full native cleanup. The historical heap corruption here was fixed by
-    # (a) SceneManager::Shutdown() destroying all scenes inside Cleanup()
-    #     before PhysicsWorld::Shutdown(), and
-    # (b) leaking the scene/physics/asset singletons so no engine teardown
-    #     ever runs during C++ static destruction.
-    # Running cleanup in CI is intentional: it is the regression test for
-    # that fix.
-    eng.cleanup()
+    try:
+        yield eng
+    finally:
+        # Full native cleanup. The historical heap corruption here was fixed by
+        # (a) SceneManager::Shutdown() destroying all scenes inside Cleanup()
+        #     before PhysicsWorld::Shutdown(), and
+        # (b) leaking the scene/physics/asset singletons so no engine teardown
+        #     ever runs during C++ static destruction.
+        # Running cleanup in CI is intentional: it is the regression test for
+        # that fix.
+        try:
+            eng.cleanup()
+        finally:
+            # The native engine is pointed at this disposable project. Cleaning
+            # that directory is sufficient and never touches tracked resources.
+            shutil.rmtree(project, ignore_errors=True)
 
 
 @pytest.fixture()
@@ -98,20 +105,3 @@ def _reset_physics_state(engine):
     Physics.set_gravity(earth_gravity)
     yield
     Physics.set_gravity(earth_gravity)
-
-
-def pytest_sessionfinish(session, exitstatus):
-    """Clean up after the test session.
-
-    Removes all .meta files created under the repository during the run.
-    Normal interpreter shutdown is used — the engine singletons are
-    intentionally leaked on the C++ side and `engine` fixture teardown runs
-    a full `cleanup()`, so no native code executes during static destruction
-    anymore (the old `os._exit()` workaround is gone on purpose).
-    """
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    for meta in glob.glob(os.path.join(root, "**", "*.meta"), recursive=True):
-        try:
-            os.remove(meta)
-        except OSError:
-            pass

@@ -12,6 +12,8 @@ on:
       - "docs/wiki/generate_api_docs.py"
       - "docs/wiki/mkdocs.yml"
       - "docs/wiki/requirements.txt"
+      - "docs/tools/**"
+      - "docs/docs-manifest.json"
       - "python/Infernux/**"
   workflow_dispatch:
 
@@ -51,15 +53,33 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: python docs/wiki/generate_api_docs.py
 
+      - name: Apply curated core API guidance
+        run: node docs/tools/apply-api-curation.mjs
+
+      - name: Generate machine-readable documentation indexes
+        run: node docs/tools/build-doc-index.mjs
+
+      - name: Generate API version comparison
+        run: node docs/tools/build-api-diff.mjs
+
       - name: Build static wiki
         env:
           PYTHONIOENCODING: utf-8
         run: python -m mkdocs build --clean -f docs/wiki/mkdocs.yml
 
+      - name: Optimize static Wiki output
+        run: node docs/tools/optimize-static-site.mjs
+
+      - name: Enforce static performance budget
+        run: node docs/tools/check-static-budget.mjs
+
+      - name: Verify website contracts
+        run: node docs/tools/verify-site.mjs
+
       - name: Commit generated wiki output
         shell: bash
         run: |
-          git add docs/wiki/docs docs/wiki/site docs/wiki/mkdocs.yml docs/wiki/mkdocs_api_nav.yml docs/assets/wiki-docs.json
+          git add docs/wiki/docs docs/wiki/site docs/wiki/mkdocs.yml docs/wiki/mkdocs_api_nav.yml docs/assets/wiki-docs.json docs/docs-index.json docs/api-index.json
 
           if git diff --cached --quiet; then
             echo "No generated wiki changes to commit."

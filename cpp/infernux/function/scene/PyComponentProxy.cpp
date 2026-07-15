@@ -109,6 +109,7 @@ void CallPythonLifecycleOneArg(const py::object &pyComponent, const std::string 
 PyComponentProxy::PyComponentProxy(py::object pyComponent)
     : m_pyComponent(std::move(pyComponent)), m_typeName("PyComponent")
 {
+    py::gil_scoped_acquire acquire;
     if (!m_pyComponent.is_none()) {
         try {
             // Get the Python class name for type identification
@@ -169,6 +170,7 @@ PyComponentProxy::PyComponentProxy(py::object pyComponent)
 
 PyComponentProxy::~PyComponentProxy()
 {
+    py::gil_scoped_acquire acquire;
     // Note: OnDestroy is called explicitly before destruction by GameObject
     // Clear reference to allow Python GC
     m_pyComponent = py::none();
@@ -180,7 +182,8 @@ PyComponentProxy::PyComponentProxy(PyComponentProxy &&other) noexcept
       m_scriptGuid(std::move(other.m_scriptGuid)), m_moduleName(std::move(other.m_moduleName)),
       m_qualifiedName(std::move(other.m_qualifiedName)), m_executeInEditMode(other.m_executeInEditMode),
       m_overridesUpdate(other.m_overridesUpdate), m_overridesFixedUpdate(other.m_overridesFixedUpdate),
-      m_overridesLateUpdate(other.m_overridesLateUpdate), m_hasCoroutineScheduler(other.m_hasCoroutineScheduler)
+      m_overridesLateUpdate(other.m_overridesLateUpdate), m_hasCoroutineScheduler(other.m_hasCoroutineScheduler),
+      m_updateDispatchCount(other.m_updateDispatchCount), m_updateForwardCount(other.m_updateForwardCount)
 {
     other.m_pyComponent = py::none();
 }
@@ -200,6 +203,8 @@ PyComponentProxy &PyComponentProxy::operator=(PyComponentProxy &&other) noexcept
         m_overridesFixedUpdate = other.m_overridesFixedUpdate;
         m_overridesLateUpdate = other.m_overridesLateUpdate;
         m_hasCoroutineScheduler = other.m_hasCoroutineScheduler;
+        m_updateDispatchCount = other.m_updateDispatchCount;
+        m_updateForwardCount = other.m_updateForwardCount;
         other.m_pyComponent = py::none();
     }
     return *this;
@@ -248,6 +253,7 @@ void PyComponentProxy::SyncPythonMirror() const
 
 void PyComponentProxy::Awake()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -266,6 +272,7 @@ void PyComponentProxy::Awake()
 
 void PyComponentProxy::OnEnable()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -276,6 +283,7 @@ void PyComponentProxy::OnEnable()
 
 void PyComponentProxy::Start()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -286,18 +294,23 @@ void PyComponentProxy::Start()
 
 void PyComponentProxy::Update(float deltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
+
+    ++m_updateDispatchCount;
 
     if (!m_overridesUpdate && !m_hasCoroutineScheduler)
         return;
 
+    ++m_updateForwardCount;
     CallPythonLifecycleFloatArg(m_pyComponent, m_typeName, "_call_update", "update", deltaTime);
     RefreshCoroutineSchedulerFlag();
 }
 
 void PyComponentProxy::FixedUpdate(float fixedDeltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -310,6 +323,7 @@ void PyComponentProxy::FixedUpdate(float fixedDeltaTime)
 
 void PyComponentProxy::LateUpdate(float deltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -322,6 +336,7 @@ void PyComponentProxy::LateUpdate(float deltaTime)
 
 void PyComponentProxy::TickWhileDisabledUpdate(float deltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none() || !m_hasCoroutineScheduler)
         return;
 
@@ -332,6 +347,7 @@ void PyComponentProxy::TickWhileDisabledUpdate(float deltaTime)
 
 void PyComponentProxy::TickWhileDisabledFixedUpdate(float fixedDeltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none() || !m_hasCoroutineScheduler)
         return;
 
@@ -342,6 +358,7 @@ void PyComponentProxy::TickWhileDisabledFixedUpdate(float fixedDeltaTime)
 
 void PyComponentProxy::TickWhileDisabledLateUpdate(float deltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none() || !m_hasCoroutineScheduler)
         return;
 
@@ -352,6 +369,7 @@ void PyComponentProxy::TickWhileDisabledLateUpdate(float deltaTime)
 
 void PyComponentProxy::OnDisable()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -361,6 +379,7 @@ void PyComponentProxy::OnDisable()
 
 void PyComponentProxy::OnGameObjectDeactivated()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -370,6 +389,7 @@ void PyComponentProxy::OnGameObjectDeactivated()
 
 void PyComponentProxy::OnDestroy()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -378,6 +398,7 @@ void PyComponentProxy::OnDestroy()
 
 void PyComponentProxy::OnValidate()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -386,6 +407,7 @@ void PyComponentProxy::OnValidate()
 
 void PyComponentProxy::Reset()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -398,6 +420,7 @@ void PyComponentProxy::Reset()
 
 void PyComponentProxy::OnCollisionEnter(const CollisionInfo &collision)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_collision_enter", "on_collision_enter",
@@ -406,6 +429,7 @@ void PyComponentProxy::OnCollisionEnter(const CollisionInfo &collision)
 
 void PyComponentProxy::OnCollisionStay(const CollisionInfo &collision)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_collision_stay", "on_collision_stay",
@@ -414,6 +438,7 @@ void PyComponentProxy::OnCollisionStay(const CollisionInfo &collision)
 
 void PyComponentProxy::OnCollisionExit(const CollisionInfo &collision)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_collision_exit", "on_collision_exit",
@@ -422,6 +447,7 @@ void PyComponentProxy::OnCollisionExit(const CollisionInfo &collision)
 
 void PyComponentProxy::OnTriggerEnter(Collider *other)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_trigger_enter", "on_trigger_enter",
@@ -430,6 +456,7 @@ void PyComponentProxy::OnTriggerEnter(Collider *other)
 
 void PyComponentProxy::OnTriggerStay(Collider *other)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_trigger_stay", "on_trigger_stay",
@@ -438,6 +465,7 @@ void PyComponentProxy::OnTriggerStay(Collider *other)
 
 void PyComponentProxy::OnTriggerExit(Collider *other)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_trigger_exit", "on_trigger_exit",
@@ -451,6 +479,7 @@ const char *PyComponentProxy::GetTypeName() const
 
 std::vector<std::string> PyComponentProxy::GetRequiredComponentTypes() const
 {
+    py::gil_scoped_acquire acquire;
     std::vector<std::string> result;
     if (m_pyComponent.is_none())
         return result;
@@ -476,6 +505,7 @@ std::vector<std::string> PyComponentProxy::GetRequiredComponentTypes() const
 
 nlohmann::json PyComponentProxy::SerializeDocument() const
 {
+    py::gil_scoped_acquire acquire;
     if (m_scriptGuid.empty() || m_typeGuid.empty())
         throw std::logic_error("Python component '" + m_typeName + "' has no stable script/type GUID");
 
@@ -528,6 +558,7 @@ bool PyComponentProxy::DeserializeDocument(const nlohmann::json &j)
 
 void PyComponentProxy::SetScriptGuid(const std::string &guid)
 {
+    py::gil_scoped_acquire acquire;
     m_scriptGuid = guid;
     if (!m_pyComponent.is_none()) {
         try {
@@ -548,6 +579,7 @@ std::unique_ptr<Component> PyComponentProxy::Clone() const
 
 nlohmann::json PyComponentProxy::SerializePyFieldsDocument() const
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         throw std::logic_error("cannot serialize fields from an unbound Python component proxy");
     if (!py::hasattr(m_pyComponent, "_serialize_fields_document"))

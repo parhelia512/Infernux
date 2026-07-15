@@ -6,6 +6,7 @@ import atexit
 import importlib
 import json
 import os
+import time
 import uuid
 
 # ── Player mode detection ───────────────────────────────────────────
@@ -106,11 +107,22 @@ def _remove_project_lock(lock_path: str, token: str) -> None:
         data = None
     if data and data.get("token") != token:
         return
-    try:
-        os.remove(lock_path)
-    except OSError as _exc:
-        Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-        pass
+    last_error = None
+    for attempt in range(20):
+        try:
+            os.remove(lock_path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError as exc:
+            last_error = exc
+            if attempt < 19:
+                time.sleep(0.05)
+        except OSError as exc:
+            last_error = exc
+            break
+    if last_error is not None:
+        Debug.log(f"[Suppressed] {type(last_error).__name__}: {last_error}")
 
 
 def _acquire_project_lock(project_path: str, mode: str) -> tuple[str, str]:

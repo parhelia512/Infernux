@@ -190,6 +190,40 @@ code, pre { font-family: var(--font-mono); }
 
 img { max-width: 100%; display: block; }
 
+.skip-link {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 2000;
+    padding: 10px 14px;
+    border-radius: var(--radius-xs);
+    background: var(--text);
+    color: var(--bg-deep);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    transform: translateY(-160%);
+    transition: transform 0.16s ease;
+}
+
+.skip-link:focus { transform: translateY(0); }
+
+.visually-hidden {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+    outline: 3px solid var(--info);
+    outline-offset: 3px;
+}
+
 /* ── Container ───────────────────────────────────────────────────── */
 .container, .nav-container {
     width: min(var(--content-width), calc(100vw - (var(--page-padding) * 2)));
@@ -361,8 +395,8 @@ img { max-width: 100%; display: block; }
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 38px;
-    height: 38px;
+    min-width: 44px;
+    height: 44px;
     padding: 0 12px;
     border-radius: 10px;
     border: 1px solid var(--border-strong);
@@ -1374,6 +1408,15 @@ img { max-width: 100%; display: block; }
 
 /* ── Responsive ──────────────────────────────────────────────────── */
 @media (max-width: 1080px) {
+    .nav-links {
+        gap: 14px;
+    }
+
+    .nav-links a {
+        font-size: 0.78rem;
+        letter-spacing: 0.08em;
+    }
+
     .hero-grid,
     .stack-layout,
     .section-head,
@@ -1399,7 +1442,7 @@ img { max-width: 100%; display: block; }
     .mission-ribbon-inner { gap: 12px; }
     .mission-kicker { display: none; }
 
-    .navbar { height: auto; padding: 12px 0; }
+    .navbar { height: auto; min-height: 68px; padding: 12px 0; }
     .nav-links { display: none; }
     .mobile-menu-btn { display: inline-flex; }
 
@@ -1434,5 +1477,64 @@ img { max-width: 100%; display: block; }
     .footer-links {
         flex-direction: column;
         gap: 32px;
+    }
+}
+
+@media (max-width: 520px) {
+    :root {
+        --page-padding: 18px;
+        --section-space: 84px;
+    }
+
+    .mission-ribbon { height: 34px; }
+    .mission-ribbon-inner { justify-content: center; }
+    .mission-sub { display: none; }
+    .mission-name { font-size: 0.84rem; letter-spacing: 0.24em; }
+
+    .nav-container { gap: 10px; }
+    .nav-logo { gap: 8px; }
+    .nav-logo .logo-text { font-size: 0.78rem; letter-spacing: 0.09em; }
+    .logo-icon { width: 32px; height: 32px; }
+    .lang-toggle { min-width: 52px; padding: 0 8px; }
+
+    .hero-grid,
+    .subpage-hero,
+    .hub-hero {
+        padding: 26px 22px;
+    }
+
+    .hero-title,
+    .subpage-hero h1,
+    .hub-hero h1 {
+        font-size: clamp(2rem, 11vw, 2.6rem);
+    }
+
+    .hero-actions,
+    .hub-actions,
+    .cta-buttons {
+        display: grid;
+        grid-template-columns: 1fr;
+    }
+
+    .btn { width: 100%; justify-content: center; }
+    .code-preview pre { font-size: 0.74rem; }
+    .section-title { font-size: clamp(1.75rem, 9vw, 2.3rem); }
+    .pillar-card,
+    .capability-card,
+    .status-card,
+    .lane-card,
+    .priority-card,
+    .hub-card,
+    .release-card { padding: 22px 20px; }
+    .footer-bottom { letter-spacing: 0.08em; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
     }
 }

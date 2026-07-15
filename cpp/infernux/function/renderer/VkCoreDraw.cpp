@@ -314,7 +314,9 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
         if (!dc.frustumVisible)
             continue;
 
-        InxMaterial *material = overrideMatRaw ? overrideMatRaw : (dc.material ? dc.material : defaultMatRaw);
+        std::shared_ptr<InxMaterial> materialOwner =
+            overrideMatOwner ? overrideMatOwner : (dc.material ? dc.material : defaultMaterial);
+        InxMaterial *material = materialOwner.get();
         if (!material)
             continue;
 
@@ -347,7 +349,7 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
         if (bufIt != m_perObjectBuffers.end() && bufIt->second.vertexBuffer)
             vb = bufIt->second.vertexBuffer->GetBuffer();
 
-        m_eligibleScratch.push_back({&dc, sortKey, matHash, vb, material, bufIt});
+        m_eligibleScratch.push_back({&dc, sortKey, matHash, vb, std::move(materialOwner), material, bufIt});
     }
 
     // Diagnostic: log per-call eligible count with queue range
@@ -601,7 +603,8 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
         const DrawCall &dc = *entry.dc;
 
         // Material already resolved in filter loop — use directly
-        InxMaterial *matRaw = entry.material;
+        auto matShared = entry.materialOwner;
+        InxMaterial *matRaw = matShared.get();
 
         VkPipeline pipeline = matRaw->GetPassPipeline(ShaderCompileTarget::Forward);
         VkPipelineLayout pipelineLayout = matRaw->GetPassPipelineLayout(ShaderCompileTarget::Forward);
@@ -615,8 +618,6 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
         if (pipeline == VK_NULL_HANDLE) {
             const std::string &vertName = matRaw->GetVertShaderName();
             const std::string &fragName = matRaw->GetFragShaderName();
-            // Non-owning shared_ptr for legacy RefreshMaterialPipeline API (rare path)
-            auto matShared = std::shared_ptr<InxMaterial>(matRaw, [](InxMaterial *) {});
             if (!fragName.empty()) {
                 RefreshMaterialPipeline(matShared, vertName, fragName);
                 pipeline = matRaw->GetPassPipeline(ShaderCompileTarget::Forward);
@@ -633,12 +634,14 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
                 if (errorMaterial->GetPassPipeline(ShaderCompileTarget::Forward) != VK_NULL_HANDLE) {
                     pipeline = errorMaterial->GetPassPipeline(ShaderCompileTarget::Forward);
                     pipelineLayout = errorMaterial->GetPassPipelineLayout(ShaderCompileTarget::Forward);
+                    matShared = errorMaterial;
                     matRaw = errorMaterial.get();
                 }
             }
             if (pipeline == VK_NULL_HANDLE && defaultMaterial) {
                 pipeline = defaultMaterial->GetPassPipeline(ShaderCompileTarget::Forward);
                 pipelineLayout = defaultMaterial->GetPassPipelineLayout(ShaderCompileTarget::Forward);
+                matShared = defaultMaterial;
                 matRaw = defaultMaterial.get();
             }
             if (pipeline == VK_NULL_HANDLE) {
@@ -673,7 +676,6 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
                 const std::string &vertName = matRaw->GetVertShaderName();
                 const std::string &fragName = matRaw->GetFragShaderName();
                 if (!fragName.empty()) {
-                    auto matShared = std::shared_ptr<InxMaterial>(matRaw, [](InxMaterial *) {});
                     if (RefreshMaterialPipeline(matShared, vertName, fragName)) {
                         rd = m_materialPipelineManager.GetRenderData(materialKey);
                     }
@@ -772,7 +774,6 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
                 const std::string &vertName = matRaw->GetVertShaderName();
                 const std::string &fragName = matRaw->GetFragShaderName();
                 if (!fragName.empty()) {
-                    auto matShared = std::shared_ptr<InxMaterial>(matRaw, [](InxMaterial *) {});
                     if (RefreshMaterialPipeline(matShared, vertName, fragName)) {
                         MaterialRenderData *rd = m_materialPipelineManager.GetRenderData(matRaw->GetMaterialKey());
                         if (rd && rd->isValid && rd->descriptorSet != VK_NULL_HANDLE &&
@@ -907,7 +908,7 @@ void InxVkCoreModular::DrawShadowCasters(VkCommandBuffer cmdBuf, uint32_t width,
     m_shadowDrawScratch.clear();
     m_shadowDrawScratch.reserve(shadowDrawCalls().size());
     for (const DrawCall &dc : shadowDrawCalls()) {
-        if (!dc.material)
+        if (!dc.castsShadows || !dc.material)
             continue;
         int renderQueue = dc.material->GetRenderQueue();
         if (renderQueue < queueMin || renderQueue > queueMax)
@@ -919,8 +920,7 @@ void InxVkCoreModular::DrawShadowCasters(VkCommandBuffer cmdBuf, uint32_t width,
         VkPipeline pip = dc.material->GetPassPipeline(ShaderCompileTarget::Shadow);
         if (pip == VK_NULL_HANDLE) {
             // Lazy creation: shadow shared resources are ready, create per-material pipeline now
-            auto matShared = std::shared_ptr<InxMaterial>(dc.material, [](InxMaterial *) {});
-            CreateMaterialShadowPipeline(matShared, dc.material->GetVertShaderName(), dc.material->GetFragShaderName());
+            CreateMaterialShadowPipeline(dc.material, dc.material->GetVertShaderName(), dc.material->GetFragShaderName());
             pip = dc.material->GetPassPipeline(ShaderCompileTarget::Shadow);
         }
         if (pip == VK_NULL_HANDLE)

@@ -236,13 +236,19 @@ def _strip_prefab_runtime_fields(obj_data: dict):
             return remapped
         return {key: rewrite_references(item, f"{path}.{key}") for key, item in value.items()}
 
+    next_local_component_id = 1
     for node, location in nodes:
         node.pop("id", None)
         transform = node.get("transform")
         if isinstance(transform, dict):
             transform.pop("component_id", None)
         for index, component in enumerate(node.get("components", [])):
-            if not isinstance(component, dict) or not isinstance(component.get("data"), dict):
+            if not isinstance(component, dict):
+                continue
+            component["component_id"] = next_local_component_id
+            next_local_component_id += 1
+            component.pop("instance_guid", None)
+            if not isinstance(component.get("data"), dict):
                 continue
             component["data"] = rewrite_references(
                 component["data"],
@@ -265,7 +271,7 @@ def read_prefab_source_canvas(file_path: str = None, guid: str = None,
 
 
 def save_prefab(game_object, file_path: str, asset_database=None,
-               source_canvas_name: str = "") -> bool:
+               source_canvas_name: str = "", root_document_template: dict = None) -> bool:
     """Serialize a GameObject hierarchy to a .prefab file.
 
     Returns True on success, False on failure.
@@ -281,6 +287,16 @@ def save_prefab(game_object, file_path: str, asset_database=None,
         go_data = game_object.serialize_document()
         if not isinstance(go_data, dict):
             raise TypeError("GameObject.serialize_document() did not return a dict")
+        if isinstance(root_document_template, dict):
+            for key in ("name", "active", "is_static", "tag", "layer"):
+                if key in root_document_template:
+                    go_data[key] = copy.deepcopy(root_document_template[key])
+            root_transform = go_data.get("transform")
+            template_transform = root_document_template.get("transform")
+            if isinstance(root_transform, dict) and isinstance(template_transform, dict):
+                for key in ("position", "rotation"):
+                    if key in template_transform:
+                        root_transform[key] = copy.deepcopy(template_transform[key])
     except Exception as exc:
         Debug.log_error(f"Failed to serialize GameObject for prefab: {exc}")
         return False
@@ -394,6 +410,40 @@ def _stamp_prefab_guid(obj_data: dict, guid: str, is_root: bool = True):
         obj_data["prefab_root"] = True
     for child in obj_data.get("children", []):
         _stamp_prefab_guid(child, guid, is_root=False)
+
+
+def _link_created_prefab_source(game_object, file_path: str, asset_database) -> bool:
+    """Turn the saved source hierarchy into an instance of its new Prefab."""
+    if game_object is None or asset_database is None:
+        return False
+    try:
+        guid = str(asset_database.get_guid_from_path(file_path) or "")
+    except Exception as exc:
+        Debug.log_warning(f"Failed to resolve created prefab GUID: {exc}")
+        return False
+    if not guid:
+        Debug.log_warning(f"Created prefab has no AssetDatabase GUID: {file_path}")
+        return False
+
+    def _link(obj, is_root: bool) -> None:
+        obj.prefab_guid = guid
+        obj.prefab_root = is_root
+        children = list(obj.get_children()) if hasattr(obj, "get_children") else []
+        for child in children:
+            _link(child, False)
+
+    try:
+        _link(game_object, True)
+    except Exception as exc:
+        Debug.log_warning(f"Failed to link created prefab source: {exc}")
+        return False
+
+    from Infernux.engine.scene_manager import SceneFileManager
+
+    manager = SceneFileManager.instance()
+    if manager is not None:
+        manager.mark_dirty()
+    return True
 
 
 def _strip_prefab_fields(obj_data: dict):
