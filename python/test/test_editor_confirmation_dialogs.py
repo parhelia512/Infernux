@@ -14,9 +14,17 @@ class _SemanticContext:
         self.opened: list[str] = []
         self.semantics: list[str] = []
         self.buttons: dict[str, object] = {}
+        self.window_positions: list[tuple[float, float, int, float, float]] = []
 
     def open_popup(self, popup_id: str) -> None:
         self.opened.append(popup_id)
+
+    @staticmethod
+    def get_main_viewport_bounds():
+        return 100.0, 50.0, 1200.0, 800.0
+
+    def set_next_window_pos(self, x, y, condition, pivot_x, pivot_y) -> None:
+        self.window_positions.append((x, y, condition, pivot_x, pivot_y))
 
     @staticmethod
     def begin_popup_modal(_popup_id: str, _flags: int) -> bool:
@@ -124,6 +132,7 @@ def test_async_save_as_cancel_reopens_confirmation_without_cancelling_exit():
         assert "editor.dirty_panel.save" in ctx.semantics
         assert "editor.dirty_panel.discard" in ctx.semantics
         assert "editor.dirty_panel.cancel" in ctx.semantics
+        assert ctx.window_positions == [(700.0, 450.0, 1, 0.5, 0.5)]
         assert cancelled == []
 
         coordinator.choose_cancel()
@@ -223,6 +232,56 @@ def test_direct_panel_close_routes_through_shared_confirmation():
         clear_panel_tracking(panel_id)
 
 
+def test_titlebar_close_restores_dirty_dock_tab_before_confirmation():
+    panel_id = "dirty_test_titlebar_close"
+    panel = ClosablePanel("Titlebar Close", panel_id)
+    panel._dirty = True
+
+    class _Context:
+        focus_calls = 0
+
+        @staticmethod
+        def begin_window_closable(_title, _is_open, _flags):
+            return True, False
+
+        @staticmethod
+        def set_next_window_focus() -> None:
+            pass
+
+        def set_window_focus(self) -> None:
+            self.focus_calls += 1
+
+        @staticmethod
+        def is_window_hovered(_flags) -> bool:
+            return False
+
+        @staticmethod
+        def is_mouse_button_clicked(_button) -> bool:
+            return False
+
+        @staticmethod
+        def is_window_focused(_flags) -> bool:
+            return True
+
+    ctx = _Context()
+    coordinator = DirtyPanelConfirmationCoordinator()
+    previous = DirtyPanelConfirmationCoordinator._instance
+    previous_active = ClosablePanel._active_panel_id
+    DirtyPanelConfirmationCoordinator._instance = coordinator
+    ClosablePanel._active_panel_id = "game"
+    try:
+        assert panel._begin_closable_window(ctx) is True
+        assert panel.is_open is True
+        assert ctx.focus_calls == 1
+        assert ClosablePanel.get_active_panel_id() == panel_id
+        assert coordinator.active_panel_id == panel_id
+    finally:
+        coordinator.choose_cancel()
+        DirtyPanelConfirmationCoordinator._instance = previous
+        ClosablePanel._active_panel_id = previous_active
+        clear_panel_tracking(panel_id)
+
+
 from pathlib import Path
 
 import Infernux.lib as native
@@ -239,6 +298,14 @@ class _ProjectDeleteSemanticContext:
 
     def open_popup(self, popup_id: str) -> None:
         self.opened.append(popup_id)
+
+    @staticmethod
+    def get_main_viewport_bounds():
+        return 0.0, 0.0, 1280.0, 720.0
+
+    @staticmethod
+    def set_next_window_pos(_x, _y, _condition, _pivot_x, _pivot_y) -> None:
+        pass
 
     @staticmethod
     def begin_popup_modal(_popup_id: str, _flags: int) -> bool:

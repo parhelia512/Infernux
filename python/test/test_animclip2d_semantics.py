@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from Infernux.core.animation_clip import AnimationClip
 from Infernux.core.asset_types import SpriteFrame
 from Infernux.engine.ui.animclip2d_editor_panel import (
@@ -7,6 +9,17 @@ from Infernux.engine.ui.animclip2d_editor_panel import (
     _ClipState,
     _TextureState,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_animclip_panel_dirty_tracking():
+    from Infernux.engine.project_context import clear_panel_tracking
+
+    clear_panel_tracking("animclip2d_editor")
+    try:
+        yield
+    finally:
+        clear_panel_tracking("animclip2d_editor")
 
 
 class _ClipInfoContext:
@@ -159,3 +172,17 @@ def test_loop_round_trips_panel_state_and_saved_clip(monkeypatch, tmp_path):
     assert captured["loop"] is False
     assert captured["frame_indices"] == [0, 1, 2]
     assert captured["fps"] == 3.0
+
+
+def test_animclip_new_document_and_dirty_draft_round_trip():
+    panel = AnimClip2DEditorPanel()
+    assert panel._dirty is True
+    panel._clips[0].name = "Recovered Clip"
+    panel._clips[0].fps = 18.0
+
+    restored = AnimClip2DEditorPanel()
+    restored.load_state(panel.save_state())
+
+    assert restored._dirty is True
+    assert restored._clips[0].name == "Recovered Clip"
+    assert restored._clips[0].fps == 18.0

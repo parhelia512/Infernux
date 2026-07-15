@@ -22,7 +22,6 @@ from typing import Optional
 from Infernux.debug import Debug
 from Infernux.engine.project_context import get_project_root
 from Infernux.engine.path_utils import safe_path as _safe_path
-from Infernux.engine.ui._dialogs import is_synthetic_input_frame, save_file_dialog
 from .scene_manager import (
     SCENE_EXTENSION,
     DEFAULT_SCENE_FILE_BASE,
@@ -31,6 +30,20 @@ from .scene_manager import (
     _save_editor_settings,
     _get_scene_root_objects,
 )
+
+
+def is_synthetic_input_frame() -> bool:
+    """Resolve the editor input probe lazily so headless imports stay UI-free."""
+    from Infernux.engine.ui._dialogs import is_synthetic_input_frame as _probe
+
+    return _probe()
+
+
+def save_file_dialog(**kwargs):
+    """Resolve the native editor dialog lazily so headless imports stay UI-free."""
+    from Infernux.engine.ui._dialogs import save_file_dialog as _save_file_dialog
+
+    return _save_file_dialog(**kwargs)
 
 
 class SceneSaveMixin:

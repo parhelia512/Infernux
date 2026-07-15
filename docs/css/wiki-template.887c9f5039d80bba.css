@@ -58,8 +58,8 @@
             transition: all 0.12s;
         }
         .lang-sw a.on {
-            background: var(--accent);
-            color: #fff;
+            background: var(--accent-fill);
+            color: var(--on-accent);
         }
         .lang-sw a:hover:not(.on) {
             color: var(--text);
@@ -136,6 +136,20 @@
             padding: 36px 56px 80px;
             max-width: 880px;
             min-width: 0;
+        }
+
+        .article-page-shell {
+            padding-top: calc(var(--nav-height) + 60px);
+            min-height: 80vh;
+            padding-bottom: 80px;
+        }
+        .article-page-container {
+            max-width: 860px;
+            margin: 0 auto;
+        }
+        .api-main.article-page-content {
+            padding: 0;
+            max-width: none;
         }
 
         /* H1 — class name */

@@ -11,6 +11,25 @@ const documentElement = {
     lang: "en",
     getAttribute() { return null; }
 };
+const giscusFrameWindow = {};
+const giscusFrame = { contentWindow: giscusFrameWindow, src: "https://giscus.app/en/widget?repo=ChenlizheMe%2FInfernux" };
+const giscusHost = {
+    dataset: {
+        repo: "ChenlizheMe/Infernux",
+        repoId: "R_kgDOO_wV3A",
+        category: "General",
+        categoryId: "DIC_kwDOO_wV3M4C5oaC",
+        mapping: "specific",
+        term: "Infernux Community Wall",
+        strict: "1",
+        reactionsEnabled: "1",
+        emitMetadata: "0",
+        inputPosition: "top",
+        loading: "lazy"
+    },
+    replaceChildren() {}
+};
+let appendedGiscusScript = null;
 
 const sandbox = {
     AbortController,
@@ -22,6 +41,7 @@ const sandbox = {
     RegExp,
     URL,
     URLSearchParams,
+    giscusFrameWindow,
     console,
     fetch: async () => { throw new Error("network is disabled in the client unit test"); },
     history: { replaceState() {} },
@@ -32,14 +52,30 @@ const sandbox = {
     document: {
         documentElement,
         addEventListener() {},
-        getElementById() { return null; },
-        querySelector() { return null; }
+        body: {
+            appendChild(node) { appendedGiscusScript = node; }
+        },
+        createElement(tagName) {
+            assert.equal(tagName, "script");
+            return {
+                dataset: {},
+                listeners: new Map(),
+                addEventListener(type, handler) { this.listeners.set(type, handler); },
+                remove() { if (appendedGiscusScript === this) appendedGiscusScript = null; }
+            };
+        },
+        getElementById(id) { return id === "giscus-client" ? appendedGiscusScript : null; },
+        querySelector(selector) {
+            if (selector === ".giscus") return giscusHost;
+            if (selector === "iframe.giscus-frame") return appendedGiscusScript ? giscusFrame : null;
+            return null;
+        }
     },
     window: {
         addEventListener() {},
-        clearTimeout,
+        clearTimeout() {},
         location: { href: "https://infernux-engine.com/community.html", search: "" },
-        setTimeout
+        setTimeout() { return 1; }
     },
     MutationObserver: class {
         observe() {}
@@ -57,12 +93,16 @@ new vm.Script(`${source}\n;globalThis.__communityTest = {
     writeCommunityCache,
     readCommunityCache,
     giscusOrigin: GISCUS_ORIGIN,
-    giscusCacheKey: GISCUS_STATUS_CACHE_KEY,
+    giscusOptInKey: GISCUS_OPT_IN_KEY,
     classifyGiscusError,
-    readGiscusReadinessCache,
-    writeGiscusReadinessCache,
+    readGiscusOptIn,
+    rememberGiscusOptIn,
+    giscusConfiguration,
+    loadGiscusEmbed,
     handleGiscusMessage,
     giscusState() { return giscusReadinessState; },
+    giscusScript() { return document.getElementById(GISCUS_SCRIPT_ID); },
+    giscusFrameWindow,
     filter(topics, query, category) {
         cachedCommunityTopics = topics;
         communitySearch = query;
@@ -137,17 +177,33 @@ assert.equal(client.classifyGiscusError("Discussion not found"), "ready");
 assert.equal(client.classifyGiscusError("giscus is not installed on this repository"), "uninstalled");
 assert.equal(client.classifyGiscusError("API rate limit exceeded"), "degraded");
 assert.equal(client.classifyGiscusError("Repository unavailable"), "error");
-client.handleGiscusMessage({ origin: "https://evil.example", data: { giscus: { error: "not installed" } } });
+assert.equal(client.giscusState(), "standby");
+assert.equal(client.readGiscusOptIn(), false);
+assert.equal(client.loadGiscusEmbed(), true);
 assert.equal(client.giscusState(), "checking");
-client.handleGiscusMessage({ origin: client.giscusOrigin, data: { giscus: { error: "giscus is not installed on this repository" } } });
+assert.equal(client.readGiscusOptIn(), true);
+assert.equal(storage.get(client.giscusOptInKey), "1");
+assert.equal(client.giscusScript().src, "https://giscus.app/client.js");
+assert.equal(client.giscusScript().crossOrigin, "anonymous");
+assert.equal(client.giscusScript().dataset.repo, "ChenlizheMe/Infernux");
+assert.equal(client.giscusScript().dataset.mapping, "specific");
+assert.equal(client.giscusScript().dataset.loading, "lazy");
+assert.equal(client.loadGiscusEmbed(), false, "a second load must be ignored while the frame is pending");
+client.handleGiscusMessage({ origin: "https://evil.example", source: client.giscusFrameWindow, data: { giscus: { error: "not installed" } } });
+assert.equal(client.giscusState(), "checking");
+client.handleGiscusMessage({ origin: client.giscusOrigin, source: {}, data: { giscus: { error: "not installed" } } });
+assert.equal(client.giscusState(), "checking");
+client.handleGiscusMessage({ origin: client.giscusOrigin, source: client.giscusFrameWindow, data: { giscus: { error: "giscus is not installed on this repository" } } });
 assert.equal(client.giscusState(), "uninstalled");
-client.handleGiscusMessage({ origin: client.giscusOrigin, data: { giscus: { resizeHeight: 420 } } });
+client.handleGiscusMessage({ origin: client.giscusOrigin, source: client.giscusFrameWindow, data: { giscus: { resizeHeight: 420 } } });
 assert.equal(client.giscusState(), "uninstalled");
-client.handleGiscusMessage({ origin: client.giscusOrigin, data: { giscus: { error: "Discussion not found" } } });
+client.handleGiscusMessage({ origin: client.giscusOrigin, source: client.giscusFrameWindow, data: { giscus: { error: "Discussion not found" } } });
 assert.equal(client.giscusState(), "ready");
-client.writeGiscusReadinessCache("ready");
-assert.equal(client.readGiscusReadinessCache(), "ready");
-storage.set(client.giscusCacheKey, JSON.stringify({ version: 1, storedAt: Date.now() - (6 * 60 * 1000), state: "ready" }));
-assert.equal(client.readGiscusReadinessCache(), null);
+const initialScript = client.giscusScript();
+assert.equal(client.loadGiscusEmbed(), true);
+assert.equal(client.giscusState(), "checking");
+assert.equal(client.giscusScript(), initialScript, "retrying an existing frame must not add another Giscus client listener");
+client.handleGiscusMessage({ origin: client.giscusOrigin, source: client.giscusFrameWindow, data: { giscus: { resizeHeight: 420 } } });
+assert.equal(client.giscusState(), "ready");
 
-console.log("Community client test passed: canonical URLs, pagination, topic metadata, filtering, localization, and verified Giscus readiness states.");
+console.log("Community client test passed: canonical URLs, pagination, topic metadata, filtering, localization, explicit Giscus loading, and verified frame messages.");

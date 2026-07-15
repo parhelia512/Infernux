@@ -357,7 +357,9 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             if not cam:
                 return tb.get_camera_settings()
             return {
+                "orthographic": bool(cam.orthographic),
                 "fov": float(cam.fov),
+                "orthographic_size": float(cam.orthographic_size),
                 "rotation_speed": float(cam.rotation_speed),
                 "pan_speed": float(cam.pan_speed),
                 "zoom_speed": float(cam.zoom_speed),
@@ -368,7 +370,9 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             cam = engine.editor_camera if engine else None
             if not cam:
                 return
+            cam.orthographic = settings["orthographic"]
             cam.fov = settings["fov"]
+            cam.orthographic_size = settings["orthographic_size"]
             cam.rotation_speed = settings["rotation_speed"]
             cam.pan_speed = settings["pan_speed"]
             cam.zoom_speed = settings["zoom_speed"]
@@ -465,7 +469,7 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             with open(layout_ver_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(str(_LAYOUT_VERSION))
 
-    def _persist_editor_state(self):
+    def _persist_editor_state(self, *, include_scene_draft: bool = False):
         if bool(getattr(self, "_suspend_persist_state", False)):
             return
         if self.console is None or self.project_panel is None or self.window_manager is None:
@@ -486,6 +490,14 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             })
         _panel_state.put("project", {"current_path": self.project_panel.get_current_path()})
         _panel_state.put("window_manager", self.window_manager.save_state())
+        if include_scene_draft and self.scene_file_manager:
+            scene_state = self.scene_file_manager.save_session_state()
+            if scene_state.get("dirty"):
+                _panel_state.put("scene_session", scene_state)
+            else:
+                _panel_state.delete("scene_session")
+        elif self.scene_file_manager and not self.scene_file_manager.is_dirty:
+            _panel_state.delete("scene_session")
         # Scene/Game views are runtime-driven and must not persist panel payloads.
         _panel_state.delete("panel:scene_view")
         _panel_state.delete("panel:game_view")
@@ -517,3 +529,4 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
     def _load_initial_scene(self):
         import Infernux.renderstack  # noqa: F401 — ensure RenderStack is discoverable
         self.scene_file_manager.load_last_scene_or_default()
+        self.scene_file_manager.restore_session_state(_panel_state.get("scene_session"))

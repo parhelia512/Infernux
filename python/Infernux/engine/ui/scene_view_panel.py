@@ -321,6 +321,15 @@ class SceneViewPanel(SceneViewGizmoMixin, SceneViewCameraMixin, SceneViewOverlay
     def _window_flags(self) -> int:
         return Theme.WINDOW_FLAGS_VIEWPORT | Theme.WINDOW_FLAGS_NO_SCROLL
 
+    def _window_title_suffix(self) -> str:
+        try:
+            from Infernux.engine.scene_manager import SceneFileManager
+
+            manager = SceneFileManager.instance()
+            return " *" if manager is not None and manager.is_dirty else ""
+        except Exception:
+            return ""
+
     def save_state(self) -> dict:
         # Scene view keeps many runtime-only camera/gizmo/render caches.
         # Persisting them across sessions can corrupt first-frame behavior.

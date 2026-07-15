@@ -56,7 +56,9 @@ class ToolbarPanel : public EditorPanel
 
     struct CameraSettings
     {
+        bool orthographic = false;
         float fov = 60.0f;
+        float orthographicSize = 5.0f;
         float rotationSpeed = 0.05f;
         float panSpeed = 1.0f;
         float zoomSpeed = 1.0f;
@@ -98,6 +100,7 @@ class ToolbarPanel : public EditorPanel
     std::string T(const std::string &key) const;
 
     static constexpr float CAMERA_DEFAULTS_FOV = 60.0f;
+    static constexpr float CAMERA_DEFAULTS_ORTHOGRAPHIC_SIZE = 5.0f;
     static constexpr float CAMERA_DEFAULTS_ROTATION = 0.05f;
     static constexpr float CAMERA_DEFAULTS_PAN = 1.0f;
     static constexpr float CAMERA_DEFAULTS_ZOOM = 1.0f;

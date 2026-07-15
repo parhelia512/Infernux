@@ -504,6 +504,11 @@ def create_material(current_path: str, material_name: str, asset_database=None):
         except Exception as exc:
             return False, str(exc)
 
+    # Publish the exact document already in memory. The Project panel can show
+    # this preview before filesystem polling or a later material save completes.
+    from Infernux.core.assets import AssetManager
+    AssetManager._prime_material_preview(file_path, content)
+
     return True, ""
 
 

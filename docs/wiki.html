@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="description" content="Learn Infernux through guided tutorials, engine manuals, architecture notes, and bilingual scripting API references.">
     <meta name="theme-color" content="#0a0c11">
     <meta name="color-scheme" content="dark light">
@@ -12,23 +14,23 @@
     <meta property="og:title" content="Infernux Learn &amp; Documentation">
     <meta property="og:description" content="Guided learning paths, system manuals, architecture notes, and a bilingual API reference for Infernux.">
     <meta property="og:url" content="https://infernux-engine.com/wiki.html">
-    <meta property="og:image" content="https://infernux-engine.com/assets/demo.png">
-    <meta property="og:image:type" content="image/png">
-    <meta property="og:image:width" content="1245">
-    <meta property="og:image:height" content="653">
-    <meta property="og:image:alt" content="Infernux editor running a voxel scene">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Infernux Learn &amp; Documentation">
     <meta name="twitter:description" content="Guided learning paths, system manuals, architecture notes, and a bilingual API reference.">
-    <meta name="twitter:image" content="https://infernux-engine.com/assets/demo.png">
-    <meta name="twitter:image:alt" content="Infernux editor running a voxel scene">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status">
     <meta name="infernux-wiki-catalog" content="assets/wiki-docs.3718aba9f552a039.json">
     <title>Infernux · 熔炉 — Documentation deck</title>
     <link rel="icon" type="image/png" href="assets/logo.png">
     <link rel="apple-touch-icon" href="assets/logo.png">
     <link rel="manifest" href="site.webmanifest">
     <link rel="stylesheet" href="css/fonts.css?v=1">
-    <link rel="stylesheet" href="css/style.css?v=12">
+    <link rel="stylesheet" href="css/style.css?v=14">
     <link rel="stylesheet" href="css/mission.css?v=2">
     <link rel="stylesheet" href="css/wiki.css?v=4">
     <link rel="stylesheet" href="css/fontawesome-subset.css?v=6.4.0">
@@ -62,13 +64,13 @@
                     </a>
                 </div>
                 <div class="nav-right">
-                    <button class="theme-toggle" type="button" onclick="toggleTheme()" title="Toggle theme" aria-label="Switch color theme" aria-pressed="false">
+                    <button class="theme-toggle" type="button" data-site-action="theme" title="Toggle theme" aria-label="Switch color theme" aria-pressed="false">
                         <i class="fas fa-moon" id="theme-icon" aria-hidden="true"></i>
                     </button>
-                    <button class="lang-toggle" type="button" onclick="toggleLanguage()" aria-label="Switch language">
+                    <button class="lang-toggle" type="button" data-site-action="language" aria-label="Switch language">
                         <span id="lang-text">中文</span>
                     </button>
-                    <button class="mobile-menu-btn" type="button" onclick="toggleMobileMenu()" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <button class="mobile-menu-btn" type="button" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
                         <i class="fas fa-bars" aria-hidden="true"></i>
                     </button>
                 </div>
@@ -678,7 +680,7 @@
         </section>
     </section>
 </div>
-<noscript><style>.docs-static-language { display: grid !important; }</style></noscript>
+<noscript><link rel="stylesheet" href="css/wiki-noscript.css?v=1"></noscript>
 <!-- END GENERATED WIKI DIRECTORY -->
                 </div>
             </section>
@@ -707,8 +709,8 @@
         </div>
     </footer>
 
-    <script src="js/i18n.js?v=12"></script>
-    <script src="js/main.js?v=9"></script>
+    <script src="js/i18n.js?v=13"></script>
+    <script src="js/main.js?v=10"></script>
     <script src="js/wiki.js?v=6"></script>
     <script src="js/docs-health.js?v=1"></script>
     <script type="application/ld+json">

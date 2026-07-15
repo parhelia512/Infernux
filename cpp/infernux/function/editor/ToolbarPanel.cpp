@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <iterator>
 
 namespace infernux
 {
@@ -261,6 +262,17 @@ void ToolbarPanel::PopupCamera(InxGUIContext *ctx)
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, 4.0f));
 
+    ImGui::TextUnformatted(T("toolbar.projection_mode").c_str());
+    ImGui::SameLine(145.0f);
+    ImGui::SetNextItemWidth(200.0f);
+    int projection = m_cameraSettings.orthographic ? 1 : 0;
+    const std::string perspective = T("toolbar.perspective");
+    const std::string orthographic = T("toolbar.orthographic");
+    const char *projectionItems[] = {perspective.c_str(), orthographic.c_str()};
+    bool changed = ImGui::Combo("##camera_projection", &projection, projectionItems, 2);
+    m_cameraSettings.orthographic = projection == 1;
+    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+
     struct CamParam
     {
         const char *key;
@@ -269,8 +281,13 @@ void ToolbarPanel::PopupCamera(InxGUIContext *ctx)
         const char *headerKey; // null if no header
     };
 
-    CamParam params[] = {
+    CamParam perspectiveParams[] = {
         {"toolbar.field_of_view", &m_cameraSettings.fov, 10.0f, 120.0f, 1.0f, 10.0f, nullptr},
+    };
+    CamParam orthographicParams[] = {
+        {"toolbar.orthographic_size", &m_cameraSettings.orthographicSize, 0.01f, 1000.0f, 0.1f, 1.0f, nullptr},
+    };
+    CamParam navigationParams[] = {
         {"toolbar.rotation_sensitivity", &m_cameraSettings.rotationSpeed, 0.005f, 1.0f, 0.005f, 0.05f,
          "toolbar.navigation_header"},
         {"toolbar.pan_speed", &m_cameraSettings.panSpeed, 0.1f, 10.0f, 0.1f, 1.0f, nullptr},
@@ -279,9 +296,9 @@ void ToolbarPanel::PopupCamera(InxGUIContext *ctx)
         {"toolbar.speed_boost", &m_cameraSettings.moveSpeedBoost, 1.0f, 20.0f, 0.1f, 1.0f, nullptr},
     };
 
-    bool changed = false;
-
-    for (auto &p : params) {
+    auto renderParams = [&](CamParam *params, size_t count) {
+      for (size_t index = 0; index < count; ++index) {
+        auto &p = params[index];
         if (p.headerKey) {
             ImGui::TextUnformatted(T(p.headerKey).c_str());
             ImGui::Separator();
@@ -311,12 +328,21 @@ void ToolbarPanel::PopupCamera(InxGUIContext *ctx)
             changed = true;
 
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
-    }
+      }
+    };
+
+    if (m_cameraSettings.orthographic)
+        renderParams(orthographicParams, std::size(orthographicParams));
+    else
+        renderParams(perspectiveParams, std::size(perspectiveParams));
+    renderParams(navigationParams, std::size(navigationParams));
 
     // Reset button
     ImGui::Dummy(ImVec2(0.0f, 2.0f));
     if (ImGui::Button(T("toolbar.reset_camera_settings").c_str(), ImVec2(-1.0f, 0.0f))) {
         m_cameraSettings.fov = CAMERA_DEFAULTS_FOV;
+        m_cameraSettings.orthographic = false;
+        m_cameraSettings.orthographicSize = CAMERA_DEFAULTS_ORTHOGRAPHIC_SIZE;
         m_cameraSettings.rotationSpeed = CAMERA_DEFAULTS_ROTATION;
         m_cameraSettings.panSpeed = CAMERA_DEFAULTS_PAN;
         m_cameraSettings.zoomSpeed = CAMERA_DEFAULTS_ZOOM;

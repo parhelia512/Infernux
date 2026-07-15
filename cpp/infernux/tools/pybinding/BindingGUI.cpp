@@ -924,7 +924,9 @@ void RegisterGUIBindings(py::module_ &m)
             [](const ToolbarPanel &self) -> py::dict {
                 auto s = self.GetCameraSettings();
                 py::dict d;
+                d["orthographic"] = s.orthographic;
                 d["fov"] = s.fov;
+                d["orthographic_size"] = s.orthographicSize;
                 d["rotation_speed"] = s.rotationSpeed;
                 d["pan_speed"] = s.panSpeed;
                 d["zoom_speed"] = s.zoomSpeed;
@@ -937,7 +939,10 @@ void RegisterGUIBindings(py::module_ &m)
             "set_camera_settings",
             [](ToolbarPanel &self, py::dict d) {
                 ToolbarPanel::CameraSettings s;
+                s.orthographic = d.contains("orthographic") ? d["orthographic"].cast<bool>() : false;
                 s.fov = d.contains("fov") ? d["fov"].cast<float>() : 60.0f;
+                s.orthographicSize =
+                    d.contains("orthographic_size") ? d["orthographic_size"].cast<float>() : 5.0f;
                 s.rotationSpeed = d.contains("rotation_speed") ? d["rotation_speed"].cast<float>() : 0.05f;
                 s.panSpeed = d.contains("pan_speed") ? d["pan_speed"].cast<float>() : 1.0f;
                 s.zoomSpeed = d.contains("zoom_speed") ? d["zoom_speed"].cast<float>() : 1.0f;
@@ -953,7 +958,10 @@ void RegisterGUIBindings(py::module_ &m)
                     py::gil_scoped_acquire acquire;
                     py::dict d = fn();
                     ToolbarPanel::CameraSettings s;
+                    s.orthographic = d.contains("orthographic") ? d["orthographic"].cast<bool>() : false;
                     s.fov = d.contains("fov") ? d["fov"].cast<float>() : 60.0f;
+                    s.orthographicSize =
+                        d.contains("orthographic_size") ? d["orthographic_size"].cast<float>() : 5.0f;
                     s.rotationSpeed = d.contains("rotation_speed") ? d["rotation_speed"].cast<float>() : 0.05f;
                     s.panSpeed = d.contains("pan_speed") ? d["pan_speed"].cast<float>() : 1.0f;
                     s.zoomSpeed = d.contains("zoom_speed") ? d["zoom_speed"].cast<float>() : 1.0f;
@@ -969,7 +977,9 @@ void RegisterGUIBindings(py::module_ &m)
                 self.applyCameraToEngine = [fn](const ToolbarPanel::CameraSettings &s) {
                     py::gil_scoped_acquire acquire;
                     py::dict d;
+                    d["orthographic"] = s.orthographic;
                     d["fov"] = s.fov;
+                    d["orthographic_size"] = s.orthographicSize;
                     d["rotation_speed"] = s.rotationSpeed;
                     d["pan_speed"] = s.panSpeed;
                     d["zoom_speed"] = s.zoomSpeed;

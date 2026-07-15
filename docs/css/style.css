@@ -4,9 +4,12 @@
 
 :root {
     /* ── Mission palette ─────────────────────────────────────────── */
-    --accent: #eb5757;
-    --accent-strong: #ff6e6e;
+    --accent: #ff6e6e;
+    --accent-strong: #ff8a8a;
     --accent-deep: #b8313b;
+    --accent-fill: #a52b36;
+    --accent-fill-hover: #861d28;
+    --on-accent: #ffffff;
     --accent-soft: rgba(235, 87, 87, 0.14);
     --accent-line: rgba(235, 87, 87, 0.32);
 
@@ -27,13 +30,13 @@
     /* ── Type ────────────────────────────────────────────────────── */
     --text: #f3eee2;
     --text-muted: #aab1bc;
-    --text-soft: #6c7484;
-    --text-faint: #44495a;
+    --text-soft: #858d9e;
+    --decorative-faint: #44495a;
     --text-mono: #d6cfbe;
 
     /* ── Lines ──────────────────────────────────────────────────── */
     --border: rgba(243, 238, 226, 0.08);
-    --border-strong: rgba(243, 238, 226, 0.18);
+    --border-strong: #687181;
     --border-accent: rgba(235, 87, 87, 0.42);
 
     /* ── Glow ───────────────────────────────────────────────────── */
@@ -62,38 +65,54 @@
     --nav-bg: rgba(8, 10, 15, 0.78);
     --nav-bg-scroll: rgba(8, 10, 15, 0.96);
     --code-bg: #0b0d12;
+    --code-surface-2: #10141b;
+    --code-border-strong: #687181;
+    --code-text-default: #d6cfbe;
+    --code-hl-keyword: #ff8a8a;
+    --code-hl-class: #ffd479;
+    --code-hl-fn: #8ac2ff;
+    --code-hl-param: #ff8787;
+    --code-hl-type: #82d4d4;
+    --code-hl-string: #a6d97a;
+    --code-hl-number: #f3b36a;
+    --code-hl-comment: #8c94a4;
+    --code-hl-literal: #f3b36a;
+    --code-hl-decorator: #d08cff;
 
     color-scheme: dark;
 }
 
 [data-theme="light"] {
-    --accent: #eb5757;
-    --accent-strong: #d83b46;
-    --accent-deep: #9c1f29;
+    --accent: #a82736;
+    --accent-strong: #891c29;
+    --accent-deep: #7f1722;
+    --accent-fill: #a82736;
+    --accent-fill-hover: #891c29;
+    --on-accent: #ffffff;
     --accent-soft: rgba(235, 87, 87, 0.1);
     --accent-line: rgba(235, 87, 87, 0.34);
 
-    --hazard: #c47b1f;
+    --hazard: #875000;
     --hazard-soft: rgba(247, 185, 85, 0.18);
-    --signal: #2e9b6c;
+    --signal: #176947;
     --signal-soft: rgba(116, 224, 163, 0.18);
-    --info: #2a72c9;
+    --info: #205e9f;
 
     --bg: #f4f1e8;
     --bg-deep: #ebe6da;
     --bg-panel: #fbf8ef;
     --bg-elevated: #f1ecdf;
     --bg-tile: #e9e3d2;
-    --bg-contrast: #ddd5c1;
+    --bg-contrast: #e6dfcf;
 
     --text: #1a1c22;
     --text-muted: #51596a;
-    --text-soft: #7a8092;
-    --text-faint: #afb4c0;
+    --text-soft: #596273;
+    --decorative-faint: #afb4c0;
     --text-mono: #2c2f3a;
 
     --border: rgba(20, 22, 30, 0.1);
-    --border-strong: rgba(20, 22, 30, 0.22);
+    --border-strong: #777d87;
     --border-accent: rgba(235, 87, 87, 0.46);
 
     --shadow: 0 22px 50px rgba(60, 32, 32, 0.1);
@@ -110,9 +129,12 @@
     --code-hl-class: #8a4b00;
     --code-hl-fn: #1a5f9e;
     --code-hl-param: #9a2d4a;
+    --code-hl-type: #17666b;
     --code-hl-string: #2d6a3a;
-    --code-hl-number: #a65f0c;
+    --code-hl-number: #8c4d00;
     --code-hl-comment: #5c6370;
+    --code-hl-literal: #8c4d00;
+    --code-hl-decorator: #714096;
 
     color-scheme: light;
 }
@@ -254,8 +276,8 @@ table { max-width: 100%; }
 .mission-ribbon {
     height: var(--ribbon-height);
     background:
-        linear-gradient(90deg, var(--accent) 0%, var(--accent-deep) 100%);
-    color: #fdf3f0;
+        linear-gradient(90deg, var(--accent-fill) 0%, var(--accent-fill-hover) 100%);
+    color: var(--on-accent);
     font-family: var(--font-mono);
     font-size: 0.74rem;
     letter-spacing: 0.18em;
@@ -278,7 +300,7 @@ table { max-width: 100%; }
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    color: rgba(253, 243, 240, 0.86);
+    color: var(--on-accent);
 }
 
 .mission-kicker::before {
@@ -301,7 +323,7 @@ table { max-width: 100%; }
 }
 
 .mission-name .mission-accent {
-    color: #ffe4d6;
+    color: var(--on-accent);
     text-shadow: 0 0 12px rgba(255, 207, 184, 0.5);
 }
 
@@ -309,7 +331,7 @@ table { max-width: 100%; }
     font-family: var(--font-display);
     font-weight: 500;
     letter-spacing: 0.4em;
-    color: rgba(253, 243, 240, 0.66);
+    color: var(--on-accent);
     font-size: 0.82rem;
 }
 
@@ -686,12 +708,12 @@ table { max-width: 100%; }
 .btn:hover { transform: translateY(-1px); }
 
 .btn-primary {
-    background: var(--accent);
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--on-accent);
     box-shadow: var(--glow-accent);
 }
 
-.btn-primary:hover { background: var(--accent-strong); }
+.btn-primary:hover { background: var(--accent-fill-hover); }
 
 .btn-secondary {
     background: transparent;
@@ -812,21 +834,21 @@ table { max-width: 100%; }
 
 .code-preview code {
     font-family: var(--font-mono);
-    color: var(--text-mono);
+    color: var(--code-text-default);
     font-size: 0.86rem;
     line-height: 1.78;
 }
 
-.keyword { color: #ff8a8a; }
-.class-name { color: #ffd479; }
-.function { color: #8ac2ff; }
-.param { color: #ff8787; }
-.type { color: #82d4d4; }
-.number { color: #f3b36a; }
-.string { color: #a6d97a; }
-.comment { color: #5e6470; font-style: italic; }
-.literal { color: #f3b36a; }
-.decorator { color: #d08cff; }
+.keyword { color: var(--code-hl-keyword); }
+.class-name { color: var(--code-hl-class); }
+.function { color: var(--code-hl-fn); }
+.param { color: var(--code-hl-param); }
+.type { color: var(--code-hl-type); }
+.number { color: var(--code-hl-number); }
+.string { color: var(--code-hl-string); }
+.comment { color: var(--code-hl-comment); font-style: italic; }
+.literal { color: var(--code-hl-literal); }
+.decorator { color: var(--code-hl-decorator); }
 
 /* Light theme: code preview readable on warm background */
 [data-theme="light"] .code-preview {
@@ -839,18 +861,6 @@ table { max-width: 100%; }
     background: var(--code-surface-2);
     border-bottom-color: var(--code-border-strong);
 }
-
-[data-theme="light"] .code-preview code {
-    color: var(--code-text-default);
-}
-
-[data-theme="light"] .code-preview .keyword { color: var(--code-hl-keyword); }
-[data-theme="light"] .code-preview .class-name { color: var(--code-hl-class); }
-[data-theme="light"] .code-preview .function { color: var(--code-hl-fn); }
-[data-theme="light"] .code-preview .param { color: var(--code-hl-param); }
-[data-theme="light"] .code-preview .string { color: var(--code-hl-string); }
-[data-theme="light"] .code-preview .number { color: var(--code-hl-number); }
-[data-theme="light"] .code-preview .comment { color: var(--code-hl-comment); }
 
 /* ── Manifesto strip (telemetry banner) ──────────────────────────── */
 .manifesto-strip {
@@ -1100,6 +1110,18 @@ table { max-width: 100%; }
     align-items: stretch;
 }
 
+.demo-frame,
+.demo-frame picture {
+    display: block;
+    min-width: 0;
+}
+
+.demo-frame img {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1245 / 653;
+}
+
 .stack-board,
 .pipeline-board,
 .cta-panel {
@@ -1187,8 +1209,8 @@ table { max-width: 100%; }
     width: 56px;
     height: 56px;
     border-radius: var(--radius-sm);
-    background: var(--accent);
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--on-accent);
     font-family: var(--font-display);
     font-weight: 700;
     font-size: 1.4rem;

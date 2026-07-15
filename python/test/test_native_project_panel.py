@@ -100,6 +100,39 @@ class TestProjectPanelCreation:
         assert material.deserialize(json.dumps(document)) is True
         assert material.name == "NewMaterial"
 
+    def test_new_material_import_primes_native_preview(self, tmp_path, monkeypatch):
+        from Infernux.core.assets import AssetManager
+
+        path = tmp_path / "Fresh.mat"
+        path.write_text('{"material_version":3}', encoding="utf-8")
+
+        class Native:
+            def __init__(self):
+                self.queries = []
+                self.full_speed_requests = 0
+
+            def query_or_schedule_material_preview(self, *args):
+                self.queries.append(args)
+                return 0
+
+            def request_full_speed_frame(self):
+                self.full_speed_requests += 1
+
+        native = Native()
+        monkeypatch.setattr(AssetManager, "_native_engine", classmethod(lambda cls: native))
+
+        AssetManager._prime_material_preview(str(path))
+
+        normalized = os.path.normpath(str(path))
+        assert native.queries == [(f"mat|{normalized}", normalized, "", path.stat().st_mtime_ns)]
+        assert native.full_speed_requests == 1
+
+        native.queries.clear()
+        AssetManager._prime_material_preview(str(path), '{"material_version":3}')
+        assert native.queries == [(
+            f"matedit|{normalized}", normalized, '{"material_version":3}', 0,
+        )]
+
     def test_create_prefab_links_the_saved_source(self, tmp_path, monkeypatch):
         from Infernux.engine import prefab_manager
 

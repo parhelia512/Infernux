@@ -123,7 +123,7 @@ function renderStaticDirectory() {
     renderStaticLanguage("en"),
     renderStaticLanguage("zh"),
     "</div>",
-    '<noscript><style>.docs-static-language { display: grid !important; }</style></noscript>'
+    '<noscript><link rel="stylesheet" href="css/wiki-noscript.css?v=1"></noscript>'
   ].join("\n");
 }
 

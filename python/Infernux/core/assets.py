@@ -328,6 +328,7 @@ class AssetManager:
         if suppress_watcher_echo:
             cls._suppress_watcher_echo("created", path)
         cls._invalidate_project_panel_cache()
+        cls._prime_material_preview(path)
         cls._emit_editor_asset_changed(path, "created")
         return result
 
@@ -575,7 +576,10 @@ class AssetManager:
 
         def _fallback_save():
             try:
-                return save()
+                saved = bool(save())
+                if saved and file_path:
+                    cls.on_material_saved(file_path)
+                return saved
             except Exception as exc:
                 Debug.log_suppressed("AssetManager.schedule_material_save_async.fallback_save", exc)
                 return False
@@ -929,6 +933,27 @@ class AssetManager:
         except Exception as exc:
             from Infernux.debug import Debug
             Debug.log_suppressed("AssetManager._invalidate_project_panel_cache", exc)
+
+    @classmethod
+    def _prime_material_preview(cls, path: str, material_json: str = "") -> None:
+        """Schedule the first material thumbnail as part of asset publication."""
+        if os.path.splitext(path)[1].lower() != ".mat":
+            return
+        native = cls._native_engine()
+        if native is None or not hasattr(native, "query_or_schedule_material_preview"):
+            return
+        try:
+            normalized = os.path.normpath(path)
+            live_document = str(material_json or "")
+            stamp = 0 if live_document else int(os.stat(normalized).st_mtime_ns)
+            resource_key = f"matedit|{normalized}" if live_document else f"mat|{normalized}"
+            native.query_or_schedule_material_preview(
+                resource_key, normalized, live_document, stamp,
+            )
+            if hasattr(native, "request_full_speed_frame"):
+                native.request_full_speed_frame()
+        except (OSError, RuntimeError) as exc:
+            Debug.log_suppressed("AssetManager._prime_material_preview", exc)
 
     @staticmethod
     def _normalize_asset_path(path: str) -> str:

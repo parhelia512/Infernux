@@ -226,6 +226,9 @@ class Infernux
     /// @return Non-zero ImGui texture id when available (stale-return for anti-flicker).
     uint64_t GetMaterialPreviewTextureId(const std::string &resourceKey) const;
 
+    /// @brief Check whether the uploaded material preview matches the latest requested generation.
+    bool IsMaterialPreviewReady(const std::string &resourceKey) const;
+
     /// @brief Get uploaded texture id for a texture preview key.
     /// @return Non-zero ImGui texture id when available (stale-return for anti-flicker).
     uint64_t GetTexturePreviewTextureId(const std::string &resourceKey) const;

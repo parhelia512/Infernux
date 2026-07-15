@@ -170,6 +170,30 @@ PYBIND11_MODULE(_Infernux, m)
             },
             "Vertical field of view in degrees")
         .def_property(
+            "orthographic",
+            [](EditorCameraController &self) -> bool {
+                auto *cam = self.GetCamera();
+                return cam && cam->GetProjectionMode() == CameraProjection::Orthographic;
+            },
+            [](EditorCameraController &self, bool value) {
+                auto *cam = self.GetCamera();
+                if (cam)
+                    cam->SetProjectionMode(value ? CameraProjection::Orthographic : CameraProjection::Perspective);
+            },
+            "Whether the Scene camera uses orthographic projection")
+        .def_property(
+            "orthographic_size",
+            [](EditorCameraController &self) -> float {
+                auto *cam = self.GetCamera();
+                return cam ? cam->GetOrthographicSize() : 5.0f;
+            },
+            [](EditorCameraController &self, float value) {
+                auto *cam = self.GetCamera();
+                if (cam)
+                    cam->SetOrthographicSize(value);
+            },
+            "Orthographic Scene camera half-height")
+        .def_property(
             "near_clip",
             [](EditorCameraController &self) -> float {
                 auto *cam = self.GetCamera();
@@ -980,6 +1004,9 @@ PYBIND11_MODULE(_Infernux, m)
         .def("get_material_preview_texture_id", &Infernux::GetMaterialPreviewTextureId, py::arg("resource_key"),
              py::call_guard<py::gil_scoped_release>(),
              "Get texture id for material preview (stale-return for anti-flicker)")
+        .def("is_material_preview_ready", &Infernux::IsMaterialPreviewReady, py::arg("resource_key"),
+             py::call_guard<py::gil_scoped_release>(),
+             "Check whether a material preview matches its latest requested generation")
         .def("render_timeline_cube_preview", &Infernux::RenderTimelineCubePreview, py::arg("px"), py::arg("py"),
              py::arg("pz"), py::arg("rx"), py::arg("ry"), py::arg("rz"), py::arg("sx"), py::arg("sy"), py::arg("sz"),
              py::arg("cam_yaw"), py::arg("cam_pitch"), py::arg("cam_distance"), py::arg("size") = 192,

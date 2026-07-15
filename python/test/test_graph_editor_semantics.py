@@ -2,10 +2,23 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from Infernux.core.anim_state_machine import AnimParameter, AnimStateMachine
 from Infernux.engine.ui import animfsm_editor_panel as animfsm_module
 from Infernux.engine.ui.animfsm_editor_panel import AnimFSMEditorPanel
 from Infernux.engine.ui.node_graph_view import NodeGraphView
+
+
+@pytest.fixture(autouse=True)
+def _isolate_animfsm_panel_dirty_tracking():
+    from Infernux.engine.project_context import clear_panel_tracking
+
+    clear_panel_tracking("animfsm_editor")
+    try:
+        yield
+    finally:
+        clear_panel_tracking("animfsm_editor")
 
 
 class _ToolbarContext:
@@ -649,3 +662,17 @@ def test_animfsm_3d_clip_picker_includes_embedded_model_takes(monkeypatch):
     items = AnimFSMEditorPanel._embedded_clip3d_picker_items("drive")
 
     assert items == [("Racer | Drive", f"{'a' * 32}::subanim:1")]
+
+
+def test_animfsm_new_document_and_dirty_draft_round_trip():
+    panel = AnimFSMEditorPanel()
+    assert panel._dirty is True
+    panel._fsm.name = "Recovered FSM"
+    panel._fsm.parameters.append(AnimParameter(name="speed"))
+
+    restored = AnimFSMEditorPanel()
+    restored.load_state(panel.save_state())
+
+    assert restored._dirty is True
+    assert restored._fsm.name == "Recovered FSM"
+    assert [parameter.name for parameter in restored._fsm.parameters] == ["speed"]

@@ -77,15 +77,8 @@ def _query_material_preview_tex(panel, native_mat, mat_data, state, cache_tag, p
     )
 
     embedded = isinstance(preview_path, str) and "::submat:" in preview_path
-    disk_ok = (
-        isinstance(preview_path, str)
-        and bool(preview_path)
-        and not embedded
-        and os.path.isfile(preview_path)
-    )
-
     json_blob = (cache_tag or "").strip()
-    if not json_blob:
+    if not json_blob and not embedded:
         try:
             json_blob = state.extra.get("cached_json") or json.dumps(
                 mat_data, sort_keys=True, ensure_ascii=False)
@@ -94,30 +87,72 @@ def _query_material_preview_tex(panel, native_mat, mat_data, state, cache_tag, p
 
     if embedded and preview_path:
         return int(get_resource_preview_texture_id(
-            panel, preview_path, material_json=json_blob) or 0)
+            panel, preview_path, material_json="") or 0)
 
     native = _resolve_native_engine(panel)
     if native is None:
         return 0
 
-    # Prefab/scene instance overrides often have no saved .mat on disk — render from JSON.
-    if json_blob and not disk_ok:
+    # The Inspector document is authoritative while it is open. This path also
+    # covers brand-new resources before their first asynchronous disk save.
+    if json_blob:
         guid = (getattr(native_mat, "guid", "") or "").strip()
         path_hint = preview_path or f"inline:{guid or id(native_mat)}"
-        tex = int(_try_get_cpp_material_preview_texture(
+        return int(_try_get_cpp_material_preview_texture(
             native, path_hint, material_json=json_blob, file_mtime_hint=0) or 0)
-        if tex:
-            return tex
 
     if not preview_path:
         return 0
 
-    tex = int(get_resource_preview_texture_id(
-        panel, preview_path, material_json=json_blob or "") or 0)
-    if tex == 0 and json_blob:
-        tex = int(get_resource_preview_texture_id(
-            panel, preview_path, material_json="") or 0)
-    return tex
+    return int(get_resource_preview_texture_id(
+        panel, preview_path, material_json="") or 0)
+
+
+def _is_material_preview_ready(panel, preview_path, cache_tag) -> bool:
+    """Return true only when the native texture is for the requested content."""
+    from .asset_resource_preview import _resolve_native_engine
+
+    native = _resolve_native_engine(panel)
+    if native is None or not hasattr(native, "is_material_preview_ready"):
+        # Older native builds have no generation status; preserve their
+        # previous non-zero-texture cache behavior.
+        return True
+
+    embedded = isinstance(preview_path, str) and "::submat:" in preview_path
+    uses_live_json = not embedded
+    norm_path = os.path.normpath(preview_path or "")
+    cache_key = f"matedit|{norm_path}" if uses_live_json else f"mat|{norm_path}"
+    try:
+        return bool(native.is_material_preview_ready(cache_key))
+    except Exception:
+        return False
+
+
+def _get_cached_material_preview_tex(panel, native_mat, mat_data, state, cache_tag, preview_path) -> int:
+    """Avoid repeating filesystem and native preview lookups for a stable material."""
+    preview_key = (preview_path or "", cache_tag or "")
+    cached_key = state.extra.get("_material_preview_query_key")
+    cached_tex = int(state.extra.get("_material_preview_tex_id", 0) or 0)
+    cached_ready = bool(state.extra.get("_material_preview_tex_ready", False))
+    if cached_key == preview_key and cached_tex and cached_ready:
+        return cached_tex
+
+    tex = _query_material_preview_tex(
+        panel, native_mat, mat_data, state, cache_tag, preview_path,
+    )
+    ready = bool(tex) and _is_material_preview_ready(panel, preview_path, cache_tag)
+    state.extra["_material_preview_query_key"] = preview_key
+    state.extra["_material_preview_tex_id"] = int(tex or 0)
+    state.extra["_material_preview_tex_ready"] = ready
+    if not ready:
+        try:
+            from .asset_resource_preview import _resolve_native_engine
+            native = _resolve_native_engine(panel)
+            if native is not None and hasattr(native, "request_full_speed_frame"):
+                native.request_full_speed_frame()
+        except Exception:
+            pass
+    return int(tex or 0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -682,6 +717,19 @@ def _apply_material_changes(panel, state, mat_data, native_mat,
         pass
 
 
+def _document_before_material_edit(state, mat_data) -> dict:
+    """Recover the pre-edit document only on frames that actually changed it."""
+    cached_json = state.extra.get("cached_json", "")
+    if cached_json:
+        try:
+            cached_document = json.loads(cached_json)
+            if isinstance(cached_document, dict):
+                return cached_document
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return copy.deepcopy(mat_data)
+
+
 def _flush_deferred_undo(panel, state, mat_data, native_mat):
     """Commit deferred undo snapshot when drag ends (changed=False frame)."""
     if not state.extra.get("_undo_pending"):
@@ -696,8 +744,6 @@ def _flush_deferred_undo(panel, state, mat_data, native_mat):
     try:
         from Infernux.engine.undo import UndoManager, MaterialDocumentCommand
         mgr = UndoManager.instance()
-        if not (mgr and not mgr.is_executing and mgr.enabled):
-            return
         new_json = json.dumps(mat_data)
         state.extra["cached_json"] = new_json
 
@@ -707,6 +753,9 @@ def _flush_deferred_undo(panel, state, mat_data, native_mat):
         file_path = state.extra.get("_mat_file_path", "")
         if file_path:
             AssetManager.set_material_save_snapshot(file_path, new_json)
+
+        if not (mgr and not mgr.is_executing and mgr.enabled):
+            return
 
         new_document = copy.deepcopy(mat_data)
         if new_document != old_document:
@@ -783,7 +832,6 @@ def render_material_body(ctx: InxGUIContext, panel, state):
     _shader_cache = state.extra["shader_cache"]
     exec_layer = state.exec_layer
     mat_data = _cached_data
-    old_document = copy.deepcopy(mat_data)
     is_builtin = bool(getattr(_native_mat, "is_builtin", False) or mat_data.get("builtin", False))
     if is_builtin:
         mat_data["builtin"] = True
@@ -843,16 +891,16 @@ def render_material_body(ctx: InxGUIContext, panel, state):
     if so_ck:
         change_key = so_ck
 
-    # Keep preview cache tag stable while user is actively editing; only refresh
-    # after edits settle for a short time, so material controls never stall.
+    # Publish edits on the following frame. Native generation coalescing keeps
+    # slider drags responsive without displaying the previous edit as current.
     now = _time.time()
     cache_tag = state.extra.get("_material_cache_tag", "")
-    if not cache_tag:
-        # Embedded model materials are immutable and have no .mat JSON the C++
-        # RenderFromJson path can deserialize; leave the tag empty so the preview
-        # uses the embedded-slot render path (the same one the Project panel uses,
-        # which renders correctly). Regular materials also start empty so the first
-        # inspector draw matches the bootstrap prewarm key.
+    if not cache_tag and not is_embedded_slot:
+        try:
+            cache_tag = state.extra.get("cached_json") or json.dumps(
+                mat_data, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            cache_tag = ""
         state.extra["_material_cache_tag"] = cache_tag
 
     pending_preview_refresh = bool(state.extra.get("_material_preview_pending", False))
@@ -881,7 +929,7 @@ def render_material_body(ctx: InxGUIContext, panel, state):
 
         preview_tex_id = 0
         if preview_path or _native_mat is not None:
-            preview_tex_id = _query_material_preview_tex(
+            preview_tex_id = _get_cached_material_preview_tex(
                 panel, _native_mat, mat_data, state, cache_tag, preview_path)
 
         if not _draw_centered_texture(ctx, preview_tex_id, avail_w, preview_size, 256, 256):
@@ -903,10 +951,10 @@ def render_material_body(ctx: InxGUIContext, panel, state):
 
     # ── Auto-save on change ─────────────────────────────────────────────
     if changed:
-        # Defer preview cache-tag update until edits settle; this keeps slider
-        # dragging responsive and avoids preview-triggered hitches.
+        # Publish the latest document on the following frame.
         state.extra["_material_preview_pending"] = True
-        state.extra["_material_preview_ready_at"] = _time.time() + 0.30
+        state.extra["_material_preview_ready_at"] = _time.time()
+        old_document = _document_before_material_edit(state, mat_data)
         _apply_material_changes(panel, state, mat_data, _native_mat,
                                 requires_deserialize, requires_pipeline_refresh,
                                 old_document, change_key, exec_layer)
@@ -1024,11 +1072,17 @@ class _InlineMaterialExecLayer:
 def _build_inline_state(panel, native_mat):
     extra = _get_inline_material_extra(panel, native_mat)
     mat_path = getattr(native_mat, "file_path", "") or ""
-    return SimpleNamespace(
-        extra=extra,
-        exec_layer=_InlineMaterialExecLayer(panel),
-        file_path=mat_path,
-    )
+    state = extra.get("_inline_state")
+    if state is None:
+        state = SimpleNamespace(
+            extra=extra,
+            exec_layer=_InlineMaterialExecLayer(panel),
+            file_path=mat_path,
+        )
+        extra["_inline_state"] = state
+    else:
+        state.file_path = mat_path
+    return state
 
 
 def _get_inline_material_extra(panel, native_mat) -> dict:

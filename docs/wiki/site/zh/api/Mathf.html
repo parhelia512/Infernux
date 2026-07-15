@@ -27,6 +27,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="description" content="Official Infernux scripting API reference for Mathf.">
     
     <meta name="theme-color" content="#0a0c11">
@@ -41,19 +43,19 @@
     <meta property="og:url" content="https://infernux-engine.com/wiki/site/zh/api/Mathf.html">
     <meta property="og:locale" content="zh_CN">
     <meta property="og:locale:alternate" content="en_US">
-    <meta property="og:image" content="https://infernux-engine.com/assets/demo.png">
-    <meta property="og:image:type" content="image/png">
-    <meta property="og:image:width" content="1245">
-    <meta property="og:image:height" content="653">
-    <meta property="og:image:alt" content="Infernux 编辑器的 NASA Punk 界面与熔岩照明体素地形。">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
     
     
     
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Mathf - Infernux Documentation">
     <meta name="twitter:description" content="Official Infernux scripting API reference for Mathf.">
-    <meta name="twitter:image" content="https://infernux-engine.com/assets/demo.png">
-    <meta name="twitter:image:alt" content="Infernux 编辑器的 NASA Punk 界面与熔岩照明体素地形。">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -75,10 +77,10 @@
           "articleSection": "API \u53c2\u8003",
           "image": {
             "@type": "ImageObject",
-            "url": "https://infernux-engine.com/assets/demo.png",
-            "width": 1245,
-            "height": 653,
-            "caption": "Infernux \u7f16\u8f91\u5668\u7684 NASA Punk \u754c\u9762\u4e0e\u7194\u5ca9\u7167\u660e\u4f53\u7d20\u5730\u5f62\u3002"
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": "Infernux NASA Punk \u4efb\u52a1\u5361\uff0c\u5305\u542b\u7f16\u8f91\u5668\u3001\u7194\u7089\u6807\u5fd7\u548c\u6280\u672f\u9884\u89c8\u72b6\u6001\u3002"
           },
           "author": {
             "@type": "Organization",
@@ -137,11 +139,11 @@
     <link rel="manifest" href="/site.webmanifest">
     <link rel="icon" type="image/png" href="/assets/logo.png">
     <link rel="stylesheet" href="/css/fonts.css?v=1">
-    <link rel="stylesheet" href="/css/style.css?v=12">
+    <link rel="stylesheet" href="/css/style.css?v=14">
     <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
-    <link rel="stylesheet" href="/css/docs-search.css?v=1">
+    <link rel="stylesheet" href="/css/docs-search.css?v=2">
     <link rel="stylesheet" href="/css/wiki-generated.css?v=4">
-    <link rel="stylesheet" href="/css/wiki-template.8eba3304d580e5c4.css">
+    <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
 </head>
 <body class="api-reference-page">
     
@@ -175,10 +177,10 @@
                 <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
                     <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span>搜索文档</span><kbd aria-hidden="true">/</kbd>
                 </button>
-                <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
                     <i class="fas fa-moon" id="theme-icon"></i>
                 </button>
-                <button type="button" class="mobile-menu-btn" onclick="toggleMobileMenu()" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
                     <i class="fas fa-bars"></i>
                 </button>
             </div>
@@ -621,13 +623,14 @@
                 <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
                 <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="API 符号、系统、工作流…">
             </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="文档搜索筛选器"></div>
             <p class="docs-search-status" id="docs-search-status" aria-live="polite"></p>
             <div class="docs-search-results" id="docs-search-results" role="list"></div>
         </div>
     </section>
 
-    <script src="/js/main.js?v=9"></script>
-    <script src="/js/docs-search.js?v=1"></script>
+    <script src="/js/main.js?v=10"></script>
+    <script src="/js/docs-search.js?v=2"></script>
     <script src="/js/wiki-generated.js?v=7"></script>
 </body>
 </html>

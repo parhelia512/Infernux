@@ -5,9 +5,8 @@ const COMMUNITY_CACHE_VERSION = 2;
 const COMMUNITY_CACHE_TTL_MS = 5 * 60 * 1000;
 const COMMUNITY_REQUEST_TIMEOUT_MS = 10000;
 const GISCUS_ORIGIN = "https://giscus.app";
-const GISCUS_STATUS_CACHE_KEY = "infernux-giscus-readiness-v1";
-const GISCUS_STATUS_CACHE_VERSION = 1;
-const GISCUS_STATUS_CACHE_TTL_MS = 5 * 60 * 1000;
+const GISCUS_OPT_IN_KEY = "infernux-giscus-opt-in-v1";
+const GISCUS_SCRIPT_ID = "giscus-client";
 const GISCUS_STATUS_TIMEOUT_MS = 12000;
 
 let cachedCommunityTopics = [];
@@ -17,7 +16,7 @@ let communitySearch = "";
 let communityCategory = "";
 let communityNextPage = 1;
 let activeCommunityRequest = null;
-let giscusReadinessState = "checking";
+let giscusReadinessState = "standby";
 let giscusStatusTimeout = null;
 
 function communityLanguage() {
@@ -44,6 +43,8 @@ function communityCopy(key) {
             answered: "Answered",
             locked: "Locked",
             feedNav: "Discussion feed navigation",
+            giscusStandbyTitle: "Replies load only when you ask.",
+            giscusStandbyDetail: "Loading this panel contacts giscus.app and enables GitHub sign-in inside its frame.",
             giscusCheckingTitle: "Checking embedded replies…",
             giscusCheckingDetail: "Waiting for a verified response from the Giscus frame.",
             giscusReadyTitle: "Embedded replies are ready.",
@@ -57,7 +58,10 @@ function communityCopy(key) {
             giscusUnknownTitle: "Embedded reply status is unknown.",
             giscusUnknownDetail: "No verified frame response arrived. A network or content blocker may be preventing the embed.",
             giscusOpen: "Open Discussions",
-            giscusInstall: "Install Giscus"
+            giscusInstall: "Install Giscus",
+            giscusLoad: "Load replies",
+            giscusRetry: "Retry replies",
+            giscusLoading: "Loading replies…"
         },
         zh: {
             error: "实时话题暂时不可用，或已达到 GitHub API 频率限制。",
@@ -77,6 +81,8 @@ function communityCopy(key) {
             answered: "已回答",
             locked: "已锁定",
             feedNav: "讨论列表导航",
+            giscusStandbyTitle: "回复只会在你主动选择后加载。",
+            giscusStandbyDetail: "加载此面板会连接 giscus.app，并在其框架内启用 GitHub 登录。",
             giscusCheckingTitle: "正在检查站内回复……",
             giscusCheckingDetail: "正在等待 Giscus 框架返回可验证状态。",
             giscusReadyTitle: "站内回复已就绪。",
@@ -90,7 +96,10 @@ function communityCopy(key) {
             giscusUnknownTitle: "无法确认站内回复状态。",
             giscusUnknownDetail: "未收到可验证的框架响应，可能被网络或内容拦截器阻止。",
             giscusOpen: "前往 Discussions",
-            giscusInstall: "安装 Giscus"
+            giscusInstall: "安装 Giscus",
+            giscusLoad: "加载回复",
+            giscusRetry: "重试回复",
+            giscusLoading: "正在加载回复……"
         }
     };
     return copy[communityLanguage()][key];
@@ -204,34 +213,26 @@ function classifyGiscusError(value) {
     return "error";
 }
 
-function readGiscusReadinessCache() {
+function readGiscusOptIn() {
     try {
-        const record = JSON.parse(sessionStorage.getItem(GISCUS_STATUS_CACHE_KEY) || "null");
-        if (record?.version !== GISCUS_STATUS_CACHE_VERSION || !Number.isFinite(record.storedAt)) return null;
-        if (!["ready", "uninstalled"].includes(record.state)) return null;
-        if (Date.now() - record.storedAt > GISCUS_STATUS_CACHE_TTL_MS) return null;
-        return record.state;
+        return sessionStorage.getItem(GISCUS_OPT_IN_KEY) === "1";
     } catch {
-        return null;
+        return false;
     }
 }
 
-function writeGiscusReadinessCache(state) {
-    if (!["ready", "uninstalled"].includes(state)) return;
+function rememberGiscusOptIn() {
     try {
-        sessionStorage.setItem(GISCUS_STATUS_CACHE_KEY, JSON.stringify({
-            version: GISCUS_STATUS_CACHE_VERSION,
-            storedAt: Date.now(),
-            state
-        }));
+        sessionStorage.setItem(GISCUS_OPT_IN_KEY, "1");
     } catch {
-        // Readiness remains visible when session storage is unavailable.
+        // Explicit loading still works when session storage is unavailable.
     }
 }
 
 function syncGiscusReadinessCopy() {
     const state = giscusReadinessState;
     const copyKeys = {
+        standby: ["giscusStandbyTitle", "giscusStandbyDetail"],
         checking: ["giscusCheckingTitle", "giscusCheckingDetail"],
         ready: ["giscusReadyTitle", "giscusReadyDetail"],
         uninstalled: ["giscusUninstalledTitle", "giscusUninstalledDetail"],
@@ -245,17 +246,23 @@ function syncGiscusReadinessCopy() {
     if (detail) detail.textContent = communityCopy(copyKeys[1]);
     const open = document.querySelector("#giscus-open-discussions span");
     const install = document.querySelector("#giscus-install span");
+    const load = document.querySelector("#giscus-load span");
     if (open) open.textContent = communityCopy("giscusOpen");
     if (install) install.textContent = communityCopy("giscusInstall");
+    if (load) {
+        const key = state === "standby" ? "giscusLoad" : state === "checking" ? "giscusLoading" : "giscusRetry";
+        load.textContent = communityCopy(key);
+    }
 }
 
-function renderGiscusReadiness(state, { cache = true } = {}) {
-    const supported = ["checking", "ready", "uninstalled", "degraded", "error", "unknown"];
+function renderGiscusReadiness(state) {
+    const supported = ["standby", "checking", "ready", "uninstalled", "degraded", "error", "unknown"];
     giscusReadinessState = supported.includes(state) ? state : "unknown";
     const host = document.getElementById("giscus-readiness");
     if (host) host.dataset.state = giscusReadinessState;
     const code = host?.querySelector(".giscus-readiness-code");
     const codes = {
+        standby: "ON-DEMAND",
         checking: "LINKING",
         ready: "ONLINE",
         uninstalled: "APP-MISSING",
@@ -269,11 +276,12 @@ function renderGiscusReadiness(state, { cache = true } = {}) {
         window.clearTimeout(giscusStatusTimeout);
         giscusStatusTimeout = null;
     }
-    if (cache) writeGiscusReadinessCache(giscusReadinessState);
 }
 
 function handleGiscusMessage(event) {
     if (event.origin !== GISCUS_ORIGIN || !event.data || typeof event.data !== "object") return;
+    const frame = document.querySelector("iframe.giscus-frame");
+    if (!frame?.contentWindow || event.source !== frame.contentWindow) return;
     const payload = event.data.giscus;
     if (!payload || typeof payload !== "object") return;
     if (typeof payload.error === "string") {
@@ -574,6 +582,69 @@ function clearCommunityFilters() {
     searchInput?.focus();
 }
 
+function giscusConfiguration() {
+    const host = document.querySelector(".giscus");
+    if (!host) return null;
+    const keys = [
+        "repo",
+        "repoId",
+        "category",
+        "categoryId",
+        "mapping",
+        "term",
+        "strict",
+        "reactionsEnabled",
+        "emitMetadata",
+        "inputPosition",
+        "loading"
+    ];
+    const config = Object.fromEntries(keys.map((key) => [key, host.dataset[key] || ""]));
+    if (!config.repo || !config.repoId || !config.categoryId || config.mapping !== "specific" || !config.term) return null;
+    return config;
+}
+
+function startGiscusStatusTimeout() {
+    if (giscusStatusTimeout !== null) window.clearTimeout(giscusStatusTimeout);
+    giscusStatusTimeout = window.setTimeout(() => {
+        if (giscusReadinessState === "checking") renderGiscusReadiness("unknown");
+    }, GISCUS_STATUS_TIMEOUT_MS);
+}
+
+function loadGiscusEmbed({ remember = true } = {}) {
+    if (giscusReadinessState === "checking") return false;
+    const host = document.querySelector(".giscus");
+    const config = giscusConfiguration();
+    if (!host || !config) {
+        renderGiscusReadiness("error");
+        return false;
+    }
+
+    if (remember) rememberGiscusOptIn();
+    const existingFrame = document.querySelector("iframe.giscus-frame");
+    if (existingFrame?.src) {
+        renderGiscusReadiness("checking");
+        existingFrame.src = existingFrame.src;
+        startGiscusStatusTimeout();
+        return true;
+    }
+    document.getElementById(GISCUS_SCRIPT_ID)?.remove();
+    host.replaceChildren();
+    renderGiscusReadiness("checking");
+
+    const script = document.createElement("script");
+    script.id = GISCUS_SCRIPT_ID;
+    script.src = `${GISCUS_ORIGIN}/client.js`;
+    script.async = true;
+    script.crossOrigin = "anonymous";
+    for (const [key, value] of Object.entries(config)) script.dataset[key] = value;
+    script.dataset.theme = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark_dimmed";
+    script.dataset.lang = communityLanguage() === "zh" ? "zh-CN" : "en";
+    script.addEventListener("error", () => renderGiscusReadiness("error"), { once: true });
+    document.body.appendChild(script);
+    startGiscusStatusTimeout();
+    return true;
+}
+
 function syncGiscusConfig() {
     const frame = document.querySelector("iframe.giscus-frame");
     if (!frame?.contentWindow) return;
@@ -584,7 +655,7 @@ function syncGiscusConfig() {
                 lang: communityLanguage() === "zh" ? "zh-CN" : "en"
             }
         }
-    }, "https://giscus.app");
+    }, GISCUS_ORIGIN);
 }
 
 window.addEventListener("message", handleGiscusMessage);
@@ -592,15 +663,7 @@ window.addEventListener("message", handleGiscusMessage);
 document.addEventListener("DOMContentLoaded", () => {
     readCommunityFiltersFromUrl();
     syncCommunityPaginationCopy();
-    const cachedGiscusState = readGiscusReadinessCache();
-    if (cachedGiscusState) {
-        renderGiscusReadiness(cachedGiscusState, { cache: false });
-    } else {
-        renderGiscusReadiness("checking", { cache: false });
-        giscusStatusTimeout = window.setTimeout(() => {
-            if (giscusReadinessState === "checking") renderGiscusReadiness("unknown", { cache: false });
-        }, GISCUS_STATUS_TIMEOUT_MS);
-    }
+    renderGiscusReadiness("standby");
 
     document.getElementById("community-filters")?.addEventListener("submit", (event) => event.preventDefault());
     document.getElementById("community-search")?.addEventListener("input", syncCommunityFiltersFromControls);
@@ -610,11 +673,14 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("community-load-more")?.addEventListener("click", () => {
         if (communityNextPage !== null) loadCommunityTopics({ page: communityNextPage });
     });
+    document.getElementById("giscus-load")?.addEventListener("click", () => loadGiscusEmbed());
 
     const giscusHost = document.querySelector(".giscus");
     if (giscusHost) {
         new MutationObserver(syncGiscusConfig).observe(giscusHost, { childList: true, subtree: true });
     }
+
+    if (readGiscusOptIn()) loadGiscusEmbed({ remember: false });
 
     loadCommunityTopics();
 });

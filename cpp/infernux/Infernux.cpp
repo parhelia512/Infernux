@@ -1028,6 +1028,8 @@ uint64_t Infernux::QueryOrScheduleMaterialPreview(const std::string &resourceKey
         state.inFlight = true;
         m_previewRequestQueue.push(MaterialPreviewRequest{key, matFilePath, state.generation, renderJson});
         m_hasPreviewPumpWork.store(true, std::memory_order_release);
+        if (m_renderer)
+            m_renderer->RequestFullSpeedFrame();
     }
 
     // Stale-return: keep showing old preview while new one renders (no flicker).
@@ -1550,6 +1552,17 @@ uint64_t Infernux::GetMaterialPreviewTextureId(const std::string &resourceKey) c
     return LiveImGuiTextureId(m_renderer.get(), it->second.textureName);
 }
 
+bool Infernux::IsMaterialPreviewReady(const std::string &resourceKey) const
+{
+    std::lock_guard<std::mutex> lock(m_previewResultMutex);
+    auto it = m_materialPreviewStates.find(CanonicalizePreviewKey(resourceKey));
+    if (it == m_materialPreviewStates.end())
+        return false;
+    const auto &state = it->second;
+    return state.generation != 0 && state.readyGeneration == state.generation &&
+           LiveImGuiTextureId(m_renderer.get(), state.textureName) != 0;
+}
+
 uint64_t Infernux::GetTexturePreviewTextureId(const std::string &resourceKey) const
 {
     std::lock_guard<std::mutex> lock(m_previewResultMutex);
@@ -1582,7 +1595,6 @@ void Infernux::InvalidateMaterialPreviewTask(const std::string &resourceKey)
         it->second.generation++;
         it->second.lastJsonHash = 0;
         it->second.lastFileMtime = 0;
-        it->second.inFlight = false;
     }
 }
 
@@ -2019,9 +2031,13 @@ bool Infernux::ScheduleMaterialSaveSnapshotTask(const std::string &key, const st
 
     const std::string pathCopy = filePath;
     const std::string jsonCopy = jsonSnapshot;
-    EnqueuePreviewTask([pathCopy, jsonCopy]() {
+    EnqueuePreviewTask([this, pathCopy, jsonCopy]() {
         try {
             DocumentStore::Instance().WriteAndWait(pathCopy, jsonCopy);
+            // The first UI invalidation happens before this asynchronous write.
+            // Invalidate again after publication so a cached old mtime cannot
+            // delay the Project panel's preview by a full polling interval.
+            InvalidateMaterialPreviewTask(std::string("mat|") + pathCopy);
         } catch (const std::exception &ex) {
             INXLOG_WARN("ScheduleMaterialSaveSnapshotTask failed for ", pathCopy, ": ", ex.what());
         }

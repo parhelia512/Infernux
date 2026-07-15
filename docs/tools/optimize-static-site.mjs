@@ -9,6 +9,9 @@ const templateFile = path.join(docsRoot, "wiki", "theme", "main.html");
 const cssRoot = path.join(docsRoot, "css");
 const check = process.argv.includes("--check");
 const changes = [];
+const hardenedCsp = "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests";
+const securityMeta = `<meta http-equiv="Content-Security-Policy" content="${hardenedCsp}">
+    <meta name="referrer" content="strict-origin-when-cross-origin">`;
 const unusedThemeOutputs = [
   path.join(root, "assets"),
   path.join(root, "search"),
@@ -48,6 +51,23 @@ function enhanceTextDiagrams(html) {
       + `<figcaption><span>INX / SYSTEM MAP</span>${label}</figcaption>`
       + `<pre><code>${diagramCode}</code></pre></figure>`;
   });
+}
+
+function hardenGeneratedHtml(html) {
+  let hardened = html;
+  const cspMetaPattern = /<meta\s+http-equiv="Content-Security-Policy"\s+content="[^"]*"\s*\/?>/i;
+  if (cspMetaPattern.test(hardened)) {
+    hardened = hardened.replace(cspMetaPattern, `<meta http-equiv="Content-Security-Policy" content="${hardenedCsp}">`);
+  } else {
+    hardened = hardened.replace(
+      /(<meta name="viewport" content="width=device-width, initial-scale=1\.0">)/,
+      `$1\n    ${securityMeta}`
+    );
+  }
+  return hardened
+    .replace(/\s+onclick="toggleTheme\(\)"/g, ' data-site-action="theme"')
+    .replace(/\s+onclick="toggleMobileMenu\(\)"/g, ' data-site-action="menu"')
+    .replace(/\/js\/main\.js\?v=9/g, "/js/main.js?v=10");
 }
 
 const template = await readFile(templateFile, "utf8");
@@ -124,6 +144,11 @@ for (const file of await walk(root)) {
     if (diagramEnhanced !== optimized) {
       changes.push(`${relative} (semantic text diagram)`);
       optimized = diagramEnhanced;
+    }
+    const hardened = hardenGeneratedHtml(optimized);
+    if (hardened !== optimized) {
+      changes.push(`${relative} (static CSP and external event bindings)`);
+      optimized = hardened;
     }
     if (!check && optimized !== source) await writeFile(file, optimized, "utf8");
     continue;

@@ -249,6 +249,61 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
         """Clear the dirty flag (e.g. when undo returns to save point)."""
         self._dirty = False
 
+    def save_session_state(self) -> dict:
+        """Capture a recoverable editor-session draft for an unsaved scene."""
+        if not self._dirty or self.is_prefab_mode or self._is_play_mode():
+            return {"dirty": False}
+        try:
+            from Infernux.lib import SceneManager
+
+            scene = SceneManager.instance().get_active_scene()
+            document = scene.serialize_document() if scene else None
+        except Exception as exc:
+            Debug.log_suppressed("SceneFileManager.save_session_state", exc)
+            document = None
+        state = {
+            "dirty": True,
+            "current_scene_path": self._current_scene_path or "",
+        }
+        if isinstance(document, dict):
+            state["document"] = document
+        return state
+
+    def restore_session_state(self, data: dict) -> bool:
+        """Restore the previous session's scene draft without writing an asset."""
+        if not isinstance(data, dict) or not bool(data.get("dirty")):
+            return False
+        document = data.get("document")
+        if isinstance(document, dict):
+            try:
+                from Infernux.lib import SceneManager
+                from Infernux.engine.scene_document_transaction import SceneDocumentTransaction
+
+                scene = SceneManager.instance().get_active_scene()
+                if scene is None:
+                    return False
+                transaction = SceneDocumentTransaction(
+                    scene,
+                    document=document,
+                    asset_database=self._asset_database,
+                    clear_registries=True,
+                    before_commit=self._prepare_native_scene_swap,
+                )
+                if not transaction.run_to_completion(raise_on_failure=False):
+                    Debug.log_warning(f"Scene session draft restore failed: {transaction.error}")
+                    return False
+            except Exception as exc:
+                Debug.log_suppressed("SceneFileManager.restore_session_state", exc)
+                return False
+
+        path = str(data.get("current_scene_path") or "").strip()
+        self._current_scene_path = os.path.abspath(path) if path and os.path.isfile(path) else None
+        self._dirty = True
+        self._reset_undo_history(scene_is_dirty=True)
+        if self._on_scene_changed:
+            self._on_scene_changed()
+        return True
+
     def set_on_scene_changed(self, cb: Callable[[], None]):
         """Register callback invoked after a scene is opened/created."""
         self._on_scene_changed = cb
@@ -661,8 +716,8 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
             Debug.log_error(f"Error populating default objects: {exc}")
 
         self._current_scene_path = None
-        self._dirty = False
-        self._reset_undo_history(scene_is_dirty=False)
+        self._dirty = True
+        self._reset_undo_history(scene_is_dirty=True)
 
         # Invalidate gizmos icon cache (scene objects are new)
         from Infernux.gizmos.collector import notify_scene_changed

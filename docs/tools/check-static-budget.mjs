@@ -58,8 +58,24 @@ for (const file of await files(path.join(docsRoot, "js"))) {
   rootExperience += await enforce(file, limits.script, "script");
 }
 rootExperience += await enforce(path.join(docsRoot, "sw.js"), limits.script, "service worker");
+const responsiveImageSets = [
+  ["demo.png", "demo-0.2.1.webp", "demo-0.2.1.avif"],
+];
+const groupedImages = new Set(responsiveImageSets.flat());
+const imageSizes = new Map();
 for (const file of (await files(path.join(docsRoot, "assets"))).filter((file) => /\.(?:avif|gif|jpe?g|png|webp)$/i.test(file))) {
-  rootExperience += await enforce(file, limits.image, "image");
+  const bytes = await enforce(file, limits.image, "image");
+  const name = path.basename(file);
+  imageSizes.set(name, bytes);
+  if (!groupedImages.has(name)) rootExperience += bytes;
+}
+for (const imageSet of responsiveImageSets) {
+  const missing = imageSet.filter((name) => !imageSizes.has(name));
+  if (missing.length) {
+    errors.push(`responsive image set is missing ${missing.join(", ")}`);
+    continue;
+  }
+  rootExperience += Math.max(...imageSet.map((name) => imageSizes.get(name)));
 }
 for (const file of (await files(path.join(docsRoot, "assets", "fonts"))).filter((file) => /\.(?:woff2?|ttf|otf)$/i.test(file))) {
   rootExperience += await enforce(file, limits.webfont, "webfont");

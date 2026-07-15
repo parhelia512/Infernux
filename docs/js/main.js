@@ -68,6 +68,22 @@ function toggleMobileMenu() {
     setMobileMenuState(open, { moveFocus: open });
 }
 
+function bindSiteActions() {
+    const handlers = {
+        theme: toggleTheme,
+        language: () => {
+            if (typeof toggleLanguage === 'function') toggleLanguage();
+        },
+        menu: toggleMobileMenu
+    };
+    document.querySelectorAll('[data-site-action]').forEach(control => {
+        const action = control.dataset.siteAction;
+        if (!handlers[action] || control.dataset.siteActionBound === 'true') return;
+        control.dataset.siteActionBound = 'true';
+        control.addEventListener('click', handlers[action]);
+    });
+}
+
 function mobileMenuElements() {
     const navLinks = document.querySelector('.nav-links');
     const button = document.querySelector('.mobile-menu-btn');
@@ -148,6 +164,7 @@ function copyCode(button) {
 
 // Smooth scroll for anchor links
 document.addEventListener('DOMContentLoaded', function() {
+    bindSiteActions();
     applyNavbarBackground();
     document.querySelectorAll('.nav-links a').forEach(link => {
         link.addEventListener('click', () => setMobileMenuState(false));
@@ -258,6 +275,7 @@ if (globalThis.__INFERNUX_NAV_TEST__) {
     globalThis.__infernuxNavigation = {
         handleMobileMenuKeydown,
         handleMobileMenuPointerDown,
+        bindSiteActions,
         mobileMenuFocusables,
         setMobileMenuState,
         toggleMobileMenu

@@ -187,6 +187,7 @@ class ClosablePanel(InxGUIRenderable):
     def _restore_after_cancelled_close(self) -> None:
         """Restore the dock tab consumed by ImGui's titlebar close request."""
         self._is_open = True
+        ClosablePanel.focus_panel_by_id(self._window_id)
         if self._window_manager is not None:
             self._window_manager.set_window_open(self._window_id, True)
 
@@ -268,6 +269,11 @@ class ClosablePanel(InxGUIRenderable):
                 self._is_open = True
                 if not self.request_close():
                     self._is_open = True
+                    # ImGui has already selected a neighbouring dock tab by the
+                    # time p_open becomes false. Restore this editor immediately;
+                    # the confirmation modal owns focus when it is rendered.
+                    ctx.set_window_focus()
+                    self._activate_panel(ctx)
                 else:
                     self._is_open = False
                 if not self._is_open and self._window_manager:

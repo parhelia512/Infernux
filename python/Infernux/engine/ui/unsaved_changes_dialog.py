@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from Infernux.engine.i18n import t
+from .theme import Theme
 
 
 def render_unsaved_changes_dialog(
@@ -20,6 +21,15 @@ def render_unsaved_changes_dialog(
     """Render the standard unsaved-document modal and return a chosen action."""
     if request_open:
         ctx.open_popup(popup_id)
+
+    viewport_x, viewport_y, viewport_w, viewport_h = ctx.get_main_viewport_bounds()
+    ctx.set_next_window_pos(
+        viewport_x + viewport_w * 0.5,
+        viewport_y + viewport_h * 0.5,
+        Theme.COND_ALWAYS,
+        0.5,
+        0.5,
+    )
     if not ctx.begin_popup_modal(popup_id, 64):
         return None
 

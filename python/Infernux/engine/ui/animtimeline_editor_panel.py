@@ -14,7 +14,6 @@ Opened from Window menu → Timeline Editor, or by double-clicking a
 from __future__ import annotations
 
 import os
-import math
 import time
 from typing import Optional
 
@@ -94,7 +93,7 @@ class AnimTimelineEditorPanel(EditorPanel):
         super().__init__(title="Timeline Editor", window_id="animtimeline_editor")
         self._timeline: AnimationTimeline = AnimationTimeline(name="Timeline")
         self._file_path: str = ""
-        self._dirty: bool = False
+        self._dirty: bool = True
         self._playhead: float = 0.0
         self._playing: bool = False
         self._last_tick: float = 0.0
@@ -151,7 +150,7 @@ class AnimTimelineEditorPanel(EditorPanel):
         self._playing = False
         self._sel_key = None
         self._drag_key = None
-        self._set_dirty(False)
+        self._set_dirty(True)
 
     def _set_dirty(self, value: bool):
         # ClosablePanel._sync_dirty_registry() reads self._dirty every frame and
@@ -222,6 +221,9 @@ class AnimTimelineEditorPanel(EditorPanel):
         data["cam_yaw"] = float(self._cam_yaw)
         data["cam_pitch"] = float(self._cam_pitch)
         data["cam_dist"] = float(self._cam_dist)
+        data["dirty"] = bool(self._dirty)
+        if self._dirty:
+            data["draft"] = self._timeline.to_dict()
         return data
 
     def _resolve_saved_timeline_path(self, data: dict) -> str:
@@ -253,6 +255,14 @@ class AnimTimelineEditorPanel(EditorPanel):
         self._cam_yaw = float(data.get("cam_yaw", self._cam_yaw))
         self._cam_pitch = float(data.get("cam_pitch", self._cam_pitch))
         self._cam_dist = float(data.get("cam_dist", self._cam_dist))
+        draft = data.get("draft")
+        if bool(data.get("dirty")) and isinstance(draft, dict):
+            self._timeline = AnimationTimeline.from_dict(draft)
+            self._file_path = self._normalize_timeline_path(data.get("file_path") or "")
+            self._timeline.file_path = self._file_path
+            self._set_dirty(True)
+            self._panel_state_restored_once = True
+            return
         self._panel_state_restored_once = False
 
     def _apply_pending_panel_restore(self) -> None:
@@ -329,6 +339,7 @@ class AnimTimelineEditorPanel(EditorPanel):
             self._open_timeline(self._file_path)
             return not self._dirty
         self._new_timeline()
+        self._set_dirty(False)
         return True
 
     # ── Selection helpers ──────────────────────────────────────────────
@@ -738,92 +749,13 @@ class AnimTimelineEditorPanel(EditorPanel):
             pos, rot, scl = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]
 
         side = min(x1 - x0, y1 - y0)
-        realtime_preview = self._playing or self._bar_was_active or self._orbiting
-        tex = 0 if realtime_preview else self._cube_preview_texture(pos, rot, scl)
-        if realtime_preview:
-            self._draw_realtime_wire_preview(ctx, x0, y0, x1, y1, pos, rot, scl)
-        elif tex:
+        tex = self._cube_preview_texture(pos, rot, scl)
+        if tex:
             cx = (x0 + x1) * 0.5
             cy = (y0 + y1) * 0.5
             ctx.draw_image_rect(tex, cx - side * 0.5, cy - side * 0.5, cx + side * 0.5, cy + side * 0.5,
                                 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, False, False, 3.0)
-        else:
-            ctx.draw_text(x0 + 10.0, y0 + 10.0, "renderer offline", *c["text"])
         ctx.draw_text(x0 + 8.0, y1 - 18.0, t("animtimeline_editor.preview"), *c["text"])
-
-    def _draw_realtime_wire_preview(self, ctx, x0, y0, x1, y1, pos, rot, scl):
-        """Draw a smooth CPU-projected cube while the timeline is moving."""
-        rx, ry, rz = (math.radians(float(value)) for value in rot)
-        cx, sxr = math.cos(rx), math.sin(rx)
-        cy, syr = math.cos(ry), math.sin(ry)
-        cz, szr = math.cos(rz), math.sin(rz)
-
-        def transform_point(point):
-            x, y, z = (point[i] * float(scl[i]) for i in range(3))
-            y, z = y * cx - z * sxr, y * sxr + z * cx
-            x, z = x * cy + z * syr, -x * syr + z * cy
-            x, y = x * cz - y * szr, x * szr + y * cz
-            return x + float(pos[0]), y + float(pos[1]), z + float(pos[2])
-
-        target = (0.0, 0.35, 0.0)
-        cp = math.cos(self._cam_pitch)
-        direction = (
-            cp * math.sin(self._cam_yaw),
-            math.sin(self._cam_pitch),
-            cp * math.cos(self._cam_yaw),
-        )
-        camera = tuple(target[i] + direction[i] * self._cam_dist for i in range(3))
-        forward = tuple(target[i] - camera[i] for i in range(3))
-        flen = math.sqrt(sum(value * value for value in forward)) or 1.0
-        forward = tuple(value / flen for value in forward)
-        right = (-forward[2], 0.0, forward[0])
-        rlen = math.sqrt(right[0] * right[0] + right[2] * right[2]) or 1.0
-        right = (right[0] / rlen, 0.0, right[2] / rlen)
-        up = (
-            right[1] * forward[2] - right[2] * forward[1],
-            right[2] * forward[0] - right[0] * forward[2],
-            right[0] * forward[1] - right[1] * forward[0],
-        )
-        center_x, center_y = (x0 + x1) * 0.5, (y0 + y1) * 0.5
-        focal = min(x1 - x0, y1 - y0) * 0.85
-
-        def project(point):
-            rel = tuple(point[i] - camera[i] for i in range(3))
-            depth = sum(rel[i] * forward[i] for i in range(3))
-            if depth <= 0.05:
-                return None
-            px = center_x + sum(rel[i] * right[i] for i in range(3)) * focal / depth
-            py = center_y - sum(rel[i] * up[i] for i in range(3)) * focal / depth
-            return px, py
-
-        grid_color = (*Theme.TEXT_DISABLED[:3], 0.32)
-        for grid_index in range(-4, 5):
-            for a, b in (
-                ((grid_index, 0.0, -4.0), (grid_index, 0.0, 4.0)),
-                ((-4.0, 0.0, grid_index), (4.0, 0.0, grid_index)),
-            ):
-                pa, pb = project(a), project(b)
-                if pa and pb:
-                    ctx.draw_line(*pa, *pb, *grid_color, 1.0)
-
-        corners = [
-            transform_point((x, y, z))
-            for x, y, z in (
-                (-0.5, -0.5, -0.5), (0.5, -0.5, -0.5),
-                (0.5, 0.5, -0.5), (-0.5, 0.5, -0.5),
-                (-0.5, -0.5, 0.5), (0.5, -0.5, 0.5),
-                (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5),
-            )
-        ]
-        projected = [project(point) for point in corners]
-        edge_color = Theme.APPLY_BUTTON
-        for start, end in (
-            (0, 1), (1, 2), (2, 3), (3, 0),
-            (4, 5), (5, 6), (6, 7), (7, 4),
-            (0, 4), (1, 5), (2, 6), (3, 7),
-        ):
-            if projected[start] and projected[end]:
-                ctx.draw_line(*projected[start], *projected[end], *edge_color, 2.0)
 
     def _cube_preview_texture(self, pos, rot, scl) -> int:
         """Schedule GPU cube preview; pump_preview_tasks() renders once per frame."""
@@ -837,9 +769,8 @@ class AnimTimelineEditorPanel(EditorPanel):
             ))
             # Native owns latest-wins backpressure: while one GPU submission is
             # active, newer states overwrite one pending slot and are rendered
-            # as soon as it completes. Python only filters exact duplicates.
-            if signature == self._preview_request_signature:
-                return self._preview_tex_cache
+            # as soon as it completes. Re-querying an identical state is cheap
+            # and lets Python observe the texture once the native pump finishes.
             self._preview_request_signature = signature
             tex = int(native.render_timeline_cube_preview(
                 float(pos[0]), float(pos[1]), float(pos[2]),
@@ -848,8 +779,6 @@ class AnimTimelineEditorPanel(EditorPanel):
                 float(self._cam_yaw), float(self._cam_pitch), float(self._cam_dist),
                 _PREVIEW_RENDER_PX,
             ) or 0)
-            if tex == 0 and hasattr(native, "get_imgui_texture_id"):
-                tex = int(native.get_imgui_texture_id("__cpp_timeline_cube_preview__") or 0)
             if tex:
                 self._preview_tex_cache = tex
             return tex or self._preview_tex_cache

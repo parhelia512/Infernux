@@ -105,8 +105,6 @@ class SceneConfirmationMixin:
                 self._post_save_callback = self._execute_pending_action
                 self._show_save_as_dialog()
         elif choice == "discard":
-            if self._pending_action == 'close':
-                self._dirty = False
             self._execute_pending_action()
         elif choice == "cancel":
             native = self._native_engine_for_close()

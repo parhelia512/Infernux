@@ -102,8 +102,14 @@ jobs:
       - name: Generate deterministic Service Worker
         run: node docs/tools/build-service-worker.mjs
 
+      - name: Verify responsive evidence images
+        run: node docs/tools/check-image-variants.mjs
+
       - name: Enforce static performance budget
         run: node docs/tools/check-static-budget.mjs
+
+      - name: Enforce design-token color contrast
+        run: node docs/tools/check-color-contrast.mjs
 
       - name: Verify website contracts
         run: node docs/tools/verify-site.mjs
@@ -113,6 +119,9 @@ jobs:
 
       - name: Test generated documentation context
         run: node docs/tools/test-doc-context.mjs
+
+      - name: Test documentation search
+        run: node docs/tools/test-doc-search.mjs
 
       - name: Test documentation health client
         run: node docs/tools/test-doc-health.mjs

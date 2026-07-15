@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="description" content="Download the verified Infernux Hub installer or Python 3.12 wheel from GitHub Releases, with file size and SHA-256 checksums.">
     <meta name="theme-color" content="#0a0c11">
     <meta name="color-scheme" content="dark light">
@@ -12,22 +14,22 @@
     <meta property="og:title" content="Download Infernux">
     <meta property="og:description" content="Verified Windows downloads for the Infernux technical preview, served by GitHub Releases.">
     <meta property="og:url" content="https://infernux-engine.com/download.html">
-    <meta property="og:image" content="https://infernux-engine.com/assets/demo.png">
-    <meta property="og:image:type" content="image/png">
-    <meta property="og:image:width" content="1245">
-    <meta property="og:image:height" content="653">
-    <meta property="og:image:alt" content="Infernux editor running a voxel scene">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Download Infernux">
     <meta name="twitter:description" content="Verified Windows downloads for the Infernux technical preview, served by GitHub Releases.">
-    <meta name="twitter:image" content="https://infernux-engine.com/assets/demo.png">
-    <meta name="twitter:image:alt" content="Infernux editor running a voxel scene">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status">
     <title>Infernux · 熔炉 — Download</title>
     <link rel="icon" type="image/png" href="assets/logo.png">
     <link rel="apple-touch-icon" href="assets/logo.png">
     <link rel="manifest" href="site.webmanifest">
     <link rel="stylesheet" href="css/fonts.css?v=1">
-    <link rel="stylesheet" href="css/style.css?v=12">
+    <link rel="stylesheet" href="css/style.css?v=14">
     <link rel="stylesheet" href="css/mission.css?v=2">
     <link rel="stylesheet" href="css/download.css?v=1">
     <link rel="stylesheet" href="css/fontawesome-subset.css?v=6.4.0">
@@ -56,9 +58,9 @@
                     <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener"><i class="fab fa-github" aria-hidden="true"></i> GitHub</a>
                 </div>
                 <div class="nav-right">
-                    <button class="theme-toggle" type="button" onclick="toggleTheme()" title="Toggle theme" aria-label="Switch color theme" aria-pressed="false"><i class="fas fa-moon" id="theme-icon" aria-hidden="true"></i></button>
-                    <button class="lang-toggle" type="button" onclick="toggleLanguage()" aria-label="Switch language"><span id="lang-text">中文</span></button>
-                    <button class="mobile-menu-btn" type="button" onclick="toggleMobileMenu()" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false"><i class="fas fa-bars" aria-hidden="true"></i></button>
+                    <button class="theme-toggle" type="button" data-site-action="theme" title="Toggle theme" aria-label="Switch color theme" aria-pressed="false"><i class="fas fa-moon" id="theme-icon" aria-hidden="true"></i></button>
+                    <button class="lang-toggle" type="button" data-site-action="language" aria-label="Switch language"><span id="lang-text">中文</span></button>
+                    <button class="mobile-menu-btn" type="button" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false"><i class="fas fa-bars" aria-hidden="true"></i></button>
                 </div>
             </div>
         </nav>
@@ -136,8 +138,8 @@
     </main>
 
     <footer class="footer"><div class="container"><div class="footer-bottom">© 2024–2026 Lizhe Chen · MIT License · 熔炉 · INFERNUX</div></div></footer>
-    <script src="js/i18n.js?v=12"></script>
-    <script src="js/main.js?v=9"></script>
+    <script src="js/i18n.js?v=13"></script>
+    <script src="js/main.js?v=10"></script>
     <script src="js/download.js?v=1"></script>
     <script type="application/ld+json">
     {

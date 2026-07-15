@@ -1,6 +1,8 @@
 #include <function/resources/InxMesh/InxMesh.h>
 #include <function/resources/InxMesh/MeshArtifact.h>
+#include <function/scene/PrimitiveMeshes.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -27,6 +29,18 @@ bool NearlyEqual(float left, float right)
 
 int main()
 {
+    const auto &sphereVertices = infernux::PrimitiveMeshes::GetSphereVertices();
+    const auto &sphereIndices = infernux::PrimitiveMeshes::GetSphereIndices();
+    assert(sphereIndices.size() % 3 == 0);
+    for (size_t triangle = 0; triangle < sphereIndices.size(); triangle += 3) {
+        const float u0 = sphereVertices.at(sphereIndices[triangle]).texCoord.x;
+        const float u1 = sphereVertices.at(sphereIndices[triangle + 1]).texCoord.x;
+        const float u2 = sphereVertices.at(sphereIndices[triangle + 2]).texCoord.x;
+        const float minU = std::min({u0, u1, u2});
+        const float maxU = std::max({u0, u1, u2});
+        assert(maxU - minU <= 0.500001f);
+    }
+
     infernux::InxMesh source("artifact-probe");
     infernux::Vertex vertex{};
     vertex.pos = {1.0f, 2.0f, 3.0f};

@@ -304,7 +304,9 @@ class BootstrapPanelsMixin:
         self.project_panel.on_state_changed = self._persist_editor_state
         wm.set_on_state_changed(self._persist_editor_state)
         try:
-            self.engine.set_before_exit_callback(self._persist_editor_state)
+            self.engine.set_before_exit_callback(
+                lambda: self._persist_editor_state(include_scene_draft=True)
+            )
         except Exception:
             pass
 

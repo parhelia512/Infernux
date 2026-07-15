@@ -8,6 +8,14 @@ const docsRoot = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(docsRoot, "..");
 const wikiDocsRoot = path.join(docsRoot, "wiki", "docs");
 const errors = [];
+const commonStaticCsp = "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests";
+const communityStaticCsp = "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' https://giscus.app; script-src-attr 'none'; style-src 'self' https://giscus.app; style-src-attr 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.github.com; frame-src https://giscus.app; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests";
+const offlineStaticCsp = "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests";
+const socialImageName = "infernux-social-card-0.2.1.jpg";
+const socialImageUrl = `https://infernux-engine.com/assets/${socialImageName}`;
+const socialImageWidth = 1200;
+const socialImageHeight = 630;
+const socialImageSha256 = "8c3a0500bf39b50c53e0ab97c1937c6a3bb61657b328bef18f420b962fae7594";
 
 function fail(message) {
     errors.push(message);
@@ -64,7 +72,7 @@ function htmlTags(source, tagName) {
 }
 
 function attribute(tag, name) {
-    return tag.match(new RegExp(`\\b${name}=["']([^"']*)["']`, "i"))?.[1] ?? null;
+    return tag.match(new RegExp(`\\b${name}=(["'])([\\s\\S]*?)\\1`, "i"))?.[2] ?? null;
 }
 
 function metaContent(source, selectorName, selectorValue) {
@@ -75,6 +83,31 @@ function metaContent(source, selectorName, selectorValue) {
 function canonicalHref(source) {
     const tag = htmlTags(source, "link").find((candidate) => (attribute(candidate, "rel") || "").split(/\s+/).includes("canonical"));
     return tag ? attribute(tag, "href") : null;
+}
+
+function jpegDimensions(buffer) {
+    if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
+    const startOfFrameMarkers = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+    let offset = 2;
+    while (offset + 3 < buffer.length) {
+        while (offset < buffer.length && buffer[offset] === 0xff) offset += 1;
+        if (offset >= buffer.length) break;
+        const marker = buffer[offset];
+        offset += 1;
+        if (marker === 0xd9 || marker === 0xda) break;
+        if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+        if (offset + 2 > buffer.length) break;
+        const segmentLength = buffer.readUInt16BE(offset);
+        if (segmentLength < 2 || offset + segmentLength > buffer.length) break;
+        if (startOfFrameMarkers.has(marker) && segmentLength >= 7) {
+            return {
+                width: buffer.readUInt16BE(offset + 5),
+                height: buffer.readUInt16BE(offset + 3),
+            };
+        }
+        offset += segmentLength;
+    }
+    return null;
 }
 
 function classNames(tag) {
@@ -168,6 +201,10 @@ async function verifyRootHtml() {
     const pages = ["index.html", "wiki.html", "roadmap.html", "community.html", "download.html", "404.html", "offline.html"];
     const i18n = await readFile(path.join(docsRoot, "js", "i18n.js"), "utf8");
     const sharedStyle = await readFile(path.join(docsRoot, "css", "style.css"), "utf8");
+    const noScriptWikiStyle = await readFile(path.join(docsRoot, "css", "wiki-noscript.css"), "utf8");
+    if (noScriptWikiStyle.trim() !== ".docs-static-language {\n    display: grid !important;\n}") {
+        fail("wiki-noscript.css: no-script fallback must only reveal both static language directories");
+    }
     for (const contract of ["text-size-adjust: 100%", "@media (prefers-contrast: more)", "@media (forced-colors: active)", "outline: 3px solid Highlight", "overflow-wrap: anywhere", "background: CanvasText"]) {
         if (!sharedStyle.includes(contract)) fail(`style.css: missing system accessibility contract '${contract}'`);
     }
@@ -179,6 +216,14 @@ async function verifyRootHtml() {
         const ids = [...source.matchAll(/\bid=["']([^"']+)["']/gi)].map((match) => match[1]);
         const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
         if (duplicateIds.length) fail(`${pageName}: duplicate ids: ${[...new Set(duplicateIds)].join(", ")}`);
+        const expectedCsp = pageName === "community.html"
+            ? communityStaticCsp
+            : pageName === "offline.html" ? offlineStaticCsp : commonStaticCsp;
+        if (metaContent(source, "http-equiv", "Content-Security-Policy") !== expectedCsp) fail(`${pageName}: static Content Security Policy differs from its least-privilege contract`);
+        if (metaContent(source, "name", "referrer") !== "strict-origin-when-cross-origin") fail(`${pageName}: missing strict cross-origin referrer policy`);
+        if (/\son[a-z]+\s*=/i.test(source)) fail(`${pageName}: inline event handler bypasses script-src-attr 'none'`);
+        if (/\sstyle\s*=/i.test(source)) fail(`${pageName}: inline style attribute bypasses the page-level style-src-attr contract`);
+        if (pageName !== "offline.html" && /<style\b/i.test(source)) fail(`${pageName}: inline style element weakens the static style-src contract`);
 
         const h1Count = (source.match(/<h1\b/gi) || []).length;
         if (h1Count !== 1) fail(`${pageName}: expected exactly one H1, found ${h1Count}`);
@@ -191,9 +236,11 @@ async function verifyRootHtml() {
             for (const name of ["twitter:card", "twitter:title", "twitter:description", "twitter:image", "twitter:image:alt"]) {
                 if (!new RegExp(`<meta\\s+name=["']${name.replace(":", "\\:")}["']`, "i").test(source)) fail(`${pageName}: missing ${name}`);
             }
-            if (!source.includes("https://infernux-engine.com/assets/demo.png")) fail(`${pageName}: social image must use the verified editor capture`);
-            if (!/property=["']og:image:width["']\s+content=["']1245["']/i.test(source)) fail(`${pageName}: social image width does not match source asset`);
-            if (!/property=["']og:image:height["']\s+content=["']653["']/i.test(source)) fail(`${pageName}: social image height does not match source asset`);
+            if (metaContent(source, "property", "og:image") !== socialImageUrl) fail(`${pageName}: social image must use the versioned NASA Punk card`);
+            if (metaContent(source, "property", "og:image:type") !== "image/jpeg") fail(`${pageName}: social image MIME type is incorrect`);
+            if (metaContent(source, "property", "og:image:width") !== String(socialImageWidth)) fail(`${pageName}: social image width does not match source asset`);
+            if (metaContent(source, "property", "og:image:height") !== String(socialImageHeight)) fail(`${pageName}: social image height does not match source asset`);
+            if (metaContent(source, "name", "twitter:image") !== socialImageUrl) fail(`${pageName}: X card image differs from Open Graph image`);
             const structuredBlocks = [...source.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
             if (!structuredBlocks.length) fail(`${pageName}: missing JSON-LD structured data`);
             for (const block of structuredBlocks) {
@@ -212,13 +259,20 @@ async function verifyRootHtml() {
             for (const contract of ["text-size-adjust: 100%", "@media (forced-colors: active)", "outline: 3px solid Highlight"]) {
                 if (!source.includes(contract)) fail(`offline.html: missing standalone accessibility contract '${contract}'`);
             }
-        } else if (!source.includes("css/style.css?v=12")) {
+        } else if (!source.includes("css/style.css?v=14")) {
             fail(`${pageName}: shared accessibility style cache version is stale`);
         }
 
+        if (pageName === "wiki.html" && !source.includes('<noscript><link rel="stylesheet" href="css/wiki-noscript.css?v=1"></noscript>')) {
+            fail("wiki.html: no-script bilingual directory fallback must remain external under the strict style policy");
+        }
+
         if (["index.html", "wiki.html", "roadmap.html", "community.html", "download.html"].includes(pageName)) {
-            if (!source.includes("js/i18n.js?v=12")) fail(`${pageName}: shared localization cache version is stale`);
-            if (!source.includes("js/main.js?v=9")) fail(`${pageName}: shared interaction cache version is stale`);
+            if (!source.includes("js/i18n.js?v=13")) fail(`${pageName}: shared localization cache version is stale`);
+            if (!source.includes("js/main.js?v=10")) fail(`${pageName}: shared interaction cache version is stale`);
+            for (const action of ["theme", "language", "menu"]) {
+                if (!source.includes(`data-site-action="${action}"`)) fail(`${pageName}: missing external '${action}' action binding`);
+            }
             const expectedHrefs = [
                 "wiki/site/en/learn/getting-started.html",
                 "wiki.html#start-here",
@@ -371,7 +425,7 @@ async function verifyBuiltWikiExperience() {
     if (/^\s*\.api-main\s+thead\s*\{\s*display:\s*none/im.test(template)) {
         fail("wiki/theme/main.html: table headings are hidden outside the API-only page scope");
     }
-    for (const contract of ["class=\"skip-link\"", "id=\"main-content\"", "aria-controls=\"primary-navigation\"", "class=\"doc-provenance\"", "data-docs-search-trigger", "data-doc-context-trigger", "data-doc-build-provenance", "data-doc-build-facts", "id=\"docs-search-dialog\"", "/js/docs-search.js?v=1", "/css/docs-search.css?v=1", "/js/wiki-generated.js?v=7", "/css/wiki-generated.css?v=4", "/css/style.css?v=12", "/js/main.js?v=9", "rel=\"manifest\" href=\"/site.webmanifest\"", "width=\"256\" height=\"256\"", "class=\"api-sidebar-toggle\"", "id=\"api-namespace-tree\"", "rel=\"canonical\"", "type=\"text/plain\"", "type=\"application/json\"", "property=\"og:title\"", "name=\"twitter:card\"", "application/ld+json", "BreadcrumbList", "LearningResource", "TechArticle", "data-doc-outline", "id=\"doc-outline-links\"", "aria-controls=\"doc-outline-links\"", "overflow-wrap: anywhere", "min-width: 7rem", "nav-priority", "/wiki.html#start-here", "/wiki.html?layer=manual#written-guides"]) {
+    for (const contract of ["class=\"skip-link\"", "id=\"main-content\"", "aria-controls=\"primary-navigation\"", "class=\"doc-provenance\"", "data-docs-search-trigger", "data-doc-context-trigger", "data-doc-build-provenance", "data-doc-build-facts", "id=\"docs-search-dialog\"", "id=\"docs-search-filters\"", "/js/docs-search.js?v=2", "/css/docs-search.css?v=2", "/js/wiki-generated.js?v=7", "/css/wiki-generated.css?v=4", "/css/style.css?v=14", "/js/main.js?v=10", "rel=\"manifest\" href=\"/site.webmanifest\"", "width=\"256\" height=\"256\"", "class=\"api-sidebar-toggle\"", "id=\"api-namespace-tree\"", "rel=\"canonical\"", "type=\"text/plain\"", "type=\"application/json\"", "property=\"og:title\"", "name=\"twitter:card\"", "application/ld+json", "BreadcrumbList", "LearningResource", "TechArticle", "data-doc-outline", "id=\"doc-outline-links\"", "aria-controls=\"doc-outline-links\"", "overflow-wrap: anywhere", "min-width: 7rem", "nav-priority", "/wiki.html#start-here", "/wiki.html?layer=manual#written-guides", "data-site-action=\"theme\"", "data-site-action=\"menu\"", "http-equiv=\"Content-Security-Policy\"", "script-src-attr 'none'"]) {
         if (!template.includes(contract)) fail(`wiki/theme/main.html: missing generated-document contract '${contract}'`);
     }
     if (template.includes("document.querySelectorAll('.api-main pre')")) fail("wiki/theme/main.html: repeated code-copy runtime must live in the shared generated-page script");
@@ -380,10 +434,12 @@ async function verifyBuiltWikiExperience() {
         const html = await readFile(builtFile, "utf8");
         const relative = posix(path.relative(docsRoot, builtFile));
         if (!html.includes(`<link rel="stylesheet" href="${expectedStyleHref}">`)) fail(`${relative}: missing content-hashed shared template style`);
-        for (const style of html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)) {
-            const normalized = `${style[1].replace(/\r\n/g, "\n").trim()}\n`;
-            if (normalized === normalizedTemplateCss) fail(`${relative}: still embeds the shared template style inline`);
-        }
+        if (metaContent(html, "http-equiv", "Content-Security-Policy") !== commonStaticCsp) fail(`${relative}: generated page CSP differs from the static documentation contract`);
+        if (metaContent(html, "name", "referrer") !== "strict-origin-when-cross-origin") fail(`${relative}: missing strict cross-origin referrer policy`);
+        if (/\son[a-z]+\s*=/i.test(html)) fail(`${relative}: generated page contains an inline event handler`);
+        if (/\sstyle\s*=/i.test(html)) fail(`${relative}: generated page contains an inline style attribute`);
+        if (/<style\b/i.test(html)) fail(`${relative}: generated page contains an inline style element`);
+        if (!html.includes('/js/main.js?v=10')) fail(`${relative}: generated page uses a stale shared interaction runtime`);
 
         if (relative === "wiki/site/404.html") {
             if (metaContent(html, "name", "robots") !== "noindex, follow") fail(`${relative}: generated error page must be excluded from indexing`);
@@ -422,11 +478,11 @@ async function verifyBuiltWikiExperience() {
         }
         if (metaContent(html, "property", "og:type") !== "article") fail(`${relative}: generated document must use the article Open Graph type`);
         if (metaContent(html, "property", "og:url") !== canonical) fail(`${relative}: Open Graph URL differs from canonical URL`);
-        if (metaContent(html, "property", "og:image") !== "https://infernux-engine.com/assets/demo.png") fail(`${relative}: social image must use the verified editor capture`);
-        if (metaContent(html, "property", "og:image:type") !== "image/png") fail(`${relative}: social image MIME type is incorrect`);
-        if (metaContent(html, "property", "og:image:width") !== "1245" || metaContent(html, "property", "og:image:height") !== "653") fail(`${relative}: social image dimensions differ from the source asset`);
+        if (metaContent(html, "property", "og:image") !== socialImageUrl) fail(`${relative}: social image must use the versioned NASA Punk card`);
+        if (metaContent(html, "property", "og:image:type") !== "image/jpeg") fail(`${relative}: social image MIME type is incorrect`);
+        if (metaContent(html, "property", "og:image:width") !== String(socialImageWidth) || metaContent(html, "property", "og:image:height") !== String(socialImageHeight)) fail(`${relative}: social image dimensions differ from the source asset`);
         if (metaContent(html, "name", "twitter:card") !== "summary_large_image") fail(`${relative}: X card must use the large-image format`);
-        if (metaContent(html, "name", "twitter:image") !== "https://infernux-engine.com/assets/demo.png") fail(`${relative}: X card image differs from Open Graph image`);
+        if (metaContent(html, "name", "twitter:image") !== socialImageUrl) fail(`${relative}: X card image differs from Open Graph image`);
 
         const localized = relative.includes("/en/") || relative.includes("/zh/");
         const expectedLanguage = relative.includes("/zh/") ? "zh-CN" : "en";
@@ -458,7 +514,7 @@ async function verifyBuiltWikiExperience() {
                 if (documentNode.url !== canonical || documentNode.mainEntityOfPage?.["@id"] !== canonical) fail(`${relative}: structured document URL differs from canonical URL`);
                 if (documentNode.inLanguage !== expectedLanguage) fail(`${relative}: structured document language differs from HTML language`);
                 if (!documentNode.description || !documentNode.headline || !documentNode.learningResourceType) fail(`${relative}: structured document is missing its human and Agent discovery fields`);
-                if (documentNode.image?.url !== "https://infernux-engine.com/assets/demo.png" || documentNode.image?.width !== 1245 || documentNode.image?.height !== 653) fail(`${relative}: structured image does not match the verified editor capture`);
+                if (documentNode.image?.url !== socialImageUrl || documentNode.image?.width !== socialImageWidth || documentNode.image?.height !== socialImageHeight) fail(`${relative}: structured image does not match the versioned social card`);
             }
             const breadcrumb = nodes.find((node) => node?.["@id"] === `${canonical}#breadcrumb` && node?.["@type"] === "BreadcrumbList");
             const items = breadcrumb?.itemListElement;
@@ -554,6 +610,7 @@ async function verifyBuiltWikiExperience() {
         'href="/wiki/site/zh/api/GameObject.html"',
         'aria-haspopup="dialog"',
         'id="docs-search-results"',
+        'id="docs-search-filters"',
         'aria-controls="api-namespace-tree"',
         'class="api-current-page"',
         'class="doc-breadcrumb"',
@@ -584,8 +641,21 @@ async function verifyBuiltWikiExperience() {
     }
 
     const docsSearch = await readFile(path.join(docsRoot, "js", "docs-search.js"), "utf8");
-    for (const contract of ["/api-index.json", "/docs-index.json", "function score", "aria-expanded", "event.key === \"/\"", "event.key === \"Escape\"", "event.key === \"Tab\""]) {
+    for (const contract of ["/api-index.json", "/docs-index.json", "function buildSearchModel", "function search", "function score", "function createFilter", "document.createElement(\"select\")", "option.textContent", "generated_for_release", "languageFilter.value", "layerFilter.value", "statusFilter.value", "select:not([disabled])", "HTMLSelectElement", "aria-expanded", "event.key === \"/\"", "event.key === \"Escape\"", "event.key === \"Tab\""]) {
         if (!docsSearch.includes(contract)) fail(`docs-search.js: missing global search contract '${contract}'`);
+    }
+    if (/\.innerHTML\s*=/.test(docsSearch)) fail("docs-search.js: search UI must not construct filter or result markup with innerHTML");
+    const docsSearchCss = await readFile(path.join(docsRoot, "css", "docs-search.css"), "utf8");
+    for (const contract of [".docs-search-filters", ".docs-search-filter select", "min-height: 44px", "overflow-x: auto", "overscroll-behavior-inline: contain", "scroll-snap-type: inline proximity"]) {
+        if (!docsSearchCss.includes(contract)) fail(`docs-search.css: missing responsive search-filter contract '${contract}'`);
+    }
+    const docsSearchTest = await readFile(path.join(docsRoot, "tools", "test-doc-search.mjs"), "utf8");
+    for (const contract of ["release parity", "bilingual facets", "layer/status browsing", "exact API symbol matches", "idle search should not flood"]) {
+        if (!docsSearchTest.includes(contract)) fail(`test-doc-search.mjs: missing search assertion '${contract}'`);
+    }
+    for (const workflowName of ["website-quality.yml", "build-wiki.yml"]) {
+        const workflow = await readFile(path.join(repoRoot, ".github", "workflows", workflowName), "utf8");
+        if (!workflow.includes("node docs/tools/test-doc-search.mjs")) fail(`${workflowName}: documentation search test is not enforced`);
     }
     if (await exists(path.join(docsRoot, "wiki", "site", "assets"))) fail("generated Wiki: unused Material assets directory was not removed");
     if (await exists(path.join(docsRoot, "wiki", "site", "search"))) fail("generated Wiki: unused Material search index was not removed");
@@ -778,14 +848,15 @@ async function verifyPublishingFiles() {
     for (const requirement of ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "pymdown-extensions>=10.8,<12"]) {
         if (!wikiRequirements.split(/\r?\n/).includes(requirement)) fail(`wiki/requirements.txt: missing compatibility bound '${requirement}'`);
     }
-    const socialImage = await readFile(path.join(docsRoot, "assets", "demo.png"));
-    const pngSignature = "89504e470d0a1a0a";
-    if (socialImage.subarray(0, 8).toString("hex") !== pngSignature) fail("assets/demo.png: expected a PNG social image");
-    else {
-        const width = socialImage.readUInt32BE(16);
-        const height = socialImage.readUInt32BE(20);
-        if (width !== 1245 || height !== 653) fail(`assets/demo.png: expected 1245x653, found ${width}x${height}`);
+    const releaseManifest = JSON.parse(await readFile(path.join(docsRoot, "release.json"), "utf8"));
+    if (socialImageName !== `infernux-social-card-${releaseManifest.version}.jpg`) fail("social card filename must follow the release single source of truth");
+    const socialImage = await readFile(path.join(docsRoot, "assets", socialImageName));
+    const dimensions = jpegDimensions(socialImage);
+    if (!dimensions) fail(`assets/${socialImageName}: expected a valid JPEG social image`);
+    else if (dimensions.width !== socialImageWidth || dimensions.height !== socialImageHeight) {
+        fail(`assets/${socialImageName}: expected ${socialImageWidth}x${socialImageHeight}, found ${dimensions.width}x${dimensions.height}`);
     }
+    if (createHash("sha256").update(socialImage).digest("hex") !== socialImageSha256) fail(`assets/${socialImageName}: content hash differs from the reviewed social card`);
     const sitemap = await readFile(path.join(docsRoot, "sitemap.xml"), "utf8");
     const sitemapDocs = JSON.parse(await readFile(path.join(docsRoot, "docs-index.json"), "utf8"));
     const sitemapApi = JSON.parse(await readFile(path.join(docsRoot, "api-index.json"), "utf8"));
@@ -838,13 +909,17 @@ async function verifyPublishingFiles() {
         "id=\"community-load-more\"",
         "id=\"community-browse-all\"",
         "id=\"giscus-readiness\"",
+        "id=\"giscus-load\"",
+        "id=\"giscus-thread\"",
         "id=\"giscus-open-discussions\"",
         "id=\"giscus-install\"",
         "https://github.com/apps/giscus/installations/new",
-        "five-minute copy of public topic metadata in sessionStorage",
+        "choosing “Load replies” is remembered only in the current tab via sessionStorage",
+        "giscus.app is contacted only after you choose “Load replies”",
         "learning-path progress in localStorage",
-        "js/community.js?v=4",
-        "css/community.css?v=6"
+        "data-loading=\"lazy\"",
+        "js/community.js?v=5",
+        "css/community.css?v=7"
     ]) {
         if (!community.includes(contract)) fail(`community.html: missing forum discovery contract '${contract}'`);
     }
@@ -896,9 +971,17 @@ async function verifyPublishingFiles() {
         "answer_chosen_at",
         "replaceChildren()",
         "GISCUS_ORIGIN = \"https://giscus.app\"",
-        "GISCUS_STATUS_CACHE_TTL_MS = 5 * 60 * 1000",
+        "GISCUS_OPT_IN_KEY = \"infernux-giscus-opt-in-v1\"",
+        "GISCUS_SCRIPT_ID = \"giscus-client\"",
+        "readGiscusOptIn",
+        "rememberGiscusOptIn",
+        "giscusConfiguration",
+        "loadGiscusEmbed",
+        "document.createElement(\"script\")",
+        "for (const [key, value] of Object.entries(config)) script.dataset[key] = value",
         "classifyGiscusError",
         "event.origin !== GISCUS_ORIGIN",
+        "event.source !== frame.contentWindow",
         "payload.resizeHeight",
         "renderGiscusReadiness",
         "AbortController"
@@ -907,6 +990,7 @@ async function verifyPublishingFiles() {
     }
     if (/innerHTML\s*=/.test(communityJs)) fail("community.js: forum UI must be constructed without innerHTML");
     if (communityJs.includes("giscus.app/api/discussions/categories")) fail("community.js: browser must use verified frame messages instead of the non-CORS Giscus category API");
+    if (/<script\b[^>]*src=["']https:\/\/giscus\.app\/client\.js/i.test(community)) fail("community.html: Giscus must not contact a third party before the visitor explicitly loads replies");
     const communityCss = await readFile(path.join(docsRoot, "css", "community.css"), "utf8");
     if (!/\.forum-field input,[\s\S]*?min-height:\s*48px;/.test(communityCss)) fail("community.css: forum inputs must preserve a 48px touch target");
     if (!/@media\s*\(max-width:\s*520px\)[\s\S]*?\.forum-controls\s*\{[\s\S]*?grid-template-columns:\s*1fr;/.test(communityCss)) fail("community.css: forum controls must collapse at phone width");
@@ -916,7 +1000,7 @@ async function verifyPublishingFiles() {
     for (const contract of [".channel-actions", ".channel-create", "grid-template-columns: repeat(2, minmax(0, 1fr))"]) {
         if (!communityCss.includes(contract)) fail(`community.css: missing structured channel contract '${contract}'`);
     }
-    for (const contract of [".giscus-readiness", "data-state=\"ready\"", "data-state=\"uninstalled\"", ".giscus-readiness-actions", ".giscus-install-action"]) {
+    for (const contract of [".giscus-readiness", "data-state=\"standby\"", "data-state=\"ready\"", "data-state=\"uninstalled\"", ".giscus-readiness-actions", ".giscus-load-action", ".giscus-install-action"]) {
         if (!communityCss.includes(contract)) fail(`community.css: missing embedded-reply readiness contract '${contract}'`);
     }
     const sharedCss = await readFile(path.join(docsRoot, "css", "style.css"), "utf8");

@@ -33,7 +33,7 @@ class VfxGraphEditorPanel(EditorPanel):
         self._system = VfxSystem()
         self._file_path = ""
         self._emitter_index = 0
-        self._dirty = False
+        self._dirty = True
         self._drag_snapshot: Optional[dict] = None
         self._selected_node_uid = ""
         self._save_as_dialog = AssetSaveAsDialog("vfx.save_as", "VFX system")
@@ -264,17 +264,30 @@ class VfxGraphEditorPanel(EditorPanel):
             self._open_vfxsystem(payload)
 
     def save_state(self) -> dict:
-        return {
+        data = {
             "file_path": self._file_path,
             "emitter_index": self._emitter_index,
             "pan_x": self._view.pan_x,
             "pan_y": self._view.pan_y,
             "zoom": self._view.zoom,
+            "dirty": bool(self._dirty),
         }
+        if self._dirty:
+            data["draft"] = self._system.to_dict()
+        return data
 
     def load_state(self, data: dict) -> None:
         path = str(data.get("file_path", ""))
-        if path and os.path.isfile(path):
+        draft = data.get("draft")
+        if bool(data.get("dirty")) and isinstance(draft, dict):
+            try:
+                self._system = VfxSystem.from_dict(draft)
+                self._file_path = os.path.abspath(path) if path else ""
+                self._system.file_path = self._file_path
+                self._dirty = True
+            except VfxSchemaError as exc:
+                Debug.log_warning(f"Failed to restore VFX editor draft: {exc}")
+        elif path and os.path.isfile(path):
             self._open_vfxsystem(path)
         self._emitter_index = min(
             int(data.get("emitter_index", 0)), max(0, len(self._system.emitters) - 1)
@@ -283,6 +296,7 @@ class VfxGraphEditorPanel(EditorPanel):
         self._view.pan_y = float(data.get("pan_y", self._view.pan_y))
         self._view.zoom = float(data.get("zoom", self._view.zoom))
         self._bind_selected_emitter()
+        self._sync_project_dirty_flag()
 
     def on_disable(self) -> None:
         try:

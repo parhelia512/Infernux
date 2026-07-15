@@ -30,18 +30,20 @@ const documentElement = {
 const body = { classList: classList() };
 const icon = { className: "fas fa-bars" };
 const attributes = new Map();
+const siteActionControls = [];
 const document = {
     activeElement: null,
     body,
     documentElement,
     addEventListener(type, handler) { listeners.set(type, handler); },
     dispatchEvent() {},
+    getElementById() { return null; },
     querySelector(selector) {
         if (selector === ".nav-links") return navLinks;
         if (selector === ".mobile-menu-btn") return button;
         return null;
     },
-    querySelectorAll() { return []; }
+    querySelectorAll(selector) { return selector === "[data-site-action]" ? siteActionControls : []; }
 };
 function focusable(name) {
     return {
@@ -57,10 +59,23 @@ const navLinks = {
 };
 const button = {
     ...focusable("menu-button"),
+    dataset: { siteAction: "menu" },
+    eventHandlers: new Map(),
+    addEventListener(type, handler) { this.eventHandlers.set(type, handler); },
     getAttribute(name) { return attributes.get(name) ?? null; },
     setAttribute(name, value) { attributes.set(name, value); },
     querySelector(selector) { return selector === "i" ? icon : null; }
 };
+function siteActionControl(action) {
+    return {
+        dataset: { siteAction: action },
+        eventHandlers: new Map(),
+        addEventListener(type, handler) { this.eventHandlers.set(type, handler); }
+    };
+}
+const themeAction = siteActionControl("theme");
+const languageAction = siteActionControl("language");
+siteActionControls.push(themeAction, languageAction, button);
 const window = {
     innerWidth: 375,
     isSecureContext: false,
@@ -87,6 +102,18 @@ new vm.Script(source, { filename: "main.js" }).runInContext(sandbox);
 
 const navigation = sandbox.__infernuxNavigation;
 assert.ok(navigation, "mobile navigation test surface should be exported");
+
+navigation.bindSiteActions();
+assert.equal(themeAction.eventHandlers.has("click"), true, "theme action should use an external event listener");
+assert.equal(languageAction.eventHandlers.has("click"), true, "language action should use an external event listener");
+assert.equal(button.eventHandlers.has("click"), true, "menu action should use an external event listener");
+themeAction.eventHandlers.get("click")();
+assert.equal(documentElement.getAttribute("data-theme"), "light");
+button.eventHandlers.get("click")();
+assert.equal(navLinks.classList.contains("mobile-open"), true);
+navigation.setMobileMenuState(false);
+navigation.bindSiteActions();
+assert.equal(themeAction.dataset.siteActionBound, "true", "site actions should not be rebound");
 
 navigation.setMobileMenuState(true, { moveFocus: true });
 assert.equal(navLinks.classList.contains("mobile-open"), true);

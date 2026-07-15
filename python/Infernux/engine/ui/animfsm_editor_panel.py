@@ -254,7 +254,7 @@ class AnimFSMEditorPanel(EditorPanel):
         super().__init__(title="Animation State Machine Editor", window_id="animfsm_editor")
         self._fsm: Optional[AnimStateMachine] = None
         self._file_path: str = ""
-        self._dirty: bool = False
+        self._dirty: bool = True
         self._save_as_dialog = AssetSaveAsDialog("animfsm.save_as", "state machine")
         self._pending_mode_switch: Optional[str] = None
         self._mode_switch_confirm_requested: bool = False
@@ -352,7 +352,7 @@ class AnimFSMEditorPanel(EditorPanel):
         self._fsm = AnimStateMachine(name="New State Machine")
         self._file_path = ""
         self._selected_uid = ""
-        self._dirty = False
+        self._dirty = True
         self._sync_graph_from_fsm()
 
     def _switch_to_new_mode_resource(self, mode: str) -> None:
@@ -516,6 +516,9 @@ class AnimFSMEditorPanel(EditorPanel):
             data["pan_x"] = self._view.pan_x
             data["pan_y"] = self._view.pan_y
             data["zoom"] = self._view.zoom
+        data["dirty"] = bool(self._dirty)
+        if self._dirty and self._fsm is not None:
+            data["draft"] = self._fsm.to_dict()
         return data
 
     def _resolve_saved_fsm_path(self, data: dict) -> str:
@@ -547,6 +550,16 @@ class AnimFSMEditorPanel(EditorPanel):
             self._view.pan_x = float(data.get("pan_x", self._view.pan_x))
             self._view.pan_y = float(data.get("pan_y", self._view.pan_y))
             self._view.zoom = float(data.get("zoom", self._view.zoom))
+        draft = data.get("draft")
+        if bool(data.get("dirty")) and isinstance(draft, dict):
+            self._fsm = AnimStateMachine.from_dict(draft)
+            self._file_path = self._normalize_fsm_path(data.get("file_path") or "")
+            self._fsm.file_path = self._file_path
+            self._dirty = True
+            self._selected_uid = ""
+            self._sync_graph_from_fsm()
+            self._panel_state_restored_once = True
+            return
         self._panel_state_restored_once = False
 
     def _apply_pending_panel_restore(self) -> None:
@@ -2548,6 +2561,7 @@ class AnimFSMEditorPanel(EditorPanel):
             self._open_animfsm(target)
             return not self._dirty
         self._new_fsm()
+        self._dirty = False
         self._sync_project_dirty_flag()
         return True
 

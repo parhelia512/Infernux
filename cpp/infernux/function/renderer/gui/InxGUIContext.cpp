@@ -89,6 +89,88 @@ void ConstrainNextFloatingWindowToMainViewport(const std::string &name, int flag
     if (positionChanged || sizeChanged)
         ImGui::SetNextWindowPos(constrainedPos, ImGuiCond_Always);
 }
+
+bool GrabOnlySliderScalar(const char *label, ImGuiDataType dataType, void *data, const void *minimum,
+                          const void *maximum, const char *format)
+{
+    ImGuiWindow *window = ImGui::GetCurrentWindow();
+    if (window->SkipItems)
+        return false;
+
+    ImGuiContext &g = *GImGui;
+    const ImGuiStyle &style = g.Style;
+    const ImGuiID id = window->GetID(label);
+    const float width = ImGui::CalcItemWidth();
+    const ImVec2 labelSize = ImGui::CalcTextSize(label, nullptr, true);
+    const ImVec2 cursor = window->DC.CursorPos;
+    const ImRect frame(cursor, ImVec2(cursor.x + width, cursor.y + labelSize.y + style.FramePadding.y * 2.0f));
+    const ImRect total(
+        frame.Min,
+        ImVec2(frame.Max.x + (labelSize.x > 0.0f ? style.ItemInnerSpacing.x + labelSize.x : 0.0f), frame.Max.y));
+
+    ImGui::ItemSize(total, style.FramePadding.y);
+    if (!ImGui::ItemAdd(total, id, &frame, ImGuiItemFlags_Inputable))
+        return false;
+    if (!format)
+        format = ImGui::DataTypeGetInfo(dataType)->PrintFmt;
+
+    const bool hovered = ImGui::ItemHoverable(frame, id, g.LastItemData.ItemFlags);
+    bool tempInputActive = ImGui::TempInputIsActive(id);
+    if (!tempInputActive) {
+        const bool clicked = hovered && ImGui::IsMouseClicked(0, ImGuiInputFlags_None, id);
+        const bool navActivated = g.NavActivateId == id;
+        if (clicked)
+            ImGui::SetKeyOwner(ImGuiKey_MouseLeft, id);
+
+        bool clickedGrab = false;
+        if (clicked) {
+            ImRect currentGrab;
+            ImGui::SliderBehavior(frame, id, dataType, data, minimum, maximum, format, ImGuiSliderFlags_None,
+                                  &currentGrab);
+            clickedGrab = currentGrab.Contains(g.IO.MousePos);
+        }
+        const bool preferInput = navActivated && (g.NavActivateFlags & ImGuiActivateFlags_PreferInput);
+        tempInputActive = (clicked && (!clickedGrab || g.IO.KeyCtrl)) || preferInput;
+
+        if (clicked || navActivated)
+            std::memcpy(&g.ActiveIdValueOnActivation, data, ImGui::DataTypeGetInfo(dataType)->Size);
+
+        if ((clickedGrab || navActivated) && !tempInputActive) {
+            ImGui::SetActiveID(id, window);
+            ImGui::SetFocusID(id, window);
+            ImGui::FocusWindow(window);
+            g.ActiveIdUsingNavDirMask |= (1 << ImGuiDir_Left) | (1 << ImGuiDir_Right);
+        }
+    }
+
+    if (tempInputActive)
+        return ImGui::TempInputScalar(frame, id, label, dataType, data, format, minimum, maximum);
+
+    const ImU32 frameColor = ImGui::GetColorU32(g.ActiveId == id ? ImGuiCol_FrameBgActive
+                                                : hovered        ? ImGuiCol_FrameBgHovered
+                                                                 : ImGuiCol_FrameBg);
+    ImGui::RenderNavCursor(frame, id);
+    ImGui::RenderFrame(frame.Min, frame.Max, frameColor, false, style.FrameRounding);
+    ImGui::RenderFrameBorder(frame.Min, frame.Max, style.FrameRounding);
+
+    ImRect grab;
+    const bool changed =
+        ImGui::SliderBehavior(frame, id, dataType, data, minimum, maximum, format, ImGuiSliderFlags_None, &grab);
+    if (changed)
+        ImGui::MarkItemEdited(id);
+    if (grab.Max.x > grab.Min.x)
+        window->DrawList->AddRectFilled(
+            grab.Min, grab.Max, ImGui::GetColorU32(g.ActiveId == id ? ImGuiCol_SliderGrabActive : ImGuiCol_SliderGrab),
+            style.GrabRounding);
+
+    char valueBuffer[64];
+    const char *valueEnd =
+        valueBuffer + ImGui::DataTypeFormatString(valueBuffer, IM_COUNTOF(valueBuffer), dataType, data, format);
+    ImGui::RenderTextClipped(frame.Min, frame.Max, valueBuffer, valueEnd, nullptr, ImVec2(0.5f, 0.5f));
+    if (labelSize.x > 0.0f)
+        ImGui::RenderText(ImVec2(frame.Max.x + style.ItemInnerSpacing.x, frame.Min.y + style.FramePadding.y), label);
+    return changed;
+}
 } // namespace
 
 /* basic text & labels */
@@ -140,14 +222,14 @@ void InxGUIContext::Checkbox(const std::string &label, bool *value)
 
 void InxGUIContext::IntSlider(const std::string &label, int *value, int min, int max)
 {
-    ImGui::SliderInt(label.c_str(), value, min, max);
+    GrabOnlySliderScalar(label.c_str(), ImGuiDataType_S32, value, &min, &max, "%d");
     if (InxGUISemantics::IsCaptureEnabled())
         RecordSemanticItem("int_slider", label, true, "", std::nullopt, static_cast<double>(*value));
 }
 
 void InxGUIContext::FloatSlider(const std::string &label, float *value, float min, float max)
 {
-    ImGui::SliderFloat(label.c_str(), value, min, max);
+    GrabOnlySliderScalar(label.c_str(), ImGuiDataType_Float, value, &min, &max, "%.3f");
     if (InxGUISemantics::IsCaptureEnabled())
         RecordSemanticItem("float_slider", label, true, "", std::nullopt, static_cast<double>(*value));
 }
@@ -1777,7 +1859,7 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
             float orig = val;
             CompensateWarp();
             if (d.slider && d.rangeMin > -1e5f)
-                ImGui::SliderFloat(d.widgetId.c_str(), &val, d.rangeMin, d.rangeMax);
+                GrabOnlySliderScalar(d.widgetId.c_str(), ImGuiDataType_Float, &val, &d.rangeMin, &d.rangeMax, "%.3f");
             else
                 ImGui::DragFloat(d.widgetId.c_str(), &val, d.speed, d.rangeMin, d.rangeMax);
             if (captureSemantics)
@@ -1799,9 +1881,11 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
             int val = d.iVal;
             int orig = val;
             CompensateWarp();
-            if (d.slider && static_cast<int>(d.rangeMin) > -1000000)
-                ImGui::SliderInt(d.widgetId.c_str(), &val, static_cast<int>(d.rangeMin), static_cast<int>(d.rangeMax));
-            else
+            if (d.slider && static_cast<int>(d.rangeMin) > -1000000) {
+                const int rangeMin = static_cast<int>(d.rangeMin);
+                const int rangeMax = static_cast<int>(d.rangeMax);
+                GrabOnlySliderScalar(d.widgetId.c_str(), ImGuiDataType_S32, &val, &rangeMin, &rangeMax, "%d");
+            } else
                 ImGui::DragInt(d.widgetId.c_str(), &val, d.speed, static_cast<int>(d.rangeMin),
                                static_cast<int>(d.rangeMax));
             if (captureSemantics)

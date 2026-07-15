@@ -4,6 +4,37 @@ from __future__ import annotations
 from Infernux.debug import Debug
 
 
+class _InlineMaterialPanelAdapter:
+    """Stable adapter shared by inline material rows in one Inspector."""
+
+    def __init__(self, state, engine, inspector_support):
+        self._state = state
+        self._engine = engine
+        self._inspector_support = inspector_support
+
+    @property
+    def _inline_material_cache(self):
+        return self._state["cache"]
+
+    @_inline_material_cache.setter
+    def _inline_material_cache(self, value):
+        self._state["cache"] = value
+
+    @property
+    def _inline_material_exec_layer(self):
+        return self._state["exec_layer"]
+
+    @_inline_material_exec_layer.setter
+    def _inline_material_exec_layer(self, value):
+        self._state["exec_layer"] = value
+
+    def _get_native_engine(self):
+        return self._engine.get_native_engine()
+
+    def _ensure_material_file_path(self, material):
+        return self._inspector_support.ensure_material_file_path(material)
+
+
 def _collect_material_renderers(items, native_map, obj):
     """Collect renderer tuples (MeshRenderer / SpriteRenderer) and their signature parts."""
     from Infernux.components.builtin_component import BuiltinComponent
@@ -75,24 +106,9 @@ def wire_material_sections(ip, _t, engine, _inspector_support,
                            mat_cache):
     """Wire material-section rendering callback onto *ip*."""
     _inline_material_state = {"cache": {}, "exec_layer": None}
-
-    def _make_inline_material_panel_adapter():
-        class _Adapter:
-            def __init__(self):
-                self._inline_material_cache = _inline_material_state["cache"]
-                self._inline_material_exec_layer = _inline_material_state["exec_layer"]
-
-            def _get_native_engine(self):
-                return engine.get_native_engine()
-
-            def _ensure_material_file_path(self, material):
-                return _inspector_support.ensure_material_file_path(material)
-
-            def _sync_back(self):
-                _inline_material_state["cache"] = self._inline_material_cache
-                _inline_material_state["exec_layer"] = self._inline_material_exec_layer
-
-        return _Adapter()
+    inline_material_adapter = _InlineMaterialPanelAdapter(
+        _inline_material_state, engine, _inspector_support,
+    )
 
     def _render_material_sections(ctx, obj_id):
         from Infernux.components.builtin_component import BuiltinComponent
@@ -118,7 +134,7 @@ def wire_material_sections(ip, _t, engine, _inspector_support,
         ctx.pop_style_color(1)
         ctx.separator()
         if not render_compact_section_header(
-            ctx, "Materials##obj_mat_sections_v2", level="primary", default_open=False
+            ctx, "Materials##obj_mat_sections", level="primary", default_open=True
         ):
             return
 
@@ -151,28 +167,26 @@ def wire_material_sections(ip, _t, engine, _inspector_support,
             if multiple_renderers and owner_name:
                 title = f"{owner_name} / {title}"
             if not render_compact_section_header(
-                ctx, f"{title}##mat_entry_v2_{index}", level="secondary", default_open=False
+                ctx, f"{title}##mat_entry_{index}", level="secondary", default_open=True
             ):
                 continue
             lock_inline_material_body = (
                 entry.get("renderer_type") == "SpriteRenderer"
                 and entry["is_default"]
             ) or bool(entry.get("is_embedded", False))
-            adapter = _make_inline_material_panel_adapter()
             ctx.push_id(index)
             try:
                 if lock_inline_material_body:
                     ctx.begin_disabled(True)
                 try:
                     mat_ui.render_inline_material_body(
-                        ctx, adapter, entry["material"],
+                        ctx, inline_material_adapter, entry["material"],
                         cache_key=f"obj_mat_{obj_id}_{index}")
                 finally:
                     if lock_inline_material_body:
                         ctx.end_disabled()
             finally:
                 ctx.pop_id()
-                adapter._sync_back()
 
             if index != len(valid_entries) - 1:
                 ctx.separator()

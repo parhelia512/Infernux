@@ -248,3 +248,17 @@ def test_deleted_vfx_asset_clears_live_particle_reference_and_marks_scene_dirty(
     assert particle.system is None
     assert particle._runtime is None
     assert dirty_calls == [True]
+
+
+def test_vfx_new_document_and_dirty_draft_round_trip():
+    from Infernux.engine.ui.vfx_graph_editor_panel import VfxGraphEditorPanel
+
+    panel = VfxGraphEditorPanel()
+    assert panel._dirty is True
+    panel._system.name = "Recovered VFX"
+
+    restored = VfxGraphEditorPanel()
+    restored.load_state(panel.save_state())
+
+    assert restored._dirty is True
+    assert restored._system.name == "Recovered VFX"

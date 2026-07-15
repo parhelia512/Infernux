@@ -107,7 +107,9 @@ class TestToolbarPanel:
     def test_camera_settings_roundtrip(self):
         tb = ToolbarPanel()
         settings = {
+            "orthographic": True,
             "fov": 75.0,
+            "orthographic_size": 12.0,
             "rotation_speed": 0.1,
             "pan_speed": 2.0,
             "zoom_speed": 1.5,
@@ -116,7 +118,9 @@ class TestToolbarPanel:
         }
         tb.set_camera_settings(settings)
         result = tb.get_camera_settings()
+        assert result["orthographic"] is True
         assert abs(result["fov"] - 75.0) < 0.01
+        assert abs(result["orthographic_size"] - 12.0) < 0.01
         assert abs(result["rotation_speed"] - 0.1) < 0.01
         assert abs(result["pan_speed"] - 2.0) < 0.01
         assert abs(result["zoom_speed"] - 1.5) < 0.01
@@ -126,6 +130,7 @@ class TestToolbarPanel:
     def test_camera_settings_defaults(self):
         tb = ToolbarPanel()
         result = tb.get_camera_settings()
+        assert result["orthographic"] is False
         assert abs(result["fov"] - 60.0) < 0.01
         assert abs(result["move_speed"] - 5.0) < 0.01
 

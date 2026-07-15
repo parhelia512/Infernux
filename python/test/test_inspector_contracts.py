@@ -1,5 +1,6 @@
 """Stable semantic contracts for scene and asset Inspector surfaces."""
 
+import json
 from types import SimpleNamespace
 
 from Infernux.core.asset_types import TextureImportSettings, TextureType
@@ -464,6 +465,96 @@ def test_builtin_asset_reference_field_records_native_property(monkeypatch):
     assert recorded[0][1] == "physic_material"
     assert isinstance(recorded[0][3], PhysicMaterialRef)
     assert recorded[0][3].path_hint.endswith("Bouncy.physicMaterial")
+
+
+def test_inline_material_state_and_preview_query_are_reused(monkeypatch):
+    import Infernux.engine.ui.inspector_material as module
+
+    class NativeMaterial:
+        file_path = "C:/project/Assets/Test.mat"
+
+        @staticmethod
+        def get_version():
+            return 4
+
+        @staticmethod
+        def serialize_document():
+            return {"properties": {}, "shaders": {}}
+
+    panel = SimpleNamespace()
+    native = NativeMaterial()
+    first_state = module._build_inline_state(panel, native)
+    second_state = module._build_inline_state(panel, native)
+
+    assert second_state is first_state
+    assert second_state.exec_layer is first_state.exec_layer
+
+    queries = []
+    monkeypatch.setattr(
+        module,
+        "_query_material_preview_tex",
+        lambda *_args: queries.append(True) or 73,
+    )
+    monkeypatch.setattr(module, "_is_material_preview_ready", lambda *_args: True)
+    assert module._get_cached_material_preview_tex(
+        panel, native, {}, first_state, "stable", native.file_path,
+    ) == 73
+    assert module._get_cached_material_preview_tex(
+        panel, native, {}, first_state, "stable", native.file_path,
+    ) == 73
+    assert len(queries) == 1
+
+
+def test_material_preview_does_not_cache_stale_generation(monkeypatch):
+    import Infernux.engine.ui.inspector_material as module
+
+    state = SimpleNamespace(extra={})
+    queries = iter((41, 42, 42))
+    ready = iter((False, True))
+    monkeypatch.setattr(module, "_query_material_preview_tex", lambda *_args: next(queries))
+    monkeypatch.setattr(module, "_is_material_preview_ready", lambda *_args: next(ready))
+
+    args = (SimpleNamespace(), None, {}, state, "new-json", "C:/project/Assets/Test.mat")
+    assert module._get_cached_material_preview_tex(*args) == 41
+    assert module._get_cached_material_preview_tex(*args) == 42
+    assert module._get_cached_material_preview_tex(*args) == 42
+
+
+def test_initial_material_preview_uses_the_in_memory_document(monkeypatch, tmp_path):
+    import Infernux.engine.ui.inspector_material as module
+    from Infernux.engine.ui import asset_resource_preview
+
+    path = tmp_path / "Fresh.mat"
+    path.write_text('{"material_version":3}', encoding="utf-8")
+    calls = []
+    native = object()
+    monkeypatch.setattr(asset_resource_preview, "_resolve_native_engine", lambda _panel: native)
+    monkeypatch.setattr(asset_resource_preview, "_try_get_cpp_material_preview_texture",
+                        lambda native, preview_path, **kwargs:
+                        calls.append((native, preview_path, kwargs)) or 17)
+
+    document = {"material_version": 3}
+    tex = module._query_material_preview_tex(
+        SimpleNamespace(), None, document,
+        SimpleNamespace(extra={"cached_json": json.dumps(document)}), "", str(path),
+    )
+
+    assert tex == 17
+    assert calls == [(native, str(path), {
+        "material_json": json.dumps(document),
+        "file_mtime_hint": 0,
+    })]
+
+
+def test_material_undo_snapshot_is_decoded_only_when_edit_occurs():
+    import Infernux.engine.ui.inspector_material as module
+
+    state = SimpleNamespace(extra={"cached_json": '{"properties":{"roughness":0.25}}'})
+    edited_document = {"properties": {"roughness": 0.75}}
+
+    assert module._document_before_material_edit(state, edited_document) == {
+        "properties": {"roughness": 0.25}
+    }
 
 
 def test_audio_track_renderer_exposes_picker_callbacks_and_semantic(monkeypatch):

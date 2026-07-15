@@ -188,6 +188,51 @@ def test_timeline_playback_requests_full_speed_editor_frames():
     assert panel._needs_full_speed_frames() is True
 
 
+def test_timeline_new_document_and_dirty_draft_round_trip():
+    panel = AnimTimelineEditorPanel()
+    assert panel._dirty is True
+    panel._timeline.duration = 7.5
+    panel._timeline.keyframes.append(TimelineKeyframe(time=1.25))
+
+    restored = AnimTimelineEditorPanel()
+    restored.load_state(panel.save_state())
+
+    assert restored._dirty is True
+    assert restored._timeline.duration == 7.5
+    assert [key.time for key in restored._timeline.keyframes] == [1.25]
+
+
+def test_timeline_discard_cleans_an_unsaved_draft():
+    panel = AnimTimelineEditorPanel()
+    panel._timeline.keyframes.append(TimelineKeyframe(time=1.25))
+
+    assert panel._discard_unsaved_changes() is True
+    assert panel._file_path == ""
+    assert panel._timeline.keyframes == []
+    assert panel._dirty is False
+
+
+def test_timeline_gpu_preview_is_polled_until_first_texture(monkeypatch):
+    class _Native:
+        def __init__(self):
+            self.calls = 0
+
+        def render_timeline_cube_preview(self, *_args):
+            self.calls += 1
+            return 23 if self.calls >= 2 else 0
+
+    native = _Native()
+    from Infernux.engine.ui import asset_resource_preview
+
+    monkeypatch.setattr(asset_resource_preview, "_resolve_native_engine", lambda _panel: native)
+    panel = AnimTimelineEditorPanel()
+    transform = ([0, 0, 0], [0, 0, 0], [1, 1, 1])
+
+    assert panel._cube_preview_texture(*transform) == 0
+    assert panel._cube_preview_texture(*transform) == 23
+    assert native.calls == 2
+
+
 from Infernux.engine.ui import asset_save_dialog
 from Infernux.engine.ui.animclip2d_editor_panel import AnimClip2DEditorPanel, _ClipState
 

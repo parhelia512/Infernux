@@ -105,6 +105,7 @@ def _wire_component_list(ctx):
             return scene, [], {}, {}
 
         items, native_map, py_map = [], {}, {}
+        from Infernux.components.builtin_component import BuiltinComponent
 
         # Single pass over get_components() preserves the actual insertion
         # order (C++ m_components vector) so the Inspector shows components
@@ -144,6 +145,14 @@ def _wire_component_list(ctx):
                 ci.is_broken = False
                 ci.icon_id = ctx.get_component_icon_id(tn, False)
                 items.append(ci)
+                wrapper_cls = BuiltinComponent._builtin_registry.get(tn)
+                if wrapper_cls is not None and not isinstance(comp, BuiltinComponent):
+                    try:
+                        comp = wrapper_cls._get_or_create_wrapper(comp, obj)
+                    except (AttributeError, ReferenceError, RuntimeError, TypeError) as exc:
+                        Debug.log_suppressed(
+                            f"Inspector.wrap_component[{tn}:{cid}]", exc
+                        )
                 native_map[cid] = comp
 
         _component_cache.update(

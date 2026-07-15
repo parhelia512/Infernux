@@ -1212,6 +1212,13 @@ uint64_t ProjectPanel::GetMaterialThumbnail(const std::string &filePath)
     if (filePath.empty() || !m_engine)
         return 0;
 
+    // The Inspector publishes its current document under matedit|. Prefer that
+    // in-memory preview so thumbnails follow edits without waiting for autosave.
+    const std::string liveResourceKey = std::string("matedit|") + filePath;
+    const uint64_t liveTexture = m_engine->GetMaterialPreviewTextureId(liveResourceKey);
+    if (liveTexture != 0)
+        return liveTexture;
+
     const std::string resourceKey = std::string("mat|") + filePath;
     uint64_t mtimeNs = GetMaterialMtimeNs(filePath);
     if (mtimeNs == 0) {
@@ -1655,11 +1662,16 @@ void ProjectPanel::HandleKeyboardShortcuts(InxGUIContext *ctx)
         return;
     // From FileGrid child: RootAndChildWindows still treats FolderTree focus as
     // Project focus, so F2 works with a file selected even if the tree has KB focus.
-    if (!ctx->IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) || ctx->WantTextInput())
+    if (!ctx->IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+        return;
+    // WantTextInput is global and may remain set for a frame after another field
+    // loses focus. Only suppress shortcuts while an editor is actually active.
+    if (ctx->WantTextInput() && ctx->IsAnyItemActive())
         return;
 
     bool ctrl = IsCtrl(ctx);
     bool shift = IsShift(ctx);
+    const bool renamePressed = ctx->IsKeyPressed(kKeyF2);
 
     // Ctrl+Shift+N: create new folder (no selection required)
     if (ctrl && shift && ctx->IsKeyPressed(kKeyN)) {
@@ -1678,19 +1690,26 @@ void ProjectPanel::HandleKeyboardShortcuts(InxGUIContext *ctx)
     if ((copyPressed || cutPressed || pastePressed) && isHierarchySelectionEmpty && !isHierarchySelectionEmpty())
         return;
 
-    bool anyRelevantKey =
-        ctx->IsKeyPressed(kKeyF2) || ctx->IsKeyPressed(kKeyDelete) || copyPressed || cutPressed || pastePressed;
+    const bool deletePressed = ctx->IsKeyPressed(kKeyDelete);
+    bool anyRelevantKey = renamePressed || deletePressed || copyPressed || cutPressed || pastePressed;
     if (!anyRelevantKey)
         return;
 
+    // Rename uses the logical selection rather than a fresh filesystem-filtered
+    // snapshot. Atomic asset saves can make the selected path briefly disappear.
+    if (renamePressed) {
+        const bool singleSelection =
+            m_selectedFiles.size() == 1 && !m_selectedFile.empty() && !IsVirtualSubAssetPath(m_selectedFile);
+        if (singleSelection)
+            BeginRename(m_selectedFile);
+        return;
+    }
+
     auto selected = GetSelectedPaths();
     bool hasSel = !selected.empty();
-    bool singleSel = (selected.size() == 1 && !m_selectedFile.empty() && !IsVirtualSubAssetPath(m_selectedFile));
 
     if (hasSel) {
-        if (ctx->IsKeyPressed(kKeyF2) && singleSel)
-            BeginRename(m_selectedFile);
-        else if (ctx->IsKeyPressed(kKeyDelete)) {
+        if (deletePressed) {
             if (deleteItems)
                 deleteItems(selected);
             m_pendingCacheInvalidation = true;

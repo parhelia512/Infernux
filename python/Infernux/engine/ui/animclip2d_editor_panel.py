@@ -118,6 +118,9 @@ class AnimClip2DEditorPanel(EditorPanel):
         self._save_as_dialog = AssetSaveAsDialog("animclip2d.save_as", "2D animation clip")
         self._pending_save_as_clip: Optional[_ClipState] = None
         self._mark_saved_snapshot()
+        # A newly opened authoring window owns an untitled in-memory document.
+        self._last_saved_signature = ""
+        self._dirty = True
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -174,8 +177,8 @@ class AnimClip2DEditorPanel(EditorPanel):
 
     def _mark_saved_snapshot(self) -> None:
         self._last_saved_signature = self._current_edit_signature()
-        self._last_saved_state = copy.deepcopy(self.save_state())
         self._dirty = False
+        self._last_saved_state = copy.deepcopy(self.save_state())
         self._sync_project_dirty_flag()
 
     def _recompute_dirty(self) -> None:
@@ -190,12 +193,17 @@ class AnimClip2DEditorPanel(EditorPanel):
                 "saved_texture_guid": c.saved_texture_guid,
                 "saved_texture_path": c.saved_texture_path,
             })
-        d: dict = {"active_clip": self._active_clip_idx, "clips": clips_data}
+        d: dict = {
+            "active_clip": self._active_clip_idx,
+            "clips": clips_data,
+            "dirty": bool(self._dirty),
+        }
         if self._tex:
             d["texture_path"] = self._tex.file_path
         return d
 
     def load_state(self, data: dict):
+        restore_dirty = bool(data.get("dirty", False))
         tex_path = data.get("texture_path", "")
         if tex_path and os.path.isfile(tex_path):
             self._load_texture(tex_path)
@@ -217,6 +225,10 @@ class AnimClip2DEditorPanel(EditorPanel):
         self._active_clip_idx = max(0, min(
             int(data.get("active_clip", 0)), len(self._clips) - 1))
         self._mark_saved_snapshot()
+        if restore_dirty:
+            self._last_saved_signature = ""
+            self._dirty = True
+            self._sync_project_dirty_flag()
 
     # ------------------------------------------------------------------
     # Render — layout: header -> tabs -> preview/details -> sequence -> palette

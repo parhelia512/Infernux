@@ -417,6 +417,7 @@
     background: var(--bg-deep);
 }
 
+.giscus-readiness[data-state="standby"] { border-left-color: var(--info); }
 .giscus-readiness[data-state="ready"] { border-left-color: var(--signal); }
 .giscus-readiness[data-state="uninstalled"],
 .giscus-readiness[data-state="error"] { border-left-color: var(--hazard); }
@@ -456,7 +457,8 @@
     justify-content: flex-end;
 }
 
-.giscus-readiness-actions a {
+.giscus-readiness-actions a,
+.giscus-readiness-actions button {
     min-height: 44px;
     display: inline-flex;
     align-items: center;
@@ -468,18 +470,34 @@
     color: var(--text-muted);
     font: 0.68rem/1.35 var(--font-mono);
     text-decoration: none;
+    cursor: pointer;
 }
 
 .giscus-readiness-actions a:hover,
-.giscus-readiness-actions a:focus-visible {
+.giscus-readiness-actions a:focus-visible,
+.giscus-readiness-actions button:hover,
+.giscus-readiness-actions button:focus-visible {
     border-color: var(--accent-line);
     background: var(--accent-soft);
     color: var(--accent);
 }
 
-.giscus-readiness-actions a:focus-visible {
+.giscus-readiness-actions a:focus-visible,
+.giscus-readiness-actions button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+}
+
+.giscus-load-action { display: none !important; }
+.giscus-readiness[data-state="standby"] .giscus-load-action,
+.giscus-readiness[data-state="uninstalled"] .giscus-load-action,
+.giscus-readiness[data-state="degraded"] .giscus-load-action,
+.giscus-readiness[data-state="error"] .giscus-load-action,
+.giscus-readiness[data-state="unknown"] .giscus-load-action { display: inline-flex !important; }
+.giscus-load-action {
+    border-color: var(--accent-line) !important;
+    background: var(--accent-soft) !important;
+    color: var(--accent) !important;
 }
 
 .giscus-install-action { display: none !important; }
@@ -636,7 +654,8 @@
         justify-content: stretch;
     }
 
-    .giscus-readiness-actions a {
+    .giscus-readiness-actions a,
+    .giscus-readiness-actions button {
         width: 100%;
     }
 
