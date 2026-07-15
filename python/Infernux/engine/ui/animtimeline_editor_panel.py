@@ -31,11 +31,10 @@ from Infernux.core.animation_timeline import (
 from .editor_panel import EditorPanel
 from .asset_save_dialog import AssetSaveAsDialog
 from .panel_registry import editor_panel
-from .imgui_keys import KEY_S, KEY_N, KEY_SPACE
+from .imgui_keys import KEY_N, KEY_SPACE
 from .theme import ImGuiCol, Theme
 
 _MOD_CTRL = 1 << 12
-_MOD_SHIFT = 1 << 13
 
 # Combo label i18n keys (order matches INTERP_MODES / APPLY_MODES).
 _INTERP_LABEL_KEYS = ("interp_constant", "interp_linear", "interp_ease_in", "interp_ease_out", "interp_ease_inout")
@@ -292,6 +291,13 @@ class AnimTimelineEditorPanel(EditorPanel):
         else:
             self._show_save_as_dialog()
 
+    def handle_save_command(self, save_as: bool = False) -> bool:
+        if save_as:
+            self._show_save_as_dialog()
+        else:
+            self._do_save()
+        return True
+
     def _save_to(self, path: str) -> bool:
         self._timeline.name = os.path.splitext(os.path.basename(path))[0]
         if self._timeline.save(path):
@@ -465,12 +471,6 @@ class AnimTimelineEditorPanel(EditorPanel):
         if not self._is_focused(ctx):
             return
         ctrl = ctx.is_key_down(_MOD_CTRL)
-        shift = ctx.is_key_down(_MOD_SHIFT)
-        if ctrl and ctx.is_key_pressed(KEY_S):
-            if shift:
-                self._show_save_as_dialog()
-            else:
-                self._do_save()
         if ctrl and ctx.is_key_pressed(KEY_N):
             self._new_timeline()
         # Space toggles playback only when no widget (e.g. a text field) is focused.

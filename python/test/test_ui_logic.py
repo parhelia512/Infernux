@@ -295,6 +295,53 @@ class TestIGUIFilters:
         assert filtered == ["MeshRenderer", "SkinnedMeshRenderer"]
 
 
+def test_focused_save_routes_to_document_then_falls_back_to_scene():
+    from Infernux.engine._bootstrap_wiring import BootstrapWiringMixin
+    from Infernux.engine.ui.closable_panel import ClosablePanel
+
+    calls = []
+
+    class Panel:
+        @staticmethod
+        def handle_save_command(save_as=False):
+            calls.append(("document", save_as))
+            return True
+
+    class WindowManager:
+        panel = Panel()
+
+        @classmethod
+        def get_window_instance(cls, panel_id):
+            return cls.panel if panel_id == "timeline" else None
+
+    class SceneFiles:
+        @staticmethod
+        def save_current_scene():
+            calls.append(("scene", False))
+
+        @staticmethod
+        def save_scene_as():
+            calls.append(("scene", True))
+
+    previous = ClosablePanel._active_panel_id
+    try:
+        ClosablePanel._active_panel_id = "timeline"
+        BootstrapWiringMixin._save_focused_document(WindowManager, SceneFiles)
+        BootstrapWiringMixin._save_focused_document(
+            WindowManager, SceneFiles, save_as=True
+        )
+        ClosablePanel._active_panel_id = "game"
+        BootstrapWiringMixin._save_focused_document(WindowManager, SceneFiles)
+    finally:
+        ClosablePanel._active_panel_id = previous
+
+    assert calls == [
+        ("document", False),
+        ("document", True),
+        ("scene", False),
+    ]
+
+
 class TestPanelFocusEvents:
     def test_closable_panel_emits_single_canonical_focus_event(self):
         from Infernux.engine.ui.closable_panel import ClosablePanel

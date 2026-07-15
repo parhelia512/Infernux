@@ -46,6 +46,8 @@ class MenuBarPanel : public InxGUIRenderable
     // Scene file operations
     std::function<void()> onSave;
     std::function<void()> onSaveAs;
+    std::function<void()> onSaveFocused;
+    std::function<void()> onSaveFocusedAs;
     std::function<void()> onNewScene;
     std::function<void()> onRequestClose;
 

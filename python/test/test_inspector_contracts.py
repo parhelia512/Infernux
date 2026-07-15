@@ -426,6 +426,46 @@ def test_python_asset_reference_field_uses_component_semantic(monkeypatch):
     assert captured["semantic_id"] == "inspector.object.143.component.547.controller"
 
 
+def test_builtin_asset_reference_field_records_native_property(monkeypatch):
+    import Infernux.engine.ui._inspector_references as module
+    from Infernux.components.serialized_field import FieldType
+    from Infernux.core.asset_ref import PhysicMaterialRef
+
+    captured = {}
+    recorded = []
+    monkeypatch.setattr(module, "field_label", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module,
+        "render_object_field",
+        lambda *_args, **kwargs: captured.update(kwargs),
+    )
+    monkeypatch.setattr(
+        module,
+        "_record_builtin_property",
+        lambda comp, attr, old, new, description: recorded.append(
+            (comp, attr, old, new, description)
+        ),
+    )
+    component = SimpleNamespace(
+        game_object=SimpleNamespace(id=21),
+        component_id=34,
+        physic_material=PhysicMaterialRef(),
+    )
+    metadata = SimpleNamespace(asset_type="PhysicMaterial")
+
+    module._render_asset_reference_field(
+        SimpleNamespace(), component, "physic_material", metadata,
+        component.physic_material, FieldType.ASSET, 120.0,
+        builtin_attr="physic_material",
+    )
+    captured["on_pick"]("C:/project/Assets/Bouncy.physicMaterial")
+
+    assert recorded[0][0] is component
+    assert recorded[0][1] == "physic_material"
+    assert isinstance(recorded[0][3], PhysicMaterialRef)
+    assert recorded[0][3].path_hint.endswith("Bouncy.physicMaterial")
+
+
 def test_audio_track_renderer_exposes_picker_callbacks_and_semantic(monkeypatch):
     import Infernux.engine.ui._inspector_extra_renderers as module
     from Infernux.engine.play_mode import PlayModeManager

@@ -105,10 +105,10 @@ void MenuBarPanel::HandleShortcuts(InxGUIContext *ctx)
     const auto pressedOnce = [](int key) { return ImGui::IsKeyPressed(static_cast<ImGuiKey>(key), false); };
 
     if (pressedOnce(KEY_S)) {
-        if (shift && onSaveAs)
-            onSaveAs();
-        else if (onSave)
-            onSave();
+        if (shift && onSaveFocusedAs)
+            onSaveFocusedAs();
+        else if (!shift && onSaveFocused)
+            onSaveFocused();
     }
 
     if (!shift && pressedOnce(KEY_N) && onNewScene)

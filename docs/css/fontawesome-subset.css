@@ -8,7 +8,8 @@
     font-style: normal;
     font-weight: 900;
     font-display: block;
-    src: url("../assets/fonts/fa-solid-900.woff2") format("woff2");
+    src: url("../assets/fonts/fa-solid-subset-900.woff2") format("woff2");
+    unicode-range: U+F002, U+F00C, U+F00D, U+F019, U+F059, U+F078, U+F086, U+F08E, U+F09C, U+F0C1, U+F0C5, U+F0C9, U+F0E7, U+F0EB, U+F135, U+F15C, U+F185, U+F186, U+F188, U+F1B3, U+F1DE, U+F21A, U+F27A, U+F2DB, U+F2F1, U+F3ED, U+F542, U+F552, U+F5CB, U+F5FD, U+F7C0;
 }
 
 @font-face {
@@ -16,7 +17,8 @@
     font-style: normal;
     font-weight: 400;
     font-display: block;
-    src: url("../assets/fonts/fa-brands-400.woff2") format("woff2");
+    src: url("../assets/fonts/fa-brands-subset-400.woff2") format("woff2");
+    unicode-range: U+F09B, U+F3E2;
 }
 
 .fa,
@@ -50,6 +52,7 @@
 .fa-bolt::before { content: "\f0e7"; }
 .fa-bug::before { content: "\f188"; }
 .fa-check::before { content: "\f00c"; }
+.fa-chevron-down::before { content: "\f078"; }
 .fa-circle-question::before { content: "\f059"; }
 .fa-comments::before { content: "\f086"; }
 .fa-copy::before { content: "\f0c5"; }

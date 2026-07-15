@@ -339,6 +339,10 @@ class WindowManager:
             for window_id, state in self._window_states.items()
         }
 
+    def get_window_instance(self, window_id: str) -> Optional[InxGUIRenderable]:
+        """Return the live panel instance for routing editor commands."""
+        return self._window_instances.get(window_id) or self._default_instances.get(window_id)
+
     def get_window_state(self, window_id: str) -> WindowState:
         """Return the explicit lifecycle state for a known window."""
         if window_id not in self._window_states:

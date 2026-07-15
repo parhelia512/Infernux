@@ -152,7 +152,6 @@ class BuildSettingsPanel:
         self._debug_mode = data.get("debug_mode", False)
         self._lto = data.get("lto", True)
         self._enable_jit = data.get("enable_jit", False)
-        self._debug_player_mcp = data.get("debug_player_mcp", False)
         self._splash_items = list(data.get("splash_items", []))
 
     def _prune_missing_splash(self):
@@ -178,7 +177,6 @@ class BuildSettingsPanel:
             "debug_mode": self._debug_mode,
             "lto": self._lto,
             "enable_jit": self._enable_jit,
-            "debug_player_mcp": bool(self._debug_mode and self._debug_player_mcp),
             "splash_items": self._splash_items,
         })
 
@@ -273,8 +271,6 @@ class BuildSettingsPanel:
         )
         if new_debug != self._debug_mode:
             self._debug_mode = new_debug
-            if not self._debug_mode:
-                self._debug_player_mcp = False
             self._save()
         ctx.same_line(0, 20)
         new_lto = ctx.checkbox(t("build.lto") + "##lto", self._lto)
@@ -295,22 +291,6 @@ class BuildSettingsPanel:
         )
         if new_jit != self._enable_jit:
             self._enable_jit = new_jit
-            self._save()
-        current_player_mcp = bool(getattr(self, "_debug_player_mcp", False))
-        ctx.begin_disabled(not self._debug_mode)
-        new_player_mcp = ctx.checkbox(
-            t("build.debug_player_mcp") + "##debug_player_mcp", current_player_mcp
-        )
-        ctx.record_semantic_item(
-            "checkbox",
-            t("build.debug_player_mcp"),
-            self._debug_mode,
-            "build_settings.debug_player_mcp",
-            bool_value=new_player_mcp,
-        )
-        ctx.end_disabled()
-        if new_player_mcp != current_player_mcp:
-            self._debug_player_mcp = bool(new_player_mcp and self._debug_mode)
             self._save()
         if not self._game_name:
             ctx.same_line()
@@ -864,7 +844,6 @@ class BuildSettingsPanel:
             debug_mode=self._debug_mode,
             lto=self._lto,
             enable_jit=self._enable_jit,
-            debug_player_mcp=getattr(self, "_debug_player_mcp", False),
         )
 
     def _cancel_build(self):

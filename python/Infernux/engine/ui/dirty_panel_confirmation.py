@@ -89,45 +89,26 @@ class DirtyPanelConfirmationCoordinator:
             if entry is None:
                 return
 
-        popup_id = "Unsaved Panel Changes###editor_dirty_panel_confirm"
-        if self._show_popup:
-            ctx.open_popup(popup_id)
-            self._show_popup = False
-        if not ctx.begin_popup_modal(popup_id, 64):
-            return
+        from .unsaved_changes_dialog import render_unsaved_changes_dialog
 
+        popup_id = "Unsaved Changes###editor_dirty_panel_confirm"
         title = str(entry.get("title") or entry.get("panel_id") or "Panel")
-        ctx.record_semantic_window("modal", "Unsaved Panel Changes", "editor.dirty_panel.dialog")
-        ctx.label(f"{title} has unsaved changes.")
-        ctx.label("Save before closing?" if self._scope == "panel" else "Save before exiting?")
-        if self._error:
-            ctx.spacing()
-            ctx.text_wrapped(self._error)
-        ctx.spacing()
-        ctx.separator()
-        ctx.spacing()
-
-        def _save() -> None:
+        choice = render_unsaved_changes_dialog(
+            ctx,
+            popup_id=popup_id,
+            semantic_prefix="editor.dirty_panel",
+            document_title=title,
+            action="exit" if self._scope == "exit" else "close",
+            error=self._error,
+            request_open=self._show_popup,
+        )
+        self._show_popup = False
+        if choice == "save":
             self.choose_save()
-            ctx.close_current_popup()
-
-        def _discard() -> None:
+        elif choice == "discard":
             self.choose_discard()
-            ctx.close_current_popup()
-
-        def _cancel() -> None:
+        elif choice == "cancel":
             self.choose_cancel()
-            ctx.close_current_popup()
-
-        ctx.button("Save##dirty_panel_save", _save)
-        ctx.record_semantic_item("button", "Save", True, "editor.dirty_panel.save")
-        ctx.same_line()
-        ctx.button("Discard##dirty_panel_discard", _discard)
-        ctx.record_semantic_item("button", "Discard", True, "editor.dirty_panel.discard")
-        ctx.same_line()
-        ctx.button("Cancel##dirty_panel_cancel", _cancel)
-        ctx.record_semantic_item("button", "Cancel", True, "editor.dirty_panel.cancel")
-        ctx.end_popup()
 
     def choose_save(self) -> None:
         entry = self._active_entry

@@ -99,30 +99,6 @@ def test_player_always_raw_copies_numpy_when_jit_is_disabled(tmp_path, monkeypat
     assert captured["raw_copy_packages"] == ["numpy"]
 
 
-def test_debug_player_mcp_includes_only_player_gateway(tmp_path, monkeypatch):
-    captured: dict = {}
-
-    class _FakeNuitkaBuilder:
-        _JIT_NOFOLLOW_PACKAGES = NuitkaBuilder._JIT_NOFOLLOW_PACKAGES
-
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-        def build(self, **_kwargs):
-            return str(tmp_path / "dist")
-
-    monkeypatch.setattr("Infernux.engine.game_builder.NuitkaBuilder", _FakeNuitkaBuilder)
-    builder = _make_builder(tmp_path, tmp_path / "build_output")
-    builder.debug_mode = True
-    builder.debug_player_mcp = True
-
-    builder._run_nuitka(str(tmp_path / "boot.py"), on_progress=None, user_packages=[])
-
-    assert captured["extra_include_packages"] == ["fastmcp", "mcp"]
-    assert captured["extra_include_modules"] == ["Infernux.mcp.player_gateway"]
-    assert captured["allow_game_build_packages"] == ["mcp", "fastmcp"]
-
-
 def test_player_cleanup_preserves_engine_icon_resources(tmp_path):
     builder = _make_builder(tmp_path, tmp_path / "build_output")
     final_dir = tmp_path / "dist"
@@ -195,13 +171,11 @@ class TestGameBuilderOutputSafety:
             str(output_dir),
             game_name="TestGame",
             debug_mode=True,
-            debug_player_mcp=True,
         )
 
         boot_path = builder._generate_boot_script()
         boot_source = open(boot_path, "r", encoding="utf-8").read()
         assert 'os.environ["_INFERNUX_PLAYER_DEBUG_BUILD"] = "1" if _DEBUG_MODE else "0"' in boot_source
-        assert 'os.environ["_INFERNUX_PLAYER_MCP_COMPILED"] = "1" if True else "0"' in boot_source
         assert 'if os.environ.get("_INFERNUX_PLAYER_CONTROL_FILE"):' in boot_source
 
         settings = output_dir / "Data" / "ProjectSettings"
@@ -210,7 +184,6 @@ class TestGameBuilderOutputSafety:
         builder._generate_manifest(str(output_dir))
         manifest = json.loads((output_dir / "Data" / "BuildManifest.json").read_text(encoding="utf-8"))
         assert manifest["debug_build"] is True
-        assert manifest["debug_player_mcp"] is True
 
     def test_validate_rejects_non_empty_unmarked_output_dir(self, tmp_path):
         output_dir = tmp_path / "build_output"
@@ -585,8 +558,6 @@ class TestNuitkaWindowsSdkEnvironment:
         builder.lto = False
         builder.extra_include_packages = []
         builder.extra_include_data = []
-        builder.extra_include_modules = []
-        builder.allow_game_build_packages = set()
         builder.raw_copy_packages = []
         builder.product_name = "Game"
         builder.file_version = "1.0.0.0"

@@ -38,4 +38,3 @@ A change record is evidence of a structural API difference, not a complete behav
 The snapshot for a released version must not silently move. CI fails when the current API differs from the recorded snapshot. Maintainers must either restore the release API, update the documented release version, or explicitly record an intentional new release baseline.
 
 Agents should compare their installed engine version with `generated_for_release` before suggesting code. When no comparison exists, say so rather than inventing compatibility.
-

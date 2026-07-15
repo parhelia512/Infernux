@@ -9,7 +9,7 @@ const failures = [];
 const checks = [
   { route: "/", type: "text/html", tokens: ["<h1", "data-i18n=\"nav.start\"", "wiki.html?layer=manual#written-guides", "data-i18n=\"home.hero.start\"", "id=\"hero-platform-note\"", "id=\"runtime-capture\"", "https://arxiv.org/abs/2604.10263"], forbid: ["fonts.googleapis.com", "cdnjs.cloudflare.com", "performance is competitive with Unity", "不比Unity差"] },
   { route: "/wiki.html", type: "text/html", tokens: ["DOCUMENTATION DECK", "data-static-doc-directory", "wiki/site/en/learn/getting-started.html", "wiki/site/zh/manual/engine-map.html", "aria-current=\"page\" data-i18n=\"nav.learn\""] },
-  { route: "/community.html", type: "text/html", token: "Infernux Community Wall" },
+  { route: "/community.html", type: "text/html", tokens: ["Infernux Community Wall", "community-load-more", "community-browse-all", "giscus-readiness", "giscus-install", "js/community.js?v=4", "css/community.css?v=6", "js/i18n.js?v=12"] },
   { route: "/download.html", type: "text/html", token: "InfernuxHubInstaller.exe" },
   { route: "/offline.html", type: "text/html", token: "Connection interrupted." },
   { route: "/site.webmanifest", type: "application/manifest+json", alternateTypes: ["application/json"], token: "\"display_override\"" },
@@ -36,14 +36,15 @@ const checks = [
   { route: "/css/fontawesome-subset.css", type: "text/css", token: "Font Awesome Free 6.4.0" },
   { route: "/css/docs-search.css", type: "text/css", token: ".docs-search-dialog" },
   { route: "/css/wiki-generated.css", type: "text/css", tokens: [".doc-build-provenance", ".doc-diagram", "overscroll-behavior-inline: contain"] },
-  { route: "/css/community.css", type: "text/css", token: ".forum-controls" },
+  { route: "/css/community.css", type: "text/css", tokens: [".forum-controls", ".forum-pagination", ".topic-signals", ".giscus-readiness", ".giscus-install-action"] },
   { route: "/js/docs-search.js", type: "text/javascript", alternateTypes: ["application/javascript"], token: "/api-index.json" },
   { route: "/js/main.js", type: "text/javascript", alternateTypes: ["application/javascript"], tokens: ["mobileMenuFocusables", "handleMobileMenuKeydown", "handleMobileMenuPointerDown", "mobile-menu-open"] },
   { route: "/js/docs-health.js", type: "text/javascript", alternateTypes: ["application/javascript"], token: "normalizeDocsHealth" },
   { route: "/js/wiki-generated.js", type: "text/javascript", alternateTypes: ["application/javascript"], token: "initializeBuildProvenance" },
-  { route: "/js/community.js", type: "text/javascript", alternateTypes: ["application/javascript"], token: "COMMUNITY_CACHE_TTL_MS" },
+  { route: "/js/community.js", type: "text/javascript", alternateTypes: ["application/javascript"], tokens: ["COMMUNITY_CACHE_TTL_MS", "sort=updated", "communityNextPage", "mergeCommunityTopics", "GISCUS_ORIGIN", "classifyGiscusError", "renderGiscusReadiness"] },
   { route: "/assets/fonts/inter-latin.woff2", type: "font/woff2", alternateTypes: ["application/octet-stream"], minBytes: 40_000, magicHex: "774f4632" },
-  { route: "/assets/fonts/fa-solid-900.woff2", type: "font/woff2", alternateTypes: ["application/octet-stream"], minBytes: 140_000, magicHex: "774f4632" },
+  { route: "/assets/fonts/fa-solid-subset-900.woff2", type: "font/woff2", alternateTypes: ["application/octet-stream"], minBytes: 3_000, maxBytes: 16_384, magicHex: "774f4632" },
+  { route: "/assets/fonts/fa-brands-subset-400.woff2", type: "font/woff2", alternateTypes: ["application/octet-stream"], minBytes: 800, maxBytes: 16_384, magicHex: "774f4632" },
 ];
 
 async function request(check) {
@@ -60,9 +61,10 @@ async function request(check) {
     const contentType = response.headers.get("content-type") || "";
     const allowedTypes = [check.type, ...(check.alternateTypes || [])];
     if (!allowedTypes.some((type) => contentType.includes(type))) throw new Error(`unexpected content-type '${contentType}'`);
-    if (check.minBytes) {
+    if (check.minBytes || check.maxBytes || check.magicHex) {
       const body = await response.arrayBuffer();
-      if (body.byteLength < check.minBytes) throw new Error(`response is only ${body.byteLength} bytes`);
+      if (check.minBytes && body.byteLength < check.minBytes) throw new Error(`response is only ${body.byteLength} bytes`);
+      if (check.maxBytes && body.byteLength > check.maxBytes) throw new Error(`response is ${body.byteLength} bytes; expected a subset no larger than ${check.maxBytes} bytes`);
       if (check.magicHex) {
         const actualMagic = Buffer.from(body).subarray(0, check.magicHex.length / 2).toString("hex");
         if (actualMagic !== check.magicHex) throw new Error(`unexpected file signature '${actualMagic}'`);

@@ -69,69 +69,51 @@ class SceneConfirmationMixin:
 
         Draws the modal "Save before …?" dialog when ``_show_confirm`` is set.
         """
-        POPUP_ID = "Save Scene?##save_confirm"
+        from Infernux.engine.i18n import t
+        from Infernux.engine.ui.unsaved_changes_dialog import render_unsaved_changes_dialog
+
+        POPUP_ID = "Unsaved Changes###scene_save_confirm"
 
         if not self._show_confirm and self._pending_action is None:
             return
 
-        if self._show_confirm:
-            ctx.open_popup(POPUP_ID)
-            self._show_confirm = False
+        choice = render_unsaved_changes_dialog(
+            ctx,
+            popup_id=POPUP_ID,
+            semantic_prefix="scene.confirm",
+            document_title=t("editor.unsaved.scene"),
+            action="exit" if self._pending_action == "close" else "close",
+            request_open=self._show_confirm,
+        )
+        self._show_confirm = False
 
-        # ImGuiWindowFlags_AlwaysAutoResize = 1 << 6 = 64
-        if ctx.begin_popup_modal(POPUP_ID, 64):
-            ctx.label("当前场景有未保存的修改。")
-            ctx.label("The current scene has unsaved changes.")
-            ctx.label("")
-            ctx.separator()
-            ctx.label("")
-
-            def _on_save():
-                if self._current_scene_path:
-                    action = self._pending_action
-                    if self._do_save(self._current_scene_path):
-                        if not self._execute_pending_action():
-                            native = self._native_engine_for_close()
-                            if native and action == 'close':
-                                native.confirm_close()
-                    else:
-                        native = self._native_engine_for_close()
-                        if self._pending_action == 'close' and native:
-                            native.cancel_close()
-                        self._close_in_progress = False
-                        self._clear_pending_action()
-                else:
-                    self._post_save_callback = self._execute_pending_action
-                    self._show_save_as_dialog()
-                ctx.close_current_popup()
-
-            def _on_dont_save():
+        if choice == "save":
+            if self._current_scene_path:
                 action = self._pending_action
-                if action == 'close':
-                    self._dirty = False
-                    self._execute_pending_action()
+                if self._do_save(self._current_scene_path):
+                    if not self._execute_pending_action():
+                        native = self._native_engine_for_close()
+                        if native and action == 'close':
+                            native.confirm_close()
                 else:
-                    self._execute_pending_action()
-                ctx.close_current_popup()
-
-            def _on_cancel():
-                native = self._native_engine_for_close()
-                if self._pending_action == 'close' and native:
-                    native.cancel_close()
-                self._close_in_progress = False
-                self._clear_pending_action()
-                ctx.close_current_popup()
-
-            ctx.button("  保存  Save  ", _on_save)
-            ctx.record_semantic_item("button", "Save", True, "scene.confirm.save")
-            ctx.same_line()
-            ctx.button("  不保存  Don't Save  ", _on_dont_save)
-            ctx.record_semantic_item("button", "Don't Save", True, "scene.confirm.discard")
-            ctx.same_line()
-            ctx.button("  取消  Cancel  ", _on_cancel)
-            ctx.record_semantic_item("button", "Cancel", True, "scene.confirm.cancel")
-
-            ctx.end_popup()
+                    native = self._native_engine_for_close()
+                    if self._pending_action == 'close' and native:
+                        native.cancel_close()
+                    self._close_in_progress = False
+                    self._clear_pending_action()
+            else:
+                self._post_save_callback = self._execute_pending_action
+                self._show_save_as_dialog()
+        elif choice == "discard":
+            if self._pending_action == 'close':
+                self._dirty = False
+            self._execute_pending_action()
+        elif choice == "cancel":
+            native = self._native_engine_for_close()
+            if self._pending_action == 'close' and native:
+                native.cancel_close()
+            self._close_in_progress = False
+            self._clear_pending_action()
 
     def poll_pending_save(self):
         """Check if the file dialog has produced a result and perform the save."""

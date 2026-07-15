@@ -372,6 +372,7 @@ void InxView::DrainSyntheticInputEvents(bool &hadInputEvent)
 
     const SDL_WindowID windowId = m_window ? SDL_GetWindowID(m_window) : 0;
     for (auto &synthetic : events) {
+        InputManager::Instance().MarkSyntheticInputForFrame();
         SDL_Event event{};
         const Uint64 timestamp = SDL_GetTicksNS();
 

@@ -22,6 +22,7 @@ from typing import Optional
 from Infernux.debug import Debug
 from Infernux.engine.project_context import get_project_root
 from Infernux.engine.path_utils import safe_path as _safe_path
+from Infernux.engine.ui._dialogs import is_synthetic_input_frame, save_file_dialog
 from .scene_manager import (
     SCENE_EXTENSION,
     DEFAULT_SCENE_FILE_BASE,
@@ -209,7 +210,7 @@ class SceneSaveMixin:
             index += 1
 
     def _show_save_as_dialog(self):
-        """Open the editor-owned Save As modal for the active scene."""
+        """Open the appropriate Save As workflow for a user or automation agent."""
         root = _effective_project_root()
         if not root:
             Debug.log_warning("No project root set — cannot save scene.")
@@ -223,12 +224,19 @@ class SceneSaveMixin:
         self._save_as_folder = "Assets"
         self._save_as_name = default_name
         self._save_as_error = ""
-        self._save_as_focus_name = True
-        self._save_as_popup_requested = True
-        self._save_as_popup_open = True
+        self._save_as_agent_modal = is_synthetic_input_frame()
+        self._save_as_focus_name = self._save_as_agent_modal
+        self._save_as_popup_requested = self._save_as_agent_modal
+        self._save_as_popup_open = self._save_as_agent_modal
+        self._save_as_native_dialog_pending = not self._save_as_agent_modal
 
     def render_save_as_popup(self, ctx) -> None:
         """Render the scene Save As workflow inside the Editor process."""
+        if self._save_as_native_dialog_pending:
+            self._save_as_native_dialog_pending = False
+            self._save_with_native_dialog()
+            return
+
         if not self._save_as_popup_open:
             return
 
@@ -271,26 +279,14 @@ class SceneSaveMixin:
             if error:
                 self._save_as_error = error
                 return
-            if os.path.exists(path) and os.path.normcase(path) != os.path.normcase(self._current_scene_path or ""):
-                self._save_as_error = "A scene already exists at this location. Choose another name to avoid overwriting it."
-                return
-            if not self._do_save(path):
-                self._save_as_error = "The scene could not be saved. Check the Console for details."
+            if not self._save_as_path(path):
                 return
             self._close_save_as_popup(ctx)
-            if self._post_save_callback:
-                callback = self._post_save_callback
-                self._post_save_callback = None
-                callback()
+            self._run_post_save_callback()
 
         def _cancel() -> None:
             self._close_save_as_popup(ctx)
-            if self._post_save_callback is not None:
-                if self._pending_action == "close" and self._engine:
-                    self._engine.cancel_close()
-                self._close_in_progress = False
-                self._clear_pending_action()
-                self._post_save_callback = None
+            self._cancel_save_as()
 
         ctx.button("Save##scene_save_as_confirm", _save)
         ctx.record_semantic_item("button", "Save", True, "scene.save_as.confirm")
@@ -324,10 +320,76 @@ class SceneSaveMixin:
 
         return os.path.join(target_folder, name + SCENE_EXTENSION), ""
 
+    def _resolve_native_save_as_path(self, path: str) -> tuple[str, str]:
+        """Validate a platform dialog result using the same Assets boundary."""
+        target = os.path.abspath(str(path or ""))
+        if not target.lower().endswith(SCENE_EXTENSION):
+            target += SCENE_EXTENSION
+        if not self._is_under_assets(target):
+            return "", "Scenes must be saved under the project's Assets directory."
+        return target, ""
+
+    def _save_with_native_dialog(self) -> None:
+        root = _effective_project_root()
+        if not root:
+            return
+
+        path = save_file_dialog(
+            title="Save Scene As",
+            win32_filter="Scene (*.scene)\0*.scene\0\0",
+            initial_dir=os.path.join(root, "Assets"),
+            default_filename=f"{self._save_as_name}{SCENE_EXTENSION}",
+            default_ext=SCENE_EXTENSION.lstrip("."),
+            tk_filetypes=[("Scene (*.scene)", "*.scene")],
+        )
+        if not path:
+            self._cancel_save_as()
+            return
+
+        path, error = self._resolve_native_save_as_path(path)
+        if error:
+            Debug.log_warning(error)
+            return
+        if not self._save_as_path(path):
+            Debug.log_warning(self._save_as_error or "The scene could not be saved. Check the Console for details.")
+            return
+        self._run_post_save_callback()
+
+    def _save_as_path(self, path: str) -> bool:
+        if os.path.exists(path) and os.path.normcase(path) != os.path.normcase(self._current_scene_path or ""):
+            self._save_as_error = "A scene already exists at this location. Choose another name to avoid overwriting it."
+            return False
+        if not self._do_save(path):
+            self._save_as_error = "The scene could not be saved. Check the Console for details."
+            return False
+        return True
+
+    def _run_post_save_callback(self) -> None:
+        if self._post_save_callback:
+            callback = self._post_save_callback
+            self._post_save_callback = None
+            callback()
+
+    def _cancel_save_as(self) -> None:
+        self._save_as_popup_open = False
+        self._save_as_popup_requested = False
+        self._save_as_focus_name = False
+        self._save_as_agent_modal = False
+        self._save_as_native_dialog_pending = False
+        self._save_as_error = ""
+        if self._post_save_callback is not None:
+            if self._pending_action == "close" and self._engine:
+                self._engine.cancel_close()
+            self._close_in_progress = False
+            self._clear_pending_action()
+            self._post_save_callback = None
+
     def _close_save_as_popup(self, ctx) -> None:
         self._save_as_popup_open = False
         self._save_as_popup_requested = False
         self._save_as_focus_name = False
+        self._save_as_agent_modal = False
+        self._save_as_native_dialog_pending = False
         self._save_as_error = ""
         ctx.close_current_popup()
 

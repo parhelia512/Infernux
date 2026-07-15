@@ -2291,6 +2291,8 @@ class MenuBarPanel(InxGUIRenderable):
 
     on_save: Any
     on_save_as: Any
+    on_save_focused: Any
+    on_save_focused_as: Any
     on_new_scene: Any
     on_request_close: Any
     on_undo: Any

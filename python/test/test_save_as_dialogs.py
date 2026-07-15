@@ -258,8 +258,9 @@ class _AnimClipSaveAsContext:
         pass
 
 
-def test_animclip_save_as_uses_editor_modal_and_focuses_name(tmp_path, monkeypatch):
+def test_animclip_agent_save_as_uses_editor_modal_and_focuses_name(tmp_path, monkeypatch):
     monkeypatch.setattr(asset_save_dialog, "get_project_root", lambda: str(tmp_path))
+    monkeypatch.setattr(asset_save_dialog, "is_synthetic_input_frame", lambda: True)
     panel = AnimClip2DEditorPanel()
     clip = _ClipState(name="Player / Idle")
     ctx = _AnimClipSaveAsContext()
@@ -286,6 +287,26 @@ def test_animclip_save_as_uses_editor_modal_and_focuses_name(tmp_path, monkeypat
         "animclip2d.save_as.confirm",
         "animclip2d.save_as.cancel",
     }.issubset(ctx.semantic_ids)
+
+
+def test_asset_save_as_uses_native_dialog_for_user_input(tmp_path, monkeypatch):
+    dialog = AssetSaveAsDialog("animtimeline.save_as", "timeline")
+    target = tmp_path / "Assets" / "Animation" / "Lift.animtimeline"
+    saved: list[str] = []
+    monkeypatch.setattr(asset_save_dialog, "is_synthetic_input_frame", lambda: False)
+    monkeypatch.setattr(asset_save_dialog, "save_file_dialog", lambda **_kwargs: str(target))
+
+    assert dialog.request(
+        title="Save Timeline",
+        extension="animtimeline",
+        default_name="Lift",
+        project_root=str(tmp_path),
+    )
+    assert dialog.is_open is True
+
+    dialog.render(None, lambda path: saved.append(path) or True)
+
+    assert saved == [str(target)]
 
 
 def test_animclip_save_as_callback_keeps_the_requested_clip_target():
@@ -319,8 +340,9 @@ def _restore_scene_manager(manager: SceneFileManager) -> None:
     SceneFileManager._instance = manager._test_previous_instance
 
 
-def test_unsaved_scene_uses_editor_owned_save_as_state(tmp_path, monkeypatch):
+def test_unsaved_scene_agent_save_uses_editor_owned_save_as_state(tmp_path, monkeypatch):
     monkeypatch.setattr(scene_save, "_effective_project_root", lambda: str(tmp_path))
+    monkeypatch.setattr(scene_save, "is_synthetic_input_frame", lambda: True)
     manager = _scene_manager()
     try:
         manager._current_scene_path = None
@@ -331,6 +353,28 @@ def test_unsaved_scene_uses_editor_owned_save_as_state(tmp_path, monkeypatch):
         assert manager._save_as_focus_name is True
         assert manager._save_as_folder == "Assets"
         assert manager._save_as_name == "UntitledScene"
+    finally:
+        _restore_scene_manager(manager)
+
+
+def test_unsaved_scene_user_save_uses_native_dialog(tmp_path, monkeypatch):
+    monkeypatch.setattr(scene_save, "_effective_project_root", lambda: str(tmp_path))
+    monkeypatch.setattr(scene_save, "is_synthetic_input_frame", lambda: False)
+    target = tmp_path / "Assets" / "Scenes" / "RacingEntry.scene"
+    saved: list[str] = []
+    monkeypatch.setattr(scene_save, "save_file_dialog", lambda **_kwargs: str(target))
+    manager = _scene_manager()
+    try:
+        manager._current_scene_path = None
+        manager._do_save = lambda path: saved.append(path) or True
+        manager._show_save_as_dialog()
+
+        assert manager._save_as_popup_open is False
+        assert manager._save_as_native_dialog_pending is True
+
+        manager.render_save_as_popup(None)
+
+        assert saved == [str(target)]
     finally:
         _restore_scene_manager(manager)
 

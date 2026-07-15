@@ -41,6 +41,20 @@ from Infernux.engine.ui import panel_state as _panel_state
 class BootstrapWiringMixin:
     """BootstrapWiringMixin method group for EditorBootstrap."""
 
+    @staticmethod
+    def _save_focused_document(wm, sfm, *, save_as: bool = False) -> None:
+        from Infernux.engine.ui.closable_panel import ClosablePanel
+
+        panel_id = ClosablePanel.get_active_panel_id()
+        panel = wm.get_window_instance(panel_id) if panel_id else None
+        handler = getattr(panel, "handle_save_command", None)
+        if callable(handler) and bool(handler(save_as=save_as)):
+            return
+        if save_as:
+            sfm.save_scene_as()
+        else:
+            sfm.save_current_scene()
+
     def _wire_menu_bar_callbacks(self, wm):
         """Wire C++ MenuBarPanel callbacks to Python managers."""
         mb = self.menu_bar
@@ -53,6 +67,11 @@ class BootstrapWiringMixin:
             mb.on_save_as = lambda: sfm.save_scene_as()
             mb.on_new_scene = lambda: sfm.new_scene()
             mb.on_request_close = lambda: sfm.request_close()
+
+            mb.on_save_focused = lambda: self._save_focused_document(wm, sfm)
+            mb.on_save_focused_as = lambda: self._save_focused_document(
+                wm, sfm, save_as=True
+            )
 
         # Undo
         def _undo():

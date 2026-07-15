@@ -29,7 +29,9 @@
 
 .channel-card {
     position: relative;
-    min-height: 220px;
+    min-height: 280px;
+    display: flex;
+    flex-direction: column;
     padding: 24px 20px 20px;
     overflow: hidden;
     background: linear-gradient(165deg, var(--bg-panel), var(--bg-elevated));
@@ -47,6 +49,12 @@
     height: 112px;
     border: 1px solid var(--accent-line);
     transform: rotate(45deg);
+    pointer-events: none;
+}
+
+.channel-card > * {
+    position: relative;
+    z-index: 1;
 }
 
 .channel-card:hover {
@@ -66,9 +74,49 @@
 }
 
 .channel-card p {
+    flex: 1;
     margin: 0;
     color: var(--text-muted);
     line-height: 1.65;
+}
+
+.channel-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 18px;
+}
+
+.channel-actions a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 10px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-deep);
+    background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
+    color: var(--text-muted);
+    font: 0.68rem/1.3 var(--font-mono);
+    text-align: center;
+    text-decoration: none;
+}
+
+.channel-actions a:hover,
+.channel-actions a:focus-visible {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.channel-actions a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.channel-actions .channel-create {
+    border-color: var(--accent-line);
+    color: var(--accent);
 }
 
 .channel-code {
@@ -255,6 +303,33 @@
     color: var(--text);
 }
 
+.topic-signals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin: 0 0 6px;
+}
+
+.topic-number,
+.topic-signal {
+    padding: 2px 6px;
+    border: 1px solid var(--border-strong);
+    color: var(--text-soft);
+    font: 0.62rem/1.35 var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.topic-signal.answered {
+    border-color: color-mix(in srgb, var(--signal) 48%, var(--border));
+    color: var(--signal);
+}
+
+.topic-signal.locked {
+    border-color: color-mix(in srgb, var(--hazard) 48%, var(--border));
+    color: var(--hazard);
+}
+
 .topic-copy small,
 .topic-metrics,
 .topic-status {
@@ -276,6 +351,52 @@
     color: var(--accent);
 }
 
+.forum-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 16px;
+}
+
+.forum-load-more,
+.forum-browse-all {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    padding: 9px 14px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-panel);
+    color: var(--text-muted);
+    font: 0.72rem/1.4 var(--font-mono);
+    text-decoration: none;
+}
+
+.forum-load-more {
+    cursor: pointer;
+}
+
+.forum-load-more:hover,
+.forum-browse-all:hover {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.forum-load-more:focus-visible,
+.forum-browse-all:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+
+.forum-load-more:disabled {
+    cursor: wait;
+    opacity: 0.72;
+}
+
 .giscus-shell {
     margin-top: 28px;
     padding: 22px;
@@ -284,16 +405,86 @@
     box-shadow: var(--shadow-soft);
 }
 
-.giscus-fallback {
-    margin: 14px 0 0;
-    color: var(--text-soft);
-    font-size: 0.78rem;
-    line-height: 1.65;
+.giscus-readiness {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 14px 18px;
+    align-items: center;
+    margin-bottom: 18px;
+    padding: 14px 16px;
+    border: 1px solid var(--border-strong);
+    border-left: 3px solid var(--info);
+    background: var(--bg-deep);
 }
 
-.giscus:has(.giscus-frame) + .giscus-fallback {
-    display: none;
+.giscus-readiness[data-state="ready"] { border-left-color: var(--signal); }
+.giscus-readiness[data-state="uninstalled"],
+.giscus-readiness[data-state="error"] { border-left-color: var(--hazard); }
+.giscus-readiness[data-state="degraded"],
+.giscus-readiness[data-state="unknown"] { border-left-color: var(--accent); }
+
+.giscus-readiness-code {
+    padding: 5px 7px;
+    border: 1px solid var(--border-strong);
+    color: var(--text-soft);
+    font: 700 0.62rem/1.3 var(--font-mono);
+    letter-spacing: 0.1em;
 }
+
+.giscus-readiness-copy {
+    min-width: 0;
+}
+
+.giscus-readiness-copy strong {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--text);
+    font-size: 0.8rem;
+}
+
+.giscus-readiness-copy p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.55;
+}
+
+.giscus-readiness-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.giscus-readiness-actions a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 11px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-panel);
+    color: var(--text-muted);
+    font: 0.68rem/1.35 var(--font-mono);
+    text-decoration: none;
+}
+
+.giscus-readiness-actions a:hover,
+.giscus-readiness-actions a:focus-visible {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.giscus-readiness-actions a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.giscus-install-action { display: none !important; }
+.giscus-readiness[data-state="uninstalled"] .giscus-install-action,
+.giscus-readiness[data-state="error"] .giscus-install-action { display: inline-flex !important; }
 
 .giscus-frame {
     width: 100%;
@@ -432,8 +623,34 @@
         padding: 18px;
     }
 
+    .giscus-readiness {
+        grid-template-columns: 1fr;
+    }
+
+    .giscus-readiness-code {
+        width: fit-content;
+    }
+
+    .giscus-readiness-actions {
+        display: grid;
+        justify-content: stretch;
+    }
+
+    .giscus-readiness-actions a {
+        width: 100%;
+    }
+
     .community-data-actions {
         display: grid;
+    }
+
+    .forum-pagination {
+        display: grid;
+    }
+
+    .forum-load-more,
+    .forum-browse-all {
+        width: 100%;
     }
 
     .community-data-actions a {

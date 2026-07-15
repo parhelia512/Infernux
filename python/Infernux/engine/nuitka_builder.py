@@ -860,10 +860,8 @@ class NuitkaBuilder:
         icon_path: Optional[str] = None,
         extra_include_packages: Optional[List[str]] = None,
         extra_include_data: Optional[List[str]] = None,
-        extra_include_modules: Optional[List[str]] = None,
         extra_requirements_files: Optional[List[str]] = None,
         raw_copy_packages: Optional[List[str]] = None,
-        allow_game_build_packages: Optional[List[str]] = None,
         console_mode: str = "disable",
         lto: bool = True,
     ):
@@ -879,13 +877,11 @@ class NuitkaBuilder:
         self.icon_path = icon_path
         self.console_mode = console_mode
         self.lto = lto
-        self.allow_game_build_packages = {str(pkg).lower().replace("_", "-") for pkg in allow_game_build_packages or []}
         self.extra_include_packages = [
             pkg for pkg in list(extra_include_packages or [])
-            if not self._is_game_build_excluded_package(pkg) or str(pkg).lower().replace("_", "-") in self.allow_game_build_packages
+            if not self._is_game_build_excluded_package(pkg)
         ]
         self.extra_include_data = list(extra_include_data or [])
-        self.extra_include_modules = list(extra_include_modules or [])
         self.extra_requirements_files = [
             os.path.abspath(path)
             for path in list(extra_requirements_files or [])
@@ -1122,12 +1118,7 @@ class NuitkaBuilder:
         ):
             cmd.append(f"--nofollow-import-to={_editor_mod}")
 
-        nofollow_modules = set(self._GAME_BUILD_NOFOLLOW_MODULES)
-        for package_name in self.allow_game_build_packages:
-            nofollow_modules.discard(package_name)
-        if "Infernux.mcp.player_gateway" in self.extra_include_modules:
-            nofollow_modules.discard("Infernux.mcp")
-        for _excluded_mod in sorted(nofollow_modules):
+        for _excluded_mod in sorted(self._GAME_BUILD_NOFOLLOW_MODULES):
             cmd.append(f"--nofollow-import-to={_excluded_mod}")
 
         # Exclude JIT packages from Nuitka compilation — they will be
@@ -1153,11 +1144,8 @@ class NuitkaBuilder:
             cmd.append("--include-module=multiprocessing")
 
         for pkg in self.extra_include_packages:
-            if pkg not in _nofollow_jit and (not self._is_game_build_excluded_package(pkg) or str(pkg).lower().replace("_", "-") in self.allow_game_build_packages):
+            if pkg not in _nofollow_jit:
                 cmd.append(f"--include-package={pkg}")
-
-        for module in self.extra_include_modules:
-            cmd.append(f"--include-module={module}")
 
         for pattern in self.extra_include_data:
             cmd.append(f"--include-package-data={pattern}")

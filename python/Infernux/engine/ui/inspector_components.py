@@ -232,6 +232,17 @@ def _build_builtin_cached_plan(ctx: InxGUIContext, comp, props, lw, skip_fields,
             })
             continue
 
+        if meta.field_type == FieldType.ASSET:
+            _flush_batch()
+            ops.append({
+                "kind": "asset_reference",
+                "py_name": py_name,
+                "cpp_attr": cpp_attr,
+                "meta": meta,
+                "current": current,
+            })
+            continue
+
         hdr = meta.header or ""
         spc = meta.space if meta.space and meta.space > 0 else 0.0
         desc = build_scalar_desc(
@@ -301,6 +312,15 @@ def _replay_builtin_cached_plan(ctx: InxGUIContext, comp, plan: dict, cache_entr
                 "AudioClip",
                 accept_drag_type="AUDIO_FILE",
                 on_drop_callback=lambda payload, _comp=comp, _attr=op["cpp_attr"]: _apply_builtin_audio_clip_drop(_comp, _attr, payload),
+            )
+            continue
+
+        if kind == "asset_reference":
+            from Infernux.components.serialized_field import FieldType
+
+            _render_asset_reference_field(
+                ctx, comp, op["py_name"], op["meta"], op["current"],
+                FieldType.ASSET, lw, builtin_attr=op["cpp_attr"],
             )
             continue
 

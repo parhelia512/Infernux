@@ -188,6 +188,14 @@ class EditorPanel(ClosablePanel):
         """
         pass
 
+    def handle_save_command(self, save_as: bool = False) -> bool:
+        """Handle a save shortcut for this panel's document.
+
+        Return ``True`` only for panels that own an authoring document. The
+        menu-bar router falls back to saving the scene for all other panels.
+        """
+        return False
+
     # ------------------------------------------------------------------
     # Unified Empty State
     # ------------------------------------------------------------------

@@ -76,6 +76,32 @@ class StyleManager:
                 padding: 4px 8px;
                 border-radius: 1px;
             }}
+
+            /* ── Dialog content ── */
+            QLabel#dialogTitle {{
+                color: {text_primary};
+                font-size: 22px;
+                font-weight: 600;
+            }}
+            QLabel#dialogSubtitle {{
+                color: {text_muted};
+                font-size: 13px;
+            }}
+            QFrame#newProjectForm {{
+                background-color: {bg_surface};
+                border: none;
+                border-radius: 4px;
+            }}
+            QLabel#fieldLabel {{
+                color: {text_secondary};
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QLabel#dialogErrorHint {{
+                color: {danger};
+                font-size: 12px;
+                padding-top: 2px;
+            }}
             QMenu {{
                 background-color: {bg_surface};
                 color: {text_primary};

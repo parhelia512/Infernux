@@ -53,6 +53,7 @@ _ZH = {
     "Cancel": "取消",
     "Create": "创建",
     "Create New Project": "创建新项目",
+    "Set the project name, location and Infernux version.": "设置项目名称、位置和 Infernux 版本。",
     "Project Name:": "项目名称：",
     "Enter a name for your project": "输入项目名称",
     "Project Location:": "项目位置：",

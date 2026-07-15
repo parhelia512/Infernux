@@ -144,13 +144,6 @@ class PlayerBootstrap:
             data_root=self.project_path,
         )
         self.engine.register_gui("player_gui", self._player_gui)
-        if os.environ.get("_INFERNUX_PLAYER_MCP_COMPILED") == "1" and self._player_gui._control.enabled:
-            try:
-                from Infernux.mcp.player_gateway import start_player_gateway
-
-                start_player_gateway(self._player_gui._control)
-            except Exception as exc:
-                Debug.log_warning(f"Debug Player MCP gateway unavailable: {exc}")
 
     def _load_initial_scene(self):
         import json as _json

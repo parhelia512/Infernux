@@ -29,7 +29,7 @@
     <link rel="stylesheet" href="css/fonts.css?v=1">
     <link rel="stylesheet" href="css/style.css?v=12">
     <link rel="stylesheet" href="css/mission.css?v=2">
-    <link rel="stylesheet" href="css/community.css?v=3">
+    <link rel="stylesheet" href="css/community.css?v=6">
     <link rel="stylesheet" href="css/fontawesome-subset.css?v=6.4.0">
 </head>
 <body>
@@ -92,10 +92,30 @@
                     <p class="section-intro" data-i18n="community.channels.intro">Discussions are for conversation and support. Issues are for reproducible defects and accepted implementation work.</p>
                 </div>
                 <div class="community-channel-grid">
-                    <a class="channel-card" href="https://github.com/ChenlizheMe/Infernux/discussions/categories/general" target="_blank" rel="noopener"><span class="channel-code">COM-01</span><i class="fas fa-comments"></i><h3 data-i18n="community.channel.general.title">General</h3><p data-i18n="community.channel.general.body">Open-ended engine and project conversation.</p></a>
-                    <a class="channel-card" href="https://github.com/ChenlizheMe/Infernux/discussions/categories/q-a" target="_blank" rel="noopener"><span class="channel-code">COM-02</span><i class="fas fa-circle-question"></i><h3 data-i18n="community.channel.qa.title">Q&amp;A</h3><p data-i18n="community.channel.qa.body">Ask a focused question and mark the answer that solved it.</p></a>
-                    <a class="channel-card" href="https://github.com/ChenlizheMe/Infernux/discussions/categories/ideas" target="_blank" rel="noopener"><span class="channel-code">COM-03</span><i class="fas fa-lightbulb"></i><h3 data-i18n="community.channel.ideas.title">Ideas</h3><p data-i18n="community.channel.ideas.body">Explore proposals before they become roadmap work.</p></a>
-                    <a class="channel-card" href="https://github.com/ChenlizheMe/Infernux/discussions/categories/show-and-tell" target="_blank" rel="noopener"><span class="channel-code">COM-04</span><i class="fas fa-satellite-dish"></i><h3 data-i18n="community.channel.show.title">Show and tell</h3><p data-i18n="community.channel.show.body">Share scenes, tools, experiments, and lessons learned.</p></a>
+                    <article class="channel-card" aria-labelledby="channel-general-title">
+                        <span class="channel-code">COM-01</span><i class="fas fa-comments" aria-hidden="true"></i>
+                        <h3 id="channel-general-title" data-i18n="community.channel.general.title">General</h3>
+                        <p data-i18n="community.channel.general.body">Open-ended engine and project conversation.</p>
+                        <div class="channel-actions"><a href="https://github.com/ChenlizheMe/Infernux/discussions/categories/general" target="_blank" rel="noopener" data-i18n="community.channel.browse">Browse</a><a class="channel-create" href="https://github.com/ChenlizheMe/Infernux/discussions/new?category=general" target="_blank" rel="noopener" data-i18n="community.channel.post">New post</a></div>
+                    </article>
+                    <article class="channel-card" aria-labelledby="channel-qa-title">
+                        <span class="channel-code">COM-02</span><i class="fas fa-circle-question" aria-hidden="true"></i>
+                        <h3 id="channel-qa-title" data-i18n="community.channel.qa.title">Q&amp;A</h3>
+                        <p data-i18n="community.channel.qa.body">Ask a focused question and mark the answer that solved it.</p>
+                        <div class="channel-actions"><a href="https://github.com/ChenlizheMe/Infernux/discussions/categories/q-a" target="_blank" rel="noopener" data-i18n="community.channel.browse">Browse</a><a class="channel-create" href="https://github.com/ChenlizheMe/Infernux/discussions/new?category=q-a" target="_blank" rel="noopener" data-i18n="community.channel.post">New post</a></div>
+                    </article>
+                    <article class="channel-card" aria-labelledby="channel-ideas-title">
+                        <span class="channel-code">COM-03</span><i class="fas fa-lightbulb" aria-hidden="true"></i>
+                        <h3 id="channel-ideas-title" data-i18n="community.channel.ideas.title">Ideas</h3>
+                        <p data-i18n="community.channel.ideas.body">Explore proposals before they become roadmap work.</p>
+                        <div class="channel-actions"><a href="https://github.com/ChenlizheMe/Infernux/discussions/categories/ideas" target="_blank" rel="noopener" data-i18n="community.channel.browse">Browse</a><a class="channel-create" href="https://github.com/ChenlizheMe/Infernux/discussions/new?category=ideas" target="_blank" rel="noopener" data-i18n="community.channel.post">New post</a></div>
+                    </article>
+                    <article class="channel-card" aria-labelledby="channel-show-title">
+                        <span class="channel-code">COM-04</span><i class="fas fa-satellite-dish" aria-hidden="true"></i>
+                        <h3 id="channel-show-title" data-i18n="community.channel.show.title">Show and tell</h3>
+                        <p data-i18n="community.channel.show.body">Share scenes, tools, experiments, and lessons learned.</p>
+                        <div class="channel-actions"><a href="https://github.com/ChenlizheMe/Infernux/discussions/categories/show-and-tell" target="_blank" rel="noopener" data-i18n="community.channel.browse">Browse</a><a class="channel-create" href="https://github.com/ChenlizheMe/Infernux/discussions/new?category=show-and-tell" target="_blank" rel="noopener" data-i18n="community.channel.post">New post</a></div>
+                    </article>
                 </div>
             </section>
 
@@ -134,6 +154,16 @@
                 <div id="community-feed" class="topic-list" aria-live="polite" aria-busy="true">
                     <div class="topic-status" data-i18n="community.feed.loading">Contacting the GitHub relay…</div>
                 </div>
+                <div class="forum-pagination" aria-label="Discussion feed navigation">
+                    <button class="forum-load-more" id="community-load-more" type="button" aria-controls="community-feed" hidden>
+                        <i class="fas fa-chevron-down" aria-hidden="true"></i>
+                        <span>Load older topics</span>
+                    </button>
+                    <a class="forum-browse-all" id="community-browse-all" href="https://github.com/ChenlizheMe/Infernux/discussions" target="_blank" rel="noopener">
+                        <span>Browse all on GitHub</span>
+                        <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                    </a>
+                </div>
                 <noscript><p class="topic-status">JavaScript is disabled. <a href="https://github.com/ChenlizheMe/Infernux/discussions">Open Discussions on GitHub</a>.</p></noscript>
             </section>
 
@@ -146,8 +176,18 @@
                     <p class="section-intro" data-i18n="community.wall.intro">Giscus connects this panel to one GitHub Discussion. Sign-in and moderation stay on GitHub.</p>
                 </div>
                 <div class="giscus-shell">
+                    <div class="giscus-readiness" id="giscus-readiness" data-state="checking">
+                        <span class="giscus-readiness-code" aria-hidden="true">AUTH-LINK</span>
+                        <div class="giscus-readiness-copy" role="status" aria-live="polite" aria-atomic="true">
+                            <strong id="giscus-readiness-title">Checking embedded replies…</strong>
+                            <p id="giscus-readiness-detail">Waiting for a verified response from the Giscus frame.</p>
+                        </div>
+                        <div class="giscus-readiness-actions">
+                            <a href="https://github.com/ChenlizheMe/Infernux/discussions" target="_blank" rel="noopener" id="giscus-open-discussions"><span>Open Discussions</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                            <a href="https://github.com/apps/giscus/installations/new" target="_blank" rel="noopener" class="giscus-install-action" id="giscus-install"><span>Install Giscus</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                        </div>
+                    </div>
                     <div class="giscus"></div>
-                    <p class="giscus-fallback" data-i18n="community.wall.fallback">If the panel is unavailable, the repository administrator must install the Giscus GitHub App. You can still use Discussions directly.</p>
                 </div>
             </section>
 
@@ -222,9 +262,9 @@
         </div>
     </footer>
 
-    <script src="js/i18n.js?v=11"></script>
+    <script src="js/i18n.js?v=12"></script>
     <script src="js/main.js?v=9"></script>
-    <script src="js/community.js?v=2"></script>
+    <script src="js/community.js?v=4"></script>
     <script src="https://giscus.app/client.js"
             data-repo="ChenlizheMe/Infernux"
             data-repo-id="R_kgDOO_wV3A"

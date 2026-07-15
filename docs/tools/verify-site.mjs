@@ -217,7 +217,7 @@ async function verifyRootHtml() {
         }
 
         if (["index.html", "wiki.html", "roadmap.html", "community.html", "download.html"].includes(pageName)) {
-            if (!source.includes("js/i18n.js?v=11")) fail(`${pageName}: shared localization cache version is stale`);
+            if (!source.includes("js/i18n.js?v=12")) fail(`${pageName}: shared localization cache version is stale`);
             if (!source.includes("js/main.js?v=9")) fail(`${pageName}: shared interaction cache version is stale`);
             const expectedHrefs = [
                 "wiki/site/en/learn/getting-started.html",
@@ -835,32 +835,90 @@ async function verifyPublishingFiles() {
         "id=\"community-refresh\"",
         "id=\"community-filter-status\"",
         "id=\"community-reset\"",
+        "id=\"community-load-more\"",
+        "id=\"community-browse-all\"",
+        "id=\"giscus-readiness\"",
+        "id=\"giscus-open-discussions\"",
+        "id=\"giscus-install\"",
+        "https://github.com/apps/giscus/installations/new",
         "five-minute copy of public topic metadata in sessionStorage",
         "learning-path progress in localStorage",
-        "js/community.js?v=2",
-        "css/community.css?v=3"
+        "js/community.js?v=4",
+        "css/community.css?v=6"
     ]) {
         if (!community.includes(contract)) fail(`community.html: missing forum discovery contract '${contract}'`);
     }
+    const discussionCategories = ["general", "q-a", "ideas", "show-and-tell"];
+    for (const slug of discussionCategories) {
+        const browseUrl = `https://github.com/ChenlizheMe/Infernux/discussions/categories/${slug}`;
+        const createUrl = `https://github.com/ChenlizheMe/Infernux/discussions/new?category=${slug}`;
+        if (!community.includes(`href="${browseUrl}"`)) fail(`community.html: missing '${slug}' browse route`);
+        if (!community.includes(`href="${createUrl}"`)) fail(`community.html: missing '${slug}' structured creation route`);
+        const formFile = path.join(repoRoot, ".github", "DISCUSSION_TEMPLATE", `${slug}.yml`);
+        if (!await exists(formFile)) {
+            fail(`.github/DISCUSSION_TEMPLATE/${slug}.yml: missing category form`);
+            continue;
+        }
+        const form = await readFile(formFile, "utf8");
+        if (!/^title:\s*"\[[^"]+\]\s*"\s*$/m.test(form)) fail(`.github/DISCUSSION_TEMPLATE/${slug}.yml: missing prefixed title`);
+        if (!/^body:\s*$/m.test(form)) fail(`.github/DISCUSSION_TEMPLATE/${slug}.yml: missing body`);
+        const nonMarkdownFields = [...form.matchAll(/^\s+- type:\s*(input|textarea|dropdown|checkboxes)\s*$/gm)];
+        if (!nonMarkdownFields.length) fail(`.github/DISCUSSION_TEMPLATE/${slug}.yml: requires a non-Markdown field`);
+        const ids = [...form.matchAll(/^\s+id:\s*([a-z0-9_-]+)\s*$/gm)].map((match) => match[1]);
+        if (ids.length !== new Set(ids).size || ids.length !== nonMarkdownFields.length) fail(`.github/DISCUSSION_TEMPLATE/${slug}.yml: field IDs are missing or duplicated`);
+        if (!/^\s+label:\s*.+\s\/\s.+$/m.test(form)) fail(`.github/DISCUSSION_TEMPLATE/${slug}.yml: fields must expose a bilingual label`);
+        if (!/^\s+required:\s*true\s*$/m.test(form)) fail(`.github/DISCUSSION_TEMPLATE/${slug}.yml: no required field protects submission quality`);
+    }
+    for (const name of ["bug_report.yml", "feature_request.yml", "question.yml", "config.yml"]) {
+        const issueTemplate = path.join(repoRoot, ".github", "ISSUE_TEMPLATE", name);
+        if (!await exists(issueTemplate)) fail(`.github/ISSUE_TEMPLATE/${name}: missing website issue destination`);
+    }
+    const issueConfig = await readFile(path.join(repoRoot, ".github", "ISSUE_TEMPLATE", "config.yml"), "utf8");
+    if (!issueConfig.includes("blank_issues_enabled: false") || !issueConfig.includes("https://github.com/ChenlizheMe/Infernux/discussions")) {
+        fail(".github/ISSUE_TEMPLATE/config.yml: issue chooser must disable blank reports and route open conversation to Discussions");
+    }
     const communityJs = await readFile(path.join(docsRoot, "js", "community.js"), "utf8");
     for (const contract of [
-        "per_page=20",
+        "COMMUNITY_PAGE_SIZE = 20",
+        "sort=updated",
+        "COMMUNITY_CACHE_VERSION = 2",
         "COMMUNITY_CACHE_TTL_MS = 5 * 60 * 1000",
         "sessionStorage.setItem",
         "normalizeCommunityTopic",
         "filteredCommunityTopics",
         "history.replaceState",
         "communityCategory",
+        "communityNextPage",
+        "mergeCommunityTopics",
+        "loadCommunityTopics({ page: communityNextPage })",
         "loadCommunityTopics({ force: true })",
         "title.textContent = topic.title",
+        "answer_chosen_at",
+        "replaceChildren()",
+        "GISCUS_ORIGIN = \"https://giscus.app\"",
+        "GISCUS_STATUS_CACHE_TTL_MS = 5 * 60 * 1000",
+        "classifyGiscusError",
+        "event.origin !== GISCUS_ORIGIN",
+        "payload.resizeHeight",
+        "renderGiscusReadiness",
         "AbortController"
     ]) {
         if (!communityJs.includes(contract)) fail(`community.js: missing resilient forum contract '${contract}'`);
     }
-    if (/innerHTML\s*=\s*topic\./.test(communityJs)) fail("community.js: remote Discussion data must not be assigned to innerHTML");
+    if (/innerHTML\s*=/.test(communityJs)) fail("community.js: forum UI must be constructed without innerHTML");
+    if (communityJs.includes("giscus.app/api/discussions/categories")) fail("community.js: browser must use verified frame messages instead of the non-CORS Giscus category API");
     const communityCss = await readFile(path.join(docsRoot, "css", "community.css"), "utf8");
     if (!/\.forum-field input,[\s\S]*?min-height:\s*48px;/.test(communityCss)) fail("community.css: forum inputs must preserve a 48px touch target");
     if (!/@media\s*\(max-width:\s*520px\)[\s\S]*?\.forum-controls\s*\{[\s\S]*?grid-template-columns:\s*1fr;/.test(communityCss)) fail("community.css: forum controls must collapse at phone width");
+    for (const contract of [".forum-pagination", ".forum-load-more", ".forum-browse-all", ".topic-signals", "min-height: 44px"]) {
+        if (!communityCss.includes(contract)) fail(`community.css: missing paginated forum contract '${contract}'`);
+    }
+    for (const contract of [".channel-actions", ".channel-create", "grid-template-columns: repeat(2, minmax(0, 1fr))"]) {
+        if (!communityCss.includes(contract)) fail(`community.css: missing structured channel contract '${contract}'`);
+    }
+    for (const contract of [".giscus-readiness", "data-state=\"ready\"", "data-state=\"uninstalled\"", ".giscus-readiness-actions", ".giscus-install-action"]) {
+        if (!communityCss.includes(contract)) fail(`community.css: missing embedded-reply readiness contract '${contract}'`);
+    }
     const sharedCss = await readFile(path.join(docsRoot, "css", "style.css"), "utf8");
     if (!/@media\s*\(max-width:\s*1180px\)[\s\S]*?\.nav-links\s*\{\s*display:\s*none;\s*\}/.test(sharedCss)) {
         fail("style.css: navigation must collapse by 1180px");
@@ -929,8 +987,8 @@ async function verifyPublishingFiles() {
         "inter-latin.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62",
         "jetbrains-mono-latin.woff2": "83c005d49d8a6a50474c73a5a36ac0468076e9c4a29da7bdb14995d80560a5be",
         "space-grotesk-latin.woff2": "0640890476fc1198ab4de571fb658de443c4d85b66466ec09534a8737ab1ce9d",
-        "fa-solid-900.woff2": "b2680383b9f3e1cc1c3036db49f3c18b0ab36091314d4ffdf82a7a11baf03080",
-        "fa-brands-400.woff2": "6046773110671e0319f2e6a8fdfc2405fe93e72f89013e6bbe683407669547c2"
+        "fa-solid-subset-900.woff2": "1ab0dea7613a56456bd30de51fee7d0fccb6def013fe1f46862e2eb204fba343",
+        "fa-brands-subset-400.woff2": "7d7c0b8449df96bbfdc8b4e6c6740ce2337af2c90363a5213713977df3e7ae76"
     };
     for (const [name, expectedHash] of Object.entries(fontHashes)) {
         const target = path.join(docsRoot, "assets", "fonts", name);
@@ -942,6 +1000,17 @@ async function verifyPublishingFiles() {
     }
 
     const iconCss = await readFile(path.join(docsRoot, "css", "fontawesome-subset.css"), "utf8");
+    for (const name of ["fa-solid-subset-900.woff2", "fa-brands-subset-400.woff2"]) {
+        const bytes = (await stat(path.join(docsRoot, "assets", "fonts", name))).size;
+        if (bytes < 500 || bytes > 16 * 1024) fail(`self-hosted icon font is not a plausible subset '${name}' (${bytes} bytes)`);
+        if (!iconCss.includes(`../assets/fonts/${name}`)) fail(`fontawesome-subset.css: missing subset font reference '${name}'`);
+    }
+    for (const range of [
+        "U+F002, U+F00C, U+F00D, U+F019, U+F059, U+F078, U+F086, U+F08E, U+F09C, U+F0C1, U+F0C5, U+F0C9, U+F0E7, U+F0EB, U+F135, U+F15C, U+F185, U+F186, U+F188, U+F1B3, U+F1DE, U+F21A, U+F27A, U+F2DB, U+F2F1, U+F3ED, U+F542, U+F552, U+F5CB, U+F5FD, U+F7C0",
+        "U+F09B, U+F3E2"
+    ]) {
+        if (!iconCss.includes(`unicode-range: ${range};`)) fail(`fontawesome-subset.css: missing verified glyph range '${range}'`);
+    }
     const iconSources = [
         ...["index.html", "wiki.html", "roadmap.html", "community.html", "download.html"].map((name) => path.join(docsRoot, name)),
         path.join(docsRoot, "wiki", "theme", "main.html"),

@@ -305,22 +305,24 @@ class PrimitiveMeshes
 
             std::array<float, 3> u{};
             std::array<float, 3> v{};
+            std::array<bool, 3> seamShifted{};
             for (size_t corner = 0; corner < 3; ++corner) {
                 const glm::vec3 normal = glm::normalize(positions[face[corner]]);
                 u[corner] = std::atan2(normal.z, normal.x) / (2.0f * PI) + 0.5f;
                 v[corner] = std::acos(std::clamp(normal.y, -1.0f, 1.0f)) / PI;
             }
             if (*std::max_element(u.begin(), u.end()) - *std::min_element(u.begin(), u.end()) > 0.5f) {
-                for (float &coordinate : u) {
-                    if (coordinate < 0.5f)
-                        coordinate += 1.0f;
+                for (size_t corner = 0; corner < 3; ++corner) {
+                    if (u[corner] < 0.5f) {
+                        u[corner] += 1.0f;
+                        seamShifted[corner] = true;
+                    }
                 }
             }
 
             for (size_t corner = 0; corner < 3; ++corner) {
                 const uint32_t sourceIndex = face[corner];
-                const bool wrapped = u[corner] > 1.0f;
-                const uint64_t cacheKey = (static_cast<uint64_t>(sourceIndex) << 1U) | (wrapped ? 1U : 0U);
+                const uint64_t cacheKey = (static_cast<uint64_t>(sourceIndex) << 1U) | (seamShifted[corner] ? 1U : 0U);
                 auto existing = renderVertexCache.find(cacheKey);
                 if (existing == renderVertexCache.end()) {
                     const glm::vec3 normal = glm::normalize(positions[sourceIndex]);

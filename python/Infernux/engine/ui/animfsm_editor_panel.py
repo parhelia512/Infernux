@@ -689,9 +689,6 @@ class AnimFSMEditorPanel(EditorPanel):
     # ═══════════════════════════════════════════════════════════════════
 
     # ImGuiKey / ImGuiMod constants
-    _IMGUI_MOD_CTRL = 1 << 12  # 4096
-    _IMGUI_KEY_S = 564
-
     def on_render_content(self, ctx: InxGUIContext):
         if not self._panel_state_restored_once:
             if self._panel_restore_data is None:
@@ -703,18 +700,6 @@ class AnimFSMEditorPanel(EditorPanel):
                 else:
                     self._panel_state_restored_once = True
             self._apply_pending_panel_restore()
-
-        # Ctrl+S save shortcut — only when THIS editor window is focused, so the
-        # global key press doesn't also save other open editors.
-        try:
-            _focused = ctx.is_window_focused(3)  # RootAndChildWindows
-        except Exception:
-            _focused = True
-        if (_focused
-                and ctx.is_key_down(self._IMGUI_MOD_CTRL)
-                and ctx.is_key_pressed(self._IMGUI_KEY_S)
-                and self._fsm is not None):
-            self._do_save()
 
         self._render_toolbar(ctx)
         ctx.separator()
@@ -2514,6 +2499,14 @@ class AnimFSMEditorPanel(EditorPanel):
             self._execute_save(target)
         else:
             self._show_save_as_dialog()
+
+    def handle_save_command(self, save_as: bool = False) -> bool:
+        if save_as:
+            if self._fsm is not None:
+                self._show_save_as_dialog()
+        else:
+            self._do_save()
+        return True
 
     def _show_save_as_dialog(self):
         safe_name = (self._fsm.name or "NewStateMachine").replace(" ", "_")

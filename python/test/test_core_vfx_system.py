@@ -118,6 +118,20 @@ def test_vfx_editor_shell_opens_and_saves_asset(tmp_path):
     assert VfxSystem.load(str(path)).name == "Dense Smoke"
 
 
+def test_untitled_vfx_save_requests_save_as_dialog(tmp_path, monkeypatch):
+    from Infernux.engine.ui import asset_save_dialog
+    from Infernux.engine.ui.vfx_graph_editor_panel import VfxGraphEditorPanel
+
+    monkeypatch.setattr(asset_save_dialog, "get_project_root", lambda: str(tmp_path))
+    monkeypatch.setattr(asset_save_dialog, "is_synthetic_input_frame", lambda: True)
+    panel = VfxGraphEditorPanel()
+    panel.system.name = "Smoke Trail"
+
+    assert panel._do_save() is False
+    assert panel._save_as_dialog.is_open is True
+    assert panel._save_as_dialog.name == "Smoke_Trail"
+
+
 class _VfxDetailContext:
     semantic_capture_enabled = True
 

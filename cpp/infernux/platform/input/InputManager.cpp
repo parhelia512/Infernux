@@ -163,6 +163,7 @@ void InputManager::BeginFrame()
     m_touchCount = 0;
     m_droppedFiles.clear();
     m_hasSyntheticMousePositionThisFrame = false;
+    m_syntheticInputThisFrame = false;
 
     // Re-apply relative mouse mode for the current window/focus state without
     // disturbing persistent capture flags. Editor capture is released on
@@ -291,6 +292,11 @@ bool InputManager::GetSyntheticMousePositionForFrame(float &x, float &y) const
     x = m_syntheticMouseX;
     y = m_syntheticMouseY;
     return true;
+}
+
+void InputManager::MarkSyntheticInputForFrame()
+{
+    m_syntheticInputThisFrame = true;
 }
 
 // ============================================================================

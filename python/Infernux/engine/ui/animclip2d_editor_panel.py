@@ -223,19 +223,10 @@ class AnimClip2DEditorPanel(EditorPanel):
     # ------------------------------------------------------------------
 
     # ImGuiKey / ImGuiMod constants
-    _IMGUI_MOD_CTRL = 1 << 12  # 4096
-    _IMGUI_KEY_S = 564
-
     def on_render_content(self, ctx: InxGUIContext):
         self._recompute_dirty()
         self._sync_project_dirty_flag()
         try:
-            # Ctrl+S save shortcut
-            if ctx.is_key_down(self._IMGUI_MOD_CTRL) and ctx.is_key_pressed(self._IMGUI_KEY_S):
-                clip = self._active_clip
-                if clip is not None and self._tex is not None and len(clip.frame_indices) > 0:
-                    self._save_clip(clip)
-
             avail_w = ctx.get_content_region_avail_width()
             self._render_texture_slot(ctx, avail_w)
             ctx.dummy(0, 8)
@@ -1107,6 +1098,16 @@ class AnimClip2DEditorPanel(EditorPanel):
             self._do_save_clip(clip, clip.saved_path)
             return
         self._show_save_as_dialog(clip)
+
+    def handle_save_command(self, save_as: bool = False) -> bool:
+        clip = self._active_clip
+        if clip is None or self._tex is None or not clip.frame_indices:
+            return True
+        if save_as:
+            self._show_save_as_dialog(clip)
+        else:
+            self._save_clip(clip)
+        return True
 
     @staticmethod
     def _texture_identity(guid: str = "", path: str = "") -> str:

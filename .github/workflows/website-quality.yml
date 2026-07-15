@@ -7,6 +7,8 @@ on:
       - "UpdateLog.md"
       - ".github/workflows/website-quality.yml"
       - ".github/workflows/build-wiki.yml"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/DISCUSSION_TEMPLATE/**"
   push:
     branches:
       - main
@@ -16,6 +18,8 @@ on:
       - "UpdateLog.md"
       - ".github/workflows/website-quality.yml"
       - ".github/workflows/build-wiki.yml"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/DISCUSSION_TEMPLATE/**"
   workflow_dispatch:
 
 permissions:

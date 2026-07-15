@@ -66,37 +66,6 @@ class PlayerControlChannel:
     def enabled(self) -> bool:
         return bool(self.request_path and self.response_path and self._token)
 
-    @property
-    def access_token(self) -> str:
-        return self._token
-
-    def call_gateway(self, action: str, arguments: dict[str, Any], *, timeout_seconds: float = 15.0) -> dict[str, Any]:
-        """Route an embedded loopback MCP request through this main-thread channel."""
-        if not self.enabled:
-            raise RuntimeError("Player control channel is unavailable.")
-        command_id = f"player-mcp-{uuid.uuid4().hex}"
-        _write_json_atomic(self.request_path, {
-            "schema_version": 1,
-            "command_id": command_id,
-            "token": self._token,
-            "action": str(action),
-            **dict(arguments or {}),
-        })
-        deadline = time.monotonic() + max(0.1, min(float(timeout_seconds), 30.0))
-        while time.monotonic() < deadline:
-            try:
-                with open(self.response_path, "r", encoding="utf-8") as stream:
-                    response = json.load(stream)
-            except (OSError, json.JSONDecodeError):
-                time.sleep(0.01)
-                continue
-            if str(response.get("command_id", "")) == command_id:
-                if response.get("ok"):
-                    return dict(response.get("data") or {})
-                raise RuntimeError(str(response.get("error", "Player command failed")))
-            time.sleep(0.01)
-        raise TimeoutError(f"Player MCP command timed out: {action}")
-
     def poll(self, engine) -> str | None:
         """Process at most one command and return an engine-owned action."""
         if not self.enabled:

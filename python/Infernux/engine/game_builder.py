@@ -130,7 +130,6 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
         debug_mode: bool = False,
         lto: bool = True,
         enable_jit: bool = False,
-        debug_player_mcp: bool = False,
     ):
         self.project_path = os.path.abspath(project_path)
         self.project_name = game_name.strip() if game_name.strip() else os.path.basename(self.project_path)
@@ -144,7 +143,6 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
         self.debug_mode = debug_mode
         self.lto = lto
         self.enable_jit = enable_jit
-        self.debug_player_mcp = bool(debug_mode and debug_player_mcp)
 
     # ------------------------------------------------------------------
     # Public API
@@ -405,7 +403,6 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
         Returns the path to the temporary boot script.
         """
         _debug_mode = self.debug_mode
-        _debug_player_mcp = self.debug_player_mcp
         _log_level_str = "LogLevel.Debug" if _debug_mode else "LogLevel.Info"
 
         boot_src = f'''\
@@ -420,8 +417,6 @@ os.environ["_INFERNUX_PLAYER_MODE"] = "1"
 
 _DEBUG_MODE = {_debug_mode!r}
 os.environ["_INFERNUX_PLAYER_DEBUG_BUILD"] = "1" if _DEBUG_MODE else "0"
-os.environ["_INFERNUX_PLAYER_MCP_COMPILED"] = "1" if {_debug_player_mcp!r} else "0"
-
 # Determine the directory containing the executable
 _DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 if not os.path.isdir(os.path.join(_DIR, "Data")):
@@ -557,8 +552,6 @@ finally:
         jit_set = NuitkaBuilder._JIT_NOFOLLOW_PACKAGES
         all_pkgs = user_packages or []
         compiled_pkgs = [p for p in all_pkgs if p not in jit_set]
-        if self.debug_player_mcp:
-            compiled_pkgs.extend(["fastmcp", "mcp"])
         raw_pkgs = {"numpy"}
         if self.enable_jit:
             raw_pkgs.update(p for p in all_pkgs if p in jit_set)
@@ -570,10 +563,8 @@ finally:
             product_name=self.project_name,
             icon_path=selected_icon if selected_icon and os.path.isfile(selected_icon) else None,
             extra_include_packages=compiled_pkgs,
-            extra_include_modules=["Infernux.mcp.player_gateway"] if self.debug_player_mcp else [],
             extra_requirements_files=self._project_requirement_files(),
             raw_copy_packages=sorted(raw_pkgs),
-            allow_game_build_packages=["mcp", "fastmcp"] if self.debug_player_mcp else [],
             console_mode="force" if self.debug_mode else "disable",
             lto=self.lto,
         )
@@ -893,7 +884,6 @@ finally:
         manifest = {
             "game_name": self.project_name,
             "debug_build": bool(self.debug_mode),
-            "debug_player_mcp": bool(self.debug_player_mcp),
             "display_mode": self.display_mode,
             "window_width": self.window_width,
             "window_height": self.window_height,
@@ -939,10 +929,9 @@ finally:
         for _build_pkg in ("av", "av.libs", "imageio"):
             _queue_dir(os.path.join(final_dir, _build_pkg))
 
-        if not self.debug_player_mcp:
-            for _mcp_pkg in self._GAME_BUILD_EXCLUDED_PACKAGES:
-                _queue_dir(os.path.join(final_dir, _mcp_pkg))
-            _queue_dir(os.path.join(final_dir, "Infernux", "mcp"))
+        for _mcp_pkg in self._GAME_BUILD_EXCLUDED_PACKAGES:
+            _queue_dir(os.path.join(final_dir, _mcp_pkg))
+        _queue_dir(os.path.join(final_dir, "Infernux", "mcp"))
 
         # Remove any leaked ffmpeg DLLs from the dist root that Nuitka's
         # DLL scanner may have copied from the av package.

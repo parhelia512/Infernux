@@ -38,4 +38,3 @@ source_paths: ["docs/tools/build-api-diff.mjs", "docs/api-snapshots", "docs/api-
 已经发布版本的快照不能静默移动。当当前 API 与已记录快照不同时，CI 会失败。维护者必须恢复该版本 API、提升文档版本，或显式记录新的发布基线。
 
 Agent 在建议代码前应把已安装引擎版本与 `generated_for_release` 比较。没有可用比较时，应明确说明，而不是虚构兼容性。
-

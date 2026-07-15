@@ -118,7 +118,7 @@ def wire_material_sections(ip, _t, engine, _inspector_support,
         ctx.pop_style_color(1)
         ctx.separator()
         if not render_compact_section_header(
-            ctx, "Materials##obj_mat_sections", level="primary", default_open=True
+            ctx, "Materials##obj_mat_sections_v2", level="primary", default_open=False
         ):
             return
 
@@ -151,7 +151,7 @@ def wire_material_sections(ip, _t, engine, _inspector_support,
             if multiple_renderers and owner_name:
                 title = f"{owner_name} / {title}"
             if not render_compact_section_header(
-                ctx, f"{title}##mat_entry_{index}", level="secondary", default_open=True
+                ctx, f"{title}##mat_entry_v2_{index}", level="secondary", default_open=False
             ):
                 continue
             lock_inline_material_body = (

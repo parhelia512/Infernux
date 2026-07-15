@@ -14,6 +14,7 @@ from Infernux.lib import InxGUIContext
 from Infernux.vfx.nodes import VFX_NODE_SPECS
 
 from .editor_panel import EditorPanel
+from .asset_save_dialog import AssetSaveAsDialog
 from .node_graph_view import NodeGraphView
 from .panel_registry import editor_panel
 
@@ -27,9 +28,6 @@ from .panel_registry import editor_panel
 class VfxGraphEditorPanel(EditorPanel):
     window_id = "vfx_graph_editor"
 
-    _IMGUI_MOD_CTRL = 1 << 12
-    _IMGUI_KEY_S = 564
-
     def __init__(self):
         super().__init__(title="VFX Graph Editor", window_id=self.window_id)
         self._system = VfxSystem()
@@ -38,6 +36,7 @@ class VfxGraphEditorPanel(EditorPanel):
         self._dirty = False
         self._drag_snapshot: Optional[dict] = None
         self._selected_node_uid = ""
+        self._save_as_dialog = AssetSaveAsDialog("vfx.save_as", "VFX system")
 
         self._view = NodeGraphView()
         self._view.semantic_namespace = "vfx.graph"
@@ -85,14 +84,46 @@ class VfxGraphEditorPanel(EditorPanel):
 
     def _do_save(self) -> bool:
         if not self._file_path:
+            self._show_save_as_dialog()
             return False
+        return self._save_to(self._file_path)
+
+    def _save_to(self, file_path: str) -> bool:
         try:
-            self._system.save(self._file_path)
+            target = os.path.abspath(file_path)
+            current = os.path.abspath(self._file_path) if self._file_path else ""
+            if not current or os.path.normcase(target) != os.path.normcase(current):
+                self._system.name = os.path.splitext(os.path.basename(target))[0]
+            self._system.save(file_path)
         except (OSError, RuntimeError, ValueError) as exc:
-            Debug.log_error(f"Failed to save VFX system '{self._file_path}': {exc}")
+            Debug.log_error(f"Failed to save VFX system '{file_path}': {exc}")
             return False
+        self._file_path = os.path.abspath(file_path)
         self._dirty = False
         self._sync_project_dirty_flag()
+        try:
+            from Infernux.core.assets import AssetManager
+
+            AssetManager.reimport_asset(self._file_path)
+        except Exception:
+            pass
+        return True
+
+    def _show_save_as_dialog(self) -> None:
+        safe_name = (self._system.name or "VFXSystem").replace(" ", "_")
+        if not self._save_as_dialog.request(
+            title="Save VFX System",
+            extension="vfxsystem",
+            default_name=safe_name,
+            current_path=self._file_path,
+        ):
+            Debug.log_warning("[VFXEditor] No project root set - cannot save VFX system.")
+
+    def handle_save_command(self, save_as: bool = False) -> bool:
+        if save_as:
+            self._show_save_as_dialog()
+        else:
+            self._do_save()
         return True
 
     def _discard_unsaved_changes(self) -> bool:
@@ -263,17 +294,6 @@ class VfxGraphEditorPanel(EditorPanel):
 
     def on_render_content(self, ctx: InxGUIContext):
         capture_semantics = bool(getattr(ctx, "semantic_capture_enabled", True))
-        try:
-            focused = ctx.is_window_focused(3)
-        except Exception:
-            focused = True
-        if (
-            focused
-            and ctx.is_key_down(self._IMGUI_MOD_CTRL)
-            and ctx.is_key_pressed(self._IMGUI_KEY_S)
-        ):
-            self._do_save()
-
         save_label = t("vfx_editor.save")
         if ctx.button(save_label):
             self._do_save()
@@ -330,6 +350,8 @@ class VfxGraphEditorPanel(EditorPanel):
         payload = ctx.accept_drag_drop_payload("VFXSYSTEM_FILE")
         if payload:
             self._open_vfxsystem(payload)
+
+        self._save_as_dialog.render(ctx, self._save_to)
 
     def _render_node_detail(self, ctx: InxGUIContext) -> None:
         emitter = self._selected_emitter()

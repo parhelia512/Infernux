@@ -144,11 +144,13 @@ class SceneFileManager(ScenePrefabMixin, SceneSaveMixin, SceneConfirmationMixin)
         self._dirty: bool = False
         self._on_scene_changed: Optional[Callable[[], None]] = None
         self._pending_save_path: Optional[str] = None
-        # Save As is an in-editor modal so remote validation and local users
-        # share the exact same persistence workflow.
+        # Automation receives an editor modal it can address semantically;
+        # desktop users receive the platform-native Save As dialog.
         self._save_as_popup_open: bool = False
         self._save_as_popup_requested: bool = False
         self._save_as_focus_name: bool = False
+        self._save_as_agent_modal: bool = False
+        self._save_as_native_dialog_pending: bool = False
         self._save_as_folder: str = "Assets"
         self._save_as_name: str = ""
         self._save_as_error: str = ""

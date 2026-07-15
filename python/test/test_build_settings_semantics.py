@@ -229,7 +229,6 @@ def test_build_settings_output_controls_expose_stable_semantic_ids(monkeypatch):
             "build_settings.debug_mode",
             "build_settings.lto",
             "build_settings.enable_jit",
-            "build_settings.debug_player_mcp",
             "build_settings.output_dir",
         "build_settings.output_dir.browse",
         "build_settings.icon",
@@ -240,7 +239,6 @@ def test_build_settings_output_controls_expose_stable_semantic_ids(monkeypatch):
             "build_settings.debug_mode": False,
             "build_settings.lto": True,
             "build_settings.enable_jit": False,
-            "build_settings.debug_player_mcp": False,
             "build_settings.output_dir": "C:/Builds/RacingPilot",
         "build_settings.icon": "",
     }
