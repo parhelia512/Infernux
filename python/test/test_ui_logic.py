@@ -132,6 +132,22 @@ class TestWindowManager:
         from Infernux.engine.ui.window_manager import WindowManager
         assert WindowManager.instance() is WindowManager.instance()
 
+    def test_window_type_listener_fires_only_on_registration(self):
+        from Infernux.engine.ui.window_manager import WindowManager
+
+        previous = WindowManager._instance
+        try:
+            manager = WindowManager(object())
+            calls = []
+            listener = lambda: calls.append(tuple(manager.get_registered_types()))
+            manager.add_type_change_listener(listener)
+            manager.register_window_type("sample", object, "Sample")
+            manager.remove_type_change_listener(listener)
+            manager.register_window_type("second", object, "Second")
+            assert calls == [("sample",)]
+        finally:
+            WindowManager._instance = previous
+
     def test_explicit_dynamic_window_state_machine(self):
         from Infernux.engine.ui.window_manager import WindowManager, WindowState
 
@@ -295,6 +311,234 @@ class TestIGUIFilters:
         assert filtered == ["MeshRenderer", "SkinnedMeshRenderer"]
 
 
+class TestUICanvasRaycast:
+    class _GameObject:
+        def __init__(self, active):
+            self.active_in_hierarchy = active
+
+    class _Element:
+        def __init__(self, active):
+            self.game_object = TestUICanvasRaycast._GameObject(active)
+            self.raycast_target = True
+            self.enabled = True
+
+        @staticmethod
+        def get_visual_rect(_ref_w, _ref_h):
+            return 0.0, 0.0, 100.0, 100.0
+
+        @staticmethod
+        def contains_point(_x, _y, _ref_w, _ref_h, _tolerance):
+            return True
+
+    def test_inactive_hierarchy_does_not_receive_raycast(self):
+        from Infernux.ui import UICanvas
+
+        canvas = UICanvas()
+        visible = self._Element(True)
+        hidden_on_top = self._Element(False)
+        canvas._get_elements = lambda: [visible, hidden_on_top]
+
+        assert canvas.raycast(50.0, 50.0) is visible
+        assert canvas.raycast_all(50.0, 50.0) == [visible]
+
+
+class TestUICanvasCollectionCache:
+    class _Root:
+        def __init__(self, canvas):
+            self._canvas = canvas
+
+        def get_py_components(self):
+            return [self._canvas]
+
+        @staticmethod
+        def get_children():
+            return []
+
+    class _Scene:
+        name = "SameName"
+        structure_version = 7
+
+        def __init__(self, canvas):
+            self._root = TestUICanvasCollectionCache._Root(canvas)
+
+        def get_root_objects(self):
+            return [self._root]
+
+    def test_same_name_and_version_do_not_alias_distinct_scenes(self):
+        from Infernux.ui import UICanvas
+        from Infernux.ui.ui_canvas_utils import collect_canvases, invalidate_canvas_cache
+
+        first_canvas = UICanvas()
+        second_canvas = UICanvas()
+        first_scene = self._Scene(first_canvas)
+        second_scene = self._Scene(second_canvas)
+
+        invalidate_canvas_cache()
+        assert collect_canvases(first_scene) == [first_canvas]
+        assert collect_canvases(second_scene) == [second_canvas]
+
+
+def test_screen_ui_rect_cache_survives_frames_and_invalidates_on_geometry_change(monkeypatch):
+    from Infernux.ui import UIText
+    from Infernux.ui.inx_ui_screen_component import clear_rect_cache
+
+    element = UIText()
+    calls = 0
+    def counted_parent_rect(width, height):
+        nonlocal calls
+        calls += 1
+        return (0.0, 0.0, width, height)
+
+    monkeypatch.setattr(element, "_get_parent_world_rect", counted_parent_rect)
+    clear_rect_cache(("scene", 1))
+
+    first = element.get_rect(1920.0, 1080.0)
+    assert element.get_rect(1920.0, 1080.0) == first
+    assert calls == 1
+
+    element.width = 320.0
+    assert element.get_rect(1920.0, 1080.0)[2] == 320.0
+    assert calls == 2
+
+
+def test_runtime_ui_packet_cache_reuses_static_text_and_tracks_mutation(monkeypatch):
+    import Infernux.ui.ui_render_dispatch as dispatch_module
+    from Infernux.ui import UIText
+
+    class Renderer:
+        def __init__(self):
+            self.text_calls = []
+
+        def add_text(self, *args):
+            self.text_calls.append(args)
+
+    element = UIText()
+    renderer = Renderer()
+    extract_calls = 0
+    original_extract = dispatch_module.extract_common
+
+    def counted_extract(value):
+        nonlocal extract_calls
+        extract_calls += 1
+        return original_extract(value)
+
+    monkeypatch.setattr(dispatch_module, "extract_common", counted_extract)
+    kwargs = {
+        "renderer": renderer,
+        "ui_list": 0,
+        "sx": 10.0,
+        "sy": 20.0,
+        "sw": 160.0,
+        "sh": 40.0,
+        "ref_w": 1920.0,
+        "ref_h": 1080.0,
+        "scale_x": 1.0,
+        "scale_y": 1.0,
+        "text_scale": 1.0,
+        "get_tex_id": lambda _path: 0,
+    }
+
+    assert dispatch_module.dispatch(element, "runtime", **kwargs)
+    assert dispatch_module.dispatch(element, "runtime", **kwargs)
+    assert extract_calls == 1
+    assert len(renderer.text_calls) == 2
+
+    element.text = "Updated"
+    assert dispatch_module.dispatch(element, "runtime", **kwargs)
+    assert extract_calls == 2
+    assert renderer.text_calls[-1][5] == "Updated"
+
+
+def test_persistent_event_combo_preserves_temporarily_unresolved_method():
+    from Infernux.engine.ui.inspector_ui_components import _persistent_event_combo_options
+
+    labels, values = _persistent_event_combo_options(
+        "toggle_settings", [], "None"
+    )
+
+    assert labels == ["None", "toggle_settings"]
+    assert values == ["", "toggle_settings"]
+
+
+class TestUIButtonPersistentDispatch:
+    class _TargetRef:
+        def __init__(self, target):
+            self._target = target
+
+        def resolve(self):
+            return self._target
+
+    class _GameObject:
+        id = 31
+        name = "Menu Controller"
+
+        def __init__(self, component):
+            self._component = component
+
+        def get_py_components(self):
+            return [self._component]
+
+    @staticmethod
+    def _entry(target, method_name):
+        from Infernux.ui.ui_event_entry import UIEventEntry
+
+        entry = UIEventEntry(
+            component_name="MenuController",
+            method_name=method_name,
+            arguments=[],
+        )
+        entry.__dict__["target"] = TestUIButtonPersistentDispatch._TargetRef(target)
+        return entry
+
+    def test_invokes_bound_component_method_and_records_result(self):
+        from Infernux.ui import UIButton
+
+        class MenuController:
+            def __init__(self):
+                self.called = False
+
+            def toggle_settings(self):
+                self.called = True
+
+        component = MenuController()
+        target = self._GameObject(component)
+        button = UIButton()
+        button.on_click_entries = [self._entry(target, "toggle_settings")]
+
+        button._dispatch_persistent_entries()
+
+        assert component.called is True
+        assert button.debug_dispatch_state() == [{
+            "index": 0,
+            "component_name": "MenuController",
+            "method_name": "toggle_settings",
+            "status": "invoked",
+            "target_id": 31,
+            "target_name": "Menu Controller",
+        }]
+
+    def test_missing_method_is_reported_instead_of_silently_ignored(self, monkeypatch):
+        from Infernux.debug import Debug
+        from Infernux.ui import UIButton
+
+        class MenuController:
+            pass
+
+        errors = []
+        monkeypatch.setattr(Debug, "log_error", errors.append)
+        target = self._GameObject(MenuController())
+        button = UIButton()
+        button.on_click_entries = [self._entry(target, "toggle_settings")]
+
+        button._dispatch_persistent_entries()
+
+        assert button.debug_dispatch_state()[0]["status"] == "missing_method"
+        assert errors == [
+            "UIButton persistent event could not invoke "
+            "Menu Controller.MenuController.toggle_settings: missing_method"
+        ]
+
+
 def test_focused_save_routes_to_document_then_falls_back_to_scene():
     from Infernux.engine._bootstrap_wiring import BootstrapWiringMixin
     from Infernux.engine.ui.closable_panel import ClosablePanel
@@ -402,3 +646,68 @@ class TestPanelFocusEvents:
             assert ctx.focus_flags == [3]
         finally:
             ClosablePanel._active_panel_id = previous_active
+
+    def test_dirty_registry_sync_is_change_driven(self, monkeypatch):
+        from Infernux.engine import project_context
+        from Infernux.engine.ui.closable_panel import ClosablePanel
+
+        calls = []
+        monkeypatch.setattr(
+            project_context,
+            "set_panel_dirty",
+            lambda panel_id, dirty, **kwargs: calls.append(
+                (panel_id, dirty, kwargs["title"])
+            ),
+        )
+
+        panel = ClosablePanel("Probe", "dirty_probe")
+        panel._dirty = False
+        panel._sync_dirty_registry()
+        panel._sync_dirty_registry()
+        panel._dirty = True
+        panel._sync_dirty_registry()
+        panel._sync_dirty_registry()
+
+        assert calls == [
+            ("dirty_probe", False, "Probe"),
+            ("dirty_probe", True, "Probe"),
+        ]
+
+
+class TestEditorPanelVisibilityLifecycle:
+    def test_hidden_hook_runs_only_on_visibility_transitions(self):
+        from Infernux.engine.ui.editor_panel import EditorPanel
+
+        class Context:
+            @staticmethod
+            def end_window():
+                pass
+
+        class ProbePanel(EditorPanel):
+            def __init__(self):
+                super().__init__("Probe", "probe")
+                self.visibility = iter([False, False, True, False, False])
+                self.hidden_calls = 0
+                self.visible_calls = 0
+                self.content_calls = 0
+
+            def _begin_closable_window(self, _ctx, _flags=0):
+                return next(self.visibility)
+
+            def _on_not_visible(self, _ctx):
+                self.hidden_calls += 1
+
+            def _on_visible_pre(self, _ctx):
+                self.visible_calls += 1
+
+            def on_render_content(self, _ctx):
+                self.content_calls += 1
+
+        panel = ProbePanel()
+        ctx = Context()
+        for _ in range(5):
+            panel.on_render(ctx)
+
+        assert panel.hidden_calls == 2
+        assert panel.visible_calls == 1
+        assert panel.content_calls == 1

@@ -20,6 +20,7 @@
 #include <initializer_list>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace infernux
 {
@@ -29,6 +30,7 @@ enum class AssetEvent;
 // Forward declaration — Collider caches a Rigidbody* pointer but does not
 // dereference it in the header (only in Collider.cpp which includes Rigidbody.h).
 class Rigidbody;
+struct PhysicsBodyPoseUpdate;
 
 /**
  * @brief Abstract base class for Collider components.
@@ -104,7 +106,8 @@ class Collider : public Component
     [[nodiscard]] static uint32_t GetSharedBodyId(const GameObject *gameObject);
 
     /// @brief Sync the body transform with the GameObject's Transform.
-    void SyncTransformToPhysics(float fixedDeltaTime = 0.0f);
+    void SyncTransformToPhysics(float fixedDeltaTime = 0.0f,
+                                std::vector<PhysicsBodyPoseUpdate> *staticPoseBatch = nullptr);
 
     /// Register body in PhysicsWorld (creates the Jolt body, does NOT add to broadphase).
     void RegisterBody();

@@ -258,6 +258,10 @@ class TransformECSStore
     {
         return m_aliveCount;
     }
+    [[nodiscard]] uint64_t GetStructuralVersion() const
+    {
+        return m_structuralVersion;
+    }
     [[nodiscard]] bool IsAlive(uint32_t index) const
     {
         return index < m_alive.size() && m_alive[index];
@@ -370,6 +374,7 @@ class TransformECSStore
     std::vector<uint32_t> m_nextFree;
     uint32_t m_freeListHead = UINT32_MAX;
     size_t m_aliveCount = 0;
+    uint64_t m_structuralVersion = 0;
 
     // ── Frame Cache arrays (same length as Capacity()) ───────────────
     std::vector<glm::vec3> m_fcWorldPositions;

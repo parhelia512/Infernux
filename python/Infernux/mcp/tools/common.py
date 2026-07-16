@@ -548,7 +548,7 @@ def _requires_saved_scene_file(name: str) -> bool:
     }
     if name in exact:
         return True
-    return name.startswith("ui.") and name not in {"ui_inspect", "ui_find_by_text"}
+    return name.startswith(("ui_", "ui.")) and name not in {"ui_inspect", "ui_find_by_text"}
 
 
 def scene_status() -> dict[str, Any]:

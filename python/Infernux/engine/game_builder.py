@@ -6,27 +6,24 @@ All engine code, dependencies, and the CPython runtime are bundled into
 a self-contained directory.  User scripts (.py in Assets/) are compiled
 to .pyc with ``py_compile`` for source protection.
 
-Output layout::
+Windows output layout::
 
     <OutputDir>/
-        <GameName>.exe          ← Nuitka-compiled native executable
-        python312.dll           ← CPython runtime (required by Nuitka)
-        SDL3.dll, imgui.dll … ← engine native DLLs (also in Infernux/lib/)
-        Infernux/              ← engine package
-            lib/
-                _Infernux.*.pyd ← pybind11 extension module
-                SDL3.dll …       ← DLLs (for os.add_dll_directory)
-        Data/
-            Assets/             ← game scenes, scripts(.pyc), textures, models
-            ProjectSettings/    ← build & tag-layer settings
-            materials/
-            Splash/             ← splash images + .infsplash video data
-            BuildManifest.json  ← display mode, window size, splash config
+        <GameName>.exe          ← small native launcher with the engine icon
+        <GameName>_Data/
+            Content.inxpkg      ← Deflate-compressed project content
+            Content.json        ← integrity and cache manifest
+            BuildManifest.json  ← display mode and boot settings
+            Runtime/            ← private CPython/Nuitka/native engine payload
+            RuntimeModules/
+                core/           ← compressed NumPy and engine resources
+                parallel/       ← optional compressed Numba/LLVM module
 """
 
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import py_compile
 import re
@@ -36,9 +33,11 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from typing import Callable, Dict, List, Optional
 
 import Infernux._jit_kernels as _jit_kernels
+import Infernux.resources as _resources
 from Infernux.debug import Debug
 from Infernux.engine.build_cancellation import BuildCancelled
 from Infernux.engine.i18n import t
@@ -114,6 +113,9 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
     _EXCLUDE_PATTERNS = {"__pycache__", ".git", ".gitignore", ".infernux-engine-lock.json"}
     _ICON_EXTS = {".png", ".jpg", ".jpeg", ".ico"}
     _GAME_BUILD_EXCLUDED_PACKAGES = frozenset({"mcp", "fastmcp"})
+    _CONTENT_ARCHIVE_FILENAME = "Content.inxpkg"
+    _CONTENT_MANIFEST_FILENAME = "Content.json"
+    _CONTENT_SCHEMA_VERSION = 1
 
     def __init__(
         self,
@@ -225,7 +227,18 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
         boot_script = self._generate_boot_script()
 
         _p(t("build.step.nuitka_compilation"), 0.06)
-        dist_dir = self._run_nuitka(boot_script, on_progress, user_packages, cancel_event)
+        try:
+            dist_dir = self._run_nuitka(
+                boot_script,
+                on_progress,
+                user_packages,
+                cancel_event,
+            )
+        finally:
+            # The boot source lives under the output directory. Remove it
+            # before the compiled dist is moved there, otherwise the layout
+            # pass can accidentally ship it inside Runtime/_build_temp.
+            self._cleanup_temp(boot_script)
 
         _p(t("build.step.organizing_output"), 0.86)
         final_dir = self._organize_output(dist_dir)
@@ -248,11 +261,20 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
         _p(t("build.step.cleaning_redundant"), 0.98)
         self._cleanup_dist(final_dir)
 
+        _p("Packing core runtime data", 0.9805)
+        self._pack_core_runtime_archive(final_dir)
+
+        _p("Packing project content", 0.981)
+        self._pack_content_archive(final_dir)
+
+        _p("Auditing packaged payload", 0.984)
+        self._write_payload_manifest(final_dir)
+
+        _p("Organizing Player distribution", 0.9845)
+        self._organize_player_layout(final_dir)
+
         _p(t("build.step.writing_marker"), 0.985)
         self._write_output_marker(final_dir)
-
-        _p(t("build.step.cleaning_temp"), 0.99)
-        self._cleanup_temp(boot_script)
 
         # Log per-directory size breakdown so the user sees where size goes
         self._report_build_size(final_dir, _blog)
@@ -305,6 +327,12 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
 
     def _output_marker_path(self, directory: Optional[str] = None) -> str:
         target_dir = os.path.abspath(directory or self.output_dir)
+        if self._player_launcher_path():
+            target_dir = os.path.join(target_dir, f"{self.project_name}_Data")
+        return os.path.join(target_dir, self.OUTPUT_MARKER_FILENAME)
+
+    def _legacy_output_marker_path(self, directory: Optional[str] = None) -> str:
+        target_dir = os.path.abspath(directory or self.output_dir)
         return os.path.join(target_dir, self.OUTPUT_MARKER_FILENAME)
 
     def _validate_output_directory(self) -> None:
@@ -340,8 +368,11 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
             if os.path.isdir(temp_dir) and not os.path.islink(temp_dir):
                 return
 
-        marker_path = self._output_marker_path(self.output_dir)
-        if os.path.isfile(marker_path):
+        marker_paths = (
+            self._output_marker_path(self.output_dir),
+            self._legacy_output_marker_path(self.output_dir),
+        )
+        if any(os.path.isfile(path) for path in marker_paths):
             return
 
         raise BuildOutputDirectoryError(
@@ -382,11 +413,11 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
 
     def _write_output_marker(self, final_dir: str) -> None:
         marker_path = self._output_marker_path(final_dir)
+        os.makedirs(os.path.dirname(marker_path), exist_ok=True)
         marker_payload = {
             "tool": "Infernux",
             "kind": "build-output",
             "project_name": self.project_name,
-            "project_path": self.project_path,
             "written_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         with open(marker_path, "w", encoding="utf-8") as f:
@@ -402,25 +433,40 @@ class GameBuilder(BuildSplashMixin, BuildDependencyMixin):
 
         Returns the path to the temporary boot script.
         """
-        boot_src = f'''\
+        boot_src = '''\
 """Infernux Game — compiled entry point."""
+import hashlib
 import json
 import os
+from pathlib import PurePosixPath
+import shutil
 import sys
 import traceback
+import zipfile
 
 # Activate player mode BEFORE any Infernux imports so the engine
 # package skips heavy editor-only UI panels and watchdog file watcher.
 os.environ["_INFERNUX_PLAYER_MODE"] = "1"
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+sys.dont_write_bytecode = True
 
-# Determine the directory containing the executable
-_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
-if not os.path.isdir(os.path.join(_DIR, "Data")):
-    _DIR = os.path.dirname(os.path.abspath(sys.executable))
+# Resolve the private runtime and public data roots. The Windows launcher sets
+# these explicitly; the fallback keeps older flat distributions portable.
+_DIR = os.environ.get("_INFERNUX_PLAYER_RUNTIME_ROOT", "").strip()
+if not _DIR:
+    _DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+    if not os.path.isdir(os.path.join(_DIR, "Data")):
+        _DIR = os.path.dirname(os.path.abspath(sys.executable))
+_DATA_ROOT = os.environ.get("_INFERNUX_PLAYER_DATA_ROOT", "").strip()
+if not _DATA_ROOT:
+    _DATA_ROOT = os.path.join(_DIR, "Data")
+_MODULE_ROOT = os.environ.get("_INFERNUX_PLAYER_MODULE_ROOT", "").strip()
+if not _MODULE_ROOT:
+    _MODULE_ROOT = os.path.join(_DIR, "RuntimeModules")
 
-_BUILD_MANIFEST = {{}}
+_BUILD_MANIFEST = {}
 try:
-    with open(os.path.join(_DIR, "Data", "BuildManifest.json"), "r", encoding="utf-8") as _mf:
+    with open(os.path.join(_DATA_ROOT, "BuildManifest.json"), "r", encoding="utf-8") as _mf:
         _BUILD_MANIFEST = json.load(_mf)
 except (OSError, ValueError):
     pass
@@ -429,6 +475,137 @@ _GAME_NAME = str(_BUILD_MANIFEST.get("game_name", "InfernuxPlayer") or "Infernux
 _SAFE_GAME_NAME = "".join(_ch if _ch not in '<>:"/\\\\|?*' else '_' for _ch in _GAME_NAME)
 os.environ["_INFERNUX_PLAYER_DEBUG_BUILD"] = "1" if _DEBUG_MODE else "0"
 
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+def _read_json(path):
+    with open(path, "r", encoding="utf-8") as source:
+        return json.load(source)
+
+def _extract_cached_archive(archive_path, manifest_path, cache_kind, allowed_roots=None):
+    manifest = _read_json(manifest_path)
+    expected_hash = str(manifest.get("archive_sha256", ""))
+    if (
+        not expected_hash
+        or int(manifest.get("archive_bytes", -1)) != os.path.getsize(archive_path)
+        or _sha256_file(archive_path) != expected_hash
+    ):
+        raise RuntimeError("Packaged archive failed integrity validation: " + archive_path)
+
+    cache_parent = (
+        os.environ.get("LOCALAPPDATA")
+        or os.environ.get("XDG_CACHE_HOME")
+        or os.path.join(os.path.expanduser("~"), ".cache")
+    )
+    cache_root = os.path.join(
+        cache_parent,
+        "Infernux",
+        "PlayerCache",
+        _SAFE_GAME_NAME,
+        cache_kind + "-" + expected_hash[:20],
+    )
+    ready_marker = os.path.join(cache_root, ".ready")
+    try:
+        with open(ready_marker, "r", encoding="ascii") as marker:
+            if marker.read().strip() == expected_hash:
+                return cache_root
+    except OSError:
+        pass
+
+    temporary = cache_root + "." + str(os.getpid()) + ".tmp"
+    shutil.rmtree(temporary, ignore_errors=True)
+    os.makedirs(temporary, exist_ok=False)
+    try:
+        with zipfile.ZipFile(archive_path, "r") as archive:
+            entries = archive.infolist()
+            files = [entry for entry in entries if not entry.is_dir()]
+            if (
+                len(files) != int(manifest.get("file_count", -1))
+                or sum(entry.file_size for entry in files)
+                != int(manifest.get("uncompressed_bytes", -1))
+            ):
+                raise RuntimeError("Packaged archive does not match its manifest")
+            for entry in entries:
+                normalized = entry.filename.replace("\\\\", "/")
+                parts = PurePosixPath(normalized).parts
+                if normalized.startswith("/") or not parts or ".." in parts or ":" in parts[0]:
+                    raise RuntimeError("Unsafe packaged archive entry: " + entry.filename)
+                if allowed_roots is not None and parts[0] not in allowed_roots:
+                    raise RuntimeError("Unexpected runtime module entry: " + entry.filename)
+            archive.extractall(temporary)
+        with open(os.path.join(temporary, ".ready"), "w", encoding="ascii") as marker:
+            marker.write(expected_hash)
+        os.makedirs(os.path.dirname(cache_root), exist_ok=True)
+        if os.path.isdir(cache_root):
+            try:
+                with open(ready_marker, "r", encoding="ascii") as marker:
+                    if marker.read().strip() == expected_hash:
+                        return cache_root
+            except OSError:
+                pass
+            shutil.rmtree(cache_root, ignore_errors=True)
+        try:
+            os.replace(temporary, cache_root)
+        except OSError:
+            if not os.path.isfile(ready_marker):
+                raise
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+    return cache_root
+
+_CORE_ROOT = os.path.join(_MODULE_ROOT, "core")
+_CORE_MANIFEST = os.path.join(_CORE_ROOT, "core-module.json")
+_CORE_ARCHIVE = os.path.join(_CORE_ROOT, "core-module.zip")
+_CORE_RUNTIME_DIR = ""
+if os.path.isfile(_CORE_MANIFEST) and os.path.isfile(_CORE_ARCHIVE):
+    _core_data = _read_json(_CORE_MANIFEST)
+    _CORE_RUNTIME_DIR = _extract_cached_archive(
+        _CORE_ARCHIVE,
+        _CORE_MANIFEST,
+        "core",
+        set(_core_data.get("allowed_roots", [])),
+    )
+    if _CORE_RUNTIME_DIR not in sys.path:
+        sys.path.insert(0, _CORE_RUNTIME_DIR)
+    os.environ["_INFERNUX_PACKAGED_RESOURCE_ROOT"] = os.path.join(
+        _CORE_RUNTIME_DIR, "Infernux", "resources"
+    )
+
+_DATA_DIR = _DATA_ROOT
+_CONTENT_ARCHIVE = os.path.join(_DATA_DIR, "Content.inxpkg")
+_CONTENT_MANIFEST = os.path.join(_DATA_DIR, "Content.json")
+if os.path.isfile(_CONTENT_ARCHIVE) and os.path.isfile(_CONTENT_MANIFEST):
+    _DATA_DIR = _extract_cached_archive(
+        _CONTENT_ARCHIVE,
+        _CONTENT_MANIFEST,
+        "content",
+    )
+    shutil.copy2(
+        os.path.join(_DATA_ROOT, "BuildManifest.json"),
+        os.path.join(_DATA_DIR, "BuildManifest.json"),
+    )
+
+_PARALLEL_ROOT = os.path.join(_MODULE_ROOT, "parallel")
+_PARALLEL_MANIFEST = os.path.join(_PARALLEL_ROOT, "parallel-module.json")
+_PARALLEL_ARCHIVE = os.path.join(_PARALLEL_ROOT, "parallel-module.zip")
+_RUNTIME_MODULE_DIR = ""
+if os.path.isfile(_PARALLEL_MANIFEST) and os.path.isfile(_PARALLEL_ARCHIVE):
+    _parallel_data = _read_json(_PARALLEL_MANIFEST)
+    _allowed_packages = set(_parallel_data.get("packages", []))
+    _allowed_packages.update(_package + ".libs" for _package in tuple(_allowed_packages))
+    _RUNTIME_MODULE_DIR = _extract_cached_archive(
+        _PARALLEL_ARCHIVE,
+        _PARALLEL_MANIFEST,
+        "parallel",
+        _allowed_packages,
+    )
+    if _RUNTIME_MODULE_DIR not in sys.path:
+        sys.path.insert(0, _RUNTIME_MODULE_DIR)
+
 # Ensure the raw-copied NumPy runtime and optional JIT packages are importable.
 # Nuitka standalone may not include the exe directory in sys.path by default.
 if _DIR not in sys.path:
@@ -436,11 +613,35 @@ if _DIR not in sys.path:
 
 # On Windows, add the exe directory as a DLL search path so that
 # native extensions inside raw-copied packages can find their .dll deps.
+_DLL_DIR_HANDLES = []
 if sys.platform == 'win32':
     try:
-        os.add_dll_directory(_DIR)
+        _DLL_DIR_HANDLES.append(os.add_dll_directory(_DIR))
     except OSError:
         pass
+    if _RUNTIME_MODULE_DIR:
+        for _dll_dir in (
+            _RUNTIME_MODULE_DIR,
+            os.path.join(_RUNTIME_MODULE_DIR, "llvmlite", "binding"),
+            os.path.join(_RUNTIME_MODULE_DIR, "llvmlite.libs"),
+        ):
+            if not os.path.isdir(_dll_dir):
+                continue
+            try:
+                _DLL_DIR_HANDLES.append(os.add_dll_directory(_dll_dir))
+            except OSError:
+                pass
+    if _CORE_RUNTIME_DIR:
+        for _dll_dir in (
+            _CORE_RUNTIME_DIR,
+            os.path.join(_CORE_RUNTIME_DIR, "numpy.libs"),
+        ):
+            if not os.path.isdir(_dll_dir):
+                continue
+            try:
+                _DLL_DIR_HANDLES.append(os.add_dll_directory(_dll_dir))
+            except OSError:
+                pass
     # Pre-load bundled MSVC CRT DLLs so the dynamic linker can resolve
     # them even on machines without Visual C++ Redistributable installed.
     import ctypes as _ctypes
@@ -457,14 +658,14 @@ if sys.platform == 'win32':
     del _ctypes
 
 # Logs go into Data/Logs/ to keep the root directory clean
-_LOGS_DIR = os.path.join(_DIR, "Data", "Logs")
+_LOGS_DIR = os.path.join(_DATA_ROOT, "Logs")
 os.makedirs(_LOGS_DIR, exist_ok=True)
 _LOG = os.path.join(_LOGS_DIR, "player.log")
 os.environ["_INFERNUX_PLAYER_LOG"] = _LOG
 
 # Debug mode: write a detailed log next to the executable
 if _DEBUG_MODE:
-    _DEBUG_LOG = os.path.join(_DIR, _SAFE_GAME_NAME + "_debug.log")
+    _DEBUG_LOG = os.path.join(_DATA_ROOT, _SAFE_GAME_NAME + "_debug.log")
     _debug_fh = open(_DEBUG_LOG, "w", encoding="utf-8")
     sys.stdout = _debug_fh
     sys.stderr = _debug_fh
@@ -513,7 +714,7 @@ try:
 
     _log("boot: calling run_player")
     run_player(
-        project_path=os.path.join(_DIR, "Data"),
+        project_path=_DATA_DIR,
         engine_log_level=LogLevel.Debug if _DEBUG_MODE else LogLevel.Info,
     )
     _log("boot: run_player returned")
@@ -548,10 +749,6 @@ finally:
         cancel_event: Optional[threading.Event] = None,
     ) -> str:
         """Invoke NuitkaBuilder. Returns the dist directory path."""
-        from Infernux.resources import icon_path
-
-        selected_icon = self.icon_path if self.icon_path else icon_path
-
         # NumPy is part of the engine runtime (batch APIs, textures, VFX and
         # native ndarray bindings), so every Player must carry it. Numba and
         # llvmlite remain conditional because only the public JIT path needs
@@ -560,27 +757,35 @@ finally:
         all_pkgs = user_packages or []
         compiled_pkgs = [p for p in all_pkgs if p not in jit_set]
         raw_pkgs = {"numpy"}
-        if self.enable_jit:
-            raw_pkgs.update(p for p in all_pkgs if p in jit_set)
 
-        development_runtime_pack = bool(self.debug_mode)
         runtime_executable = "InfernuxPlayer.exe" if sys.platform == "win32" else "InfernuxPlayer"
+        player_icon = self.icon_path
+        if not player_icon:
+            candidate = os.path.join(
+                _resources.get_package_resources_path(), "icons", "icon.png"
+            )
+            if os.path.isfile(candidate):
+                player_icon = candidate
+
         nk = NuitkaBuilder(
             entry_script=boot_script,
             output_dir=self.output_dir,
-            output_filename=runtime_executable if development_runtime_pack else f"{self.project_name}.exe",
-            product_name="Infernux Player" if development_runtime_pack else self.project_name,
-            icon_path=(
-                None
-                if development_runtime_pack
-                else selected_icon if selected_icon and os.path.isfile(selected_icon) else None
-            ),
+            output_filename=runtime_executable,
+            product_name="Infernux Player",
+            icon_path=player_icon or None,
             extra_include_packages=compiled_pkgs,
             extra_requirements_files=self._project_requirement_files(),
             raw_copy_packages=sorted(raw_pkgs),
+            # Release wheels prebuild this dependency closure into the base
+            # Runtime Pack, while the packages themselves remain in a small
+            # optional module selected by the user's build setting.
+            runtime_support_packages=["numba", "llvmlite"],
             console_mode="force" if self.debug_mode else "disable",
             lto=self.lto,
-            runtime_pack_cache=development_runtime_pack,
+            # Runtime compilation is independent from Data/ project content
+            # and product branding. The generic Player is renamed after the
+            # prebuilt pack is restored.
+            runtime_pack_cache=True,
         )
 
         def _nk_progress(msg: str, pct: float):
@@ -589,7 +794,28 @@ finally:
             if on_progress:
                 on_progress(msg, mapped)
 
-        return nk.build(on_progress=_nk_progress, cancel_event=cancel_event)
+        dist_dir = nk.build(on_progress=_nk_progress, cancel_event=cancel_event)
+        if self.enable_jit:
+            if on_progress:
+                on_progress(t("build.step.injecting_jit"), 0.85)
+            if not nk.install_runtime_module(
+                dist_dir,
+                module_name="parallel",
+                packages=["numba", "llvmlite"],
+                archive_only=True,
+            ):
+                raise RuntimeError("Unable to stage the parallel Runtime Module")
+        return dist_dir
+
+    def _player_launcher_path(self) -> str:
+        if sys.platform != "win32":
+            return ""
+        candidate = os.path.join(
+            _resources.get_package_resources_path(),
+            "player",
+            "InfernuxLauncher.exe",
+        )
+        return candidate if os.path.isfile(candidate) else ""
 
     # ------------------------------------------------------------------
     # Organize output: move dist contents to the final output directory
@@ -644,13 +870,16 @@ finally:
                         os.remove(dst)
                 shutil.move(src, dst)
 
-        if self.debug_mode:
-            runtime_name = "InfernuxPlayer.exe" if sys.platform == "win32" else "InfernuxPlayer"
-            game_name = f"{self.project_name}.exe" if sys.platform == "win32" else self.project_name
-            runtime_executable = os.path.join(final_dir, runtime_name)
-            game_executable = os.path.join(final_dir, game_name)
-            if os.path.isfile(runtime_executable) and os.path.normcase(runtime_executable) != os.path.normcase(game_executable):
-                os.replace(runtime_executable, game_executable)
+        runtime_name = "InfernuxPlayer.exe" if sys.platform == "win32" else "InfernuxPlayer"
+        game_name = f"{self.project_name}.exe" if sys.platform == "win32" else self.project_name
+        runtime_executable = os.path.join(final_dir, runtime_name)
+        game_executable = os.path.join(final_dir, game_name)
+        if (
+            not self._player_launcher_path()
+            and os.path.isfile(runtime_executable)
+            and os.path.normcase(runtime_executable) != os.path.normcase(game_executable)
+        ):
+            os.replace(runtime_executable, game_executable)
 
         Debug.log_internal(
             f"  moved dist to output in {time.perf_counter() - _move_t0:.2f}s"
@@ -668,6 +897,62 @@ finally:
             shutil.rmtree(staging_parent, ignore_errors=True)
 
         return final_dir
+
+    def _organize_player_layout(self, final_dir: str) -> None:
+        """Hide implementation payload behind a Unity-style Windows layout."""
+        launcher_path = self._player_launcher_path()
+        if not launcher_path:
+            return
+
+        data_source = os.path.join(final_dir, "Data")
+        if not os.path.isdir(data_source):
+            raise RuntimeError("Player Data directory is missing before layout organization")
+
+        data_name = f"{self.project_name}_Data"
+        data_root = os.path.join(final_dir, data_name)
+        runtime_root = os.path.join(data_root, "Runtime")
+        module_source = os.path.join(final_dir, "RuntimeModules")
+        module_target = os.path.join(data_root, "RuntimeModules")
+        game_executable = os.path.join(
+            final_dir,
+            f"{self.project_name}.exe",
+        )
+
+        if os.path.exists(data_root):
+            shutil.rmtree(data_root)
+        os.replace(data_source, data_root)
+        if os.path.isdir(module_source):
+            os.replace(module_source, module_target)
+        os.makedirs(runtime_root, exist_ok=True)
+
+        for name in list(os.listdir(final_dir)):
+            if name == data_name:
+                continue
+            source = os.path.join(final_dir, name)
+            destination = os.path.join(runtime_root, name)
+            if os.path.exists(destination):
+                if os.path.isdir(destination):
+                    shutil.rmtree(destination)
+                else:
+                    os.remove(destination)
+            shutil.move(source, destination)
+
+        shutil.copy2(launcher_path, game_executable)
+        layout_manifest = {
+            "schema_version": 3,
+            "layout": "infernux-windows-player-v3",
+            "launcher": os.path.basename(game_executable),
+            "data_directory": data_name,
+            "runtime_directory": "Runtime",
+            "runtime_modules_directory": "RuntimeModules",
+        }
+        with open(
+            os.path.join(data_root, "PlayerLayout.json"),
+            "w",
+            encoding="utf-8",
+        ) as manifest_file:
+            json.dump(layout_manifest, manifest_file, indent=2, sort_keys=True)
+            manifest_file.write("\n")
 
     # ------------------------------------------------------------------
     # Game data
@@ -810,6 +1095,7 @@ finally:
                             py_compile.compile(
                                 sidecar_py,
                                 cfile=sidecar_py + "c",
+                                dfile=os.path.relpath(sidecar_py, data_dir).replace("\\", "/"),
                                 optimize=2,
                                 doraise=True,
                             )
@@ -827,6 +1113,7 @@ finally:
                         py_compile.compile(
                             py_path,
                             cfile=py_path + "c",
+                            dfile=os.path.relpath(py_path, data_dir).replace("\\", "/"),
                             optimize=2,
                             doraise=True,
                         )
@@ -845,6 +1132,297 @@ finally:
             manifest_path = os.path.join(data_dir, "_script_guid_map.json")
             with open(manifest_path, "w", encoding="utf-8") as mf:
                 json.dump(guid_map, mf)
+
+    @staticmethod
+    def _sha256_file(path: str) -> str:
+        digest = hashlib.sha256()
+        with open(path, "rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _pack_core_runtime_archive(self, final_dir: str) -> None:
+        """Compress always-required Python data that can load from cache."""
+        module_root = os.path.join(final_dir, "RuntimeModules", "core")
+        os.makedirs(module_root, exist_ok=True)
+        archive_path = os.path.join(module_root, "core-module.zip")
+        manifest_path = os.path.join(module_root, "core-module.json")
+        temporary_archive = archive_path + f".{os.getpid()}.tmp"
+        roots = [
+            os.path.join(final_dir, "numpy"),
+            os.path.join(final_dir, "numpy.libs"),
+            os.path.join(final_dir, "Infernux", "resources"),
+        ]
+        files: list[tuple[str, str]] = []
+        uncompressed_bytes = 0
+        for payload_root in roots:
+            if not os.path.isdir(payload_root):
+                continue
+            for root, _dirs, filenames in os.walk(payload_root):
+                for filename in filenames:
+                    source_path = os.path.join(root, filename)
+                    relative = os.path.relpath(source_path, final_dir).replace("\\", "/")
+                    files.append((source_path, relative))
+                    uncompressed_bytes += os.path.getsize(source_path)
+        if not files:
+            raise RuntimeError("Core Runtime Module contains no files")
+
+        try:
+            with zipfile.ZipFile(
+                temporary_archive,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+                compresslevel=6,
+                allowZip64=True,
+            ) as archive:
+                for source_path, relative in sorted(files, key=lambda item: item[1]):
+                    archive.write(source_path, relative)
+            os.replace(temporary_archive, archive_path)
+        finally:
+            try:
+                os.remove(temporary_archive)
+            except FileNotFoundError:
+                pass
+
+        archive_bytes = os.path.getsize(archive_path)
+        manifest = {
+            "schema_version": 1,
+            "module": "core",
+            "archive": "core-module.zip",
+            "archive_sha256": self._sha256_file(archive_path),
+            "archive_bytes": archive_bytes,
+            "uncompressed_bytes": uncompressed_bytes,
+            "file_count": len(files),
+            "compression": "zip-deflate-6",
+            "allowed_roots": ["Infernux", "numpy", "numpy.libs"],
+        }
+        with open(manifest_path, "w", encoding="utf-8") as manifest_file:
+            json.dump(manifest, manifest_file, indent=2, sort_keys=True)
+            manifest_file.write("\n")
+
+        for payload_root in roots:
+            shutil.rmtree(payload_root, ignore_errors=True)
+
+        ratio = archive_bytes / max(1, uncompressed_bytes)
+        Debug.log_internal(
+            f"Packed core runtime data into {archive_bytes / (1024 * 1024):.1f} MB "
+            f"({ratio:.1%} of {uncompressed_bytes / (1024 * 1024):.1f} MB)"
+        )
+
+    def _pack_content_archive(self, final_dir: str) -> None:
+        """Pack authoring files into one validated Player content archive."""
+        data_root = os.path.join(final_dir, "Data")
+        if not os.path.isdir(data_root):
+            raise RuntimeError("Player Data directory is missing")
+
+        archive_path = os.path.join(data_root, self._CONTENT_ARCHIVE_FILENAME)
+        manifest_path = os.path.join(data_root, self._CONTENT_MANIFEST_FILENAME)
+        temporary_archive = archive_path + f".{os.getpid()}.tmp"
+        retained = {
+            "BuildManifest.json",
+            "BuildPayload.json",
+            self._CONTENT_ARCHIVE_FILENAME,
+            self._CONTENT_MANIFEST_FILENAME,
+        }
+        files: list[tuple[str, str]] = []
+        project_bytecode_count = 0
+        project_metadata_count = 0
+        plaintext_project_scripts: list[str] = []
+        uncompressed_bytes = 0
+
+        for root, dirs, filenames in os.walk(data_root):
+            dirs[:] = [directory for directory in dirs if directory != "Logs"]
+            for filename in filenames:
+                path = os.path.join(root, filename)
+                relative = os.path.relpath(path, data_root).replace("\\", "/")
+                if "/" not in relative and relative in retained:
+                    continue
+                suffix = os.path.splitext(filename)[1].lower()
+                if relative.startswith("Assets/") and suffix == ".py":
+                    plaintext_project_scripts.append(relative)
+                elif relative.startswith("Assets/") and suffix == ".pyc":
+                    project_bytecode_count += 1
+                if suffix == ".meta":
+                    project_metadata_count += 1
+                files.append((path, relative))
+                uncompressed_bytes += os.path.getsize(path)
+
+        if plaintext_project_scripts:
+            raise RuntimeError(
+                "Packaged Player still contains plaintext project scripts: "
+                + ", ".join(plaintext_project_scripts[:8])
+            )
+        if not files:
+            raise RuntimeError("Player content archive would be empty")
+
+        try:
+            with zipfile.ZipFile(
+                temporary_archive,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+                compresslevel=6,
+                allowZip64=True,
+            ) as archive:
+                for source_path, relative in sorted(files, key=lambda item: item[1]):
+                    archive.write(source_path, relative)
+            os.replace(temporary_archive, archive_path)
+        finally:
+            try:
+                os.remove(temporary_archive)
+            except FileNotFoundError:
+                pass
+
+        archive_bytes = os.path.getsize(archive_path)
+        manifest = {
+            "schema_version": self._CONTENT_SCHEMA_VERSION,
+            "archive": self._CONTENT_ARCHIVE_FILENAME,
+            "archive_sha256": self._sha256_file(archive_path),
+            "archive_bytes": archive_bytes,
+            "uncompressed_bytes": uncompressed_bytes,
+            "file_count": len(files),
+            "compression": "zip-deflate-6",
+            "project_bytecode_count": project_bytecode_count,
+            "project_metadata_count": project_metadata_count,
+        }
+        with open(manifest_path, "w", encoding="utf-8") as manifest_file:
+            json.dump(manifest, manifest_file, indent=2, sort_keys=True)
+            manifest_file.write("\n")
+
+        for source_path, _relative in files:
+            os.remove(source_path)
+        for root, dirs, _files in os.walk(data_root, topdown=False):
+            for directory in dirs:
+                path = os.path.join(root, directory)
+                if os.path.basename(path) == "Logs":
+                    continue
+                try:
+                    os.rmdir(path)
+                except OSError:
+                    pass
+
+        ratio = archive_bytes / max(1, uncompressed_bytes)
+        Debug.log_internal(
+            f"Packed {len(files)} content files into {archive_bytes / (1024 * 1024):.1f} MB "
+            f"({ratio:.1%} of {uncompressed_bytes / (1024 * 1024):.1f} MB)"
+        )
+
+    def _write_payload_manifest(self, final_dir: str) -> None:
+        """Audit release layout and describe what remains inspectable."""
+        data_root = os.path.join(final_dir, "Data")
+        assets_root = os.path.join(data_root, "Assets")
+        user_source_files: list[str] = []
+        user_bytecode_files: list[str] = []
+        project_meta_files: list[str] = []
+        third_party_source_files: list[str] = []
+        forbidden_runtime_files: list[str] = []
+        native_binary_count = 0
+        native_binary_bytes = 0
+        total_files = 0
+        total_bytes = 0
+
+        for root, _dirs, files in os.walk(final_dir):
+            for filename in files:
+                path = os.path.join(root, filename)
+                relative = os.path.relpath(path, final_dir).replace("\\", "/")
+                try:
+                    size = os.path.getsize(path)
+                except OSError:
+                    size = 0
+                total_files += 1
+                total_bytes += size
+                suffix = os.path.splitext(filename)[1].lower()
+                in_assets = root == assets_root or root.startswith(assets_root + os.sep)
+                if suffix in {
+                    ".bak",
+                    ".exp",
+                    ".lib",
+                    ".meta",
+                    ".pdb",
+                    ".pyc",
+                    ".pyi",
+                    ".pyo",
+                } and not (in_assets and suffix in {".meta", ".pyc"}):
+                    forbidden_runtime_files.append(relative)
+                if in_assets and suffix == ".py":
+                    user_source_files.append(relative)
+                elif in_assets and suffix == ".pyc":
+                    user_bytecode_files.append(relative)
+                if (root == data_root or root.startswith(data_root + os.sep)) and suffix == ".meta":
+                    project_meta_files.append(relative)
+                elif suffix == ".py":
+                    third_party_source_files.append(relative)
+                if suffix in {".exe", ".dll", ".pyd", ".so", ".dylib"}:
+                    native_binary_count += 1
+                    native_binary_bytes += size
+
+        if user_source_files:
+            raise RuntimeError(
+                "Packaged Player still contains plaintext project scripts: "
+                + ", ".join(user_source_files[:8])
+            )
+        if third_party_source_files:
+            raise RuntimeError(
+                "Packaged Player still contains plaintext runtime sources: "
+                + ", ".join(third_party_source_files[:8])
+            )
+        if forbidden_runtime_files:
+            raise RuntimeError(
+                "Packaged Player still contains build-time artifacts: "
+                + ", ".join(forbidden_runtime_files[:8])
+            )
+        runtime_pack = {}
+        runtime_marker_path = os.path.join(final_dir, "_infernux_runtime_pack.json")
+        try:
+            with open(runtime_marker_path, "r", encoding="utf-8") as marker_file:
+                runtime_pack = json.load(marker_file)
+        except (OSError, json.JSONDecodeError):
+            pass
+
+        content_manifest = {}
+        try:
+            with open(
+                os.path.join(data_root, self._CONTENT_MANIFEST_FILENAME),
+                "r",
+                encoding="utf-8",
+            ) as content_file:
+                content_manifest = json.load(content_file)
+        except (OSError, json.JSONDecodeError):
+            pass
+
+        payload = {
+            "schema_version": 3 if self._player_launcher_path() else 2,
+            "layout": (
+                "infernux-windows-player-v3"
+                if self._player_launcher_path()
+                else "infernux-player-directory-v2"
+            ),
+            "code_protection": {
+                "engine": "nuitka-native",
+                "project_scripts": "cpython-optimized-bytecode",
+                "strong_encryption": False,
+                "plaintext_project_script_count": 0,
+                "project_bytecode_count": content_manifest.get(
+                    "project_bytecode_count", len(user_bytecode_files)
+                ),
+                "project_metadata_count": content_manifest.get(
+                    "project_metadata_count", len(project_meta_files)
+                ),
+                "third_party_python_source_count": 0,
+            },
+            "content": content_manifest,
+            "runtime_pack_fingerprint": runtime_pack.get("fingerprint", ""),
+            "files": {
+                "count": total_files,
+                "bytes": total_bytes,
+                "native_binary_count": native_binary_count,
+                "native_binary_bytes": native_binary_bytes,
+            },
+        }
+        manifest_path = os.path.join(data_root, "BuildPayload.json")
+        os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+        with open(manifest_path, "w", encoding="utf-8") as manifest_file:
+            json.dump(payload, manifest_file, indent=2, sort_keys=True)
+            manifest_file.write("\n")
 
     # ------------------------------------------------------------------
     # Splash items
@@ -972,6 +1550,10 @@ finally:
         _queue_file(os.path.join(final_dir, "Infernux", "lib", "InfernuxLauncher.exe"))
         _queue_file(os.path.join(final_dir, "Data", "ProjectSettings", "EditorSettings.json"))
         _queue_file(os.path.join(final_dir, "Data", "ProjectSettings", "GameView.ini"))
+        # A packaged Player reads the bundled Infernux/resources directory
+        # directly. The editor's synchronized Library copy is redundant and
+        # can contain another full copy of the engine font and icons.
+        _queue_dir(os.path.join(final_dir, "Data", "Library", "Resources"))
 
         # Remove the platform-tagged .pyd duplicate — Nuitka standardises
         # to the short name (_Infernux.pyd) and --include-package-data
@@ -994,10 +1576,13 @@ finally:
                 if fname.lower().endswith(".dll"):
                     _queue_file(os.path.join(lib_dir, fname))
 
-        # Remove .meta files from engine shaders (editor hot-reload metadata)
-        shaders_dir = os.path.join(final_dir, "Infernux", "resources", "shaders")
-        if os.path.isdir(shaders_dir):
-            for root, _, files in os.walk(shaders_dir):
+        # Project metadata remains under Data/Assets because it carries the
+        # stable GUID identity referenced by scenes and other assets. Engine
+        # package metadata is build-time authoring state and is never shipped.
+        for metadata_root in (os.path.join(final_dir, "Infernux"),):
+            if not os.path.isdir(metadata_root):
+                continue
+            for root, _, files in os.walk(metadata_root):
                 for fname in files:
                     if fname.endswith(".meta"):
                         _queue_file(os.path.join(root, fname))
@@ -1013,6 +1598,9 @@ finally:
                 for fname in files:
                     if fname.endswith(".pyc"):
                         files_to_remove.append(os.path.join(root, fname))
+            for fname in files:
+                if os.path.splitext(fname)[1].lower() in {".pdb", ".lib", ".exp", ".pyi"}:
+                    files_to_remove.append(os.path.join(root, fname))
 
         # ── Execute removals ─────────────────────────────────────────
         # 1. Remove individual files (fast, no subprocess)
@@ -1066,27 +1654,11 @@ finally:
 
     @staticmethod
     def _cleanup_temp(boot_script: str):
-        """Remove the temporary boot script directory.
-
-        Runs in a daemon thread so the caller returns immediately;
-        on Windows uses a single ``rd /s /q`` for speed.
-        """
+        """Synchronously remove the temporary boot script directory."""
         boot_dir = os.path.dirname(boot_script)
         if not os.path.isdir(boot_dir):
             return
-
-        def _bg():
-            if sys.platform == "win32":
-                subprocess.run(
-                    ["cmd", "/c", "rd", "/s", "/q", boot_dir],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            else:
-                shutil.rmtree(boot_dir, ignore_errors=True)
-
-        t = threading.Thread(target=_bg, daemon=True)
-        t.start()
+        shutil.rmtree(boot_dir)
 
     # ------------------------------------------------------------------
     # Build size report

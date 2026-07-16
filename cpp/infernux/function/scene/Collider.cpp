@@ -578,7 +578,7 @@ void Collider::RebuildShape()
     }
 }
 
-void Collider::SyncTransformToPhysics(float fixedDeltaTime)
+void Collider::SyncTransformToPhysics(float fixedDeltaTime, std::vector<PhysicsBodyPoseUpdate> *staticPoseBatch)
 {
     auto &actor = ActorMut();
     if (actor.bodyId == 0xFFFFFFFF)
@@ -626,13 +626,15 @@ void Collider::SyncTransformToPhysics(float fixedDeltaTime)
         bool isKinematicBody = (rb != nullptr && rb->IsEnabled() && rb->IsKinematic());
         if (isKinematicBody && fixedDeltaTime > 0.0f) {
             physicsWorld.MoveBodyKinematic(actor.bodyId, pos, rot, fixedDeltaTime);
+        } else if (staticPoseBatch && !rb) {
+            staticPoseBatch->push_back({actor.bodyId, pos, rot});
         } else {
             physicsWorld.SetBodyPosition(actor.bodyId, pos, rot);
         }
 
         // After moving a static/kinematic body, wake nearby dynamic bodies.
         bool isStaticBody = (rb == nullptr || !rb->IsEnabled());
-        if (isStaticBody) {
+        if (isStaticBody && PhysicsECSStore::Instance().GetAliveRigidbodyCount() > 0) {
             physicsWorld.WakeBodiesTouchingStatic(actor.bodyId);
         }
     }

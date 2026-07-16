@@ -185,7 +185,7 @@ class PlayerGUI(InxGUIRenderable):
 
         canvases = collect_sorted_canvases(scene, allow_stale_empty=True)
         if canvases:
-            clear_rect_cache(time.perf_counter())
+            clear_rect_cache((id(scene), int(scene.structure_version)))
 
         renderer.begin_frame(game_w, game_h)
         if not canvases:

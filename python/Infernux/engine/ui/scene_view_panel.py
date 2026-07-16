@@ -363,7 +363,7 @@ class SceneViewPanel(SceneViewGizmoMixin, SceneViewCameraMixin, SceneViewOverlay
         if self._engine:
             self._engine.set_scene_view_visible(False)
 
-    def _pre_render(self, ctx):
+    def _update_visible_frame_state(self):
         import time
         current_time = time.time()
         self._delta_time = current_time - self._last_frame_time if self._last_frame_time > 0 else 0.016
@@ -384,6 +384,7 @@ class SceneViewPanel(SceneViewGizmoMixin, SceneViewCameraMixin, SceneViewOverlay
             self._play_border_clr = Theme.BORDER_PAUSE if pm.state == PlayModeState.PAUSED else Theme.BORDER_PLAY
 
     def _on_visible_pre(self, ctx):
+        self._update_visible_frame_state()
         # Activate C++ scene rendering and request full-speed frames only
         # when the Scene View panel is actually visible.  Previously these
         # lived in _pre_render (which runs every frame for all panels) and

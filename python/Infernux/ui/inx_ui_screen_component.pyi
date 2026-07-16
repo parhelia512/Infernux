@@ -9,7 +9,7 @@ from Infernux.ui.enums import ScreenAlignH, ScreenAlignV
 from Infernux.ui.ui_event_data import PointerEventData
 
 
-def clear_rect_cache(frame_id: int = ...) -> None:
+def clear_rect_cache(frame_id: object = ...) -> None:
     """Call once per frame before any ``get_rect()`` usage to clear per-frame cache."""
     ...
 

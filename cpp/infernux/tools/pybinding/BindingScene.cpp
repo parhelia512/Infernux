@@ -185,7 +185,10 @@ static GameObject *CreatePrimitiveObject(Scene *scene, PrimitiveType type, const
     if (obj) {
         MeshRenderer *renderer = obj->AddComponent<MeshRenderer>();
         if (renderer) {
-            renderer->SetSharedPrimitiveMesh(*vertices, *indices, objectName);
+            // The GameObject's display name is independent from the mesh
+            // identity. Keeping the canonical primitive name lets scene
+            // serialization store a compact built-in reference.
+            renderer->SetSharedPrimitiveMesh(*vertices, *indices, defaultName);
             AddPrimitiveCollider(*obj, type);
         }
     }
@@ -220,7 +223,7 @@ static py::list CreatePrimitiveObjectsBatch(Scene *scene, PrimitiveType type, si
         if (obj) {
             MeshRenderer *renderer = obj->AddComponent<MeshRenderer>();
             if (renderer) {
-                renderer->SetSharedPrimitiveMesh(*vertices, *indices, prefix);
+                renderer->SetSharedPrimitiveMesh(*vertices, *indices, defaultName);
                 AddPrimitiveCollider(*obj, type);
             }
         }
@@ -1894,6 +1897,8 @@ void RegisterSceneBindings(py::module_ &m)
         .def_property_readonly("scene_count", &SceneManager::GetSceneCount, "Number of currently loaded scenes")
         .def("is_playing", &SceneManager::IsPlaying, "Check if in play mode")
         .def("play", &SceneManager::Play, "Enter play mode")
+        .def("_start_active_scene_for_play", &SceneManager::StartActiveSceneForPlay,
+             "Internal: publish a transactionally loaded Scene into the current play session")
         .def("stop", &SceneManager::Stop, "Stop play mode")
         .def("pause", &SceneManager::Pause, "Pause play mode")
         .def("is_paused", &SceneManager::IsPaused, "Check if paused")

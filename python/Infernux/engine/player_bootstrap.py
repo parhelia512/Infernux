@@ -185,12 +185,20 @@ class PlayerBootstrap:
             first_scene = os.path.join(self.project_path, first_scene)
 
         if not os.path.isfile(first_scene):
-            Debug.log_warning(f"First scene file not found: {first_scene}")
-            return
+            raise RuntimeError(f"First scene file not found: {first_scene}")
 
         if self.scene_file_manager:
-            self.scene_file_manager._do_open_scene(first_scene)
-            Debug.log_internal(f"Loaded initial scene: {os.path.basename(first_scene)}")
+            if not self.scene_file_manager._do_open_scene(first_scene):
+                raise RuntimeError(f"Failed to load initial scene: {first_scene}")
+            from Infernux.lib import SceneManager as _NativeSM
+
+            scene = _NativeSM.instance().get_active_scene()
+            if scene is None:
+                raise RuntimeError("Initial scene load completed without an active scene")
+            Debug.log_internal(
+                f"Loaded initial scene: {os.path.basename(first_scene)} "
+                f"(objects={len(scene.get_all_objects())}, camera={scene.main_camera is not None})"
+            )
 
     def _enter_play_mode(self):
         """Enter play mode immediately (no deferred task, no save guard)."""

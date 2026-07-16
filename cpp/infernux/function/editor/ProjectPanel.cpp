@@ -2175,8 +2175,19 @@ void ProjectPanel::MoveProjectItemsToFolder(const std::string &targetDir, const 
 
 void ProjectPanel::PreRender(InxGUIContext *ctx)
 {
-    const auto preStart = std::chrono::steady_clock::now();
+    (void)ctx;
     m_frameTimeNow = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+
+    if (m_currentPath != m_lastNotifiedPath) {
+        m_lastNotifiedPath = m_currentPath;
+        if (onStateChanged)
+            onStateChanged();
+    }
+}
+
+void ProjectPanel::VisiblePreRender(InxGUIContext *ctx)
+{
+    const auto preStart = std::chrono::steady_clock::now();
     const auto iconsStart = std::chrono::steady_clock::now();
     EnsureTypeIconsLoaded();
     const auto previewStart = std::chrono::steady_clock::now();
@@ -2184,11 +2195,6 @@ void ProjectPanel::PreRender(InxGUIContext *ctx)
     const auto otherStart = std::chrono::steady_clock::now();
     GetGridTextLineHeight(ctx);
 
-    if (m_currentPath != m_lastNotifiedPath) {
-        m_lastNotifiedPath = m_currentPath;
-        if (onStateChanged)
-            onStateChanged();
-    }
     const auto preEnd = std::chrono::steady_clock::now();
     m_subPreOther += std::chrono::duration<double, std::milli>(preEnd - otherStart).count();
     m_subPrePreview += std::chrono::duration<double, std::milli>(otherStart - previewStart).count();

@@ -13,14 +13,15 @@ from Infernux.components import serialized_field
 from .inx_ui_component import InxUIComponent
 from .enums import ScreenAlignH, ScreenAlignV
 
-# Per-frame rect cache — avoids repeated hierarchy walks via pybind11.
-# Cleared at the start of each frame by clear_rect_cache().
+# Rect cache — avoids repeated hierarchy walks and serialized-field reads.
+# Runtime callers retain it until hierarchy or geometry changes; editor tools
+# may still provide a unique token when they need frame-local invalidation.
 _rect_cache: dict = {}
-_rect_cache_frame: int = -1
+_rect_cache_frame = None
 
 
-def clear_rect_cache(frame_id: int = 0) -> None:
-    """Call once per frame before any get_rect() usage."""
+def clear_rect_cache(frame_id=0) -> None:
+    """Clear cached rectangles when the caller's invalidation token changes."""
     global _rect_cache, _rect_cache_frame
     if frame_id != _rect_cache_frame:
         _rect_cache.clear()
@@ -47,6 +48,21 @@ class InxUIScreenComponent(InxUIComponent):
     """
 
     _hide_transform_: bool = True
+    _GEOMETRY_FIELDS = frozenset({
+        "align_h", "align_v", "x", "y", "width", "height", "rotation",
+    })
+
+    def __setattr__(self, name, value):
+        super().__setattr__(name, value)
+        if name.startswith("_"):
+            return
+        object.__setattr__(
+            self,
+            "_ui_render_revision",
+            int(getattr(self, "_ui_render_revision", 0)) + 1,
+        )
+        if name in self._GEOMETRY_FIELDS:
+            _invalidate_rect_cache()
 
     align_h: ScreenAlignH = serialized_field(default=ScreenAlignH.Left, tooltip="Horizontal anchor", group="Position")
     align_v: ScreenAlignV = serialized_field(default=ScreenAlignV.Top, tooltip="Vertical anchor", group="Position")

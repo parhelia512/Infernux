@@ -131,6 +131,16 @@ class PreparedPythonComponent:
     fields_document: dict
     instance: Any
 
+    @property
+    def component_index(self) -> int:
+        marker = ".components["
+        _prefix, separator, suffix = self.document_path.rpartition(marker)
+        if not separator or not suffix.endswith("]"):
+            raise PythonComponentRestoreError(
+                f"invalid Python component document path '{self.document_path}'"
+            )
+        return int(suffix[:-1])
+
 
 _COMPONENT_RECORD_FIELDS = {
     "component_id", "type_id", "type_version", "enabled", "execution_order", "data",
@@ -327,6 +337,8 @@ def _prepare_python_component_records(
                     fields=fields,
                     error=f"Missing script '{type_name}': {detail}",
                 )
+                from Infernux.debug import Debug
+                Debug.log_error(instance._broken_error)
             instance_type = type(instance)
             is_broken = bool(getattr(instance, "_is_broken", False))
             # Script file renames change the import module path. Class renames
@@ -692,6 +704,99 @@ def publish_prepared_scene_python_components(
             clear_registries=clear_registries,
             object_id_map=object_id_map,
         )
+    except Exception:
+        prepared_graph.discard()
+        raise
+
+
+def replace_scene_python_components_for_play(
+    scene,
+    document: dict,
+    asset_database=None,
+) -> bool:
+    """Create fresh Python instances without rebuilding the native scene graph.
+
+    Entering Play Mode only needs a fresh scripting domain. Native objects and
+    components still match the snapshot captured immediately beforehand, so
+    recreating thousands of renderers and colliders is unnecessary. Stop Mode
+    continues to restore the complete document transactionally.
+    """
+    prepared_graph = preflight_scene_python_components(document, asset_database)
+    prepared = list(prepared_graph.components)
+    existing_by_object: dict[int, list[Any]] = {}
+    targets: dict[int, Any] = {}
+
+    try:
+        for item in prepared:
+            if item.game_object_id is None or item.component_id is None:
+                raise PythonComponentRestoreError(
+                    f"{item.document_path} has no persistent object/component identity"
+                )
+            target = targets.get(item.game_object_id)
+            if target is None:
+                target = scene.find_by_id(item.game_object_id)
+                if target is None:
+                    raise PythonComponentRestoreError(
+                        f"Python component target {item.game_object_id} is missing"
+                    )
+                targets[item.game_object_id] = target
+                existing_by_object[item.game_object_id] = list(target.get_py_components() or [])
+
+        expected_ids_by_object: dict[int, set[int]] = {}
+        for item in prepared:
+            expected_ids_by_object.setdefault(item.game_object_id, set()).add(item.component_id)
+        for object_id, existing in existing_by_object.items():
+            existing_ids = {
+                int(getattr(component, "_component_id", 0) or 0)
+                for component in existing
+            }
+            if existing_ids != expected_ids_by_object[object_id]:
+                raise PythonComponentRestoreError(
+                    f"Python component identity changed on GameObject {object_id}"
+                )
+
+        for existing in existing_by_object.values():
+            for component in existing:
+                native_component = getattr(component, "_cpp_component", None)
+                owner = getattr(component, "game_object", None)
+                if native_component is None or owner is None:
+                    raise PythonComponentRestoreError("live Python component lost its native binding")
+                if not owner._remove_prepared_py_component(native_component):
+                    raise PythonComponentRestoreError("failed to detach an edit-mode Python component")
+
+        from Infernux.components.component import InxComponent
+        from Infernux.components.builtin_component import BuiltinComponent
+        from Infernux.gizmos.collector import notify_scene_changed
+
+        InxComponent._clear_all_instances()
+        BuiltinComponent._clear_cache()
+        notify_scene_changed()
+
+        attached = []
+        for item in sorted(prepared, key=lambda value: (value.game_object_id, value.component_index)):
+            target = targets[item.game_object_id]
+            instance = target._attach_prepared_py_component(item.instance, item.component_index)
+            if instance is not item.instance:
+                raise PythonComponentRestoreError(
+                    f"Python component '{item.type_name}' was rejected by its target GameObject"
+                )
+            native_component = getattr(instance, "_cpp_component", None)
+            if native_component is None:
+                raise PythonComponentRestoreError(
+                    f"Python component '{item.type_name}' was not bound to a native proxy"
+                )
+            native_component._set_component_id(item.component_id)
+            instance._component_id = item.component_id
+            instance._refresh_native_handle()
+            native_component.execution_order = item.execution_order
+            attached.append((target, instance, native_component))
+
+        for _target, instance, _native_component in attached:
+            instance._call_on_after_deserialize()
+        for target, _instance, native_component in attached:
+            target._activate_prepared_py_component(native_component)
+        prepared_graph.consume()
+        return True
     except Exception:
         prepared_graph.discard()
         raise

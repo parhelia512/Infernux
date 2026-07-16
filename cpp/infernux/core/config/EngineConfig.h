@@ -181,11 +181,7 @@ struct EngineConfig
     // Singleton access
     // ========================================================================
 
-    static EngineConfig &Get()
-    {
-        static EngineConfig instance;
-        return instance;
-    }
+    static EngineConfig &Get();
 
   private:
     EngineConfig() = default;

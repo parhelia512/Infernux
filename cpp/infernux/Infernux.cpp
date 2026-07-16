@@ -12,6 +12,7 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <function/audio/AudioClipLoader.h>
@@ -995,6 +996,41 @@ static void ApplySrgbPreviewInPlace(std::vector<unsigned char> &pixels)
     }
 }
 
+struct PreviewPixelSummary
+{
+    uint64_t hash = UINT64_C(1469598103934665603);
+    uint32_t nonTransparentPixelCount = 0;
+    uint8_t minRgb = 0;
+    uint8_t maxRgb = 0;
+};
+
+static PreviewPixelSummary SummarizePreviewPixels(const std::vector<unsigned char> &pixels)
+{
+    PreviewPixelSummary summary;
+    if (pixels.empty()) {
+        summary.hash = 0;
+        return summary;
+    }
+
+    uint8_t minRgb = 255;
+    uint8_t maxRgb = 0;
+    for (size_t index = 0; index < pixels.size(); ++index) {
+        const uint8_t value = pixels[index];
+        summary.hash ^= value;
+        summary.hash *= UINT64_C(1099511628211);
+        const size_t channel = index & 3u;
+        if (channel < 3u) {
+            minRgb = (std::min)(minRgb, value);
+            maxRgb = (std::max)(maxRgb, value);
+        } else if (value != 0) {
+            ++summary.nonTransparentPixelCount;
+        }
+    }
+    summary.minRgb = minRgb;
+    summary.maxRgb = maxRgb;
+    return summary;
+}
+
 uint64_t Infernux::QueryOrScheduleMaterialPreview(const std::string &resourceKey, const std::string &matFilePath,
                                                   const std::string &materialJson, uint64_t fileMtimeHint)
 {
@@ -1087,6 +1123,7 @@ int Infernux::PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown)
         std::vector<unsigned char> pixels;
         if (!m_renderer->TryCompleteMaterialPreviewGPU(completed.ticket, kMaterialPreviewSize, pixels))
             MaterialPreviewer::RenderCpuPreview(completed.material, kMaterialPreviewSize, pixels, assetDatabase);
+        const PreviewPixelSummary pixelSummary = SummarizePreviewPixels(pixels);
 
         std::string textureName;
         {
@@ -1116,6 +1153,11 @@ int Infernux::PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown)
                 it->second.pendingUploadVersion = uploadVersion;
                 it->second.pendingPreviewGeneration = completed.generation;
                 it->second.pendingSize = kMaterialPreviewSize;
+                it->second.pixelGeneration = completed.generation;
+                it->second.pixelHash = pixelSummary.hash;
+                it->second.nonTransparentPixelCount = pixelSummary.nonTransparentPixelCount;
+                it->second.minRgb = pixelSummary.minRgb;
+                it->second.maxRgb = pixelSummary.maxRgb;
                 m_hasPendingPreviewUploads.store(true, std::memory_order_release);
                 m_hasPreviewPumpWork.store(true, std::memory_order_release);
             }
@@ -1206,6 +1248,7 @@ int Infernux::PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown)
             textureName = it->second.textureName;
         }
         try {
+            const PreviewPixelSummary pixelSummary = SummarizePreviewPixels(pixels);
             const uint64_t uploadVersion =
                 m_renderer->SubmitTextureForImGui(textureName, pixels.data(), pixels.size(), kMaterialPreviewSize,
                                                   kMaterialPreviewSize, VK_FILTER_LINEAR);
@@ -1215,6 +1258,11 @@ int Infernux::PumpMaterialPreviewUploads(int uploadBudget, bool ignoreCooldown)
                 it->second.pendingUploadVersion = uploadVersion;
                 it->second.pendingPreviewGeneration = request.generation;
                 it->second.pendingSize = kMaterialPreviewSize;
+                it->second.pixelGeneration = request.generation;
+                it->second.pixelHash = pixelSummary.hash;
+                it->second.nonTransparentPixelCount = pixelSummary.nonTransparentPixelCount;
+                it->second.minRgb = pixelSummary.minRgb;
+                it->second.maxRgb = pixelSummary.maxRgb;
                 m_hasPendingPreviewUploads.store(true, std::memory_order_release);
                 m_hasPreviewPumpWork.store(true, std::memory_order_release);
             }
@@ -1402,6 +1450,7 @@ void Infernux::PumpPreviewTasks()
             if (stateSnapshot.textureName.empty())
                 continue;
 
+            const PreviewPixelSummary pixelSummary = SummarizePreviewPixels(completed.pixels);
             uint64_t uploadVersion = 0;
             try {
                 uploadVersion = m_renderer->SubmitTextureForImGui(
@@ -1426,6 +1475,11 @@ void Infernux::PumpPreviewTasks()
                 it->second.pendingPreviewGeneration = completed.generation;
                 it->second.pendingWidth = completed.width;
                 it->second.pendingHeight = completed.height;
+                it->second.pixelGeneration = completed.generation;
+                it->second.pixelHash = pixelSummary.hash;
+                it->second.nonTransparentPixelCount = pixelSummary.nonTransparentPixelCount;
+                it->second.minRgb = pixelSummary.minRgb;
+                it->second.maxRgb = pixelSummary.maxRgb;
                 m_hasPendingPreviewUploads.store(true, std::memory_order_release);
                 m_hasPreviewPumpWork.store(true, std::memory_order_release);
             }
@@ -1484,6 +1538,7 @@ void Infernux::PumpPreviewTasks()
             }
 
             try {
+                const PreviewPixelSummary pixelSummary = SummarizePreviewPixels(pixels);
                 const uint64_t uploadVersion = m_renderer->SubmitTextureForImGui(
                     textureName, pixels.data(), pixels.size(), kMeshPreviewSize, kMeshPreviewSize, VK_FILTER_LINEAR);
                 {
@@ -1493,6 +1548,11 @@ void Infernux::PumpPreviewTasks()
                         it->second.pendingUploadVersion = uploadVersion;
                         it->second.pendingPreviewGeneration = completed.generation;
                         it->second.pendingSize = kMeshPreviewSize;
+                        it->second.pixelGeneration = completed.generation;
+                        it->second.pixelHash = pixelSummary.hash;
+                        it->second.nonTransparentPixelCount = pixelSummary.nonTransparentPixelCount;
+                        it->second.minRgb = pixelSummary.minRgb;
+                        it->second.maxRgb = pixelSummary.maxRgb;
                         m_hasPendingPreviewUploads.store(true, std::memory_order_release);
                         m_hasPreviewPumpWork.store(true, std::memory_order_release);
                     }
@@ -1586,16 +1646,41 @@ bool Infernux::IsMaterialPreviewReady(const std::string &resourceKey) const
 
 std::vector<Infernux::PreviewTaskSnapshot> Infernux::GetPreviewTaskSnapshots() const
 {
+    std::unordered_map<uint64_t, uint32_t> imguiTextureUseCounts;
+    if (const ImDrawData *drawData = ImGui::GetDrawData(); drawData && drawData->Valid) {
+        for (int listIndex = 0; listIndex < drawData->CmdListsCount; ++listIndex) {
+            const ImDrawList *drawList = drawData->CmdLists[listIndex];
+            if (!drawList)
+                continue;
+            for (const ImDrawCmd &command : drawList->CmdBuffer) {
+                const ImTextureID textureId = command.GetTexID();
+                uint64_t value = 0;
+                static_assert(sizeof(textureId) <= sizeof(value));
+                std::memcpy(&value, &textureId, sizeof(textureId));
+                if (value != 0)
+                    ++imguiTextureUseCounts[value];
+            }
+        }
+    }
+
     std::vector<PreviewTaskSnapshot> snapshots;
     std::lock_guard<std::mutex> lock(m_previewResultMutex);
     snapshots.reserve(m_materialPreviewStates.size() + m_texturePreviewStates.size() + m_meshPreviewStates.size());
 
-    auto finish = [this](PreviewTaskSnapshot &snapshot) {
+    auto finish = [this, &imguiTextureUseCounts](PreviewTaskSnapshot &snapshot) {
         snapshot.textureId = LiveImGuiTextureId(m_renderer.get(), snapshot.textureName);
+        snapshot.imguiDrawCommandCount = imguiTextureUseCounts[snapshot.textureId];
         if (m_renderer) {
             snapshot.publishedUploadVersion = m_renderer->GetImGuiTextureVersion(snapshot.textureName);
             snapshot.failedUploadVersion = m_renderer->GetFailedImGuiTextureVersion(snapshot.textureName);
         }
+    };
+    const auto copyPixelSummary = [](PreviewTaskSnapshot &snapshot, const auto &state) {
+        snapshot.pixelGeneration = state.pixelGeneration;
+        snapshot.pixelHash = state.pixelHash;
+        snapshot.nonTransparentPixelCount = state.nonTransparentPixelCount;
+        snapshot.minRgb = state.minRgb;
+        snapshot.maxRgb = state.maxRgb;
     };
 
     for (const auto &[key, state] : m_materialPreviewStates) {
@@ -1614,6 +1699,7 @@ std::vector<Infernux::PreviewTaskSnapshot> Infernux::GetPreviewTaskSnapshots() c
         snapshot.pendingHeight = state.pendingSize;
         snapshot.readyWidth = state.readySize;
         snapshot.readyHeight = state.readySize;
+        copyPixelSummary(snapshot, state);
         finish(snapshot);
         snapshots.push_back(std::move(snapshot));
     }
@@ -1632,6 +1718,7 @@ std::vector<Infernux::PreviewTaskSnapshot> Infernux::GetPreviewTaskSnapshots() c
         snapshot.pendingHeight = state.pendingHeight;
         snapshot.readyWidth = state.readyWidth;
         snapshot.readyHeight = state.readyHeight;
+        copyPixelSummary(snapshot, state);
         finish(snapshot);
         snapshots.push_back(std::move(snapshot));
     }
@@ -1652,6 +1739,7 @@ std::vector<Infernux::PreviewTaskSnapshot> Infernux::GetPreviewTaskSnapshots() c
         snapshot.pendingHeight = state.pendingSize;
         snapshot.readyWidth = state.readySize;
         snapshot.readyHeight = state.readySize;
+        copyPixelSummary(snapshot, state);
         finish(snapshot);
         snapshots.push_back(std::move(snapshot));
     }

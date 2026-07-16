@@ -233,6 +233,7 @@ class TestMenuBarPanel:
 
         windows = mb.get_open_windows()
         assert windows["console"] is True
+        mb.invalidate_window_type_cache()
 
     def test_open_close_window(self):
         mb = MenuBarPanel()
@@ -373,6 +374,12 @@ class TestHierarchyPanel:
         assert hp.selection_count() == 1
         hp.clear_selection()
         assert hp.is_selection_empty()
+
+    def test_native_selection_and_runtime_hidden_snapshots(self):
+        hp = HierarchyPanel()
+        hp.set_selection_snapshot([10, 20], 20)
+        hp.set_runtime_hidden_ids({30, 40})
+        hp.set_scene_header_snapshot("Sample *", False, "")
 
     def test_on_selection_changed_callback(self):
         hp = HierarchyPanel()

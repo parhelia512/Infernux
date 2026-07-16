@@ -14,6 +14,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace infernux
@@ -78,6 +79,27 @@ struct RendererFrameTelemetrySnapshot
     double sceneUpdateMs = 0.0;
     double guiBuildMs = 0.0;
     double prepareFrameMs = 0.0;
+    std::unordered_map<std::string, double> guiPanelTimesMs;
+    std::unordered_map<std::string, std::unordered_map<std::string, double>> guiPanelSubTimesMs;
+};
+
+struct UIPerformanceMetricStats
+{
+    size_t sampleCount = 0;
+    double meanMs = 0.0;
+    double medianMs = 0.0;
+    double p95Ms = 0.0;
+    double maxMs = 0.0;
+};
+
+struct RendererUIPerformanceSnapshot
+{
+    uint64_t firstFrame = 0;
+    uint64_t lastFrame = 0;
+    size_t sampleCount = 0;
+    UIPerformanceMetricStats guiBuild;
+    std::unordered_map<std::string, UIPerformanceMetricStats> panelTimes;
+    std::unordered_map<std::string, std::unordered_map<std::string, UIPerformanceMetricStats>> panelSubTimes;
 };
 
 class InxRenderer
@@ -141,6 +163,7 @@ class InxRenderer
     [[nodiscard]] size_t TrimMeshGpuBudget();
     [[nodiscard]] GpuResidencySnapshot GetGpuResidencySnapshot() const;
     [[nodiscard]] RendererFrameTelemetrySnapshot GetFrameTelemetrySnapshot();
+    [[nodiscard]] RendererUIPerformanceSnapshot GetUIPerformanceSnapshot(size_t maxSamples = 240) const;
     [[nodiscard]] uint64_t GetGpuResidencyBudgetBytes() const;
     void SetGpuResidencyBudgetBytes(uint64_t bytes);
     [[nodiscard]] size_t TrimGpuResidencyBudget();
@@ -493,6 +516,19 @@ class InxRenderer
     double m_guiBuildMs = 0.0;       ///< GUI::BuildFrame (all ImGui panels) (ms)
     double m_prepareFrameMs = 0.0;   ///< PrepareFrame (collect/cull) (ms)
     double m_gameOnlyFrameMs = 0.0;  ///< Sum of game-only phases (ms)
+
+    static constexpr size_t UI_PERFORMANCE_HISTORY_SIZE = 240;
+    struct UIMetricHistory
+    {
+        std::array<double, UI_PERFORMANCE_HISTORY_SIZE> values{};
+        std::array<uint64_t, UI_PERFORMANCE_HISTORY_SIZE> frames{};
+    };
+    UIMetricHistory m_uiBuildHistory;
+    std::unordered_map<std::string, UIMetricHistory> m_uiPanelHistory;
+    std::unordered_map<std::string, std::unordered_map<std::string, UIMetricHistory>> m_uiPanelSubHistory;
+    size_t m_uiPerformanceWriteIndex = 0;
+    size_t m_uiPerformanceSampleCount = 0;
+    void RecordUIPerformanceFrame();
 
     /// Per-frame cached game camera pointer, lazily resolved once per frame
     /// by FindGameCameraCached() and cleared at the start of each DrawFrame.

@@ -349,6 +349,7 @@ def render_material_property(
 _native_mat = None
 _cached_data: Optional[dict] = None
 _shader_cache: dict = {".vert": None, ".frag": None}
+_surface_batch_plans: dict = {}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -427,139 +428,128 @@ def _render_shader_section(ctx, mat_data, state, is_builtin, default_open):
     return changed, requires_deserialize, requires_pipeline_refresh, change_key
 
 
-def _render_so_surface_and_cull(ctx, rs, mat_data, overrides, so_lw):
-    """Surface Type + Cull Mode options. Return *(overrides, change_key)*."""
-    change_key = ""
-    # Surface Type (Opaque / Transparent)
+def _render_surface_options_batch(ctx, rs, mat_data, overrides, so_lw):
+    """Render all steady-state surface controls through one native bridge call."""
+    entries = []
+
+    def add(key, desc):
+        entries.append((key, desc))
+
     surface_items = [t("material.opaque"), t("material.transparent")]
-    cur_surface = 1 if rs.get("blendEnable", False) else 0
-    field_label(ctx, t("material.surface_type"), so_lw)
-    new_surface = ctx.combo("##mat_surface_type", cur_surface, surface_items)
-    if new_surface != cur_surface:
-        if new_surface == 1:  # Transparent
-            rs["blendEnable"] = True
-            rs["srcColorBlendFactor"] = 6
-            rs["dstColorBlendFactor"] = 7
-            rs["colorBlendOp"] = 0
-            rs["srcAlphaBlendFactor"] = 0
-            rs["dstAlphaBlendFactor"] = 1
-            rs["alphaBlendOp"] = 0
-            rs["depthWriteEnable"] = False
-            rs["renderQueue"] = 3000
-            overrides |= 0x80 | 0x10 | 0x20 | 0x02 | 0x40
-        else:  # Opaque
-            rs["blendEnable"] = False
-            rs["depthWriteEnable"] = True
-            rs["renderQueue"] = 2000
-            overrides |= 0x80 | 0x10 | 0x02 | 0x40
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.surface_type"
-    # Cull Mode
+    add("surface", {"t": 7, "w": "##mat_surface_type", "n": t("material.surface_type"),
+                    "ei": 1 if rs.get("blendEnable", False) else 0, "en": surface_items})
+
     cull_items = [t("material.cull_none"), t("material.cull_front"), t("material.cull_back")]
-    cull_val = int(rs.get("cullMode", 2))
-    cull_idx = {0: 0, 1: 1, 2: 2}.get(cull_val, 2)
-    field_label(ctx, t("material.cull_mode"), so_lw)
-    new_cull_idx = ctx.combo("##mat_cull_mode", cull_idx, cull_items)
-    if new_cull_idx != cull_idx:
-        rs["cullMode"] = new_cull_idx
-        overrides |= 0x01
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.cull_mode"
-    return overrides, change_key
+    cull_idx = {0: 0, 1: 1, 2: 2}.get(int(rs.get("cullMode", 2)), 2)
+    add("cull", {"t": 7, "w": "##mat_cull_mode", "n": t("material.cull_mode"),
+                 "ei": cull_idx, "en": cull_items})
 
+    add("depth_write", {"t": 2, "w": "##mat_depth_write", "n": t("material.depth_write"),
+                        "b": bool(rs.get("depthWriteEnable", True)), "fl": True})
 
-def _render_so_depth_and_blend(ctx, rs, mat_data, overrides, so_lw):
-    """Depth Write + Depth Test + Blend Mode options. Return *(overrides, change_key)*."""
-    change_key = ""
-    # Depth Write
-    dw_val = rs.get("depthWriteEnable", True)
-    field_label(ctx, t("material.depth_write"), so_lw)
-    new_dw = ctx.checkbox("##mat_depth_write", dw_val)
-    if new_dw != dw_val:
-        rs["depthWriteEnable"] = new_dw
-        overrides |= 0x02
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.depth_write"
-    # Depth Test
-    compare_items = [t("material.compare_never"), t("material.compare_less"), t("material.compare_equal"), t("material.compare_less_equal"),
-                     t("material.compare_greater"), t("material.compare_not_equal"), t("material.compare_greater_equal"), t("material.compare_always")]
-    dt_enable = rs.get("depthTestEnable", True)
-    dt_op = int(rs.get("depthCompareOp", 1))
-    field_label(ctx, t("material.depth_test"), so_lw)
-    if dt_enable:
-        new_op = ctx.combo("##mat_depth_test", dt_op, compare_items)
-    else:
-        new_op = ctx.combo("##mat_depth_test", 7, ["Off"] + compare_items[1:])
-        new_op = 0 if new_op == 0 else new_op
-    if not dt_enable and new_op > 0:
-        rs["depthTestEnable"] = True
-        rs["depthCompareOp"] = new_op
-        overrides |= 0x04 | 0x08
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.depth_test"
-    elif dt_enable and new_op != dt_op:
-        rs["depthCompareOp"] = new_op
-        overrides |= 0x08
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.depth_test"
-    # Blend Mode (only visible when transparent)
+    compare_items = [t("material.compare_never"), t("material.compare_less"),
+                     t("material.compare_equal"), t("material.compare_less_equal"),
+                     t("material.compare_greater"), t("material.compare_not_equal"),
+                     t("material.compare_greater_equal"), t("material.compare_always")]
+    depth_enabled = bool(rs.get("depthTestEnable", True))
+    depth_op = int(rs.get("depthCompareOp", 1))
+    depth_names = compare_items if depth_enabled else ["Off"] + compare_items[1:]
+    add("depth_test", {"t": 7, "w": "##mat_depth_test", "n": t("material.depth_test"),
+                       "ei": depth_op if depth_enabled else 7, "en": depth_names})
+
     if rs.get("blendEnable", False):
-        blend_items = [t("material.blend_alpha"), t("material.blend_additive"), t("material.blend_premultiply")]
         src = int(rs.get("srcColorBlendFactor", 6))
         dst = int(rs.get("dstColorBlendFactor", 7))
-        if src == 1 and dst == 1:
-            cur_blend_idx = 1
-        elif src == 1 and dst == 7:
-            cur_blend_idx = 2
+        blend_idx = 1 if (src, dst) == (1, 1) else 2 if (src, dst) == (1, 7) else 0
+        add("blend", {"t": 7, "w": "##mat_blend_mode", "n": t("material.blend_mode"),
+                      "ei": blend_idx,
+                      "en": [t("material.blend_alpha"), t("material.blend_additive"),
+                             t("material.blend_premultiply")]})
+
+    alpha_clip = bool(rs.get("alphaClipEnabled", False))
+    add("alpha_clip", {"t": 2, "w": "##mat_alpha_clip", "n": t("material.alpha_clip"),
+                       "b": alpha_clip, "fl": True})
+    if alpha_clip:
+        add("alpha_threshold", {"t": 0, "w": "##mat_alpha_threshold", "n": t("material.threshold"),
+                                "f": float(rs.get("alphaClipThreshold", 0.5)),
+                                "mn": 0.0, "mx": 1.0, "sl": True})
+
+    is_transparent = bool(rs.get("blendEnable", False))
+    rq_min, rq_max = (2501, 5000) if is_transparent else (0, 2500)
+    rq = max(rq_min, min(int(rs.get("renderQueue", 2000)), rq_max))
+    add("render_queue", {"t": 1, "w": "##mat_render_queue", "n": t("material.render_queue"),
+                         "i": rq, "sp": 1.0, "mn": rq_min, "mx": rq_max})
+
+    plan_key = tuple(
+        (key, desc["t"], desc["w"], desc["n"], tuple(desc.get("en", ())),
+         desc.get("mn"), desc.get("mx"), desc.get("sp"), desc.get("sl"), desc.get("fl"))
+        for key, desc in entries
+    )
+    plan = _surface_batch_plans.get(plan_key)
+    if plan is None:
+        plan = ctx.create_property_batch_plan([desc for _, desc in entries])
+        _surface_batch_plans[plan_key] = plan
+
+    values = []
+    for _, desc in entries:
+        if desc["t"] == 0:
+            values.append(desc["f"])
+        elif desc["t"] == 1:
+            values.append(desc["i"])
+        elif desc["t"] == 2:
+            values.append(desc["b"])
         else:
-            cur_blend_idx = 0
-        field_label(ctx, t("material.blend_mode"), so_lw)
-        new_blend_idx = ctx.combo("##mat_blend_mode", cur_blend_idx, blend_items)
-        if new_blend_idx != cur_blend_idx:
-            _BLEND = {0: (6, 7), 1: (1, 1), 2: (1, 7)}
-            rs["srcColorBlendFactor"], rs["dstColorBlendFactor"] = _BLEND[new_blend_idx]
+            values.append(desc["ei"])
+    changes = ctx.render_property_batch_plan_values(plan, values, so_lw)
+    change_key = ""
+    for raw_index, value in changes.items():
+        key = entries[int(raw_index)][0]
+        if key == "surface":
+            if int(value) == 1:
+                rs.update({"blendEnable": True, "srcColorBlendFactor": 6,
+                           "dstColorBlendFactor": 7, "colorBlendOp": 0,
+                           "srcAlphaBlendFactor": 0, "dstAlphaBlendFactor": 1,
+                           "alphaBlendOp": 0, "depthWriteEnable": False,
+                           "renderQueue": 3000})
+            else:
+                rs.update({"blendEnable": False, "depthWriteEnable": True, "renderQueue": 2000})
+            overrides |= 0x80 | 0x10 | 0x20 | 0x02 | 0x40
+        elif key == "cull":
+            rs["cullMode"] = int(value)
+            overrides |= 0x01
+        elif key == "depth_write":
+            rs["depthWriteEnable"] = bool(value)
+            overrides |= 0x02
+        elif key == "depth_test":
+            new_op = int(value)
+            if not depth_enabled and new_op > 0:
+                rs["depthTestEnable"] = True
+                rs["depthCompareOp"] = new_op
+                overrides |= 0x04 | 0x08
+            elif depth_enabled and new_op != depth_op:
+                rs["depthCompareOp"] = new_op
+                overrides |= 0x08
+        elif key == "blend":
+            rs["srcColorBlendFactor"], rs["dstColorBlendFactor"] = {
+                0: (6, 7), 1: (1, 1), 2: (1, 7),
+            }[int(value)]
             rs["colorBlendOp"] = 0
             overrides |= 0x20
-            mat_data["renderStateOverrides"] = overrides
-            change_key = "render_state.blend_mode"
-    return overrides, change_key
-
-
-def _render_so_clip_and_queue(ctx, rs, mat_data, overrides, so_lw):
-    """Alpha Clip + Render Queue options. Return *(overrides, change_key)*."""
-    change_key = ""
-    # Alpha Clip
-    ac_enabled = rs.get("alphaClipEnabled", False)
-    ac_threshold = float(rs.get("alphaClipThreshold", 0.5))
-    field_label(ctx, t("material.alpha_clip"), so_lw)
-    new_ac = ctx.checkbox("##mat_alpha_clip", ac_enabled)
-    if new_ac != ac_enabled:
-        rs["alphaClipEnabled"] = new_ac
-        if new_ac and "alphaClipThreshold" not in rs:
-            rs["alphaClipThreshold"] = 0.5
-        overrides |= 0x100
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.alpha_clip"
-    if rs.get("alphaClipEnabled", False):
-        field_label(ctx, t("material.threshold"), so_lw)
-        new_threshold = ctx.float_slider("##mat_alpha_threshold", ac_threshold, 0.0, 1.0)
-        if abs(new_threshold - ac_threshold) > 1e-5:
-            rs["alphaClipThreshold"] = new_threshold
+        elif key == "alpha_clip":
+            rs["alphaClipEnabled"] = bool(value)
+            if value and "alphaClipThreshold" not in rs:
+                rs["alphaClipThreshold"] = 0.5
             overrides |= 0x100
-            mat_data["renderStateOverrides"] = overrides
-            change_key = "render_state.alpha_threshold"
-    # Render Queue
-    is_transparent = rs.get("blendEnable", False)
-    rq_min, rq_max = (2501, 5000) if is_transparent else (0, 2500)
-    rq = int(rs.get("renderQueue", 2000))
-    rq = max(rq_min, min(rq, rq_max))
-    field_label(ctx, t("material.render_queue"), so_lw)
-    new_rq = int(ctx.drag_int("##mat_render_queue", rq, 1.0, rq_min, rq_max))
-    if new_rq != rq:
-        rs["renderQueue"] = new_rq
-        overrides |= 0x40
+        elif key == "alpha_threshold":
+            rs["alphaClipThreshold"] = float(value)
+            overrides |= 0x100
+        elif key == "render_queue":
+            rs["renderQueue"] = int(value)
+            overrides |= 0x40
+        change_key = f"render_state.{key}"
+
+    if change_key:
         mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.render_queue"
     return overrides, change_key
 
 
@@ -586,16 +576,11 @@ def _render_surface_options_section(ctx, mat_data, is_builtin, default_open):
                      t("material.render_queue")]
         so_lw = max_label_w(ctx, so_labels)
 
-        overrides, ck1 = _render_so_surface_and_cull(ctx, rs, mat_data, overrides, so_lw)
-        overrides, ck2 = _render_so_depth_and_blend(ctx, rs, mat_data, overrides, so_lw)
-        overrides, ck3 = _render_so_clip_and_queue(ctx, rs, mat_data, overrides, so_lw)
-
-        for ck in (ck1, ck2, ck3):
-            if ck:
-                changed = True
-                change_key = ck
-                requires_deserialize = True
-                requires_pipeline_refresh = True
+        overrides, change_key = _render_surface_options_batch(ctx, rs, mat_data, overrides, so_lw)
+        if change_key:
+            changed = True
+            requires_deserialize = True
+            requires_pipeline_refresh = True
 
     _record_profile_timing("materialSurface", section_t0)
     if is_builtin:

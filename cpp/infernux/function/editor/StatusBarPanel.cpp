@@ -1,5 +1,6 @@
 #include "StatusBarPanel.h"
 #include "ConsolePanel.h"
+#include <function/renderer/gui/InxGUISemantics.h>
 
 #include <algorithm>
 #include <cstring>
@@ -113,6 +114,8 @@ void StatusBarPanel::RenderContent(InxGUIContext *ctx, float dispW)
         if (m_console)
             m_console->SelectLatestEntry();
     }
+    if (InxGUISemantics::IsCaptureEnabled())
+        ctx->RecordSemanticItem("status_console", "Console", true, "status.console");
     ImGui::PopStyleColor(3);
 
     // Overlay text on top of the invisible button

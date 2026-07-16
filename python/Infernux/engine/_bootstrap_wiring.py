@@ -133,6 +133,8 @@ class BootstrapWiringMixin:
             return wm.get_open_windows()
 
         mb.get_registered_types = _get_registered_types
+        wm.add_type_change_listener(mb.invalidate_window_type_cache)
+        mb.invalidate_window_type_cache()
         mb.get_open_windows = _get_open_windows
         mb.open_window = lambda tid: wm.open_window(tid)
         mb.close_window = lambda tid: wm.close_window(tid)
@@ -209,6 +211,7 @@ class BootstrapWiringMixin:
 
         # Subscribe to DebugConsole for latest message + count updates
         from Infernux.debug import DebugConsole, LogType
+        from Infernux.engine.i18n import t as _t
         from Infernux.engine.ui.console_utils import is_internal, sanitize_text
 
         def _on_log_entry(entry):
@@ -234,17 +237,35 @@ class BootstrapWiringMixin:
             _on_log_entry(entry)
         console.add_listener(_on_log_entry)
 
-        # Register a lightweight renderable that syncs EngineStatus each frame
-        from Infernux.lib import InxGUIRenderable, InxGUIContext
+        # Fold status expiry/synchronization into the existing Python frame tick.
+        # A separate Python ImGui renderable would add another C++/Python virtual
+        # dispatch every frame even though status text changes rarely.
         from Infernux.engine.ui.engine_status import EngineStatus
 
-        class _EngineStatusSync(InxGUIRenderable):
-            def on_render(self, ctx: InxGUIContext):
-                text, progress = EngineStatus.get()
+        last_status = [None]
+        last_hierarchy_header = [None]
+
+        def _sync_engine_status():
+            state = EngineStatus.get()
+            if state != last_status[0]:
+                last_status[0] = state
+                text, progress = state
                 sb.set_engine_status(text, progress)
 
-        self._engine_status_sync = _EngineStatusSync()
-        self.engine.register_gui("engine_status_sync", self._engine_status_sync)
+            sfm = self.scene_file_manager
+            prefab_mode = bool(sfm and sfm.is_prefab_mode)
+            scene_name = sfm.get_display_name() if sfm else ""
+            prefab_name = (
+                _t("hierarchy.prefab_mode_header").format(name=scene_name)
+                if prefab_mode else ""
+            )
+            header_state = (scene_name, prefab_mode, prefab_name)
+            if header_state != last_hierarchy_header[0]:
+                last_hierarchy_header[0] = header_state
+                self.hierarchy.set_scene_header_snapshot(*header_state)
+
+        self.engine._editor_frame_sync_callback = _sync_engine_status
+        _sync_engine_status()
 
     def _wire_hierarchy_callbacks(self):
         """Wire C++ HierarchyPanel callbacks to Python managers."""

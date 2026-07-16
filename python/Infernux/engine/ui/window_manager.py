@@ -87,6 +87,7 @@ class WindowManager:
         self._builtin_defaults: set = set()  # window_ids that should reopen on reset
         self._project_console_front_id = "project"
         self._on_state_changed: Optional[Callable[[], None]] = None
+        self._type_change_listeners: list[Callable[[], None]] = []
         self._imgui_ini_path: Optional[str] = None
         self._pending_actions: Deque[Callable[[], None]] = deque()
         self._is_processing_actions = False
@@ -137,6 +138,20 @@ class WindowManager:
     def _notify_state_changed(self):
         if self._on_state_changed is not None:
             self._on_state_changed()
+
+    def add_type_change_listener(self, callback: Callable[[], None]) -> None:
+        if callback not in self._type_change_listeners:
+            self._type_change_listeners.append(callback)
+
+    def remove_type_change_listener(self, callback: Callable[[], None]) -> None:
+        try:
+            self._type_change_listeners.remove(callback)
+        except ValueError:
+            pass
+
+    def _notify_type_changed(self) -> None:
+        for callback in tuple(self._type_change_listeners):
+            callback()
 
     def note_panel_focus(self, panel_id: str):
         if panel_id not in self._window_states:
@@ -192,6 +207,7 @@ class WindowManager:
             title_key=title_key,
             menu_path=menu_path,
         )
+        self._notify_type_changed()
     
     def open_window(self, type_id: str, instance_id: Optional[str] = None) -> Optional[InxGUIRenderable]:
         """

@@ -172,3 +172,29 @@ def test_game_viewport_does_not_steal_clicks_through_a_floating_window(monkeypat
     assert ctx.invisible_button_calls == [("##GameViewportInput", 320.0, 180.0)]
     assert route_calls[0][3] is False
     assert route_calls[0][4] is False
+
+
+def test_game_viewport_activates_on_mouse_down_before_imgui_button_release(monkeypatch):
+    import Infernux.engine.ui.game_view_panel as module
+
+    monkeypatch.setattr(module, "_SM", SimpleNamespace(instance=lambda: SimpleNamespace(get_active_scene=lambda: None)))
+    monkeypatch.setattr(module, "collect_sorted_canvases", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        module,
+        "capture_viewport_info",
+        lambda _ctx: SimpleNamespace(image_min_x=0.0, image_min_y=0.0),
+    )
+
+    panel = GameViewPanel(engine=_Engine())
+    panel._fit_mode = False
+    panel._display_scale = 1.0
+    panel._render_screen_ui = lambda *_args, **_kwargs: None
+    route_calls: list[tuple] = []
+    panel._route_game_input = lambda *_args: route_calls.append(_args)
+    ctx = _Context(window_hovered=True, mouse_clicked=True)
+    ctx.invisible_button = lambda *_args: False
+
+    panel._render_game_viewport(ctx, 320, 180, 1.0)
+
+    assert route_calls[0][3] is True
+    assert route_calls[0][4] is True

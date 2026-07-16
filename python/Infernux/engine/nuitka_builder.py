@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import queue
 import re
 import shutil
@@ -25,7 +26,8 @@ import sys
 import tempfile
 import threading
 import time
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 from typing import Callable, List, Optional
 
 from Infernux.debug import Debug
@@ -40,8 +42,19 @@ _STAGING_ROOT = "C:\\_InxBuild"
 _NUITKA_CACHE_DIR = os.path.join(_STAGING_ROOT, "_nuitka_cache")
 _RUNTIME_PACK_DIR = os.path.join(_STAGING_ROOT, "_runtime_packs")
 _REQUIREMENTS_STATE_DIR = os.path.join(_STAGING_ROOT, "_requirements_state")
-_RUNTIME_PACK_SCHEMA_VERSION = 1
+_RUNTIME_PACK_SCHEMA_VERSION = 4
 _MAX_RUNTIME_PACKS = 4
+_RUNTIME_HASH_STATE_FILENAME = "content-hashes.json"
+_RUNTIME_ARCHIVE_FILENAME = "runtime-pack.zip"
+_PACKAGED_RUNTIME_DIRNAME = "_runtime_packs"
+_RUNTIME_MODULE_SCHEMA_VERSION = 1
+_RUNTIME_MODULE_ARCHIVE_FILENAME = "parallel-module.zip"
+_RUNTIME_MODULE_MANIFEST_FILENAME = "parallel-module.json"
+_PACKAGED_RUNTIME_MODULE_DIRNAME = "_runtime_modules"
+_RELEASE_ARCHIVE_COMPRESSION_LEVEL = 9
+_RUNTIME_PACK_FORBIDDEN_SUFFIXES = frozenset(
+    {".bak", ".exp", ".lib", ".meta", ".pdb", ".pyc", ".pyi", ".pyo"}
+)
 
 _AUTO_INSTALLABLE_PACKAGES = {
     "nuitka": "nuitka",
@@ -894,9 +907,11 @@ class NuitkaBuilder:
         extra_include_data: Optional[List[str]] = None,
         extra_requirements_files: Optional[List[str]] = None,
         raw_copy_packages: Optional[List[str]] = None,
+        runtime_support_packages: Optional[List[str]] = None,
         console_mode: str = "disable",
         lto: bool = True,
         runtime_pack_cache: bool = False,
+        packaged_runtime_lookup: bool = True,
     ):
         self.entry_script = os.path.abspath(entry_script)
         self.output_dir = os.path.abspath(output_dir)
@@ -911,6 +926,10 @@ class NuitkaBuilder:
         self.console_mode = console_mode
         self.lto = lto
         self.runtime_pack_cache = bool(runtime_pack_cache)
+        self.packaged_runtime_lookup = bool(packaged_runtime_lookup)
+        self.last_runtime_pack_key = ""
+        self.last_runtime_compatibility_key = ""
+        self._engine_fingerprint_cache = ""
         self.extra_include_packages = [
             pkg for pkg in list(extra_include_packages or [])
             if not self._is_game_build_excluded_package(pkg)
@@ -921,7 +940,8 @@ class NuitkaBuilder:
             for path in list(extra_requirements_files or [])
             if path
         ]
-        self.raw_copy_packages = list(raw_copy_packages or [])
+        self.raw_copy_packages = sorted(set(raw_copy_packages or []))
+        self.runtime_support_packages = sorted(set(runtime_support_packages or []))
 
         # Staging directory — unique per build to allow parallel builds
         tag = hashlib.md5(self.output_dir.encode()).hexdigest()[:8]
@@ -941,6 +961,8 @@ class NuitkaBuilder:
         self,
         on_progress: Optional[Callable[[str, float], None]] = None,
         cancel_event: Optional[threading.Event] = None,
+        *,
+        force_runtime_rebuild: bool = False,
     ) -> str:
         """Run Nuitka compilation.  Returns the dist directory path."""
         import time as _time
@@ -972,7 +994,15 @@ class NuitkaBuilder:
         _p(f"cmd: {' '.join(cmd)}", 0.05)
 
         runtime_pack_key = self._runtime_pack_fingerprint(cmd) if self.runtime_pack_cache else ""
-        dist_dir = self._restore_runtime_pack(runtime_pack_key) if runtime_pack_key else None
+        compatibility_key = self._runtime_pack_compatibility_key() if runtime_pack_key else ""
+        self.last_runtime_pack_key = runtime_pack_key
+        self.last_runtime_compatibility_key = compatibility_key
+        dist_dir = None
+        if runtime_pack_key and not force_runtime_rebuild:
+            dist_dir = self._restore_runtime_pack(
+                runtime_pack_key,
+                compatibility_key=compatibility_key if self.packaged_runtime_lookup else "",
+            )
         if dist_dir is None:
             _p(t("build.step.running_nuitka"), 0.10)
             dist_dir = self._run_nuitka(cmd, on_progress, cancel_event)
@@ -993,7 +1023,12 @@ class NuitkaBuilder:
 
             if runtime_pack_key:
                 _p("Caching reusable Infernux Runtime Pack", 0.94)
-                self._store_runtime_pack(runtime_pack_key, dist_dir)
+                self._store_runtime_pack(
+                    runtime_pack_key,
+                    dist_dir,
+                    compatibility_key=compatibility_key,
+                    overwrite=force_runtime_rebuild,
+                )
         else:
             _p("Reused prebuilt Infernux Runtime Pack", 0.94)
 
@@ -1007,13 +1042,15 @@ class NuitkaBuilder:
         """Fingerprint every input that can change a reusable Player runtime."""
         digest = hashlib.sha256()
         digest.update(f"runtime-pack-v{_RUNTIME_PACK_SCHEMA_VERSION}\0".encode("ascii"))
-        digest.update(os.path.normcase(os.path.abspath(self._builder_python)).encode("utf-8"))
-
         normalized_command = []
-        for argument in cmd:
+        for index, argument in enumerate(cmd):
             value = str(argument)
+            if index == 0:
+                value = "<PYTHON>"
             value = value.replace(self._staging_dir, "<STAGING>")
             value = value.replace(getattr(self, "_staged_entry", ""), "<ENTRY>")
+            if value.startswith("--jobs="):
+                value = "--jobs=<AUTO>"
             normalized_command.append(value)
         digest.update(json.dumps(normalized_command, sort_keys=True).encode("utf-8"))
 
@@ -1024,29 +1061,236 @@ class NuitkaBuilder:
                 with open(requirement_file, "rb") as source:
                     digest.update(source.read())
 
+        digest.update(self._builder_environment_fingerprint())
+
+        digest.update(self._engine_content_fingerprint().encode("ascii"))
+        return digest.hexdigest()
+
+    def _runtime_pack_compatibility_key(self) -> str:
+        """Return a machine-independent key for a wheel-shipped Player pack."""
+        requirements: list[dict[str, str]] = []
+        for requirement_file in sorted(self.extra_requirements_files):
+            if not os.path.isfile(requirement_file):
+                continue
+            requirements.append({
+                "name": os.path.basename(requirement_file),
+                "sha256": self._hash_file(Path(requirement_file)),
+            })
+        payload = {
+            "schema_version": _RUNTIME_PACK_SCHEMA_VERSION,
+            "python_abi": f"cp{sys.version_info.major}{sys.version_info.minor}",
+            "platform": sys.platform,
+            "machine": platform.machine().lower(),
+            "console_mode": self.console_mode,
+            "lto": bool(self.lto),
+            "archive_compression_level": _RELEASE_ARCHIVE_COMPRESSION_LEVEL,
+            "include_packages": sorted(self.extra_include_packages),
+            "include_data": sorted(self.extra_include_data),
+            "raw_packages": sorted(self.raw_copy_packages),
+            "runtime_support_packages": sorted(
+                getattr(self, "runtime_support_packages", [])
+            ),
+            "requirements": requirements,
+            "icon_sha256": (
+                self._hash_file(Path(self.icon_path))
+                if self.icon_path and os.path.isfile(self.icon_path)
+                else ""
+            ),
+            "engine_fingerprint": self._engine_content_fingerprint(),
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _hash_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _engine_content_fingerprint(self) -> str:
+        if getattr(self, "_engine_fingerprint_cache", ""):
+            return self._engine_fingerprint_cache
+
         import Infernux
 
+        digest = hashlib.sha256()
         package_root = Path(Infernux.__file__).resolve().parent
-        relevant_suffixes = {".py", ".pyd", ".dll", ".so", ".dylib", ".json", ".glsl", ".vert", ".frag", ".shadingmodel"}
+        hash_state = self._load_runtime_hash_state()
+        live_hash_keys: set[str] = set()
         for path in sorted(package_root.rglob("*")):
-            if not path.is_file() or path.suffix.lower() not in relevant_suffixes:
+            if not path.is_file():
                 continue
             relative = path.relative_to(package_root).as_posix()
-            if "/__pycache__/" in f"/{relative}/" or relative.endswith(".pyi"):
+            if (
+                "/__pycache__/" in f"/{relative}/"
+                or relative == _PACKAGED_RUNTIME_DIRNAME
+                or relative.startswith(f"{_PACKAGED_RUNTIME_DIRNAME}/")
+                or relative == _PACKAGED_RUNTIME_MODULE_DIRNAME
+                or relative.startswith(f"{_PACKAGED_RUNTIME_MODULE_DIRNAME}/")
+                or relative == "test"
+                or relative.startswith("test/")
+                or path.suffix.lower()
+                in {".pyc", ".pdb", ".lib", ".exp", ".meta", ".bak"}
+                or relative.endswith(".pyi")
+            ):
                 continue
             digest.update(relative.encode("utf-8"))
-            with path.open("rb") as source:
-                for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                    digest.update(chunk)
-        return digest.hexdigest()
+            content_hash, state_key = self._cached_file_hash(path, hash_state)
+            live_hash_keys.add(state_key)
+            digest.update(content_hash.encode("ascii"))
+        self._store_runtime_hash_state(
+            {key: value for key, value in hash_state.items() if key in live_hash_keys}
+        )
+        self._engine_fingerprint_cache = digest.hexdigest()
+        return self._engine_fingerprint_cache
+
+    def _builder_environment_fingerprint(self) -> bytes:
+        package_names = sorted({
+            "nuitka",
+            *(name.split(".", 1)[0] for name in self.extra_include_packages),
+            *(name.split(".", 1)[0] for name in self.raw_copy_packages),
+            *(
+                name.split(".", 1)[0]
+                for name in getattr(self, "runtime_support_packages", [])
+            ),
+        })
+        script = f"""
+import importlib.metadata as metadata
+import json
+import platform
+import sys
+
+versions = {{}}
+for name in {package_names!r}:
+    try:
+        versions[name] = metadata.version(name)
+    except metadata.PackageNotFoundError:
+        versions[name] = "<missing>"
+print(json.dumps({{
+    "executable": sys.executable,
+    "version": sys.version,
+    "platform": platform.platform(),
+    "packages": versions,
+}}, sort_keys=True))
+"""
+        try:
+            result = _run_python(self._builder_python, ["-c", script], timeout=30)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip().encode("utf-8")
+        except Exception as exc:
+            Debug.log_warning(f"Runtime Pack environment fingerprint failed: {exc}")
+        return (
+            f"{self._builder_python}\0{sys.version}\0{sys.platform}"
+        ).encode("utf-8")
+
+    @staticmethod
+    def _runtime_hash_state_path() -> str:
+        return os.path.join(_RUNTIME_PACK_DIR, _RUNTIME_HASH_STATE_FILENAME)
+
+    def _load_runtime_hash_state(self) -> dict[str, dict]:
+        try:
+            with open(self._runtime_hash_state_path(), "r", encoding="utf-8") as state_file:
+                state = json.load(state_file)
+            return state if isinstance(state, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    @staticmethod
+    def _cached_file_hash(path: Path, state: dict[str, dict]) -> tuple[str, str]:
+        stat = path.stat()
+        key = os.path.normcase(os.path.abspath(path))
+        cached = state.get(key, {})
+        if (
+            cached.get("size") == stat.st_size
+            and cached.get("mtime_ns") == stat.st_mtime_ns
+            and isinstance(cached.get("sha256"), str)
+        ):
+            return cached["sha256"], key
+
+        file_digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                file_digest.update(chunk)
+        value = file_digest.hexdigest()
+        state[key] = {
+            "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+            "sha256": value,
+        }
+        return value, key
+
+    def _store_runtime_hash_state(self, state: dict[str, dict]) -> None:
+        os.makedirs(_RUNTIME_PACK_DIR, exist_ok=True)
+        state_path = self._runtime_hash_state_path()
+        temporary = state_path + f".{os.getpid()}.tmp"
+        try:
+            with open(temporary, "w", encoding="utf-8") as state_file:
+                json.dump(state, state_file, sort_keys=True)
+            os.replace(temporary, state_path)
+        finally:
+            try:
+                os.remove(temporary)
+            except FileNotFoundError:
+                pass
 
     def _runtime_pack_path(self, runtime_pack_key: str) -> str:
         return os.path.join(_RUNTIME_PACK_DIR, runtime_pack_key)
 
-    def _restore_runtime_pack(self, runtime_pack_key: str) -> Optional[str]:
-        pack_root = self._runtime_pack_path(runtime_pack_key)
+    def _restore_runtime_pack(
+        self,
+        runtime_pack_key: str,
+        *,
+        compatibility_key: str = "",
+    ) -> Optional[str]:
+        restored = self._restore_runtime_pack_root(
+            self._runtime_pack_path(runtime_pack_key),
+            expected_fingerprint=runtime_pack_key,
+            touch_manifest=True,
+        )
+        if restored is not None or not compatibility_key:
+            return restored
+
+        for root in self._packaged_runtime_roots():
+            restored = self._restore_runtime_pack_root(
+                os.path.join(root, compatibility_key),
+                expected_compatibility_key=compatibility_key,
+                expected_engine_fingerprint=self._engine_content_fingerprint(),
+                touch_manifest=False,
+            )
+            if restored is not None:
+                Debug.log_internal(
+                    f"Packaged Runtime Pack hit: {compatibility_key[:16]} ({root})"
+                )
+                return restored
+        return None
+
+    @staticmethod
+    def _packaged_runtime_roots() -> list[str]:
+        roots: list[str] = []
+        configured = os.environ.get("INFERNUX_PREBUILT_RUNTIME_PACK_DIR", "")
+        if configured:
+            roots.append(os.path.abspath(os.path.expanduser(configured)))
+        try:
+            import Infernux
+
+            roots.append(str(Path(Infernux.__file__).resolve().parent / _PACKAGED_RUNTIME_DIRNAME))
+        except (ImportError, OSError):
+            pass
+        return list(dict.fromkeys(roots))
+
+    def _restore_runtime_pack_root(
+        self,
+        pack_root: str,
+        *,
+        expected_fingerprint: str = "",
+        expected_compatibility_key: str = "",
+        expected_engine_fingerprint: str = "",
+        touch_manifest: bool = False,
+    ) -> Optional[str]:
         manifest_path = os.path.join(pack_root, "runtime-pack.json")
-        source_dist = os.path.join(pack_root, "dist")
+        archive_path = os.path.join(pack_root, _RUNTIME_ARCHIVE_FILENAME)
         try:
             with open(manifest_path, "r", encoding="utf-8") as manifest_file:
                 manifest = json.load(manifest_file)
@@ -1054,29 +1298,81 @@ class NuitkaBuilder:
             return None
         if (
             manifest.get("schema_version") != _RUNTIME_PACK_SCHEMA_VERSION
-            or manifest.get("fingerprint") != runtime_pack_key
-            or not os.path.isdir(source_dist)
+            or (expected_fingerprint and manifest.get("fingerprint") != expected_fingerprint)
+            or (
+                expected_compatibility_key
+                and manifest.get("compatibility_key") != expected_compatibility_key
+            )
+            or (
+                expected_engine_fingerprint
+                and manifest.get("engine_fingerprint") != expected_engine_fingerprint
+            )
+            or not os.path.isfile(archive_path)
+            or manifest.get("archive_bytes") != os.path.getsize(archive_path)
         ):
             return None
 
+        expected_sha256 = manifest.get("archive_sha256", "")
+        if not expected_sha256 or self._hash_file(Path(archive_path)) != expected_sha256:
+            Debug.log_warning(f"Runtime Pack checksum mismatch: {archive_path}")
+            return None
+
         destination = os.path.join(self._staging_dir, "boot.dist")
+        temporary = destination + f".{os.getpid()}.tmp"
         shutil.rmtree(destination, ignore_errors=True)
-        shutil.copytree(source_dist, destination)
+        shutil.rmtree(temporary, ignore_errors=True)
         try:
-            os.utime(manifest_path, None)
-        except OSError:
-            pass
-        Debug.log_internal(f"Runtime Pack cache hit: {runtime_pack_key[:16]}")
+            os.makedirs(temporary, exist_ok=False)
+            with zipfile.ZipFile(archive_path, "r") as archive:
+                entries = archive.infolist()
+                files = [info for info in entries if not info.is_dir()]
+                if manifest.get("file_count") != len(files) or manifest.get(
+                    "uncompressed_bytes"
+                ) != sum(info.file_size for info in files):
+                    raise ValueError("Runtime Pack archive does not match its manifest")
+                for info in entries:
+                    normalized = info.filename.replace("\\", "/")
+                    parts = PurePosixPath(normalized).parts
+                    if (
+                        normalized.startswith("/")
+                        or ".." in parts
+                        or (parts and ":" in parts[0])
+                    ):
+                        raise ValueError(f"Unsafe Runtime Pack entry: {info.filename}")
+                archive.extractall(temporary)
+            os.replace(temporary, destination)
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            shutil.rmtree(temporary, ignore_errors=True)
+            Debug.log_warning(f"Runtime Pack restore failed: {exc}")
+            return None
+        if touch_manifest:
+            try:
+                os.utime(manifest_path, None)
+            except OSError:
+                pass
+        Debug.log_internal(f"Runtime Pack cache hit: {manifest.get('fingerprint', '')[:16]}")
         return destination
 
-    def _store_runtime_pack(self, runtime_pack_key: str, dist_dir: str) -> None:
+    def _store_runtime_pack(
+        self,
+        runtime_pack_key: str,
+        dist_dir: str,
+        *,
+        compatibility_key: str = "",
+        overwrite: bool = False,
+    ) -> None:
         os.makedirs(_RUNTIME_PACK_DIR, exist_ok=True)
         pack_root = self._runtime_pack_path(runtime_pack_key)
         marker = {
             "schema_version": _RUNTIME_PACK_SCHEMA_VERSION,
             "fingerprint": runtime_pack_key,
+            "compatibility_key": compatibility_key,
+            "engine_fingerprint": self._engine_content_fingerprint(),
             "python_abi": f"cp{sys.version_info.major}{sys.version_info.minor}",
             "platform": sys.platform,
+            "machine": platform.machine().lower(),
+            "console_mode": self.console_mode,
+            "lto": bool(self.lto),
             "created_at": time.time(),
         }
         with open(os.path.join(dist_dir, "_infernux_runtime_pack.json"), "w", encoding="utf-8") as marker_file:
@@ -1084,12 +1380,47 @@ class NuitkaBuilder:
             marker_file.write("\n")
 
         if os.path.isdir(pack_root):
-            return
+            existing_archive = os.path.join(pack_root, _RUNTIME_ARCHIVE_FILENAME)
+            existing_manifest = os.path.join(pack_root, "runtime-pack.json")
+            if not overwrite and os.path.isfile(existing_archive) and os.path.isfile(existing_manifest):
+                return
+            shutil.rmtree(pack_root, ignore_errors=True)
         temporary = pack_root + f".{os.getpid()}.tmp"
         shutil.rmtree(temporary, ignore_errors=True)
         try:
             os.makedirs(temporary, exist_ok=False)
-            shutil.copytree(dist_dir, os.path.join(temporary, "dist"))
+            archive_path = os.path.join(temporary, _RUNTIME_ARCHIVE_FILENAME)
+            file_count = 0
+            uncompressed_bytes = 0
+            with zipfile.ZipFile(
+                archive_path,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+                compresslevel=_RELEASE_ARCHIVE_COMPRESSION_LEVEL,
+                allowZip64=True,
+            ) as archive:
+                for source_path in sorted(Path(dist_dir).rglob("*")):
+                    if not source_path.is_file():
+                        continue
+                    if source_path.suffix.lower() in _RUNTIME_PACK_FORBIDDEN_SUFFIXES:
+                        continue
+                    relative = source_path.relative_to(dist_dir).as_posix()
+                    archive.write(source_path, relative)
+                    file_count += 1
+                    uncompressed_bytes += source_path.stat().st_size
+            archive_bytes = os.path.getsize(archive_path)
+            archive_digest = hashlib.sha256()
+            with open(archive_path, "rb") as archive_file:
+                for chunk in iter(lambda: archive_file.read(1024 * 1024), b""):
+                    archive_digest.update(chunk)
+            marker.update({
+                "archive": _RUNTIME_ARCHIVE_FILENAME,
+                "archive_sha256": archive_digest.hexdigest(),
+                "archive_bytes": archive_bytes,
+                "uncompressed_bytes": uncompressed_bytes,
+                "file_count": file_count,
+                "compression": f"zip-deflate-{_RELEASE_ARCHIVE_COMPRESSION_LEVEL}",
+            })
             with open(os.path.join(temporary, "runtime-pack.json"), "w", encoding="utf-8") as manifest_file:
                 json.dump(marker, manifest_file, indent=2, sort_keys=True)
                 manifest_file.write("\n")
@@ -1099,9 +1430,242 @@ class NuitkaBuilder:
                 if not os.path.isdir(pack_root):
                     raise
             self._prune_runtime_packs()
-            Debug.log_internal(f"Runtime Pack cached: {runtime_pack_key[:16]}")
+            ratio = archive_bytes / max(1, uncompressed_bytes)
+            Debug.log_internal(
+                f"Runtime Pack cached: {runtime_pack_key[:16]} "
+                f"({file_count} files, {ratio:.1%} of source size)"
+            )
         finally:
             shutil.rmtree(temporary, ignore_errors=True)
+
+    def export_runtime_pack(self, destination_root: str) -> str:
+        """Copy the most recently built pack into a wheel package-data root."""
+        if not self.last_runtime_pack_key or not self.last_runtime_compatibility_key:
+            raise RuntimeError("build() must complete before exporting a Runtime Pack")
+        source = Path(self._runtime_pack_path(self.last_runtime_pack_key))
+        if not source.is_dir():
+            raise RuntimeError(f"Runtime Pack cache is missing: {source}")
+
+        destination = Path(destination_root).resolve() / self.last_runtime_compatibility_key
+        temporary = destination.with_name(destination.name + f".{os.getpid()}.tmp")
+        shutil.rmtree(temporary, ignore_errors=True)
+        temporary.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, temporary)
+        if destination.exists():
+            shutil.rmtree(destination)
+        os.replace(temporary, destination)
+        return str(destination)
+
+    def export_runtime_module(
+        self,
+        destination_root: str,
+        *,
+        module_name: str = "parallel",
+        packages: Optional[List[str]] = None,
+    ) -> str:
+        """Build a wheel-shipped optional runtime module from raw packages."""
+        if module_name != "parallel":
+            raise ValueError(f"Unsupported Runtime Module: {module_name}")
+        if not self.last_runtime_compatibility_key:
+            raise RuntimeError("build() must complete before exporting a Runtime Module")
+
+        selected_packages = sorted(set(packages or ["numba", "llvmlite"]))
+        destination = (
+            Path(destination_root).resolve() / self.last_runtime_compatibility_key
+        )
+        temporary = destination.with_name(destination.name + f".{os.getpid()}.tmp")
+        payload_root = Path(tempfile.mkdtemp(prefix="infernux-runtime-module-"))
+        shutil.rmtree(temporary, ignore_errors=True)
+        try:
+            self._inject_jit_packages(str(payload_root), packages=selected_packages)
+            temporary.mkdir(parents=True, exist_ok=False)
+            archive_path = temporary / _RUNTIME_MODULE_ARCHIVE_FILENAME
+            file_count = 0
+            uncompressed_bytes = 0
+            with zipfile.ZipFile(
+                archive_path,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+                compresslevel=_RELEASE_ARCHIVE_COMPRESSION_LEVEL,
+                allowZip64=True,
+            ) as archive:
+                for source_path in sorted(payload_root.rglob("*")):
+                    if not source_path.is_file():
+                        continue
+                    if source_path.suffix.lower() in _RUNTIME_PACK_FORBIDDEN_SUFFIXES:
+                        continue
+                    relative = source_path.relative_to(payload_root).as_posix()
+                    archive.write(source_path, relative)
+                    file_count += 1
+                    uncompressed_bytes += source_path.stat().st_size
+
+            if file_count == 0:
+                raise RuntimeError("Parallel Runtime Module contains no files")
+            manifest = {
+                "schema_version": _RUNTIME_MODULE_SCHEMA_VERSION,
+                "module": module_name,
+                "compatibility_key": self.last_runtime_compatibility_key,
+                "engine_fingerprint": self._engine_content_fingerprint(),
+                "python_abi": f"cp{sys.version_info.major}{sys.version_info.minor}",
+                "platform": sys.platform,
+                "machine": platform.machine().lower(),
+                "packages": selected_packages,
+                "archive": _RUNTIME_MODULE_ARCHIVE_FILENAME,
+                "archive_sha256": self._hash_file(archive_path),
+                "archive_bytes": archive_path.stat().st_size,
+                "uncompressed_bytes": uncompressed_bytes,
+                "file_count": file_count,
+                "compression": f"zip-deflate-{_RELEASE_ARCHIVE_COMPRESSION_LEVEL}",
+                "created_at": time.time(),
+            }
+            with (temporary / _RUNTIME_MODULE_MANIFEST_FILENAME).open(
+                "w", encoding="utf-8"
+            ) as manifest_file:
+                json.dump(manifest, manifest_file, indent=2, sort_keys=True)
+                manifest_file.write("\n")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists():
+                shutil.rmtree(destination)
+            os.replace(temporary, destination)
+            return str(destination)
+        finally:
+            shutil.rmtree(payload_root, ignore_errors=True)
+            shutil.rmtree(temporary, ignore_errors=True)
+
+    @staticmethod
+    def _packaged_runtime_module_roots() -> list[str]:
+        roots: list[str] = []
+        configured = os.environ.get("INFERNUX_PREBUILT_RUNTIME_MODULE_DIR", "")
+        if configured:
+            roots.append(os.path.abspath(os.path.expanduser(configured)))
+        try:
+            import Infernux
+
+            roots.append(
+                str(
+                    Path(Infernux.__file__).resolve().parent
+                    / _PACKAGED_RUNTIME_MODULE_DIRNAME
+                )
+            )
+        except (ImportError, OSError):
+            pass
+        return list(dict.fromkeys(roots))
+
+    def install_runtime_module(
+        self,
+        dist_dir: str,
+        *,
+        module_name: str = "parallel",
+        packages: Optional[List[str]] = None,
+        archive_only: bool = False,
+    ) -> bool:
+        """Install or stage an optional wheel module for a Player."""
+        selected_packages = sorted(set(packages or ["numba", "llvmlite"]))
+        compatibility_key = self.last_runtime_compatibility_key
+        if compatibility_key:
+            for root in self._packaged_runtime_module_roots():
+                module_root = Path(root) / compatibility_key
+                manifest_path = module_root / _RUNTIME_MODULE_MANIFEST_FILENAME
+                archive_path = module_root / _RUNTIME_MODULE_ARCHIVE_FILENAME
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if (
+                    manifest.get("schema_version") != _RUNTIME_MODULE_SCHEMA_VERSION
+                    or manifest.get("module") != module_name
+                    or manifest.get("compatibility_key") != compatibility_key
+                    or manifest.get("engine_fingerprint")
+                    != self._engine_content_fingerprint()
+                    or sorted(manifest.get("packages", [])) != selected_packages
+                    or not archive_path.is_file()
+                    or manifest.get("archive_bytes") != archive_path.stat().st_size
+                    or manifest.get("archive_sha256") != self._hash_file(archive_path)
+                ):
+                    continue
+
+                if archive_only:
+                    destination = Path(dist_dir) / "RuntimeModules" / module_name
+                    shutil.rmtree(destination, ignore_errors=True)
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(module_root, destination)
+                    Debug.log_internal(
+                        f"Packaged {module_name} Runtime Module staged compressed: "
+                        f"{compatibility_key[:16]}"
+                    )
+                    return True
+
+                temporary = Path(tempfile.mkdtemp(prefix="infernux-module-"))
+                try:
+                    with zipfile.ZipFile(archive_path, "r") as archive:
+                        entries = archive.infolist()
+                        files = [info for info in entries if not info.is_dir()]
+                        if (
+                            manifest.get("file_count") != len(files)
+                            or manifest.get("uncompressed_bytes")
+                            != sum(info.file_size for info in files)
+                        ):
+                            raise ValueError(
+                                "Runtime Module archive does not match its manifest"
+                            )
+                        allowed_roots = set(selected_packages) | {
+                            f"{package}.libs" for package in selected_packages
+                        }
+                        for info in entries:
+                            normalized = info.filename.replace("\\", "/")
+                            parts = PurePosixPath(normalized).parts
+                            if (
+                                normalized.startswith("/")
+                                or not parts
+                                or ".." in parts
+                                or ":" in parts[0]
+                                or parts[0] not in allowed_roots
+                            ):
+                                raise ValueError(
+                                    f"Unsafe Runtime Module entry: {info.filename}"
+                                )
+                        archive.extractall(temporary)
+                    destination_root = Path(dist_dir)
+                    for child in temporary.iterdir():
+                        destination = destination_root / child.name
+                        if destination.is_dir():
+                            shutil.rmtree(destination)
+                        elif destination.exists():
+                            destination.unlink()
+                        shutil.move(str(child), destination)
+                    Debug.log_internal(
+                        f"Packaged {module_name} Runtime Module installed: "
+                        f"{compatibility_key[:16]}"
+                    )
+                    return True
+                except (OSError, ValueError, zipfile.BadZipFile) as exc:
+                    Debug.log_warning(f"Runtime Module restore failed: {exc}")
+                finally:
+                    shutil.rmtree(temporary, ignore_errors=True)
+
+        Debug.log_warning(
+            f"Packaged {module_name} Runtime Module unavailable; "
+            "building it from the local build environment"
+        )
+        if archive_only:
+            temporary_root = Path(tempfile.mkdtemp(prefix="infernux-module-export-"))
+            try:
+                exported = Path(
+                    self.export_runtime_module(
+                        str(temporary_root),
+                        module_name=module_name,
+                        packages=selected_packages,
+                    )
+                )
+                destination = Path(dist_dir) / "RuntimeModules" / module_name
+                shutil.rmtree(destination, ignore_errors=True)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(exported, destination)
+                return True
+            finally:
+                shutil.rmtree(temporary_root, ignore_errors=True)
+        self._inject_jit_packages(dist_dir, packages=selected_packages)
+        return all((Path(dist_dir) / package).is_dir() for package in selected_packages)
 
     @staticmethod
     def _prune_runtime_packs() -> None:
@@ -1131,6 +1695,7 @@ class NuitkaBuilder:
                 "ordered_set",
                 *self.extra_include_packages,
                 *self.raw_copy_packages,
+                *getattr(self, "runtime_support_packages", []),
             )
             Debug.log_internal(
                 f"  _ensure_python_packages in {_time.perf_counter() - _t0:.2f}s"
@@ -1244,6 +1809,8 @@ class NuitkaBuilder:
         # entire editor UI (hundreds of files) which is never used.
         cmd += [
             "--include-package-data=Infernux",
+            f"--noinclude-data-files=Infernux/{_PACKAGED_RUNTIME_DIRNAME}/*",
+            f"--noinclude-data-files=Infernux/{_PACKAGED_RUNTIME_MODULE_DIRNAME}/*",
         ]
 
         # Explicitly ensure the pybind11 native extension is bundled
@@ -1280,7 +1847,10 @@ class NuitkaBuilder:
         # Exclude JIT packages from Nuitka compilation — they will be
         # injected as raw site-packages afterwards so numba retains the
         # Python bytecode it needs for LLVM JIT at runtime.
-        _nofollow_jit = self._JIT_NOFOLLOW_PACKAGES | set(self.raw_copy_packages)
+        runtime_dependency_packages = set(self.raw_copy_packages) | set(
+            getattr(self, "runtime_support_packages", [])
+        )
+        _nofollow_jit = self._JIT_NOFOLLOW_PACKAGES | runtime_dependency_packages
         for _jit_pkg in sorted(_nofollow_jit):
             cmd.append(f"--nofollow-import-to={_jit_pkg}")
 
@@ -1288,7 +1858,7 @@ class NuitkaBuilder:
         # import transitively.  Nuitka can't discover them because the
         # packages are excluded via --nofollow-import-to, so we trace
         # them in a subprocess and include them explicitly.
-        if self.raw_copy_packages:
+        if runtime_dependency_packages:
             for _stdlib_mod in self._discover_jit_stdlib_deps():
                 cmd.append(f"--include-module={_stdlib_mod}")
 
@@ -1341,7 +1911,10 @@ class NuitkaBuilder:
         import time as _time
         _t0 = _time.perf_counter()
 
-        pkgs_arg = ",".join(sorted(self.raw_copy_packages))
+        pkgs_arg = ",".join(sorted(
+            set(self.raw_copy_packages)
+            | set(getattr(self, "runtime_support_packages", []))
+        ))
         # The subprocess: record modules before vs after importing the
         # packages, then report only stdlib top-level names.
         trace_script = (
@@ -1610,14 +2183,21 @@ class NuitkaBuilder:
     # Inject raw JIT packages
     # ------------------------------------------------------------------
 
-    def _inject_jit_packages(self, dist_dir: str):
+    def _inject_jit_packages(
+        self,
+        dist_dir: str,
+        packages: Optional[List[str]] = None,
+    ):
         """Copy raw site-packages into the Nuitka dist for JIT-dependent packages.
 
         Numba requires Python bytecode at runtime for LLVM JIT compilation.
         Nuitka's C compilation removes bytecode, so these packages must be
         copied as-is from the builder environment's site-packages.
         """
-        if not self.raw_copy_packages:
+        selected_packages = sorted(set(
+            self.raw_copy_packages if packages is None else packages
+        ))
+        if not selected_packages:
             return
 
         import time as _time
@@ -1638,7 +2218,7 @@ class NuitkaBuilder:
         for cand in reversed(candidates):
             if os.path.isdir(cand) and all(
                 os.path.isdir(os.path.join(cand, pkg))
-                for pkg in self.raw_copy_packages
+                for pkg in selected_packages
             ):
                 site_packages = cand
                 break
@@ -1662,7 +2242,7 @@ class NuitkaBuilder:
         copied: list[str] = []
         dist_root = Path(dist_dir)
 
-        for pkg in sorted(self.raw_copy_packages):
+        for pkg in selected_packages:
             src = os.path.join(site_packages, pkg)
             if not os.path.isdir(src):
                 Debug.log_warning(

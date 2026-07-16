@@ -13,6 +13,9 @@
 namespace infernux
 {
 
+class SkinnedMeshRenderer;
+class Transform;
+
 /**
  * @brief RenderableObject - data needed to render one object.
  *
@@ -24,12 +27,14 @@ struct RenderableObject
     uint64_t objectId;
     glm::mat4 worldMatrix;
     MeshRef mesh;
-    std::shared_ptr<InxMaterial> renderMaterial; // Actual material for rendering (kept alive by MeshRenderer)
-    InxMaterial *renderMaterialRaw = nullptr;    // Raw pointer for fast sort/access
-    MeshRenderer *meshRenderer = nullptr;        // Direct pointer to avoid re-lookup
-    AABB worldBounds;                            // World-space bounding box for culling
-    size_t drawCallStart = 0;                    // Cached span in m_cachedDrawCalls
-    size_t drawCallCount = 0;                    // Number of draw calls emitted for this renderable
+    std::shared_ptr<InxMaterial> renderMaterial;    // Actual material for rendering (kept alive by MeshRenderer)
+    InxMaterial *renderMaterialRaw = nullptr;       // Raw pointer for fast sort/access
+    MeshRenderer *meshRenderer = nullptr;           // Direct pointer to avoid re-lookup
+    Transform *transform = nullptr;                 // Stable while the renderer registry version is unchanged
+    SkinnedMeshRenderer *skinnedRenderer = nullptr; // Resolved once instead of RTTI checks every frame
+    AABB worldBounds;                               // World-space bounding box for culling
+    size_t drawCallStart = 0;                       // Cached span in m_cachedDrawCalls
+    size_t drawCallCount = 0;                       // Number of draw calls emitted for this renderable
     bool visible;
 };
 
@@ -102,6 +107,11 @@ class SceneRenderer
     /// Converts the culled/sorted RenderableObject list into DrawCall + combined vertex/index data.
     /// @note Vertices remain in model/local space; per-object world transform is applied on GPU via push constants.
     [[nodiscard]] const DrawCallResult &BuildDrawCalls();
+
+    /// Clear one-shot mesh upload requests after a render context has
+    /// consumed the cached draw calls. Cached draw calls survive across
+    /// frames, while forceBufferUpdate must not.
+    void AcknowledgeMeshBufferUpdates();
 
     /// @brief Build draw calls by re-culling existing renderables against a different camera.
     /// Reuses cached draw-call spans and world bounds from PrepareFrame().

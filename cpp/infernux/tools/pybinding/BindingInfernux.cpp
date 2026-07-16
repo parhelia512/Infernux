@@ -674,6 +674,42 @@ PYBIND11_MODULE(_Infernux, m)
                                    result["scene_update_ms"] = snapshot.sceneUpdateMs;
                                    result["gui_build_ms"] = snapshot.guiBuildMs;
                                    result["prepare_frame_ms"] = snapshot.prepareFrameMs;
+                                   result["ui_panel_times_ms"] = snapshot.guiPanelTimesMs;
+                                   result["ui_panel_sub_times_ms"] = snapshot.guiPanelSubTimesMs;
+                                   return result;
+                               })
+        .def_property_readonly("renderer_ui_performance_snapshot",
+                               [](Infernux &self) {
+                                   auto *renderer = self.GetRenderer();
+                                   const RendererUIPerformanceSnapshot snapshot =
+                                       renderer ? renderer->GetUIPerformanceSnapshot()
+                                                : RendererUIPerformanceSnapshot{};
+                                   const auto encodeStats = [](const UIPerformanceMetricStats &stats) {
+                                       py::dict result;
+                                       result["sample_count"] = stats.sampleCount;
+                                       result["mean_ms"] = stats.meanMs;
+                                       result["median_ms"] = stats.medianMs;
+                                       result["p95_ms"] = stats.p95Ms;
+                                       result["max_ms"] = stats.maxMs;
+                                       return result;
+                                   };
+                                   py::dict panelTimes;
+                                   for (const auto &[name, stats] : snapshot.panelTimes)
+                                       panelTimes[py::str(name)] = encodeStats(stats);
+                                   py::dict panelSubTimes;
+                                   for (const auto &[panelName, stages] : snapshot.panelSubTimes) {
+                                       py::dict encodedStages;
+                                       for (const auto &[stageName, stats] : stages)
+                                           encodedStages[py::str(stageName)] = encodeStats(stats);
+                                       panelSubTimes[py::str(panelName)] = std::move(encodedStages);
+                                   }
+                                   py::dict result;
+                                   result["first_frame"] = snapshot.firstFrame;
+                                   result["last_frame"] = snapshot.lastFrame;
+                                   result["sample_count"] = snapshot.sampleCount;
+                                   result["gui_build"] = encodeStats(snapshot.guiBuild);
+                                   result["panel_times"] = std::move(panelTimes);
+                                   result["panel_sub_times"] = std::move(panelSubTimes);
                                    return result;
                                })
         .def_property_readonly("asset_runtime_records", &Infernux::GetAssetRuntimeRecords)
@@ -1030,6 +1066,12 @@ PYBIND11_MODULE(_Infernux, m)
                     item["pending_height"] = snapshot.pendingHeight;
                     item["ready_width"] = snapshot.readyWidth;
                     item["ready_height"] = snapshot.readyHeight;
+                    item["pixel_generation"] = snapshot.pixelGeneration;
+                    item["pixel_hash"] = snapshot.pixelHash;
+                    item["non_transparent_pixel_count"] = snapshot.nonTransparentPixelCount;
+                    item["min_rgb"] = snapshot.minRgb;
+                    item["max_rgb"] = snapshot.maxRgb;
+                    item["imgui_draw_command_count"] = snapshot.imguiDrawCommandCount;
                     result.append(std::move(item));
                 }
                 return result;

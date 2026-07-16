@@ -481,7 +481,7 @@ def _visible_groups(mcp) -> dict[str, list[str]]:
         "runtime": [
             "editor_play", "runtime_wait", "runtime_run_for", "runtime_measure_motion",
             "runtime_motion_capture_arm", "runtime_motion_capture_status", "runtime_motion_capture_cancel",
-            "runtime_input_state", "runtime_renderer_state", "runtime_read_errors",
+            "runtime_input_state", "runtime_renderer_state", "runtime_ui_performance", "runtime_read_errors",
         ],
         "player_validation": [
             "player_validation_launch", "player_validation_status", "player_validation_observe",

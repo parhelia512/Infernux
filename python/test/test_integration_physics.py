@@ -825,6 +825,22 @@ class TestShapeCasts:
         )
         assert hit is not None
 
+    def test_raycast_flushes_moved_static_collider_without_fixed_step(self, scene):
+        target = scene.create_game_object("MovedStaticQueryTarget")
+        target.transform.position = Vector3(0, 0, 0)
+        target.add_component("BoxCollider")
+
+        sm = SceneManager.instance()
+        sm.play()
+        sm.pause()
+        sm.step()
+
+        target.transform.position = Vector3(12, 0, 0)
+        hit = Physics.raycast(Vector3(12, 5, 0), Vector3(0, -1, 0), 10.0)
+
+        assert hit is not None
+        assert hit.game_object.name == "MovedStaticQueryTarget"
+
     def test_capsule_cast_hits_ground(self, scene):
         _make_ground(scene)
         sm = SceneManager.instance()

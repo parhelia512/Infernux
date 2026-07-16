@@ -6,6 +6,7 @@
 
 #include <imgui.h>
 
+#include <atomic>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -38,6 +39,8 @@ class ConsolePanel : public EditorPanel
     int GetWarningCount() const;
     int GetErrorCount() const;
 
+    std::unordered_map<std::string, double> ConsumeSubTimings() override;
+
     /// Select the last visible entry and request window focus.
     /// Called from status bar click.
     void SelectLatestEntry();
@@ -58,6 +61,7 @@ class ConsolePanel : public EditorPanel
     bool autoScroll = true;
 
   protected:
+    void PreRender(InxGUIContext *ctx) override;
     void OnRenderContent(InxGUIContext *ctx) override;
 
   private:
@@ -87,11 +91,14 @@ class ConsolePanel : public EditorPanel
     void OnLogMessage(LogLevel level, const char *file, int line, const std::string &message, bool internalOnly);
 
     // ── Log storage ──
-    static constexpr size_t MAX_LOGS = 2147483647u;
+    static constexpr size_t MAX_LOGS = 100000u;
     std::deque<LogEntry> m_logs;
     uint64_t m_nextUid = 1;
     mutable std::mutex m_logMutex;       // protects m_logs + m_pendingLogs
     std::vector<LogEntry> m_pendingLogs; // accumulated off-main-thread, flushed in OnRender
+    std::atomic<int> m_infoCount{0};
+    std::atomic<int> m_warnCount{0};
+    std::atomic<int> m_errorCount{0};
 
     // ── Filter cache ──
     bool m_cacheDirty = true;
@@ -113,11 +120,17 @@ class ConsolePanel : public EditorPanel
     bool m_rowHeightMeasured = false;
     float m_detailHeight = 90.0f;
 
+    double m_subFlush = 0.0;
+    double m_subCache = 0.0;
+    double m_subToolbar = 0.0;
+    double m_subBody = 0.0;
+
     // ── Helpers ──
     void FlushPendingLogs();
     void GetCountSnapshot(int &infoCount, int &warnCount, int &errorCount) const;
     void EnsureCache();
     void DetectFilterChange();
+    bool MatchesCurrentFilters(const LogEntry &entry) const;
     void RenderToolbar(InxGUIContext *ctx);
     void RenderBody(InxGUIContext *ctx);
     void RenderRow(int visIdx, const VisibleEntry &ve);

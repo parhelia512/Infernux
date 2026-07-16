@@ -328,10 +328,8 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
     def _window_flags(self) -> int:
         return Theme.WINDOW_FLAGS_VIEWPORT | Theme.WINDOW_FLAGS_NO_SCROLL
 
-    def _pre_render(self, ctx):
-        self._load_view_settings()
-
     def _on_visible_pre(self, ctx):
+        self._load_view_settings()
         # Keep UI mode active the entire time the panel is visible
         if self._on_request_ui_mode:
             self._on_request_ui_mode(True)

@@ -1,4 +1,5 @@
 #include "InxGUI.h"
+#include "../ProfileConfig.h"
 #include "InxGUIContext.h"
 #include "InxGUISemantics.h"
 #include <function/editor/EditorTheme.h>
@@ -494,6 +495,9 @@ void InxGUI::BuildFrame()
 
     using hrc = std::chrono::high_resolution_clock;
     m_lastPanelTimesMs.clear();
+#if INFERNUX_FRAME_PROFILE
+    m_lastPanelSubTimesMs.clear();
+#endif
 
     // Render against a stable snapshot so Register/Unregister calls that
     // happen during panel rendering do not invalidate the active iteration.
@@ -509,6 +513,11 @@ void InxGUI::BuildFrame()
         renderable->OnRender(ctx.get());
         auto t1 = hrc::now();
         m_lastPanelTimesMs[name] = std::chrono::duration<double, std::milli>(t1 - t0).count();
+#if INFERNUX_FRAME_PROFILE
+        auto subTimes = renderable->ConsumeSubTimings();
+        if (!subTimes.empty())
+            m_lastPanelSubTimesMs.emplace(name, std::move(subTimes));
+#endif
     }
 
     ApplyPendingDockTabSelections();

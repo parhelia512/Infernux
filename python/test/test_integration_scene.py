@@ -380,6 +380,35 @@ class TestPrimitives:
         assert len(positions) > 0
         assert len(indices) > 0
 
+    @pytest.mark.parametrize(
+        "primitive_type,expected_mesh_name",
+        [
+            (PrimitiveType.Cube, "Cube"),
+            (PrimitiveType.Quad, "Quad"),
+        ],
+    )
+    def test_custom_named_primitives_serialize_as_compact_builtins(
+        self, scene, primitive_type, expected_mesh_name
+    ):
+        primitive = scene.create_primitive(primitive_type, "CustomObjectName")
+        document = primitive.get_component("MeshRenderer").serialize_document()
+
+        assert document["inlineMeshName"] == expected_mesh_name
+        assert document["inlineMeshBuiltin"] is True
+        assert "inlineVertices" not in document
+        assert "inlineIndices" not in document
+
+    def test_batch_primitives_serialize_as_compact_builtins(self, scene):
+        cubes = scene.create_primitives_batch(PrimitiveType.Cube, 3, "WaveCube")
+
+        assert [cube.name for cube in cubes] == ["WaveCube_0", "WaveCube_1", "WaveCube_2"]
+        for cube in cubes:
+            document = cube.get_component("MeshRenderer").serialize_document()
+            assert document["inlineMeshName"] == "Cube"
+            assert document["inlineMeshBuiltin"] is True
+            assert "inlineVertices" not in document
+            assert "inlineIndices" not in document
+
     def test_sphere_is_uniform_geodesic_mesh_without_degenerate_poles(self, scene):
         sphere = scene.create_primitive(PrimitiveType.Sphere, "GeodesicSphere")
         renderer = sphere.get_component("MeshRenderer")
@@ -939,6 +968,26 @@ class TestSceneSerialization:
         assert document["objects"][0]["name"] == "AtomicSceneObject"
         assert list(tmp_path.glob("atomic.scene.tmp.*")) == []
 
+    def test_large_scene_uses_dense_diffable_storage(self, scene, tmp_path):
+        for index in range(512):
+            scene.create_game_object(f"Dense_{index}")
+
+        scene_path = tmp_path / "dense.scene"
+        assert scene.save_to_file(str(scene_path)) is True
+
+        content = scene_path.read_text(encoding="utf-8")
+        document = json.loads(content)
+        pretty = json.dumps(document, indent=2)
+
+        assert len(document["objects"]) == 512
+        assert content.count("\n") >= 512
+        assert len(content) < len(pretty) * 0.7
+        assert all(
+            line.startswith("    {")
+            for line in content.splitlines()
+            if '"Dense_' in line
+        )
+
     def test_scene_file_manager_serializes_save_as_name_before_writing(
         self,
         scene,
@@ -982,6 +1031,28 @@ class TestSceneSerialization:
         finally:
             SceneFileManager._instance = previous_manager
             set_project_root(previous_root)
+
+    def test_runtime_scene_publish_rebuilds_scaled_collider_from_current_world_transform(self, scene):
+        from Infernux.lib import Physics
+
+        platform = scene.create_game_object("RuntimeScaledPlatform")
+        platform.transform.position = Vector3(0.0, 0.4, 16.0)
+        platform.transform.local_scale = Vector3(5.0, 0.8, 18.0)
+        platform.add_component("BoxCollider")
+        document = scene.serialize_document()
+
+        sm = SceneManager.instance()
+        sm.play()
+        transaction = SceneDocumentTransaction(scene, document=document)
+        assert transaction.run_to_completion() is True
+
+        sm._start_active_scene_for_play()
+
+        edge_hits = Physics.overlap_box(
+            Vector3(0.0, 0.4, 24.0),
+            Vector3(0.1, 0.1, 0.1),
+        )
+        assert any(collider.game_object.name == "RuntimeScaledPlatform" for collider in edge_hits)
 
     def test_scene_deserialize_advances_game_object_id_allocator(self, scene):
         scene.create_game_object("PersistedHighId")

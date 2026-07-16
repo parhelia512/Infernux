@@ -159,6 +159,7 @@ class ProjectPanel : public EditorPanel
   protected:
     void OnRenderContent(InxGUIContext *ctx) override;
     void PreRender(InxGUIContext *ctx) override;
+    void VisiblePreRender(InxGUIContext *ctx) override;
 
   private:
     // ── Translation cache ────────────────────────────────────────────

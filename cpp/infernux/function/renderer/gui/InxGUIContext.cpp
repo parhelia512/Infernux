@@ -16,6 +16,11 @@ namespace infernux
 
 float InxGUIContext::s_dpiScale = 1.0f;
 
+float InxGUIContext::GetDpiScale() const
+{
+    return s_dpiScale;
+}
+
 namespace
 {
 ImTextureID ToImTextureID(uint64_t textureId)
@@ -1903,20 +1908,26 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
             break;
         }
         case PropertyDesc::Bool: {
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, kCheckboxPad);
-            ImGui::SetWindowFontScale(kCheckboxFontScale);
             bool val = d.bVal;
             bool orig = val;
-            std::string cbLabel = !d.label.empty() ? d.label : d.widgetId;
+            if (d.fieldLabel)
+                doLabel(d.label);
+            else {
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, kCheckboxPad);
+                ImGui::SetWindowFontScale(kCheckboxFontScale);
+            }
+            std::string cbLabel = d.fieldLabel ? d.widgetId : (!d.label.empty() ? d.label : d.widgetId);
             if (d.mixed)
                 ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
             ImGui::Checkbox(cbLabel.c_str(), &val);
             if (captureSemantics)
-                RecordSemanticItem("checkbox", cbLabel, true, semanticId, val);
+                RecordSemanticItem("checkbox", d.label.empty() ? cbLabel : d.label, true, semanticId, val);
             if (d.mixed)
                 ImGui::PopItemFlag();
-            ImGui::SetWindowFontScale(1.0f);
-            ImGui::PopStyleVar(1);
+            if (!d.fieldLabel) {
+                ImGui::SetWindowFontScale(1.0f);
+                ImGui::PopStyleVar(1);
+            }
             if (val != orig) {
                 PropertyChange c;
                 c.index = i;
@@ -2045,6 +2056,83 @@ std::vector<PropertyChange> InxGUIContext::RenderPropertyBatch(const std::vector
             ImGui::SetTooltip("%s", d.tooltip.c_str());
     }
     return changes;
+}
+
+uint32_t InxGUIContext::RenderObjectFieldChrome(const std::string &fieldId, const std::string &displayText,
+                                                const std::string &typeHint, bool selected, bool clickable,
+                                                bool hasPicker, uint64_t pickerTextureId, const std::string &semanticId)
+{
+    constexpr float buttonSide = 20.0f;
+    constexpr ImVec4 bodyColor{0.10f, 0.10f, 0.10f, 0.82f};
+    constexpr ImVec4 borderColor{0.22f, 0.22f, 0.22f, 1.0f};
+    constexpr ImVec4 buttonIdle{0.20f, 0.20f, 0.20f, 1.0f};
+    constexpr ImVec4 buttonHover{0.28f, 0.24f, 0.24f, 1.0f};
+    constexpr ImVec4 buttonActive{0.922f, 0.341f, 0.341f, 1.0f};
+
+    ImGui::PushID(fieldId.c_str());
+    std::string fullText = "   " + displayText + " (" + typeHint + ")";
+    if (fullText.size() > 38)
+        fullText = fullText.substr(0, 35) + "...";
+
+    const float availableWidth = ImGui::GetContentRegionAvail().x;
+    const float buttonWidth = hasPicker ? buttonSide : 0.0f;
+    const float fieldWidth = (std::max)(availableWidth - buttonWidth, 10.0f);
+
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(16.0f, 2.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+    ImGui::PushStyleColor(ImGuiCol_Header, bodyColor);
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, bodyColor);
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, bodyColor);
+    ImGui::BeginGroup();
+
+    uint32_t result = 0;
+    if (clickable)
+        ImGui::SetNextItemAllowOverlap();
+    if (ImGui::Selectable(fullText.c_str(), selected, 0, ImVec2(fieldWidth, 0.0f)) && clickable)
+        result |= 1u;
+
+    if (hasPicker) {
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (availableWidth - buttonWidth - fieldWidth));
+        ImGui::PushStyleColor(ImGuiCol_Button, buttonIdle);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, buttonHover);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, buttonActive);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 2.0f));
+        if (ImGui::Button("##picker", ImVec2(buttonSide, 0.0f)))
+            result |= 2u;
+
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImVec2 max = ImGui::GetItemRectMax();
+        const float drawSize =
+            (std::max)(0.0f, (std::min)(10.0f, (std::min)(max.x - min.x - 6.0f, max.y - min.y - 4.0f)));
+        const ImVec2 drawMin{min.x + ((max.x - min.x) - drawSize) * 0.5f, min.y + ((max.y - min.y) - drawSize) * 0.5f};
+        if (pickerTextureId != 0 && drawSize > 0.0f) {
+            ImGui::GetWindowDrawList()->AddImage(ToImTextureID(pickerTextureId), drawMin,
+                                                 ImVec2(drawMin.x + drawSize, drawMin.y + drawSize));
+        } else {
+            constexpr const char *fallback = "o";
+            const ImVec2 textSize = ImGui::CalcTextSize(fallback);
+            ImGui::GetWindowDrawList()->AddText(
+                ImVec2(min.x + ((max.x - min.x) - textSize.x) * 0.5f, min.y + ((max.y - min.y) - textSize.y) * 0.5f),
+                ImGui::GetColorU32(ImGuiCol_Text), fallback);
+        }
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(3);
+    }
+
+    if (result != 0 && hasPicker)
+        ImGui::OpenPopup("##obj_picker");
+
+    ImGui::EndGroup();
+    RecordSemanticItem("object_field", displayText, clickable, semanticId);
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar(2);
+
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImGui::GetWindowDrawList()->AddRect(min, max, ImGui::ColorConvertFloat4ToU32(borderColor), 0.0f, 0, 1.0f);
+    ImGui::PopID();
+    return result;
 }
 
 } // namespace infernux

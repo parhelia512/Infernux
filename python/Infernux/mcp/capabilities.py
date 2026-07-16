@@ -16,7 +16,23 @@ CONFIG_REL_PATH = os.path.join("ProjectSettings", "mcp_capabilities.json")
 # for existing projects, while new remote sessions opt into a constrained mode.
 PROFILE_TOOL_GROUPS: dict[str, frozenset[str] | None] = {
     "research_full": None,
-    "developer_assist": frozenset({"docs", "api", "project", "console", "session", "capture"}),
+    "developer_assist": frozenset({
+        "docs",
+        "api",
+        "project",
+        "editor",
+        "scene",
+        "hierarchy",
+        "asset",
+        "material",
+        "renderstack",
+        "console",
+        "camera",
+        "ui",
+        "transactions",
+        "session",
+        "capture",
+    }),
     # Global validation may observe engine state, but it must mutate the
     # editor only through the real input route exposed by input/editor_ui.
     "global_validation": frozenset({"docs", "api", "project", "console", "runtime", "session", "input", "ui_semantics", "capture", "player_validation"}),

@@ -35,6 +35,11 @@ bool SemanticMenuItem(InxGUIContext *ctx, const std::string &label, const std::s
 
 MenuBarPanel::MenuBarPanel() = default;
 
+void MenuBarPanel::InvalidateWindowTypeCache()
+{
+    m_windowTypesDirty = true;
+}
+
 // ════════════════════════════════════════════════════════════════════
 // Translation helper
 // ════════════════════════════════════════════════════════════════════
@@ -184,12 +189,12 @@ void MenuBarPanel::RenderWindowMenu(InxGUIContext *ctx)
     if (!BeginSemanticMenu(ctx, T("menu.window"), "menu.window"))
         return;
 
-    if (getRegisteredTypes && getOpenWindows) {
-        auto types = getRegisteredTypes();
+    RefreshWindowTypeCache();
+    if (!m_cachedWindowTypes.empty() && getOpenWindows) {
         auto openWins = getOpenWindows();
 
         bool hasItems = false;
-        for (const auto &info : types) {
+        for (const auto &info : m_cachedWindowTypes) {
             if (info.menuPath != "Window")
                 continue;
             hasItems = true;
@@ -231,35 +236,12 @@ void MenuBarPanel::RenderWindowMenu(InxGUIContext *ctx)
 
 void MenuBarPanel::RenderDynamicMenus(InxGUIContext *ctx)
 {
-    if (!getRegisteredTypes || !getOpenWindows)
+    RefreshWindowTypeCache();
+    if (m_cachedWindowTypes.empty())
         return;
 
-    auto types = getRegisteredTypes();
-    auto openWins = getOpenWindows();
-
-    // Discover unique top-level menu names (everything except "Window").
-    // Preserve insertion order so menus appear in panel registration order.
-    std::vector<std::string> topMenus;
-    for (const auto &info : types) {
-        if (info.menuPath == "Window")
-            continue;
-        std::string top = info.menuPath;
-        auto slash = top.find('/');
-        if (slash != std::string::npos)
-            top = top.substr(0, slash);
-
-        bool found = false;
-        for (const auto &t : topMenus)
-            if (t == top) {
-                found = true;
-                break;
-            }
-        if (!found)
-            topMenus.push_back(top);
-    }
-
     // Render each top-level menu.
-    for (const auto &top : topMenus) {
+    for (const auto &top : m_cachedTopMenus) {
         // Build i18n key: "Animation" -> "menu.animation"
         std::string key = "menu." + top;
         for (auto &c : key)
@@ -273,14 +255,38 @@ void MenuBarPanel::RenderDynamicMenus(InxGUIContext *ctx)
         if (label == key.substr(key.rfind('.') + 1))
             label = top;
 
-        RenderMenuGroup(ctx, top, label, types, openWins);
+        RenderMenuGroup(ctx, top, label, m_cachedWindowTypes);
+    }
+}
+
+void MenuBarPanel::RefreshWindowTypeCache()
+{
+    if (!m_windowTypesDirty)
+        return;
+    if (!getRegisteredTypes)
+        return;
+
+    m_windowTypesDirty = false;
+    m_cachedWindowTypes = getRegisteredTypes();
+    m_cachedTopMenus.clear();
+    for (const auto &info : m_cachedWindowTypes) {
+        if (info.menuPath == "Window")
+            continue;
+        std::string top = info.menuPath;
+        const auto slash = top.find('/');
+        if (slash != std::string::npos)
+            top.resize(slash);
+        if (std::find(m_cachedTopMenus.begin(), m_cachedTopMenus.end(), top) == m_cachedTopMenus.end())
+            m_cachedTopMenus.push_back(std::move(top));
     }
 }
 
 void MenuBarPanel::RenderMenuGroup(InxGUIContext *ctx, const std::string &topMenu, const std::string &translatedLabel,
-                                   const std::vector<WindowTypeInfo> &types,
-                                   const std::map<std::string, bool> &openWins)
+                                   const std::vector<WindowTypeInfo> &types)
 {
+    if (!BeginSemanticMenu(ctx, translatedLabel, "menu." + topMenu))
+        return;
+
     // Collect entries belonging to this top-level menu.
     struct Entry
     {
@@ -325,11 +331,7 @@ void MenuBarPanel::RenderMenuGroup(InxGUIContext *ctx, const std::string &topMen
         }
     }
 
-    if (entries.empty())
-        return;
-
-    if (!BeginSemanticMenu(ctx, translatedLabel, "menu." + topMenu))
-        return;
+    const auto openWins = getOpenWindows ? getOpenWindows() : std::map<std::string, bool>{};
 
     // Lambda: render a single menu-item toggle
     auto renderItem = [&](const Entry &e) {

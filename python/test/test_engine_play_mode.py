@@ -156,6 +156,24 @@ class TestPlayModeManager:
 
         assert mgr.is_runtime_hidden_object_id(404)
 
+    def test_runtime_hidden_listener_only_fires_for_state_changes(self):
+        mgr = PlayModeManager()
+        calls = []
+        listener = lambda: calls.append(mgr.get_runtime_hidden_object_ids())
+        mgr.add_runtime_hidden_listener(listener)
+
+        obj = _FakeRuntimeGameObject(404, "HiddenClone")
+        mgr.register_runtime_hidden_object(obj)
+        mgr.register_runtime_hidden_object(obj)
+        mgr.clear_runtime_hidden_object_ids()
+        mgr.clear_runtime_hidden_object_ids()
+
+        assert calls == [{404}, set()]
+
+        mgr.remove_runtime_hidden_listener(listener)
+        mgr.register_runtime_hidden_object(obj)
+        assert calls == [{404}, set()]
+
     def test_rebuild_scene_failure_preserves_runtime_hidden_ids(self):
         mgr = PlayModeManager()
         mgr._runtime_hidden_object_ids = {1, 2, 3}

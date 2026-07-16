@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from Infernux.components import serialized_field, list_field, add_component_menu
 from Infernux.components.serialized_field import FieldType
+from Infernux.debug import Debug
 from .enums import TextAlignH, TextAlignV
 from .ui_selectable import UISelectable
 from .ui_event import UIEvent
@@ -122,30 +123,71 @@ class UIButton(UISelectable):
 
     def _dispatch_persistent_entries(self):
         """Resolve and invoke each on_click_entries binding."""
-        entries = self.on_click_entries
+        entries = list(self.on_click_entries or [])
+        results = []
+        self._last_persistent_dispatch = results
         if not entries:
             return
-        for entry in entries:
+        for index, entry in enumerate(entries):
+            result = {
+                "index": index,
+                "component_name": str(getattr(entry, "component_name", "") or ""),
+                "method_name": str(getattr(entry, "method_name", "") or ""),
+                "status": "pending",
+            }
+            results.append(result)
             target_ref = _get_serializable_raw_field(entry, "target")
             if target_ref is None:
+                result["status"] = "missing_target"
+                self._log_dispatch_failure(result)
                 continue
             go = target_ref.resolve() if hasattr(target_ref, "resolve") else target_ref
             if go is None:
+                result["status"] = "unresolved_target"
+                self._log_dispatch_failure(result)
                 continue
+            result["target_id"] = int(getattr(go, "id", 0) or 0)
+            result["target_name"] = str(getattr(go, "name", "") or "")
             comp_name = getattr(entry, "component_name", "") or ""
             method_name = getattr(entry, "method_name", "") or ""
             if not comp_name or not method_name:
+                result["status"] = "incomplete_binding"
+                self._log_dispatch_failure(result)
                 continue
             comp = self._resolve_component(go, comp_name)
             if comp is None:
+                result["status"] = "missing_component"
+                self._log_dispatch_failure(result)
                 continue
             fn = getattr(comp, method_name, None)
-            if callable(fn):
-                try:
-                    fn(*materialize_event_arguments(entry, comp))
-                except Exception:
-                    import traceback
-                    traceback.print_exc()
+            if not callable(fn):
+                result["status"] = "missing_method"
+                self._log_dispatch_failure(result)
+                continue
+            try:
+                fn(*materialize_event_arguments(entry, comp))
+                result["status"] = "invoked"
+            except Exception as exc:
+                result["status"] = "exception"
+                result["error"] = f"{type(exc).__name__}: {exc}"
+                Debug.log_error(
+                    f"UIButton persistent event failed for "
+                    f"{result['target_name']}.{comp_name}.{method_name}: {exc}"
+                )
+
+    @staticmethod
+    def _log_dispatch_failure(result: dict) -> None:
+        target = result.get("target_name") or f"object {result.get('target_id', 0)}"
+        component = result.get("component_name") or "<component>"
+        method = result.get("method_name") or "<method>"
+        Debug.log_error(
+            f"UIButton persistent event could not invoke "
+            f"{target}.{component}.{method}: {result['status']}"
+        )
+
+    def debug_dispatch_state(self) -> list[dict]:
+        """Return the most recent click dispatch result for on-demand diagnostics."""
+        return [dict(item) for item in getattr(self, "_last_persistent_dispatch", [])]
 
     @staticmethod
     def _resolve_component(go, comp_name: str):

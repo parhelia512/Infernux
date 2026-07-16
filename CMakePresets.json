@@ -80,7 +80,10 @@
     {
       "name": "release",
       "configurePreset": "release",
-      "configuration": "Release"
+      "configuration": "Release",
+      "targets": [
+        "package_and_install_python"
+      ]
     },
     {
       "name": "debug",
@@ -102,7 +105,10 @@
     },
     {
       "name": "release-macos",
-      "configurePreset": "release-macos"
+      "configurePreset": "release-macos",
+      "targets": [
+        "package_and_install_python"
+      ]
     },
     {
       "name": "debug-macos",
@@ -110,7 +116,10 @@
     },
     {
       "name": "release-linux",
-      "configurePreset": "release-linux"
+      "configurePreset": "release-linux",
+      "targets": [
+        "package_and_install_python"
+      ]
     },
     {
       "name": "debug-linux",

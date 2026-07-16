@@ -49,6 +49,7 @@ struct PropertyDesc
     bool slider = false;
     bool multiline = false;
     bool mixed = false;
+    bool fieldLabel = false; // Render Bool as a label + checkbox field.
     std::vector<std::string> enumNames;
     std::string header;  // Section header text above this field (empty = none)
     float space = 0;     // Vertical padding before this field
@@ -75,10 +76,7 @@ class InxGUIContext
   public:
     /* DPI scale — set by InxGUI::Init, read by Python/UI code */
     static float s_dpiScale;
-    float GetDpiScale() const
-    {
-        return s_dpiScale;
-    }
+    float GetDpiScale() const;
     /* basic text & labels */
     void Label(const std::string &text);
     void TextWrapped(const std::string &text);
@@ -362,6 +360,9 @@ class InxGUIContext
 
     /* batch property rendering — renders all scalar fields in one call */
     std::vector<PropertyChange> RenderPropertyBatch(const std::vector<PropertyDesc> &descriptors, float labelWidth);
+    uint32_t RenderObjectFieldChrome(const std::string &fieldId, const std::string &displayText,
+                                     const std::string &typeHint, bool selected, bool clickable, bool hasPicker,
+                                     uint64_t pickerTextureId, const std::string &semanticId = "");
 
   private:
     struct SearchableComboState

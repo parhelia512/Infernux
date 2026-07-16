@@ -155,10 +155,10 @@ void InspectorPanel::SetDetailFile(const std::string &filePath, const std::strin
 }
 
 // ============================================================================
-// PreRender
+// VisiblePreRender
 // ============================================================================
 
-void InspectorPanel::PreRender(InxGUIContext * /*ctx*/)
+void InspectorPanel::VisiblePreRender(InxGUIContext * /*ctx*/)
 {
     auto now = std::chrono::steady_clock::now();
     m_frameTimeNow = std::chrono::duration<float>(now.time_since_epoch()).count();

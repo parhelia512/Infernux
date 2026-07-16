@@ -40,6 +40,13 @@ class GameObject;
 class Collider;
 class Rigidbody;
 
+struct PhysicsBodyPoseUpdate
+{
+    uint32_t bodyId = 0xFFFFFFFF;
+    glm::vec3 position{0.0f};
+    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+};
+
 /**
  * @brief Result of a physics raycast (Unity: RaycastHit).
  */
@@ -119,6 +126,9 @@ class PhysicsWorld
 
     /// Inform the physics world that a body has moved (kinematic / editor move).
     void SetBodyPosition(uint32_t bodyId, const glm::vec3 &pos, const glm::quat &rot);
+
+    /// Update many static body poses with one broadphase notification.
+    void SetBodyPositionsBatch(const std::vector<PhysicsBodyPoseUpdate> &updates);
 
     /// Notify that a body's shape or properties changed.
     void UpdateBodyShape(Collider *collider, const Collider *exclude = nullptr);

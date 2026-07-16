@@ -180,14 +180,57 @@ void HierarchyPanel::ExpandToObject(uint64_t objId)
 
 void HierarchyPanel::SyncSelectionCache()
 {
+    if (m_selectionPushMode)
+        return;
     m_selIds.clear();
+    m_selOrderedIds.clear();
     if (getSelectedIds) {
-        auto ids = getSelectedIds();
-        for (auto id : ids)
+        m_selOrderedIds = getSelectedIds();
+        for (auto id : m_selOrderedIds)
             m_selIds.insert(id);
     }
     m_selPrimary = getPrimary ? getPrimary() : 0;
     m_selCount = selectionCount ? selectionCount() : 0;
+}
+
+void HierarchyPanel::SetSelectionSnapshot(const std::vector<uint64_t> &ids, uint64_t primary)
+{
+    m_selectionPushMode = true;
+    m_selOrderedIds = ids;
+    m_selIds.clear();
+    m_selIds.insert(ids.begin(), ids.end());
+    m_selPrimary = primary;
+    m_selCount = static_cast<int>(ids.size());
+}
+
+void HierarchyPanel::SetRuntimeHiddenIds(const std::unordered_set<uint64_t> &ids)
+{
+    m_runtimeHiddenPushMode = true;
+    m_hiddenIds = ids;
+}
+
+void HierarchyPanel::SetSceneHeaderSnapshot(const std::string &sceneDisplayName, bool prefabMode,
+                                            const std::string &prefabDisplayName)
+{
+    m_sceneHeaderPushMode = true;
+    m_sceneDisplayName = sceneDisplayName;
+    m_cachedPrefabMode = prefabMode;
+    m_prefabDisplayName = prefabDisplayName;
+}
+
+bool HierarchyPanel::IsPrefabModeActive() const
+{
+    return m_sceneHeaderPushMode ? m_cachedPrefabMode : (isPrefabMode && isPrefabMode());
+}
+
+std::string HierarchyPanel::SceneDisplayName() const
+{
+    return m_sceneHeaderPushMode ? m_sceneDisplayName : (getSceneDisplayName ? getSceneDisplayName() : "");
+}
+
+std::string HierarchyPanel::PrefabDisplayName() const
+{
+    return m_sceneHeaderPushMode ? m_prefabDisplayName : (getPrefabDisplayName ? getPrefabDisplayName() : "Prefab");
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -469,8 +512,8 @@ std::vector<uint64_t> HierarchyPanel::CollectOrderedIds(const std::vector<GameOb
 
 std::vector<uint64_t> HierarchyPanel::GetDragIds(uint64_t primaryId)
 {
-    if (m_selIds.count(primaryId) && m_selCount > 1 && getSelectedIds)
-        return getSelectedIds();
+    if (m_selIds.count(primaryId) && m_selCount > 1)
+        return m_selOrderedIds;
     return {primaryId};
 }
 
@@ -711,7 +754,7 @@ void HierarchyPanel::ReparentToRoot(uint64_t draggedId)
 void HierarchyPanel::HandleExternalDrop(const std::string &dropType, uint64_t payload, uint64_t parentId)
 {
     // In Prefab Mode, force under prefab root
-    if (isPrefabMode && isPrefabMode() && parentId == 0) {
+    if (IsPrefabModeActive() && parentId == 0) {
         Scene *scene = SceneManager::Instance().GetActiveScene();
         if (scene && !scene->GetRootObjects().empty())
             parentId = scene->GetRootObjects()[0]->GetID();
@@ -728,7 +771,7 @@ void HierarchyPanel::HandleExternalDrop(const std::string &dropType, uint64_t pa
 void HierarchyPanel::HandleExternalDropStr(const std::string &dropType, const std::string &payload, uint64_t parentId)
 {
     // In Prefab Mode, force under prefab root
-    if (isPrefabMode && isPrefabMode() && parentId == 0) {
+    if (IsPrefabModeActive() && parentId == 0) {
         Scene *scene = SceneManager::Instance().GetActiveScene();
         if (scene && !scene->GetRootObjects().empty())
             parentId = scene->GetRootObjects()[0]->GetID();
@@ -1542,10 +1585,10 @@ void HierarchyPanel::RenderGameObjectTree(InxGUIContext *ctx, GameObject *obj)
 }
 
 // ════════════════════════════════════════════════════════════════════
-// PreRender — keyboard shortcuts + deferred selection
+// VisiblePreRender — keyboard shortcuts + deferred selection
 // ════════════════════════════════════════════════════════════════════
 
-void HierarchyPanel::PreRender(InxGUIContext *ctx)
+void HierarchyPanel::VisiblePreRender(InxGUIContext *ctx)
 {
     using Clock = std::chrono::high_resolution_clock;
     auto msSince = [](const Clock::time_point &start) {
@@ -1554,9 +1597,9 @@ void HierarchyPanel::PreRender(InxGUIContext *ctx)
 
     // Refresh hidden IDs
     auto preHiddenStart = Clock::now();
-    if (getRuntimeHiddenIds)
+    if (!m_runtimeHiddenPushMode && getRuntimeHiddenIds)
         m_hiddenIds = getRuntimeHiddenIds();
-    else
+    else if (!m_runtimeHiddenPushMode)
         m_hiddenIds.clear();
     m_subPreHidden += msSince(preHiddenStart);
 
@@ -1662,14 +1705,14 @@ void HierarchyPanel::OnRenderContent(InxGUIContext *ctx)
     auto headerStart = Clock::now();
     if (m_uiMode) {
         ctx->Label(Tr("hierarchy.ui_mode"));
-    } else if (isPrefabMode && isPrefabMode()) {
-        std::string prefabName = getPrefabDisplayName ? getPrefabDisplayName() : "Prefab";
+    } else if (IsPrefabModeActive()) {
+        std::string prefabName = PrefabDisplayName();
         ctx->PushStyleColor(ImGuiCol_Text, EditorTheme::PREFAB_TEXT.x, EditorTheme::PREFAB_TEXT.y,
                             EditorTheme::PREFAB_TEXT.z, EditorTheme::PREFAB_TEXT.w);
         ctx->Label(prefabName);
         ctx->PopStyleColor(1);
     } else {
-        std::string displayName = getSceneDisplayName ? getSceneDisplayName() : "";
+        std::string displayName = SceneDisplayName();
         if (!displayName.empty())
             ctx->Label(displayName);
         else {
@@ -1931,7 +1974,7 @@ void HierarchyPanel::OnRenderContent(InxGUIContext *ctx)
     // selected object silently turns the next root creation into a collapsed
     // child and makes it appear to disappear from the Hierarchy.
     uint64_t parentIdForNew = 0;
-    if (isPrefabMode && isPrefabMode()) {
+    if (IsPrefabModeActive()) {
         Scene *pscene = SceneManager::Instance().GetActiveScene();
         if (pscene && !pscene->GetRootObjects().empty())
             parentIdForNew = pscene->GetRootObjects()[0]->GetID();

@@ -214,14 +214,17 @@ def run_player(project_path: str, engine_log_level=LogLevel.Info):
     import time
     from .player_bootstrap import PlayerBootstrap
 
-    from .library_sync import sync_resources
-    sync_resources(project_path)
-    _resources.activate_library(project_path)
-
     # Packaged/standalone games skip the project lock entirely — they
     # have their own self-contained Data folder and should never conflict
     # with an editor instance or another packaged game.
     is_packaged = os.environ.get("_INFERNUX_PLAYER_MODE") == "1"
+
+    # Packaged players already carry Infernux/resources. Only development
+    # players mirror those resources into the project's Library directory.
+    if not is_packaged:
+        from .library_sync import sync_resources
+        sync_resources(project_path)
+        _resources.activate_library(project_path)
 
     lock_path = lock_token = None
     if not is_packaged:

@@ -121,6 +121,8 @@ PropertyDesc DecodePropertyDesc(const py::dict &d)
         p.multiline = d["ml"].cast<bool>();
     if (d.contains("mix"))
         p.mixed = d["mix"].cast<bool>();
+    if (d.contains("fl"))
+        p.fieldLabel = d["fl"].cast<bool>();
     if (d.contains("hdr"))
         p.header = d["hdr"].cast<std::string>();
     if (d.contains("spc"))
@@ -139,6 +141,44 @@ std::vector<PropertyDesc> DecodePropertyBatch(py::list descriptors)
         props.push_back(DecodePropertyDesc(descriptors[i].cast<py::dict>()));
     }
     return props;
+}
+
+void UpdatePropertyBatchValues(PropertyBatchPlan &plan, const py::sequence &values)
+{
+    if (py::len(values) != static_cast<py::ssize_t>(plan.descriptors.size()))
+        throw py::value_error("Property batch value count does not match the compiled plan.");
+
+    for (size_t i = 0; i < plan.descriptors.size(); ++i) {
+        auto &desc = plan.descriptors[i];
+        const py::handle value = values[static_cast<py::ssize_t>(i)];
+        switch (desc.type) {
+        case PropertyDesc::Float:
+            desc.fVal[0] = py::cast<float>(value);
+            break;
+        case PropertyDesc::Int:
+        case PropertyDesc::Enum:
+            desc.iVal = py::cast<int>(value);
+            break;
+        case PropertyDesc::Bool:
+            desc.bVal = py::cast<bool>(value);
+            break;
+        case PropertyDesc::String:
+            desc.sVal = py::cast<std::string>(value);
+            break;
+        case PropertyDesc::Vec2:
+        case PropertyDesc::Vec3:
+        case PropertyDesc::Vec4:
+        case PropertyDesc::Color: {
+            const auto components = py::reinterpret_borrow<py::sequence>(value);
+            const int count = desc.type == PropertyDesc::Vec2 ? 2 : desc.type == PropertyDesc::Vec3 ? 3 : 4;
+            if (py::len(components) != count)
+                throw py::value_error("Property batch vector value has the wrong component count.");
+            for (int component = 0; component < count; ++component)
+                desc.fVal[component] = py::cast<float>(components[component]);
+            break;
+        }
+        }
+    }
 }
 
 py::dict EncodePropertyChanges(const std::vector<PropertyChange> &changes)
@@ -826,7 +866,23 @@ void RegisterGUIBindings(py::module_ &m)
                 return EncodePropertyChanges(ctx.RenderPropertyBatch(plan->descriptors, labelWidth));
             },
             py::arg("plan"), py::arg("label_width"),
-            "Render a reusable native property batch plan. Returns {index: new_value} for changed fields.");
+            "Render a reusable native property batch plan. Returns {index: new_value} for changed fields.")
+        .def(
+            "render_property_batch_plan_values",
+            [](InxGUIContext &ctx, const std::shared_ptr<PropertyBatchPlan> &plan, py::sequence values,
+               float labelWidth) -> py::dict {
+                if (!plan)
+                    return py::dict();
+                UpdatePropertyBatchValues(*plan, values);
+                return EncodePropertyChanges(ctx.RenderPropertyBatch(plan->descriptors, labelWidth));
+            },
+            py::arg("plan"), py::arg("values"), py::arg("label_width"),
+            "Update only the values of a compiled property plan, render it, and return changed fields.")
+        .def("render_object_field_chrome", &InxGUIContext::RenderObjectFieldChrome, py::arg("field_id"),
+             py::arg("display_text"), py::arg("type_hint"), py::arg("selected") = false,
+             py::arg("clickable") = true, py::arg("has_picker") = false, py::arg("picker_texture_id") = 0,
+             py::arg("semantic_id") = "",
+             "Render steady-state object-reference chrome in one native call; returns interaction flags.");
 
     py::class_<InxGUIRenderable, PyGUIRenderable, std::shared_ptr<InxGUIRenderable>>(m, "InxGUIRenderable",
                                                                                      py::dynamic_attr())
@@ -941,8 +997,7 @@ void RegisterGUIBindings(py::module_ &m)
                 ToolbarPanel::CameraSettings s;
                 s.orthographic = d.contains("orthographic") ? d["orthographic"].cast<bool>() : false;
                 s.fov = d.contains("fov") ? d["fov"].cast<float>() : 60.0f;
-                s.orthographicSize =
-                    d.contains("orthographic_size") ? d["orthographic_size"].cast<float>() : 5.0f;
+                s.orthographicSize = d.contains("orthographic_size") ? d["orthographic_size"].cast<float>() : 5.0f;
                 s.rotationSpeed = d.contains("rotation_speed") ? d["rotation_speed"].cast<float>() : 0.05f;
                 s.panSpeed = d.contains("pan_speed") ? d["pan_speed"].cast<float>() : 1.0f;
                 s.zoomSpeed = d.contains("zoom_speed") ? d["zoom_speed"].cast<float>() : 1.0f;
@@ -960,8 +1015,7 @@ void RegisterGUIBindings(py::module_ &m)
                     ToolbarPanel::CameraSettings s;
                     s.orthographic = d.contains("orthographic") ? d["orthographic"].cast<bool>() : false;
                     s.fov = d.contains("fov") ? d["fov"].cast<float>() : 60.0f;
-                    s.orthographicSize =
-                        d.contains("orthographic_size") ? d["orthographic_size"].cast<float>() : 5.0f;
+                    s.orthographicSize = d.contains("orthographic_size") ? d["orthographic_size"].cast<float>() : 5.0f;
                     s.rotationSpeed = d.contains("rotation_speed") ? d["rotation_speed"].cast<float>() : 0.05f;
                     s.panSpeed = d.contains("pan_speed") ? d["pan_speed"].cast<float>() : 1.0f;
                     s.zoomSpeed = d.contains("zoom_speed") ? d["zoom_speed"].cast<float>() : 1.0f;
@@ -993,6 +1047,7 @@ void RegisterGUIBindings(py::module_ &m)
     // ── MenuBarPanel ───────────────────────────────────────────────────
     py::class_<MenuBarPanel, InxGUIRenderable, std::shared_ptr<MenuBarPanel>>(m, "MenuBarPanel")
         .def(py::init<>())
+        .def("invalidate_window_type_cache", &MenuBarPanel::InvalidateWindowTypeCache)
         .def_readwrite("on_save", &MenuBarPanel::onSave)
         .def_readwrite("on_save_as", &MenuBarPanel::onSaveAs)
         .def_readwrite("on_save_focused", &MenuBarPanel::onSaveFocused)
@@ -1028,6 +1083,10 @@ void RegisterGUIBindings(py::module_ &m)
         .def("clear_selection_and_notify", &HierarchyPanel::ClearSelectionAndNotify)
         .def("set_selected_object_by_id", &HierarchyPanel::SetSelectedObjectById, py::arg("id"),
              py::arg("clear_search") = false)
+        .def("set_selection_snapshot", &HierarchyPanel::SetSelectionSnapshot, py::arg("ids"), py::arg("primary"))
+        .def("set_runtime_hidden_ids", &HierarchyPanel::SetRuntimeHiddenIds, py::arg("ids"))
+        .def("set_scene_header_snapshot", &HierarchyPanel::SetSceneHeaderSnapshot, py::arg("scene_display_name"),
+             py::arg("prefab_mode"), py::arg("prefab_display_name"))
         .def("expand_to_object", &HierarchyPanel::ExpandToObject, py::arg("obj_id"))
         .def("set_pending_expand_id", &HierarchyPanel::SetPendingExpandId, py::arg("obj_id"))
         .def("invalidate_scene_structure_cache", &HierarchyPanel::InvalidateSceneStructureCache)

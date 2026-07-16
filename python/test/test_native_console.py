@@ -68,6 +68,17 @@ class TestNativeConsolePanel:
         assert panel.get_warning_count() == 0
         assert panel.get_error_count() == 0
 
+    def test_large_pending_log_counts_are_incremental(self):
+        panel = ConsolePanel()
+        for index in range(20000):
+            panel.log_from_python(LogLevel.Info, f"entry {index}")
+        panel.log_from_python(LogLevel.Warn, "warning")
+        panel.log_from_python(LogLevel.Error, "error")
+
+        assert panel.get_info_count() == 20000
+        assert panel.get_warning_count() == 1
+        assert panel.get_error_count() == 1
+
     def test_filter_properties(self):
         panel = ConsolePanel()
         assert panel.show_info is True

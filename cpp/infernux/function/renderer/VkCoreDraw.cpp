@@ -168,6 +168,29 @@ void InxVkCoreModular::SetDrawCalls(const std::vector<DrawCall> *drawCalls)
         m_cachedDefaultLit = AssetRegistry::Instance().GetBuiltinMaterial("DefaultLit");
         m_cachedErrorMat = AssetRegistry::Instance().GetBuiltinMaterial("ErrorMaterial");
     }
+
+    // Track only the small unique queue set. Sorting one queue value per
+    // DrawCall costs more than the empty render-pass scans this replaces.
+    m_drawQueueValues.clear();
+    m_drawQueueValuesOverflow = false;
+    if (!drawCalls)
+        return;
+    constexpr size_t kTrackedQueueLimit = 16;
+    m_drawQueueValues.reserve(kTrackedQueueLimit);
+    for (const DrawCall &drawCall : *drawCalls) {
+        const InxMaterial *material = drawCall.material ? drawCall.material.get() : m_cachedDefaultLit.get();
+        if (!material)
+            continue;
+        const int queue = material->GetRenderQueue();
+        if (std::find(m_drawQueueValues.begin(), m_drawQueueValues.end(), queue) != m_drawQueueValues.end())
+            continue;
+        if (m_drawQueueValues.size() == kTrackedQueueLimit) {
+            m_drawQueueValuesOverflow = true;
+            m_drawQueueValues.clear();
+            break;
+        }
+        m_drawQueueValues.push_back(queue);
+    }
 }
 
 void InxVkCoreModular::SetShadowDrawCalls(const std::vector<DrawCall> *drawCalls)
@@ -268,6 +291,13 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
     if (drawCalls().empty())
         return;
 
+    if (overrideMaterial.empty() && !m_drawQueueValuesOverflow) {
+        const bool queuePresent =
+            std::any_of(m_drawQueueValues.begin(), m_drawQueueValues.end(),
+                        [queueMin, queueMax](int queue) { return queue >= queueMin && queue <= queueMax; });
+        if (!queuePresent)
+            return;
+    }
 #if INFERNUX_FRAME_PROFILE
     ++m_drawSceneFilteredCalls;
 #endif
@@ -314,9 +344,9 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
         if (!dc.frustumVisible)
             continue;
 
-        std::shared_ptr<InxMaterial> materialOwner =
-            overrideMatOwner ? overrideMatOwner : (dc.material ? dc.material : defaultMaterial);
-        InxMaterial *material = materialOwner.get();
+        const std::shared_ptr<InxMaterial> *materialOwner =
+            overrideMatOwner ? &overrideMatOwner : (dc.material ? &dc.material : &defaultMaterial);
+        InxMaterial *material = materialOwner->get();
         if (!material)
             continue;
 
@@ -349,7 +379,7 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
         if (bufIt != m_perObjectBuffers.end() && bufIt->second.vertexBuffer)
             vb = bufIt->second.vertexBuffer->GetBuffer();
 
-        m_eligibleScratch.push_back({&dc, sortKey, matHash, vb, std::move(materialOwner), material, bufIt});
+        m_eligibleScratch.push_back({&dc, sortKey, matHash, vb, materialOwner, material, bufIt});
     }
 
     // Diagnostic: log per-call eligible count with queue range
@@ -602,9 +632,25 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
         const auto &entry = m_eligibleScratch[idx];
         const DrawCall &dc = *entry.dc;
 
-        // Material already resolved in filter loop — use directly
-        auto matShared = entry.materialOwner;
-        InxMaterial *matRaw = matShared.get();
+        // Once a batch has established valid Vulkan state, subsequent
+        // consecutive instances with the same material/mesh can extend it
+        // without repeating material-pipeline and descriptor validation.
+        if (batchInstanceCount > 0) {
+            const DrawCall &batchFirst = *m_eligibleScratch[batchFirstInstance].dc;
+            const bool batchingAllowed =
+                allowBatching || (batchFirst.allowTransparentInstancing && dc.allowTransparentInstancing);
+            if (batchingAllowed && entry.material == currentMaterialRaw && entry.vertexBuf == currentVertexBuffer &&
+                dc.indexStart == batchIndexStart && dc.indexCount == batchIndexCount &&
+                dc.vertexStart == batchVertexStart) {
+                ++batchInstanceCount;
+                continue;
+            }
+        }
+
+        // Material already resolved in filter loop — use directly without
+        // incrementing a shared_ptr reference count for every instance.
+        const std::shared_ptr<InxMaterial> *matOwner = entry.materialOwner;
+        InxMaterial *matRaw = matOwner->get();
 
         VkPipeline pipeline = matRaw->GetPassPipeline(ShaderCompileTarget::Forward);
         VkPipelineLayout pipelineLayout = matRaw->GetPassPipelineLayout(ShaderCompileTarget::Forward);
@@ -619,7 +665,7 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
             const std::string &vertName = matRaw->GetVertShaderName();
             const std::string &fragName = matRaw->GetFragShaderName();
             if (!fragName.empty()) {
-                RefreshMaterialPipeline(matShared, vertName, fragName);
+                RefreshMaterialPipeline(*matOwner, vertName, fragName);
                 pipeline = matRaw->GetPassPipeline(ShaderCompileTarget::Forward);
                 pipelineLayout = matRaw->GetPassPipelineLayout(ShaderCompileTarget::Forward);
             }
@@ -634,14 +680,14 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
                 if (errorMaterial->GetPassPipeline(ShaderCompileTarget::Forward) != VK_NULL_HANDLE) {
                     pipeline = errorMaterial->GetPassPipeline(ShaderCompileTarget::Forward);
                     pipelineLayout = errorMaterial->GetPassPipelineLayout(ShaderCompileTarget::Forward);
-                    matShared = errorMaterial;
+                    matOwner = &errorMaterial;
                     matRaw = errorMaterial.get();
                 }
             }
             if (pipeline == VK_NULL_HANDLE && defaultMaterial) {
                 pipeline = defaultMaterial->GetPassPipeline(ShaderCompileTarget::Forward);
                 pipelineLayout = defaultMaterial->GetPassPipelineLayout(ShaderCompileTarget::Forward);
-                matShared = defaultMaterial;
+                matOwner = &defaultMaterial;
                 matRaw = defaultMaterial.get();
             }
             if (pipeline == VK_NULL_HANDLE) {
@@ -676,7 +722,7 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
                 const std::string &vertName = matRaw->GetVertShaderName();
                 const std::string &fragName = matRaw->GetFragShaderName();
                 if (!fragName.empty()) {
-                    if (RefreshMaterialPipeline(matShared, vertName, fragName)) {
+                    if (RefreshMaterialPipeline(*matOwner, vertName, fragName)) {
                         rd = m_materialPipelineManager.GetRenderData(materialKey);
                     }
                 }
@@ -774,7 +820,7 @@ void InxVkCoreModular::DrawSceneFiltered(VkCommandBuffer cmdBuf, uint32_t width,
                 const std::string &vertName = matRaw->GetVertShaderName();
                 const std::string &fragName = matRaw->GetFragShaderName();
                 if (!fragName.empty()) {
-                    if (RefreshMaterialPipeline(matShared, vertName, fragName)) {
+                    if (RefreshMaterialPipeline(*matOwner, vertName, fragName)) {
                         MaterialRenderData *rd = m_materialPipelineManager.GetRenderData(matRaw->GetMaterialKey());
                         if (rd && rd->isValid && rd->descriptorSet != VK_NULL_HANDLE &&
                             m_materialPipelineManager.IsDescriptorSetLive(rd->descriptorSet)) {
@@ -920,7 +966,8 @@ void InxVkCoreModular::DrawShadowCasters(VkCommandBuffer cmdBuf, uint32_t width,
         VkPipeline pip = dc.material->GetPassPipeline(ShaderCompileTarget::Shadow);
         if (pip == VK_NULL_HANDLE) {
             // Lazy creation: shadow shared resources are ready, create per-material pipeline now
-            CreateMaterialShadowPipeline(dc.material, dc.material->GetVertShaderName(), dc.material->GetFragShaderName());
+            CreateMaterialShadowPipeline(dc.material, dc.material->GetVertShaderName(),
+                                         dc.material->GetFragShaderName());
             pip = dc.material->GetPassPipeline(ShaderCompileTarget::Shadow);
         }
         if (pip == VK_NULL_HANDLE)
@@ -1629,11 +1676,15 @@ void InxVkCoreModular::EnsureObjectBuffers(uint64_t objectId, const std::vector<
         throw std::invalid_argument("Mesh GPU identity requires GUID and runtime version together");
 
     auto objectIt = m_perObjectBuffers.find(objectId);
-    if (objectIt != m_perObjectBuffers.end() && !forceUpdate) {
-        // Frame-stamp dedup: if already ensured this frame, skip entirely
+    if (objectIt != m_perObjectBuffers.end()) {
+        // A second camera can carry the same one-shot force flag in its copied
+        // draw calls. The object was already updated from the same scene cache
+        // on this frame, so skip it regardless of that stale copy.
         if (objectIt->second.ensuredOnFrame == m_ensureFrameCounter) {
             return;
         }
+    }
+    if (objectIt != m_perObjectBuffers.end() && !forceUpdate) {
         // Fast path: if data pointers AND sizes match, content hasn't changed
         if (objectIt->second.lastVertexPtr == vertices.data() && objectIt->second.lastIndexPtr == indices.data() &&
             objectIt->second.vertexCount == vertices.size() && objectIt->second.indexCount == indices.size()) {
@@ -1750,6 +1801,11 @@ void InxVkCoreModular::CleanupUnusedBuffersByIds(const std::unordered_set<uint64
 
 size_t InxVkCoreModular::CleanupUnusedBuffersByFrameStamp()
 {
+    if (m_skipObjectBufferCleanupThisFrame) {
+        m_skipObjectBufferCleanupThisFrame = false;
+        return m_perObjectBuffers.size();
+    }
+
     // Remove objects that were not referenced by EnsureObjectBuffers on this frame.
     bool anyRemoved = false;
     for (auto it = m_perObjectBuffers.begin(); it != m_perObjectBuffers.end();) {
@@ -1766,6 +1822,11 @@ size_t InxVkCoreModular::CleanupUnusedBuffersByFrameStamp()
 
     if (anyRemoved)
         (void)TrimMeshGpuBudget();
+
+    if (anyRemoved) {
+        for (auto &entry : m_objectBufferBindingCache)
+            entry.valid = false;
+    }
 
     return m_perObjectBuffers.size();
 }

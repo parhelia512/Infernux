@@ -10,9 +10,10 @@
  *     callers may safely observe a half-released entry (owner == nullptr,
  *     IsAlive == false).
  *   * Releasing a Rigidbody invalidates every PhysicsActorData::rigidbody
- *     pointer that references it. Rigidbody::OnDisable() is the primary cleaner;
- *     ScrubCachedRigidbody() is the safety net for paths that bypass it
- *     (editor undo/redo on inactive objects, scene rebuild order anomalies).
+ *     pointer that references it.
+ * Rigidbody::OnDisable() is the primary cleaner;
+ *     ScrubCachedRigidbody() is the safety net for paths that bypass
+ * it (editor undo/redo on inactive objects, scene rebuild order anomalies).
  *   * The pending-queue dedup sets MUST be cleared whenever pool slots may be
  *     recycled; ClearPendingQueues() is the single chokepoint for that — see
  *     SceneManager::ClearComponentRegistries.
@@ -207,7 +208,7 @@ void PhysicsECSStore::ReleaseRigidbody(RigidbodyHandle handle)
     if (!m_rigidbodyPool.IsAlive(handle))
         return;
 
-// Safety net: see ScrubCachedRigidbody. Rigidbody::OnDisable() is the
+    // Safety net: see ScrubCachedRigidbody. Rigidbody::OnDisable() is the
     // primary cleaner, but editor undo/redo on inactive components and other
     // bypass paths reach Release without going through OnDisable; without this
     // scrub, sibling colliders would dereference a freed Rigidbody.
@@ -238,29 +239,65 @@ const RigidbodyECSData &PhysicsECSStore::GetRigidbody(RigidbodyHandle handle) co
 
 void PhysicsECSStore::MarkColliderDirty(ColliderHandle handle)
 {
-    if (m_colliderPool.IsAlive(handle)) {
-        if (m_dirtyColliderSet.insert(ColliderHandleKey(handle)).second)
-            m_dirtyColliderList.push_back(handle);
-    }
+    if (!m_colliderPool.IsAlive(handle))
+        return;
+    const ActorHandle actorHandle = m_colliderPool.Get(handle).actorHandle;
+    if (!m_actorPool.IsAlive(actorHandle))
+        return;
+    auto &actor = m_actorPool.Get(actorHandle);
+    if (actor.transformDirtyQueued)
+        return;
+    actor.transformDirtyQueued = true;
+    m_dirtyActorList.push_back(actorHandle);
 }
 
-std::vector<PhysicsECSStore::ColliderHandle> PhysicsECSStore::ConsumeDirtyColliders()
+void PhysicsECSStore::MarkGameObjectDirty(GameObject *owner)
 {
-    std::vector<ColliderHandle> pending;
-    pending.swap(m_dirtyColliderList);
-    m_dirtyColliderSet.clear();
-    return CollapseToActorPrimary(pending, *this);
+    if (!owner)
+        return;
+    const auto found = m_actorByOwner.find(owner);
+    if (found == m_actorByOwner.end() || !m_actorPool.IsAlive(found->second))
+        return;
+    auto &actor = m_actorPool.Get(found->second);
+    if (actor.transformDirtyQueued)
+        return;
+    actor.transformDirtyQueued = true;
+    m_dirtyActorList.push_back(found->second);
+}
+
+const std::vector<PhysicsECSStore::ColliderHandle> &PhysicsECSStore::ConsumeDirtyColliders()
+{
+    m_dirtyColliderScratch.clear();
+    m_dirtyColliderScratch.reserve(m_dirtyActorList.size());
+    for (const ActorHandle actorHandle : m_dirtyActorList) {
+        if (!m_actorPool.IsAlive(actorHandle))
+            continue;
+        auto &actor = m_actorPool.Get(actorHandle);
+        actor.transformDirtyQueued = false;
+        Collider *primary = actor.primaryCollider;
+        if (primary && primary->IsEnabled() && m_colliderPool.IsAlive(primary->GetECSHandle()))
+            m_dirtyColliderScratch.push_back(primary->GetECSHandle());
+    }
+    m_dirtyActorList.clear();
+    return m_dirtyColliderScratch;
 }
 
 void PhysicsECSStore::MarkAllCollidersDirty()
 {
-    m_dirtyColliderList.clear();
-    m_dirtyColliderSet.clear();
-    auto handles = m_colliderPool.GetAliveHandles();
-    m_dirtyColliderList.reserve(handles.size());
-    for (auto &h : handles) {
-        m_dirtyColliderList.push_back(h);
-        m_dirtyColliderSet.insert(ColliderHandleKey(h));
+    for (const ActorHandle actorHandle : m_dirtyActorList) {
+        if (m_actorPool.IsAlive(actorHandle))
+            m_actorPool.Get(actorHandle).transformDirtyQueued = false;
+    }
+    m_dirtyActorList.clear();
+
+    const auto actors = m_actorPool.GetAliveHandles();
+    m_dirtyActorList.reserve(actors.size());
+    for (const ActorHandle actorHandle : actors) {
+        auto &actor = m_actorPool.Get(actorHandle);
+        if (!actor.primaryCollider || !actor.primaryCollider->IsEnabled())
+            continue;
+        actor.transformDirtyQueued = true;
+        m_dirtyActorList.push_back(actorHandle);
     }
 }
 
@@ -310,8 +347,11 @@ void PhysicsECSStore::ClearPendingQueues()
     m_pendingBodyCreationSet.clear();
     m_pendingBroadphaseAdds.clear();
     m_pendingBroadphaseSet.clear();
-    m_dirtyColliderList.clear();
-    m_dirtyColliderSet.clear();
+    for (const ActorHandle actorHandle : m_dirtyActorList) {
+        if (m_actorPool.IsAlive(actorHandle))
+            m_actorPool.Get(actorHandle).transformDirtyQueued = false;
+    }
+    m_dirtyActorList.clear();
 }
 
 } // namespace infernux

@@ -787,8 +787,16 @@ def register_scene_tools(mcp) -> None:
                 before_ids = _component_ids(obj)
                 if script_path:
                     from Infernux.components import load_and_create_component
-                    from Infernux.mcp.tools.common import get_asset_database
-                    comp = load_and_create_component(script_path, asset_database=get_asset_database(), type_name=component_type)
+                    from Infernux.mcp import capabilities
+                    from Infernux.mcp.tools.common import get_asset_database, resolve_asset_path
+                    resolved_script_path = resolve_asset_path(
+                        capabilities.project_path(), script_path
+                    )
+                    comp = load_and_create_component(
+                        resolved_script_path,
+                        asset_database=get_asset_database(),
+                        type_name=component_type,
+                    )
                     if comp is None:
                         raise RuntimeError(f"Script did not create component '{component_type}'.")
                     comp = obj.add_py_component(comp)

@@ -40,6 +40,7 @@ struct TransformBatchHandle
     mutable std::vector<size_t> resolvedIndices;
     mutable std::vector<uint8_t> validMask;
     mutable std::vector<float> valueScratch;
+    mutable uint64_t resolvedStructuralVersion = UINT64_MAX;
 
     explicit TransformBatchHandle(const py::list &pyList, Mode validationMode = Mode::Strict) : mode(validationMode)
     {
@@ -69,6 +70,10 @@ struct TransformBatchHandle
     Transform *const *Resolve() const
     {
         auto &store = TransformECSStore::Instance();
+        const uint64_t structuralVersion = store.GetStructuralVersion();
+        if (resolvedStructuralVersion == structuralVersion)
+            return resolved.data();
+
         resolved.clear();
         resolvedIndices.clear();
         std::fill(validMask.begin(), validMask.end(), uint8_t{0});
@@ -84,6 +89,7 @@ struct TransformBatchHandle
             resolved.push_back(owner);
             resolvedIndices.push_back(i);
         }
+        resolvedStructuralVersion = structuralVersion;
         return resolved.data();
     }
 };

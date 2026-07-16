@@ -27,6 +27,14 @@ ConsolePanel::~ConsolePanel()
     InxLog::GetInstance().RemoveSink(m_sinkId);
 }
 
+std::unordered_map<std::string, double> ConsolePanel::ConsumeSubTimings()
+{
+    std::unordered_map<std::string, double> result{
+        {"flush", m_subFlush}, {"cache", m_subCache}, {"toolbar", m_subToolbar}, {"body", m_subBody}};
+    m_subFlush = m_subCache = m_subToolbar = m_subBody = 0.0;
+    return result;
+}
+
 // ════════════════════════════════════════════════════════════════════
 // INXLOG sink callback (may be called from ANY thread)
 // ════════════════════════════════════════════════════════════════════
@@ -50,6 +58,18 @@ void ConsolePanel::OnLogMessage(LogLevel level, const char *file, int line, cons
 
     {
         std::lock_guard<std::mutex> lock(m_logMutex);
+        switch (entry.level) {
+        case LOG_WARN:
+            ++m_warnCount;
+            break;
+        case LOG_ERROR:
+        case LOG_FATAL:
+            ++m_errorCount;
+            break;
+        default:
+            ++m_infoCount;
+            break;
+        }
         m_pendingLogs.push_back(std::move(entry));
     }
 }
@@ -74,6 +94,18 @@ void ConsolePanel::LogFromPython(LogLevel level, const std::string &message, con
 
     {
         std::lock_guard<std::mutex> lock(m_logMutex);
+        switch (entry.level) {
+        case LOG_WARN:
+            ++m_warnCount;
+            break;
+        case LOG_ERROR:
+        case LOG_FATAL:
+            ++m_errorCount;
+            break;
+        default:
+            ++m_infoCount;
+            break;
+        }
         m_pendingLogs.push_back(std::move(entry));
     }
 }
@@ -83,6 +115,9 @@ void ConsolePanel::Clear()
     std::lock_guard<std::mutex> lock(m_logMutex);
     m_logs.clear();
     m_pendingLogs.clear();
+    m_infoCount = 0;
+    m_warnCount = 0;
+    m_errorCount = 0;
     m_selectedIndex = -1;
     m_nextUid = 1;
     m_cacheDirty = true;
@@ -158,11 +193,25 @@ void ConsolePanel::GetLastVisibleForStatusBar(std::string &outMsg, std::string &
 
 void ConsolePanel::OnRenderContent(InxGUIContext *ctx)
 {
-    FlushPendingLogs();
-    EnsureCache();
+    const auto toolbarStart = std::chrono::steady_clock::now();
     RenderToolbar(ctx);
+    const auto bodyStart = std::chrono::steady_clock::now();
     ImGui::Separator();
     RenderBody(ctx);
+    const auto bodyEnd = std::chrono::steady_clock::now();
+    m_subToolbar += std::chrono::duration<double, std::milli>(bodyStart - toolbarStart).count();
+    m_subBody += std::chrono::duration<double, std::milli>(bodyEnd - bodyStart).count();
+}
+
+void ConsolePanel::PreRender(InxGUIContext * /*ctx*/)
+{
+    const auto flushStart = std::chrono::steady_clock::now();
+    FlushPendingLogs();
+    const auto cacheStart = std::chrono::steady_clock::now();
+    EnsureCache();
+    const auto cacheEnd = std::chrono::steady_clock::now();
+    m_subFlush += std::chrono::duration<double, std::milli>(cacheStart - flushStart).count();
+    m_subCache += std::chrono::duration<double, std::milli>(cacheEnd - cacheStart).count();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -179,45 +228,59 @@ void ConsolePanel::FlushPendingLogs()
         incoming.swap(m_pendingLogs);
     }
 
+    DetectFilterChange();
+    const bool appendToVisible = !m_cacheDirty && !m_filterDirty && !collapse;
     for (auto &entry : incoming) {
         entry.uid = m_nextUid++;
+        const size_t logIndex = m_logs.size();
+        if (appendToVisible && MatchesCurrentFilters(entry))
+            m_visible.push_back({logIndex, 1, entry.uid});
+        switch (entry.level) {
+        case LOG_WARN:
+            ++m_cachedWarnCount;
+            break;
+        case LOG_ERROR:
+        case LOG_FATAL:
+            ++m_cachedErrorCount;
+            break;
+        default:
+            ++m_cachedInfoCount;
+            break;
+        }
         m_logs.push_back(std::move(entry));
     }
 
-    while (m_logs.size() > MAX_LOGS)
+    bool trimmed = false;
+    while (m_logs.size() > MAX_LOGS) {
+        switch (m_logs.front().level) {
+        case LOG_WARN:
+            --m_warnCount;
+            break;
+        case LOG_ERROR:
+        case LOG_FATAL:
+            --m_errorCount;
+            break;
+        default:
+            --m_infoCount;
+            break;
+        }
         m_logs.pop_front();
+        trimmed = true;
+    }
 
-    m_cacheDirty = true;
+    // The common non-collapse path can extend the visible cache in O(new logs).
+    // Filtering/collapse changes and deque trimming still use the full rebuild.
+    if (!appendToVisible || trimmed)
+        m_cacheDirty = true;
     if (!m_userScrolledUp)
         m_scrollToBottom = true;
 }
 
 void ConsolePanel::GetCountSnapshot(int &infoCount, int &warnCount, int &errorCount) const
 {
-    infoCount = 0;
-    warnCount = 0;
-    errorCount = 0;
-
-    auto accumulate = [&infoCount, &warnCount, &errorCount](LogLevel level) {
-        switch (level) {
-        case LOG_WARN:
-            ++warnCount;
-            break;
-        case LOG_ERROR:
-        case LOG_FATAL:
-            ++errorCount;
-            break;
-        default:
-            ++infoCount;
-            break;
-        }
-    };
-
-    std::lock_guard<std::mutex> lock(m_logMutex);
-    for (const auto &log : m_logs)
-        accumulate(log.level);
-    for (const auto &log : m_pendingLogs)
-        accumulate(log.level);
+    infoCount = m_infoCount.load(std::memory_order_relaxed);
+    warnCount = m_warnCount.load(std::memory_order_relaxed);
+    errorCount = m_errorCount.load(std::memory_order_relaxed);
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -235,6 +298,17 @@ void ConsolePanel::DetectFilterChange()
         m_prevCollapse = collapse;
         m_filterDirty = true;
     }
+}
+
+bool ConsolePanel::MatchesCurrentFilters(const LogEntry &entry) const
+{
+    if (entry.level <= LOG_INFO)
+        return showInfo;
+    if (entry.level == LOG_WARN)
+        return showWarnings;
+    if (entry.level == LOG_ERROR || entry.level == LOG_FATAL)
+        return showErrors;
+    return showInfo;
 }
 
 void ConsolePanel::EnsureCache()
@@ -264,11 +338,7 @@ void ConsolePanel::EnsureCache()
         const auto &log = m_logs[i];
 
         // Apply filters
-        if (log.level <= LOG_INFO && !showInfo)
-            continue;
-        if (log.level == LOG_WARN && !showWarnings)
-            continue;
-        if ((log.level == LOG_ERROR || log.level == LOG_FATAL) && !showErrors)
+        if (!MatchesCurrentFilters(log))
             continue;
 
         if (collapse) {

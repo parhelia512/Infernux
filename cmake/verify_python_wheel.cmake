@@ -19,6 +19,53 @@ file(REMOVE_RECURSE "${_verify_root}")
 file(MAKE_DIRECTORY "${_verify_root}")
 file(ARCHIVE_EXTRACT INPUT "${_wheel}" DESTINATION "${_verify_root}")
 
+file(GLOB_RECURSE _forbidden_files LIST_DIRECTORIES false
+    "${_verify_root}/*.bak"
+    "${_verify_root}/*.exp"
+    "${_verify_root}/*.lib"
+    "${_verify_root}/*.meta"
+    "${_verify_root}/*.pdb"
+    "${_verify_root}/*.pyc"
+    "${_verify_root}/*.pyo"
+)
+if(_forbidden_files)
+    list(JOIN _forbidden_files "\n  " _forbidden_report)
+    message(FATAL_ERROR
+        "Wheel contains build-time or editor-only files:\n  ${_forbidden_report}"
+    )
+endif()
+
+file(GLOB_RECURSE _nested_runtime_archives LIST_DIRECTORIES false
+    "${_verify_root}/runtime-pack.zip"
+    "${_verify_root}/*-module.zip"
+)
+set(_archive_index 0)
+foreach(_runtime_archive IN LISTS _nested_runtime_archives)
+    math(EXPR _archive_index "${_archive_index} + 1")
+    set(_archive_verify_root "${_verify_root}/nested-${_archive_index}")
+    file(REMOVE_RECURSE "${_archive_verify_root}")
+    file(MAKE_DIRECTORY "${_archive_verify_root}")
+    file(ARCHIVE_EXTRACT INPUT "${_runtime_archive}" DESTINATION "${_archive_verify_root}")
+    file(GLOB_RECURSE _nested_forbidden_files LIST_DIRECTORIES false
+        "${_archive_verify_root}/*.bak"
+        "${_archive_verify_root}/*.exp"
+        "${_archive_verify_root}/*.lib"
+        "${_archive_verify_root}/*.meta"
+        "${_archive_verify_root}/*.pdb"
+        "${_archive_verify_root}/*.pyc"
+        "${_archive_verify_root}/*.pyi"
+        "${_archive_verify_root}/*.pyo"
+    )
+    if(_nested_forbidden_files)
+        list(JOIN _nested_forbidden_files "\n  " _nested_forbidden_report)
+        message(FATAL_ERROR
+            "Runtime archive ${_runtime_archive} contains build-time files:\n"
+            "  ${_nested_forbidden_report}"
+        )
+    endif()
+    file(REMOVE_RECURSE "${_archive_verify_root}")
+endforeach()
+
 file(GLOB_RECURSE _native_files LIST_DIRECTORIES false
     "${_package_root}/Infernux/*.dll"
     "${_package_root}/Infernux/*.dylib"

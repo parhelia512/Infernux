@@ -54,7 +54,7 @@ class SelectionManager:
             pass
 
     def _notify(self) -> None:
-        for cb in self._callbacks:
+        for cb in tuple(self._callbacks):
             try:
                 cb()
             except Exception as _exc:

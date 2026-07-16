@@ -36,6 +36,7 @@ struct PhysicsActorData
     glm::vec3 lastScale{1.0f};
     uint64_t shapeRevision = 0;
     uint64_t transformRevision = 0;
+    bool transformDirtyQueued = false;
 };
 
 using PhysicsActorPool = InxContiguousPool<PhysicsActorData>;
@@ -153,14 +154,20 @@ class PhysicsECSStore
     /// Mark a collider as needing transform→physics sync before the next physics step.
     void MarkColliderDirty(ColliderHandle handle);
 
+    /// Mark the single shared physics actor owned by a GameObject dirty.
+    /// Avoids allocating/scanning a temporary component list from Transform observers.
+    void MarkGameObjectDirty(GameObject *owner);
+
     /// Consume the dirty set.  Returns handles that were dirty (moved since last flush).
     /// Clears the internal set atomically.
-    std::vector<ColliderHandle> ConsumeDirtyColliders();
+    /// Consume dirty actor primaries into retained scratch storage.
+    /// The returned reference remains valid until the next call.
+    const std::vector<ColliderHandle> &ConsumeDirtyColliders();
 
     /// True if any collider has been marked dirty since last consume.
     [[nodiscard]] bool HasDirtyColliders() const
     {
-        return !m_dirtyColliderSet.empty();
+        return !m_dirtyActorList.empty();
     }
 
     /// Mark all alive colliders dirty (used for force-sync scenarios).
@@ -223,6 +230,10 @@ class PhysicsECSStore
     {
         return m_rigidbodyPool.GetAliveHandles();
     }
+    [[nodiscard]] size_t GetAliveRigidbodyCount() const
+    {
+        return m_rigidbodyPool.AliveCount();
+    }
 
     /// Null out the Rigidbody pointer on every actor that references *dying*.
     /// Idempotent and safe when no actor references the component.
@@ -248,8 +259,8 @@ class PhysicsECSStore
     std::unordered_map<GameObject *, ActorHandle> m_actorByOwner;
 
     // Dirty collider tracking — colliders whose Transform changed and need physics sync.
-    std::vector<ColliderHandle> m_dirtyColliderList;
-    std::unordered_set<uint64_t> m_dirtyColliderSet; // generation-aware handle dedup
+    std::vector<ActorHandle> m_dirtyActorList;
+    std::vector<ColliderHandle> m_dirtyColliderScratch;
 
     // Pending body creation queue — colliders that deferred RegisterBody.
     std::vector<ColliderHandle> m_pendingBodyCreationList;

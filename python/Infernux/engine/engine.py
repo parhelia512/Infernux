@@ -31,6 +31,7 @@ class Engine():
         self._gizmos_uploaded = False
         self._resources_manager = None  # Set in init_renderer (editor only)
         self._before_exit_callback = None
+        self._editor_frame_sync_callback = None
 
     @staticmethod
     def _parse_present_mode(value) -> int | None:
@@ -340,6 +341,9 @@ class Engine():
             else float(external_delta_time)
         )
         self._last_frame_time = current_time
+
+        if self._editor_frame_sync_callback is not None:
+            self._editor_frame_sync_callback()
         
         # Process pending script reloads on the main thread, but throttle polling.
         rm = self._resources_manager

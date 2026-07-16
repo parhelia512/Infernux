@@ -40,6 +40,7 @@ class MenuBarPanel : public InxGUIRenderable
   public:
     MenuBarPanel();
     ~MenuBarPanel() override = default;
+    void InvalidateWindowTypeCache();
 
     // ── Callbacks set from Python ────────────────────────────────────
 
@@ -85,13 +86,14 @@ class MenuBarPanel : public InxGUIRenderable
     void HandleShortcuts(InxGUIContext *ctx);
     void RenderProjectMenu(InxGUIContext *ctx);
     void RenderDynamicMenus(InxGUIContext *ctx);
+    void RefreshWindowTypeCache();
     void RenderWindowMenu(InxGUIContext *ctx);
 
     /// Render a single top-level menu for panels whose menuPath starts with
     /// @p topMenu.  Panels with exact match become top-level items; those
     /// with a '/' suffix become sub-menus (e.g. "Animation/2D Animation").
     void RenderMenuGroup(InxGUIContext *ctx, const std::string &topMenu, const std::string &translatedLabel,
-                         const std::vector<WindowTypeInfo> &types, const std::map<std::string, bool> &openWins);
+                         const std::vector<WindowTypeInfo> &types);
 
     std::string T(const std::string &key) const;
 
@@ -106,6 +108,9 @@ class MenuBarPanel : public InxGUIRenderable
     static constexpr int KEY_RIGHT_SHIFT = ImGuiKey_RightShift;
 
     int m_lastShortcutFrame = -1;
+    std::vector<WindowTypeInfo> m_cachedWindowTypes;
+    std::vector<std::string> m_cachedTopMenus;
+    bool m_windowTypesDirty = true;
 };
 
 } // namespace infernux

@@ -396,8 +396,7 @@ class SceneManager:
         sm = _NativeSceneManager.instance()
         scene = sm.get_active_scene()
         if scene:
-            scene.set_playing(True)
-            scene.start()
+            sm._start_active_scene_for_play()
 
     # ------------------------------------------------------------------
     # Build-list queries

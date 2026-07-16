@@ -104,6 +104,7 @@ TransformECSStore::Handle TransformECSStore::Allocate(Transform *owner)
     m_owners[index] = owner;
 
     ++m_aliveCount;
+    ++m_structuralVersion;
     return Handle{index, m_generations[index]};
 }
 
@@ -120,6 +121,7 @@ void TransformECSStore::Release(Handle handle)
     m_nextFree[idx] = m_freeListHead;
     m_freeListHead = idx;
     --m_aliveCount;
+    ++m_structuralVersion;
 }
 
 bool TransformECSStore::IsValid(Handle handle) const
@@ -135,7 +137,10 @@ void TransformECSStore::RebindOwner(Handle handle, Transform *owner)
     if (!IsValid(handle)) {
         return;
     }
-    m_owners[handle.index] = owner;
+    if (m_owners[handle.index] != owner) {
+        m_owners[handle.index] = owner;
+        ++m_structuralVersion;
+    }
 }
 
 void TransformECSStore::Reserve(size_t capacity)
@@ -461,27 +466,40 @@ void TransformECSStore::GatherWorldPositions(Transform *const *transforms, float
 
 void TransformECSStore::ScatterWorldPositions(Transform *const *transforms, const float *in, size_t count)
 {
-    // Fast path: batch-set local positions and dirty flags, then
-    // batch-invalidate subtrees.  SetWorldPosition per-element is
-    // expensive due to GetParentTransformSafe + inverse matrix per call.
+    bool requiresMatrixSync = false;
     for (size_t i = 0; i < count; ++i) {
         Transform *t = transforms[i];
         Transform *parent = t->GetParent();
         glm::vec3 wp(in[i * 3], in[i * 3 + 1], in[i * 3 + 2]);
         uint32_t idx = t->GetECSHandle().index;
-        if (!parent) {
+
+        GameObject *gameObject = t->GetGameObject();
+        const bool hasChildren = gameObject && gameObject->GetChildCount() > 0;
+        if (!parent && !hasChildren) {
             m_localPositions[idx] = wp;
+            m_cachedWorldMatrices[idx][3] = glm::vec4(wp, 1.0f);
+            m_worldMatrixDirty[idx] = 0;
+            if (m_frameCacheActive)
+                m_fcWorldPositions[idx] = wp;
+            if (m_invalidationObserver)
+                m_invalidationObserver(t);
         } else {
-            glm::mat4 invParent = glm::inverse(parent->GetWorldMatrix());
-            m_localPositions[idx] = glm::vec3(invParent * glm::vec4(wp, 1.0f));
+            if (!parent) {
+                m_localPositions[idx] = wp;
+            } else {
+                glm::mat4 invParent = glm::inverse(parent->GetWorldMatrix());
+                m_localPositions[idx] = glm::vec3(invParent * glm::vec4(wp, 1.0f));
+            }
+            m_worldMatrixDirty[idx] = 1;
+            requiresMatrixSync = true;
+            InvalidateSubtree(t, false);
         }
         m_dirty[idx] = 1;
-        m_worldMatrixDirty[idx] = 1;
     }
-    m_anyWorldMatrixDirty = true;
-    for (size_t i = 0; i < count; ++i) {
-        InvalidateSubtree(transforms[i], false);
-    }
+    if (requiresMatrixSync)
+        m_anyWorldMatrixDirty = true;
+    if (count > 0)
+        ++m_globalTransformSerial;
 }
 
 void TransformECSStore::GatherWorldEulerAngles(Transform *const *transforms, float *out, size_t count) const

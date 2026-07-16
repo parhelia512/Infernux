@@ -634,7 +634,11 @@ class Material:
 
     def save(self, file_path: str) -> bool:
         """Save material to a .mat file."""
-        return self._native.serialize_to_file(file_path)
+        try:
+            self._native.save_to(file_path)
+            return True
+        except (OSError, RuntimeError, ValueError):
+            return False
 
     # ==========================================================================
     # Dunder methods

@@ -237,6 +237,8 @@ void SceneRenderer::CollectRenderables(uint32_t cullingMask)
         renderable.renderMaterial = renderer->GetEffectiveMaterial(); // Get actual InxMaterial
         renderable.renderMaterialRaw = renderable.renderMaterial.get();
         renderable.meshRenderer = renderer; // Store direct pointer
+        renderable.transform = obj->GetTransform();
+        renderable.skinnedRenderer = dynamic_cast<SkinnedMeshRenderer *>(renderer);
         renderable.drawCallStart = 0;
         renderable.drawCallCount = 0;
 
@@ -278,22 +280,30 @@ void SceneRenderer::UpdateCachedRenderableTransforms(bool useActiveCameraCulling
         MeshRenderer *mr = renderable.meshRenderer;
         if (!mr)
             continue;
-        GameObject *obj = mr->GetGameObject();
-        if (!obj)
+        Transform *transform = renderable.transform;
+        if (!transform)
             continue;
 
-        const glm::mat4 &worldMatrix = obj->GetTransform()->GetWorldMatrix();
+        const glm::mat4 &worldMatrix = transform->GetWorldMatrix();
 
         // Detect transform change: skip bounds + draw-call patch for static objects.
         const bool transformChanged = std::memcmp(&worldMatrix, &renderable.worldMatrix, sizeof(glm::mat4)) != 0;
         const bool bufferDirty = mr->ConsumeMeshBufferDirty();
 
         if (transformChanged) {
+            const bool translationOnly =
+                std::memcmp(&worldMatrix[0], &renderable.worldMatrix[0], sizeof(glm::vec4) * 3) == 0;
+            const glm::vec3 translationDelta = glm::vec3(worldMatrix[3] - renderable.worldMatrix[3]);
             renderable.worldMatrix = worldMatrix;
 
-            glm::vec3 bmin, bmax;
-            mr->ComputeWorldBounds(worldMatrix, bmin, bmax);
-            renderable.worldBounds = AABB(bmin, bmax);
+            if (translationOnly) {
+                renderable.worldBounds.min += translationDelta;
+                renderable.worldBounds.max += translationDelta;
+            } else {
+                glm::vec3 bmin, bmax;
+                mr->ComputeWorldBounds(worldMatrix, bmin, bmax);
+                renderable.worldBounds = AABB(bmin, bmax);
+            }
         }
 
         if (useFrustum) {
@@ -307,8 +317,8 @@ void SceneRenderer::UpdateCachedRenderableTransforms(bool useActiveCameraCulling
                 std::min(renderable.drawCallStart + renderable.drawCallCount, m_cachedDrawCalls.drawCalls.size());
             std::shared_ptr<const std::vector<glm::mat4>> skinBoneMatricesOwner;
             const std::vector<glm::mat4> *skinBoneMatricesPtr = nullptr;
-            const bool isSkinnedRenderer = dynamic_cast<SkinnedMeshRenderer *>(mr) != nullptr;
-            if (auto *skinned = dynamic_cast<SkinnedMeshRenderer *>(mr); skinned && skinned->HasRuntimeSkinnedMesh()) {
+            const bool isSkinnedRenderer = renderable.skinnedRenderer != nullptr;
+            if (auto *skinned = renderable.skinnedRenderer; skinned && skinned->HasRuntimeSkinnedMesh()) {
                 skinBoneMatricesOwner = skinned->GetRuntimeSkinBonePalette();
                 skinBoneMatricesPtr = skinBoneMatricesOwner.get();
             }
@@ -602,6 +612,15 @@ const DrawCallResult &SceneRenderer::BuildDrawCalls()
     return m_cachedDrawCalls;
 }
 
+void SceneRenderer::AcknowledgeMeshBufferUpdates()
+{
+    if (!m_drawCallsCacheValid)
+        return;
+
+    for (DrawCall &drawCall : m_cachedDrawCalls.drawCalls)
+        drawCall.forceBufferUpdate = false;
+}
+
 CameraDrawCallResult SceneRenderer::BuildDrawCallsForCamera(Camera *camera, bool includeShadowDrawCalls)
 {
 #if INFERNUX_FRAME_PROFILE
@@ -630,7 +649,9 @@ CameraDrawCallResult SceneRenderer::BuildDrawCallsForCamera(Camera *camera, bool
         result.shadowDrawCallsRef = &cachedResult.drawCalls;
     }
 
-    result.visibleDrawCalls.reserve(m_visibleCount > 0 ? m_visibleCount : cachedResult.drawCalls.size());
+    constexpr size_t kRenderContextAppendSlack = 32;
+    result.visibleDrawCalls.reserve((m_visibleCount > 0 ? m_visibleCount : cachedResult.drawCalls.size()) +
+                                    kRenderContextAppendSlack);
 
     m_visibleCount = 0;
     for (auto &renderable : m_renderables) {

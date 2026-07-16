@@ -238,6 +238,12 @@ class Infernux
         int pendingHeight = 0;
         int readyWidth = 0;
         int readyHeight = 0;
+        uint64_t pixelGeneration = 0;
+        uint64_t pixelHash = 0;
+        uint32_t nonTransparentPixelCount = 0;
+        uint8_t minRgb = 0;
+        uint8_t maxRgb = 0;
+        uint32_t imguiDrawCommandCount = 0;
     };
 
     /// @brief Read-only diagnostics for active preview state machines.
@@ -414,6 +420,11 @@ class Infernux
         int readySize = 0;
         std::string textureName;
         uint64_t textureId = 0;
+        uint64_t pixelGeneration = 0;
+        uint64_t pixelHash = 0;
+        uint32_t nonTransparentPixelCount = 0;
+        uint8_t minRgb = 0;
+        uint8_t maxRgb = 0;
     };
 
     struct TexturePreviewState
@@ -432,6 +443,11 @@ class Infernux
         uint64_t textureId = 0;
         bool nearest = false;
         bool srgb = false;
+        uint64_t pixelGeneration = 0;
+        uint64_t pixelHash = 0;
+        uint32_t nonTransparentPixelCount = 0;
+        uint8_t minRgb = 0;
+        uint8_t maxRgb = 0;
     };
 
     struct MeshPreviewState
@@ -449,6 +465,11 @@ class Infernux
         std::string textureName;
         uint64_t textureId = 0;
         std::string meshFilePath; ///< Absolute path to model file
+        uint64_t pixelGeneration = 0;
+        uint64_t pixelHash = 0;
+        uint32_t nonTransparentPixelCount = 0;
+        uint8_t minRgb = 0;
+        uint8_t maxRgb = 0;
     };
 
     void EnqueuePreviewTask(std::function<void()> fn);

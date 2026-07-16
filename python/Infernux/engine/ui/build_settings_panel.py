@@ -606,7 +606,13 @@ class BuildSettingsPanel:
 
             name = os.path.splitext(os.path.basename(scene_path))[0]
             root = get_project_root() or ""
-            rel = os.path.relpath(scene_path, root)
+            try:
+                rel = os.path.relpath(scene_path, root) if root else scene_path
+            except ValueError:
+                # Windows cannot compute a relative path across drive letters.
+                # A copied project can temporarily retain absolute build-scene
+                # paths from its source project, so keep the panel renderable.
+                rel = os.path.normpath(scene_path)
 
             ctx.push_style_var_vec2(ImGuiStyleVar.ItemSpacing, *Theme.BUILD_SETTINGS_ROW_SPC)
             

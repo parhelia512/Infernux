@@ -1,4 +1,5 @@
 recursive-include python/Infernux *
 recursive-exclude python/Infernux/test *
 recursive-exclude python/test *
-global-exclude __pycache__ *.pyc *.pyo
+recursive-exclude python *.meta
+global-exclude __pycache__ *.pyc *.pyo *.bak *.pdb *.lib *.exp

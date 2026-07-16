@@ -101,7 +101,7 @@ jobs:
             "--accept-licenses","--default-answer","--confirm-command","install"
 
       - name: Install Python build dependencies
-        run: python -m pip install "pybind11>=2.11" numpy build wheel setuptools nuitka ordered-set zstandard PySide6
+        run: python -m pip install -r requirements.txt nuitka ordered-set zstandard
 
       - name: Configure (CMake preset release)
         shell: pwsh
@@ -113,7 +113,11 @@ jobs:
         shell: pwsh
         run: |
           $env:VULKAN_SDK = "C:\VulkanSDK\$env:VULKAN_SDK_VERSION"
-          cmake --build --preset release --target _Infernux --parallel
+          cmake --build --preset release --target _Infernux
+
+      - name: Prebuild release Player Runtime Pack
+        shell: pwsh
+        run: cmake --build --preset release --target prebuild_player_runtime
 
       - name: Build wheel
         env:

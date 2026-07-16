@@ -17,6 +17,7 @@ from Infernux.components.builtin import BoxCollider as BoxColliderComponent
 from Infernux.components.builtin import Camera as CameraComponent
 from Infernux.components.builtin import PhysicsMaterialCombine
 from Infernux.core.assets import AssetManager
+from Infernux.core.material import Material
 from Infernux.renderstack.render_stack import RenderStack
 from Infernux.renderstack.render_stack_pipeline import RenderStackPipeline
 
@@ -1274,6 +1275,14 @@ class TestTextureCreation:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestMaterial:
+    def test_python_material_wrapper_saves_through_current_native_api(self, engine, tmp_path):
+        material = Material.create_lit("WrapperSave")
+        path = tmp_path / "wrapper-save.mat"
+
+        assert material.save(str(path)) is True
+        document = json.loads(path.read_text(encoding="utf-8"))
+        assert document["name"] == "WrapperSave"
+
     def test_texture_assignment_is_guid_only(self, engine):
         material = InxMaterial.create_default_unlit()
 

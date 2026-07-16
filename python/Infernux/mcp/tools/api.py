@@ -198,6 +198,7 @@ SUBSYSTEM_GUIDES: dict[str, dict[str, Any]] = {
             "Positions and sizes are in canvas design pixels, scaled by UICanvas.compute_scale for the Game View.",
             "Use api_get('UICanvas'), api_get('UIText'), api_get('UIButton'), and api_get('InxUIScreenComponent') before scripting UI.",
             "UIButton.on_click is a runtime UIEvent; persistent callbacks use on_click_entries.",
+            "Persistent clicks reference a target GameObject, then a component attached to it, then one public method; never bind a script asset directly.",
         ],
         "symbols": ["UICanvas", "UIText", "UIImage", "UIButton", "UIEvent", "PointerEventData"],
     },

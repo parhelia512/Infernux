@@ -37,6 +37,7 @@ class ClosablePanel(InxGUIRenderable):
         self._window_manager: Optional['WindowManager'] = None
         self._panel_was_focused: bool = False
         self._dirty_close_approved: bool = False
+        self._dirty_registry_snapshot = None
     
     @property
     def window_id(self) -> str:
@@ -137,14 +138,38 @@ class ClosablePanel(InxGUIRenderable):
             from Infernux.engine.project_context import set_panel_dirty
 
             dirty = bool(getattr(self, "_dirty", False))
+            title = self._resolve_panel_display_title()
+            save_kind = (
+                "save"
+                if callable(getattr(self, "_do_save", None))
+                else "clip"
+                if callable(getattr(self, "_save_clip", None))
+                else ""
+            )
+            dialog = getattr(self, "_save_as_dialog", None)
+            has_save_pending = dialog is not None and hasattr(dialog, "is_open")
+            discard_fn = getattr(self, "_discard_unsaved_changes", None)
+            has_discard = hasattr(self, "_dirty")
+            snapshot = (
+                dirty,
+                title,
+                save_kind,
+                id(dialog) if has_save_pending else 0,
+                id(getattr(discard_fn, "__func__", discard_fn)) if callable(discard_fn) else 0,
+                has_discard,
+            )
+            if snapshot == self._dirty_registry_snapshot:
+                return
+
             set_panel_dirty(
                 self._window_id,
                 dirty,
-                title=self._resolve_panel_display_title(),
+                title=title,
                 save_handler=self._resolve_panel_save_handler(),
                 save_pending_handler=self._resolve_panel_save_pending_handler(),
                 discard_handler=self._resolve_panel_discard_handler(),
             )
+            self._dirty_registry_snapshot = snapshot
         except Exception:
             pass
 

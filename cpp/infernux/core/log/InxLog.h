@@ -32,11 +32,7 @@ class InxLog
         DeferredTail,
     };
 
-    static InxLog &GetInstance()
-    {
-        static InxLog instance;
-        return instance;
-    }
+    static InxLog &GetInstance();
 
     /// Open a log file under the given path.  When a file is open, all log
     /// output goes to the file instead of the console.

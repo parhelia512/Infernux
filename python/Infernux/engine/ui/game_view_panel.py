@@ -268,9 +268,6 @@ class GameViewPanel(EditorPanel):
         # Intentionally ignore persisted data for Game View.
         return
 
-    def _pre_render(self, ctx):
-        self._load_resolution_settings()
-
     def on_enable(self):
         # Runtime caches must always start from a cold state after open.
         self._last_game_width = 0
@@ -292,6 +289,7 @@ class GameViewPanel(EditorPanel):
         self._set_game_render_active(False)
 
     def _on_visible_pre(self, ctx):
+        self._load_resolution_settings()
         focused = (ClosablePanel.get_active_panel_id() == self.window_id) or self._is_window_or_child_focused(ctx)
         if focused and not self._was_focused:
             if self._on_focus_gained:
@@ -470,7 +468,7 @@ class GameViewPanel(EditorPanel):
 
         _canvases = collect_sorted_canvases(_scene, allow_stale_empty=True) if _scene is not None else []
         if _canvases:
-            clear_rect_cache(_pc())
+            clear_rect_cache((id(_scene), int(_scene.structure_version)))
 
         viewport_hovered = False
         viewport_clicked = False
@@ -514,7 +512,11 @@ class GameViewPanel(EditorPanel):
                 # still prevents input from reaching this panel through a
                 # floating Editor window.
                 viewport_hovered = ctx.is_item_hovered() and ctx.is_window_hovered()
-                viewport_clicked = viewport_clicked and viewport_hovered
+                # ImGui buttons normally report activation on release. Screen
+                # UI needs the matching press frame too, so focus the Game View
+                # as soon as the pointer is pressed over its real viewport.
+                viewport_pressed = bool(ctx.is_mouse_button_clicked(0))
+                viewport_clicked = viewport_hovered and (viewport_clicked or viewport_pressed)
                 Input.set_game_viewport_origin(vp.image_min_x, vp.image_min_y)
 
                 self._render_screen_ui(ctx, vp.image_min_x, vp.image_min_y,

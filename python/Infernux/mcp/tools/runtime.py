@@ -535,6 +535,11 @@ def register_runtime_tools(mcp) -> None:
         """Read current renderer submission and GPU residency telemetry."""
         return ok(_run_on_main("runtime_renderer_state", _renderer_state))
 
+    @mcp.tool(name="runtime_ui_performance")
+    def runtime_ui_performance() -> dict:
+        """Read an engine-recorded rolling UI profile without active frame polling."""
+        return ok(_run_on_main("runtime_ui_performance", _ui_performance_state))
+
     @mcp.tool(name="runtime_physics_state")
     def runtime_physics_state() -> dict:
         """Read physics-world population and the latest fixed-step profile."""
@@ -725,6 +730,17 @@ def _renderer_state() -> dict[str, Any]:
             and int(frame.get("game_draw_call_count", 0) or 0) > 0
         ),
     }
+
+
+def _ui_performance_state() -> dict[str, Any]:
+    from Infernux.engine.bootstrap import EditorBootstrap
+
+    bootstrap = EditorBootstrap.instance()
+    engine = bootstrap.engine if bootstrap is not None else None
+    native = engine.get_native_engine() if engine is not None else None
+    if native is None:
+        raise RuntimeError("UI performance telemetry requires a running graphical Editor session.")
+    return dict(native.renderer_ui_performance_snapshot)
 
 
 def _physics_state(physics_api=None, scene_manager=None) -> dict[str, Any]:
@@ -1908,7 +1924,18 @@ def _bounded_probe_items(value, defaults: tuple, name: str) -> list:
 def _read_input_state(keys: list, axes: list, mouse_buttons: list[int]) -> dict[str, Any]:
     from Infernux.input import Input
 
-    return _collect_input_state(Input, keys, axes, mouse_buttons)
+    state = _collect_input_state(Input, keys, axes, mouse_buttons)
+    try:
+        from Infernux.engine.bootstrap import EditorBootstrap
+
+        bootstrap = EditorBootstrap.instance()
+        game_view = bootstrap.game_view if bootstrap is not None else None
+        processor = getattr(game_view, "_ui_event_processor", None)
+        if processor is not None and hasattr(processor, "debug_state"):
+            state["screen_ui_event"] = processor.debug_state()
+    except Exception:
+        pass
+    return state
 
 
 def _collect_input_state(input_api, keys: list, axes: list, mouse_buttons: list[int] | None = None) -> dict[str, Any]:
@@ -1964,6 +1991,7 @@ def _register_metadata() -> None:
         ),
         "runtime_input_state": "Read Game View focus and selected keyboard, axis, and mouse input probes.",
         "runtime_renderer_state": "Read renderer targets, camera availability, draw submissions, timings, and GPU residency.",
+        "runtime_ui_performance": "Read the engine-recorded rolling UI profile without per-frame MCP polling.",
         "runtime_physics_state": "Read physics body population and latest fixed-step/contact profile.",
         "runtime_physics_raycast": "Run a bounded read-only raycast through the public Physics API.",
         "runtime_physics_overlap_box": "Read colliders overlapping a bounded axis-aligned world-space box.",

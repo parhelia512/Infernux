@@ -1141,6 +1141,16 @@ def _clone_onclick_entries(lst):
     return [_clone_onclick_entry(e) for e in lst]
 
 
+def _persistent_event_combo_options(current: str, available, none_label: str):
+    """Keep serialized bindings intact while scripts or references reload."""
+    values = [""] + list(available)
+    labels = [none_label] + list(available)
+    if current and current not in values:
+        values.append(current)
+        labels.append(current)
+    return labels, values
+
+
 def _resolve_onclick_go(payload):
     """Resolve a hierarchy drag payload to a GameObject."""
     from Infernux.lib import SceneManager
@@ -1272,8 +1282,9 @@ def _render_onclick_entry(ctx, btn_comp, entries, i, entry, lw):
                 comp_names.append(cname)
 
     cur_comp_name = getattr(entry, "component_name", "") or ""
-    comp_labels = [t("ui_comp.none")] + comp_names
-    comp_values = [""] + comp_names
+    comp_labels, comp_values = _persistent_event_combo_options(
+        cur_comp_name, comp_names, t("ui_comp.none")
+    )
     try:
         comp_idx = comp_values.index(cur_comp_name)
     except ValueError:
@@ -1302,8 +1313,9 @@ def _render_onclick_entry(ctx, btn_comp, entries, i, entry, lw):
                 break
 
     cur_method = getattr(entry, "method_name", "") or ""
-    method_labels = [t("ui_comp.none")] + method_names
-    method_values = [""] + method_names
+    method_labels, method_values = _persistent_event_combo_options(
+        cur_method, method_names, t("ui_comp.none")
+    )
     try:
         method_idx = method_values.index(cur_method)
     except ValueError:

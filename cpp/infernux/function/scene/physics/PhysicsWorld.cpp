@@ -37,6 +37,7 @@
 #include "../Component.h"
 #include "../GameObject.h"
 #include "../Scene.h"
+#include "../SceneManager.h"
 #include "../Transform.h"
 #include <core/config/EngineConfig.h>
 #include <core/config/MathConstants.h>
@@ -820,9 +821,40 @@ void PhysicsWorld::SetBodyPosition(uint32_t bodyId, const glm::vec3 &pos, const 
     if (!m_initialized || bodyId == 0xFFFFFFFF)
         return;
 
-    JPH::BodyInterface &bodyInterface = m_physicsSystem->GetBodyInterface();
+    // Transform sync runs serially on the main thread before PhysicsSystem::Update.
+    // Avoid taking Jolt's striped body lock once per moved static/kinematic body.
+    JPH::BodyInterface &bodyInterface = m_physicsSystem->GetBodyInterfaceNoLock();
     bodyInterface.SetPositionAndRotation(JPH::BodyID(bodyId), JPH::RVec3(pos.x, pos.y, pos.z),
                                          JPH::Quat(rot.x, rot.y, rot.z, rot.w), JPH::EActivation::DontActivate);
+}
+
+void PhysicsWorld::SetBodyPositionsBatch(const std::vector<PhysicsBodyPoseUpdate> &updates)
+{
+    if (!m_initialized || updates.empty())
+        return;
+
+    static thread_local JPH::BodyIDVector bodyIds;
+    static thread_local std::vector<JPH::RVec3> positions;
+    static thread_local std::vector<JPH::Quat> rotations;
+    bodyIds.clear();
+    positions.clear();
+    rotations.clear();
+    bodyIds.reserve(updates.size());
+    positions.reserve(updates.size());
+    rotations.reserve(updates.size());
+    for (const auto &update : updates) {
+        if (update.bodyId == 0xFFFFFFFF)
+            continue;
+        bodyIds.emplace_back(update.bodyId);
+        positions.emplace_back(update.position.x, update.position.y, update.position.z);
+        rotations.emplace_back(update.rotation.x, update.rotation.y, update.rotation.z, update.rotation.w);
+    }
+    if (bodyIds.empty())
+        return;
+
+    JPH::BodyInterface &bodyInterface = m_physicsSystem->GetBodyInterfaceNoLock();
+    bodyInterface.SetPositionAndRotationBatch(bodyIds.data(), positions.data(), rotations.data(),
+                                              static_cast<int>(bodyIds.size()));
 }
 
 void PhysicsWorld::UpdateBodyShape(Collider *collider, const Collider *exclude)
@@ -1369,6 +1401,7 @@ bool PhysicsWorld::Raycast(const glm::vec3 &origin, const glm::vec3 &direction, 
 std::vector<RaycastHit> PhysicsWorld::RaycastAll(const glm::vec3 &origin, const glm::vec3 &direction, float maxDistance,
                                                  uint32_t layerMask, bool queryTriggers) const
 {
+    SceneManager::Instance().EnsurePhysicsQueriesCurrent();
     std::vector<RaycastHit> hits;
     if (!m_initialized || layerMask == 0 || !IsFinite(origin))
         return hits;
@@ -1429,6 +1462,7 @@ std::vector<Collider *> PhysicsWorld::OverlapShapeImpl(const JPH::Shape &shape, 
                                                        const glm::quat &orientation, uint32_t layerMask,
                                                        bool queryTriggers) const
 {
+    SceneManager::Instance().EnsurePhysicsQueriesCurrent();
     std::vector<Collider *> results;
     JPH::CollideShapeSettings settings;
     JPH::RMat44 transform =
@@ -1461,6 +1495,7 @@ bool PhysicsWorld::ShapeCastImpl(const JPH::Shape &shape, const glm::vec3 &origi
                                  const glm::vec3 &direction, float maxDistance, RaycastHit &outHit, uint32_t layerMask,
                                  bool queryTriggers) const
 {
+    SceneManager::Instance().EnsurePhysicsQueriesCurrent();
     glm::vec3 dir(0.0f);
     if (!NormalizeQueryDirection(direction, maxDistance, dir))
         return false;

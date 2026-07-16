@@ -207,6 +207,9 @@ class UICanvas(InxUIComponent):
         ref_h = float(self.reference_height)
         elements = self._get_elements()
         for elem in reversed(elements):
+            elem_go = getattr(elem, "game_object", None)
+            if elem_go is not None and not elem_go.active_in_hierarchy:
+                continue
             if not getattr(elem, "raycast_target", True):
                 continue
             if not getattr(elem, "enabled", True):
@@ -227,6 +230,9 @@ class UICanvas(InxUIComponent):
         elements = self._get_elements()
         hits = []
         for elem in reversed(elements):
+            elem_go = getattr(elem, "game_object", None)
+            if elem_go is not None and not elem_go.active_in_hierarchy:
+                continue
             if not getattr(elem, "raycast_target", True):
                 continue
             if not getattr(elem, "enabled", True):

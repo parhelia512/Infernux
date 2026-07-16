@@ -116,6 +116,11 @@ class SceneManager
     /// @brief Call every frame
     void Update(float deltaTime);
 
+    /// Flush deferred body creation and dirty static Collider poses before a
+    /// scene query. Static-only scenes otherwise defer this work because they
+    /// have no dynamics or contacts to simulate.
+    void EnsurePhysicsQueriesCurrent();
+
     /// @brief Called at a fixed time step (physics / deterministic logic)
     void FixedUpdate();
 
@@ -197,6 +202,13 @@ class SceneManager
     /// force-syncs every Jolt body to its current Transform so the first frame
     /// runs against authored positions instead of stale editor values.
     void Play();
+
+    /// @brief Publish the active Scene into an already-running play session.
+    ///
+    /// Runtime scene replacement keeps SceneManager in play mode, so it must
+    /// rebuild the same transform/physics state that a fresh Play() creates.
+    /// This is an engine lifecycle hook, not a gameplay scene-loading API.
+    void StartActiveSceneForPlay();
 
     /// @brief Exit play mode.
     ///

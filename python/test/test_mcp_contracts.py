@@ -65,7 +65,7 @@ def _registered_tools(tmp_path, profile: str) -> set[str]:
     return set(_registered_mcp(tmp_path, profile).tools)
 
 
-def test_developer_assist_exposes_script_tools_without_scene_mutation(tmp_path):
+def test_developer_assist_exposes_scripts_and_semantic_scene_authoring(tmp_path):
     tools = _registered_tools(tmp_path, "developer_assist")
 
     assert {
@@ -76,10 +76,15 @@ def test_developer_assist_exposes_script_tools_without_scene_mutation(tmp_path):
         "mcp_attempt_stop",
         "project_script_write",
         "public_api_validate_script",
+        "scene_new",
+        "scene_save",
+        "hierarchy_create_object",
+        "component_ensure",
+        "ui_bind_click",
     } <= tools
     assert "mcp_report_blocker" not in tools
-    assert "scene_new" not in tools
-    assert "hierarchy_create_object" not in tools
+    assert "input_key" not in tools
+    assert "editor_ui_click" not in tools
 
 
 def test_global_validation_exposes_blocker_tools_without_script_or_scene_mutation(tmp_path):

@@ -32,12 +32,53 @@ uint64_t Scene::GenerateWorldId()
 
 namespace
 {
+constexpr size_t kDenseSceneObjectThreshold = 512;
+
+std::string DumpSceneDocument(const nlohmann::json &document, size_t objectCount)
+{
+    if (objectCount < kDenseSceneObjectThreshold)
+        return document.dump(2);
+
+    // Keep large authored scenes diffable by root object without paying the
+    // substantial whitespace cost of recursively pretty-printing every field.
+    std::string output;
+    output.reserve(objectCount * 1024 + 1024);
+    output += "{\n";
+
+    size_t fieldIndex = 0;
+    for (const auto &[key, value] : document.items()) {
+        output += "  ";
+        output += nlohmann::json(key).dump();
+        output += ": ";
+
+        if (key == "objects" && value.is_array()) {
+            output += "[\n";
+            for (size_t objectIndex = 0; objectIndex < value.size(); ++objectIndex) {
+                output += "    ";
+                output += value[objectIndex].dump();
+                if (objectIndex + 1 < value.size())
+                    output += ',';
+                output += '\n';
+            }
+            output += "  ]";
+        } else {
+            output += value.dump();
+        }
+
+        if (++fieldIndex < document.size())
+            output += ',';
+        output += '\n';
+    }
+    output += '}';
+    return output;
+}
+
 /// Cheap header validation used before SceneCommitToken moves the live world.
 /// Full graph validation still happens inside DeserializeDocument.
 bool ValidateSceneDocumentHeader(const nlohmann::json &document)
 {
-    if (!document.is_object() || !document.contains("schema_version") || !document["schema_version"].is_number_integer() ||
-        document["schema_version"].get<int>() != 2) {
+    if (!document.is_object() || !document.contains("schema_version") ||
+        !document["schema_version"].is_number_integer() || document["schema_version"].get<int>() != 2) {
         INXLOG_ERROR("Scene::Deserialize: expected schema_version 2");
         return false;
     }
@@ -1047,7 +1088,7 @@ nlohmann::json Scene::SerializeDocument() const
 
 std::string Scene::Serialize() const
 {
-    return SerializeDocument().dump(2);
+    return DumpSceneDocument(SerializeDocument(), m_objectsById.size());
 }
 
 bool Scene::DeserializeDocument(const nlohmann::json &j)
@@ -1249,7 +1290,7 @@ bool Scene::DeserializeDocument(const nlohmann::json &j)
 bool Scene::SaveToFile(const std::string &path) const
 {
     try {
-        const std::string jsonStr = SerializeDocument().dump(2);
+        const std::string jsonStr = DumpSceneDocument(SerializeDocument(), m_objectsById.size());
         DocumentStore::Instance().WriteAndWait(path, jsonStr);
         return true;
     } catch (const std::exception &e) {

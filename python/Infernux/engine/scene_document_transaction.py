@@ -60,6 +60,7 @@ class SceneDocumentTransaction:
         document: Optional[dict[str, Any]] = None,
         asset_database: Any = None,
         clear_registries: bool = True,
+        borrow_document: bool = False,
         before_commit: Optional[Callable[[], None]] = None,
         after_publish: Optional[Callable[[], None]] = None,
     ) -> None:
@@ -72,7 +73,11 @@ class SceneDocumentTransaction:
 
         self._scene = scene
         self._path = os.fspath(path) if path is not None else None
-        self._document = copy.deepcopy(document) if document is not None else None
+        self._document = (
+            document
+            if document is not None and borrow_document
+            else copy.deepcopy(document) if document is not None else None
+        )
         self._asset_database = asset_database
         self._clear_registries = bool(clear_registries)
         self._before_commit = before_commit

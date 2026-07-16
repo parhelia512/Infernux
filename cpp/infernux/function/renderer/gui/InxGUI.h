@@ -57,13 +57,10 @@ class InxGUI
         return m_renderableOrder;
     }
 
-    /// Consume sub-timing breakdown from a named panel (returns empty if none).
-    std::unordered_map<std::string, double> ConsumePanelSubTimings(const std::string &name)
+    [[nodiscard]] const std::unordered_map<std::string, std::unordered_map<std::string, double>> &
+    GetLastPanelSubTimesMs() const
     {
-        auto it = m_renderables_umap.find(name);
-        if (it != m_renderables_umap.end() && it->second)
-            return it->second->ConsumeSubTimings();
-        return {};
+        return m_lastPanelSubTimesMs;
     }
 
     void Register(const std::string &name, std::shared_ptr<InxGUIRenderable> renderable);
@@ -180,6 +177,7 @@ class InxGUI
     std::vector<std::string> m_renderableOrder;
     std::vector<std::string> m_pendingDockTabSelections;
     std::unordered_map<std::string, double> m_lastPanelTimesMs;
+    std::unordered_map<std::string, std::unordered_map<std::string, double>> m_lastPanelSubTimesMs;
     std::unordered_map<std::string, ImGuiTextureResource> m_textures_umap;
     std::unordered_map<std::string, uint64_t> m_textureUploadGenerations;
     std::unordered_map<std::string, uint64_t> m_failedTextureUploadVersions;

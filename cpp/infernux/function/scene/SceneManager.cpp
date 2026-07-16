@@ -45,11 +45,7 @@ SceneManager::SceneManager()
         auto *gameObject = transform ? transform->GetGameObject() : nullptr;
         if (!gameObject)
             return;
-        auto &physicsStore = PhysicsECSStore::Instance();
-        for (auto *collider : gameObject->GetComponents<Collider>()) {
-            if (collider)
-                physicsStore.MarkColliderDirty(collider->GetECSHandle());
-        }
+        PhysicsECSStore::Instance().MarkGameObjectDirty(gameObject);
     });
 
     // Create editor camera
@@ -245,10 +241,16 @@ void SceneManager::Update(float deltaTime)
             // Flush deferred broadphase additions (Unity-style batch add)
             FlushPendingBroadphase();
 
-            // Sync collider transforms before physics step (serial-skip when nothing moved)
-            t0 = ProfileClock::now();
-            SyncCollidersToPhysics(m_fixedTimeStep);
-            m_lastFrameProfile.syncCollidersMs += ProfileMsSince(t0);
+            auto &physicsStore = PhysicsECSStore::Instance();
+            bool hasRigidbodies = physicsStore.GetAliveRigidbodyCount() > 0;
+            if (hasRigidbodies) {
+                // Collider-only scenes have no dynamic/static or kinematic/static
+                // pairs to solve. Keep their dirty poses queued until a scene
+                // query needs current broadphase state.
+                t0 = ProfileClock::now();
+                SyncCollidersToPhysics(m_fixedTimeStep);
+                m_lastFrameProfile.syncCollidersMs += ProfileMsSince(t0);
+            }
 
             t0 = ProfileClock::now();
             m_activeScene->FixedUpdate(m_fixedTimeStep);
@@ -257,26 +259,28 @@ void SceneManager::Update(float deltaTime)
             // FixedUpdate may rotate/move kinematic colliders or instantiate
             // new physics objects. Flush those changes before the Jolt step.
             FlushPendingBroadphase();
-            t0 = ProfileClock::now();
-            SyncCollidersToPhysics(m_fixedTimeStep);
-            m_lastFrameProfile.syncCollidersMs += ProfileMsSince(t0);
+            hasRigidbodies = physicsStore.GetAliveRigidbodyCount() > 0;
+            if (hasRigidbodies) {
+                t0 = ProfileClock::now();
+                SyncCollidersToPhysics(m_fixedTimeStep);
+                m_lastFrameProfile.syncCollidersMs += ProfileMsSince(t0);
 
-            // Step Jolt physics world
-            t0 = ProfileClock::now();
-            PhysicsWorld::Instance().Step(m_fixedTimeStep);
-            m_lastFrameProfile.physicsStepMs += ProfileMsSince(t0);
-            m_lastFrameProfile.dynamicCCDSplits +=
-                static_cast<double>(PhysicsWorld::Instance().GetLastDynamicCCDSplitCount());
+                // Step Jolt only when at least one Rigidbody can participate.
+                t0 = ProfileClock::now();
+                PhysicsWorld::Instance().Step(m_fixedTimeStep);
+                m_lastFrameProfile.physicsStepMs += ProfileMsSince(t0);
+                m_lastFrameProfile.dynamicCCDSplits +=
+                    static_cast<double>(PhysicsWorld::Instance().GetLastDynamicCCDSplitCount());
 
-            // Dispatch collision/trigger callbacks to components (Unity-style)
-            t0 = ProfileClock::now();
-            m_lastFrameProfile.contactEvents += static_cast<double>(PhysicsWorld::Instance().DispatchContactEvents());
-            m_lastFrameProfile.physicsEventsMs += ProfileMsSince(t0);
+                t0 = ProfileClock::now();
+                m_lastFrameProfile.contactEvents +=
+                    static_cast<double>(PhysicsWorld::Instance().DispatchContactEvents());
+                m_lastFrameProfile.physicsEventsMs += ProfileMsSince(t0);
 
-            // Write physics results back to Transforms (dynamic Rigidbodies)
-            t0 = ProfileClock::now();
-            SyncRigidbodiesToTransform();
-            m_lastFrameProfile.syncRigidbodiesMs += ProfileMsSince(t0);
+                t0 = ProfileClock::now();
+                SyncRigidbodiesToTransform();
+                m_lastFrameProfile.syncRigidbodiesMs += ProfileMsSince(t0);
+            }
 
             m_fixedTimeAccumulator -= m_fixedTimeStep;
         }
@@ -289,6 +293,14 @@ void SceneManager::Update(float deltaTime)
         m_activeScene->Update(m_lastScaledDeltaTime);
         m_lastFrameProfile.gameplayUpdateMs += ProfileMsSince(t0);
     }
+}
+
+void SceneManager::EnsurePhysicsQueriesCurrent()
+{
+    if (!m_activeScene)
+        return;
+    FlushPendingBroadphase();
+    SyncCollidersToPhysics(m_fixedTimeStep);
 }
 
 void SceneManager::FixedUpdate()
@@ -344,32 +356,46 @@ void SceneManager::Play()
     if (m_onPlayStateChanged)
         m_onPlayStateChanged(true);
 
-    if (m_activeScene) {
-        m_activeScene->SetPlaying(true);
+    StartActiveSceneForPlay();
+}
 
-        auto tStart = ProfileClock::now();
-        m_activeScene->Start();
-        double startMs = ProfileMsSince(tStart);
+void SceneManager::StartActiveSceneForPlay()
+{
+    if (!m_activeScene)
+        return;
 
-        // Force-sync ALL body positions to current Transform.
-        ForceAllBodiesToCurrentTransform();
+    m_activeScene->SetPlaying(true);
 
-        // Flush any deferred broadphase additions from Awake/OnEnable, then
-        // rebuild broad-phase tree so raycasts work from the first frame.
-        auto tFlush = ProfileClock::now();
-        FlushPendingBroadphase();
-        PhysicsWorld::Instance().OptimizeBroadPhase();
-        double flushMs = ProfileMsSince(tFlush);
+    // A transactional runtime load publishes freshly-deserialized Transform
+    // rows immediately before this call. Their world caches can still contain
+    // values from recycled ECS slots. Jolt shapes consume world scale during
+    // body creation, so synchronize the graph before Collider::RegisterBody.
+    TransformECSStore::Instance().SyncSceneWorldMatrices(m_activeScene);
 
-        // Activate all dynamic rigidbodies AFTER bodies have been created and
-        // added to the broadphase.  Without this, gravity and other forces
-        // don't take effect until something externally wakes the body.
-        ActivateAllDynamicBodies();
+    auto tStart = ProfileClock::now();
+    m_activeScene->Start();
+    double startMs = ProfileMsSince(tStart);
 
-        if (startMs + flushMs > 500.0) {
-            INXLOG_INFO("[Perf] Play(): Start=", static_cast<int>(startMs), "ms, Flush=", static_cast<int>(flushMs),
-                        "ms");
-        }
+    // Start callbacks may author transforms. Publish those edits before shape
+    // creation as well, matching the transform state visible to gameplay.
+    TransformECSStore::Instance().SyncSceneWorldMatrices(m_activeScene);
+
+    // Force-sync resident body positions, then create and publish deferred
+    // bodies for a newly loaded Scene.
+    ForceAllBodiesToCurrentTransform();
+
+    auto tFlush = ProfileClock::now();
+    FlushPendingBroadphase();
+    PhysicsWorld::Instance().OptimizeBroadPhase();
+    double flushMs = ProfileMsSince(tFlush);
+
+    // Jolt bodies default to sleeping and need activation after broadphase
+    // publication for gravity and forces to apply on the first fixed step.
+    ActivateAllDynamicBodies();
+
+    if (startMs + flushMs > 500.0) {
+        INXLOG_INFO("[Perf] StartActiveSceneForPlay(): Start=", static_cast<int>(startMs),
+                    "ms, Flush=", static_cast<int>(flushMs), "ms");
     }
 }
 
@@ -478,8 +504,11 @@ void SceneManager::ExtractPersistentObjects(Scene *scene)
 void SceneManager::SyncCollidersToPhysics(float fixedDeltaTime)
 {
     auto &store = PhysicsECSStore::Instance();
-    auto dirtyColliders = store.ConsumeDirtyColliders();
+    const auto &dirtyColliders = store.ConsumeDirtyColliders();
     m_lastFrameProfile.colliderSyncCandidates += static_cast<double>(dirtyColliders.size());
+    static thread_local std::vector<PhysicsBodyPoseUpdate> staticPoseBatch;
+    staticPoseBatch.clear();
+    staticPoseBatch.reserve(dirtyColliders.size());
 
     for (const auto handle : dirtyColliders) {
         if (!store.IsValid(handle))
@@ -491,7 +520,7 @@ void SceneManager::SyncCollidersToPhysics(float fixedDeltaTime)
         auto *go = col->GetGameObject();
         if (!go || go->GetScene() != m_activeScene)
             continue;
-        col->SyncTransformToPhysics(fixedDeltaTime);
+        col->SyncTransformToPhysics(fixedDeltaTime, &staticPoseBatch);
         const auto actorHandle = data.actorHandle;
         if (!store.IsValid(actorHandle))
             throw std::logic_error("dirty Collider references a stale PhysicsActor");
@@ -502,6 +531,7 @@ void SceneManager::SyncCollidersToPhysics(float fixedDeltaTime)
             m_lastFrameProfile.syncExternalMovesMs += ProfileMsSince(t0);
         }
     }
+    PhysicsWorld::Instance().SetBodyPositionsBatch(staticPoseBatch);
 }
 
 void SceneManager::FlushPendingBroadphase()

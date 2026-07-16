@@ -104,6 +104,18 @@ class _FakeObjectFieldContext(_FakeSemanticContext):
     def open_popup(self, popup_id):
         self.opened_popups.append(popup_id)
 
+    def render_object_field_chrome(
+        self, _field_id, display_text, _type_hint, _selected, clickable,
+        has_picker, _picker_texture_id, semantic_id,
+    ):
+        if has_picker:
+            self.open_popup("##obj_picker")
+        if semantic_id:
+            self.record_semantic_item(
+                "object_field", display_text, clickable, semantic_id
+            )
+        return 1
+
 
 def _text_component():
     return SimpleNamespace(
@@ -555,6 +567,45 @@ def test_material_undo_snapshot_is_decoded_only_when_edit_occurs():
     assert module._document_before_material_edit(state, edited_document) == {
         "properties": {"roughness": 0.25}
     }
+
+
+def test_material_surface_controls_use_one_native_batch():
+    import Infernux.engine.ui.inspector_material as module
+
+    captured = []
+
+    class Context:
+        @staticmethod
+        def create_property_batch_plan(descriptors):
+            return descriptors
+
+        @staticmethod
+        def render_property_batch_plan_values(descriptors, values, label_width):
+            captured.append((descriptors, label_width))
+            return {0: 1}
+
+    document = {
+        "renderState": {
+            "blendEnable": False,
+            "depthWriteEnable": True,
+            "depthTestEnable": True,
+            "depthCompareOp": 1,
+            "cullMode": 2,
+            "renderQueue": 2000,
+        },
+        "renderStateOverrides": 0,
+    }
+    overrides, change_key = module._render_surface_options_batch(
+        Context(), document["renderState"], document, 0, 144.0,
+    )
+
+    assert len(captured) == 1
+    assert len(captured[0][0]) == 6
+    assert captured[0][1] == 144.0
+    assert document["renderState"]["blendEnable"] is True
+    assert document["renderState"]["renderQueue"] == 3000
+    assert overrides == document["renderStateOverrides"]
+    assert change_key == "render_state.surface"
 
 
 def test_audio_track_renderer_exposes_picker_callbacks_and_semantic(monkeypatch):

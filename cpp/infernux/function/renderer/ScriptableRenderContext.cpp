@@ -84,7 +84,7 @@ void ScriptableRenderContext::SetupCameraProperties(Camera *camera)
 // Cull
 // ============================================================================
 
-CullingResults ScriptableRenderContext::Cull(Camera *camera)
+CullingResults &ScriptableRenderContext::Cull(Camera *camera)
 {
 #if INFERNUX_FRAME_PROFILE
     using Clock = std::chrono::high_resolution_clock;
@@ -148,7 +148,7 @@ CullingResults ScriptableRenderContext::Cull(Camera *camera)
     // CollectLights() runs earlier in the frame (InxRenderer::UpdateSceneLighting),
     // so the count is already available.
     results.lightCount = m_vkCore->GetLightCollector().GetTotalLightCount();
-    m_cachedCullingResults = results;
+    m_cachedCullingResults = std::move(results);
 #if INFERNUX_FRAME_PROFILE
     const double elapsedMs = std::chrono::duration<double, std::milli>(Clock::now() - cullStart).count();
     g_srcProfileSnapshot.cullMs += elapsedMs;
@@ -162,7 +162,7 @@ CullingResults ScriptableRenderContext::Cull(Camera *camera)
     g_srcProfileSnapshot.cullCalls += 1.0;
     g_srcProfileSnapshot.baseDrawCalls += static_cast<double>(results.visibleObjectCount());
 #endif
-    return results;
+    return m_cachedCullingResults;
 }
 
 // ============================================================================
@@ -185,7 +185,7 @@ void ScriptableRenderContext::ApplyGraph(const RenderGraphDescription &desc)
 #endif
 }
 
-void ScriptableRenderContext::SubmitCulling(CullingResults culling)
+void ScriptableRenderContext::SubmitCulling(CullingResults &culling)
 {
 #if INFERNUX_FRAME_PROFILE
     using Clock = std::chrono::high_resolution_clock;
@@ -339,11 +339,42 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
         shadowSource = &culling.shadowDrawCalls;
     }
 
+    // Compute a lightweight resource-identity fingerprint. World matrices and
+    // visibility intentionally do not participate: neither changes mesh GPU
+    // buffers. The fingerprint still detects a same-sized but different
+    // visible set after camera movement.
+    uint64_t bufferIdentity = 1469598103934665603ULL;
+    bool hasForcedBufferUpdate = false;
+    auto accumulateBufferIdentity = [&](const DrawCall &dc) {
+        auto mix = [&](uint64_t value) {
+            bufferIdentity ^= value;
+            bufferIdentity *= 1099511628211ULL;
+        };
+        mix(dc.objectId);
+        mix(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dc.meshVertices)));
+        mix(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dc.meshIndices)));
+        mix(dc.meshRuntimeVersion);
+        hasForcedBufferUpdate = hasForcedBufferUpdate || dc.forceBufferUpdate;
+    };
+    if (shadowSource) {
+        for (const DrawCall &dc : *shadowSource)
+            accumulateBufferIdentity(dc);
+    }
+    for (const DrawCall &dc : m_orderedDrawCalls)
+        accumulateBufferIdentity(dc);
+
+    const size_t bufferIdentityDrawCallCount = m_orderedDrawCalls.size() + (shadowSource ? shadowSource->size() : 0);
+    const bool reuseObjectBuffers =
+        !hasForcedBufferUpdate &&
+        m_vkCore->CanReuseObjectBufferBindings(bufferIdentity, bufferIdentityDrawCallCount);
+
     // Ensure per-object GPU buffers
 #if INFERNUX_FRAME_PROFILE
     t0 = Clock::now();
 #endif
-    if (shadowSource) {
+    if (reuseObjectBuffers) {
+        m_vkCore->ReuseObjectBufferBindingsThisFrame();
+    } else if (shadowSource) {
         // Consecutive-objectId dedup: draw calls for multi-submesh objects
         // share the same objectId and are adjacent in the array.  Skip
         // redundant hash-map lookups inside EnsureObjectBuffers.
@@ -379,13 +410,24 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
     std::vector<DrawCall> forwardDrawCalls = std::move(m_orderedDrawCalls);
 
     if (!shadowSource) {
-        for (const DrawCall &dc : forwardDrawCalls) {
-            if (dc.meshVertices && dc.meshIndices) {
-                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate,
-                                              dc.meshAssetGuid, dc.meshRuntimeVersion);
+        if (!reuseObjectBuffers) {
+            for (const DrawCall &dc : forwardDrawCalls) {
+                if (dc.meshVertices && dc.meshIndices) {
+                    m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate,
+                                                  dc.meshAssetGuid, dc.meshRuntimeVersion);
+                }
             }
         }
     }
+
+    if (!reuseObjectBuffers)
+        m_vkCore->PrimeObjectBufferBindingCache(bufferIdentity, bufferIdentityDrawCallCount);
+
+    // Mesh dirtiness is a one-shot upload request. SceneRenderer caches draw
+    // calls across frames, so leaving the bit set would re-hash every mesh on
+    // every frame. The first context has now consumed the request; later
+    // cameras share the same VkCore object buffers.
+    SceneRenderBridge::Instance().GetSceneRenderer().AcknowledgeMeshBufferUpdates();
 
     DrawCallResult result;
     result.drawCalls = std::move(forwardDrawCalls);
@@ -444,9 +486,9 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
 void ScriptableRenderContext::RenderWithGraph(Camera *camera, const RenderGraphDescription &desc)
 {
     SetupCameraProperties(camera);
-    CullingResults culling = Cull(camera);
+    CullingResults &culling = Cull(camera);
     ApplyGraph(desc);
-    SubmitCulling(std::move(culling));
+    SubmitCulling(culling);
 }
 
 // ============================================================================

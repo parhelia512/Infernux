@@ -1,6 +1,8 @@
 import os
 
-_package_dir = os.path.dirname(os.path.abspath(__file__))
+_package_dir = os.environ.get("_INFERNUX_PACKAGED_RESOURCE_ROOT") or os.path.dirname(
+    os.path.abspath(__file__)
+)
 
 # Default to package directory; overridden by activate_library() at launch.
 icon_path = os.path.join(_package_dir, "icons", "icon.png")

@@ -98,6 +98,9 @@ bool GetBuiltinPrimitiveMeshData(const std::string &name, const std::vector<Vert
     } else if (name == "Plane") {
         vertices = &PrimitiveMeshes::GetPlaneVertices();
         indices = &PrimitiveMeshes::GetPlaneIndices();
+    } else if (name == "Quad") {
+        vertices = &PrimitiveMeshes::GetQuadVertices();
+        indices = &PrimitiveMeshes::GetQuadIndices();
     }
 
     return vertices != nullptr && indices != nullptr;

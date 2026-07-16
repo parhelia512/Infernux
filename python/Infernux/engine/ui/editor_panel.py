@@ -59,6 +59,7 @@ class EditorPanel(ClosablePanel):
     def __init__(self, title: str, window_id: Optional[str] = None):
         super().__init__(title, window_id)
         self._enable_called = False
+        self._content_was_visible: Optional[bool] = None
 
     # Keys that should never be part of generic persisted panel state.
     _AUTO_STATE_SKIP_KEYS = {
@@ -69,6 +70,8 @@ class EditorPanel(ClosablePanel):
         "_window_id",
         "_title",
         "_title_key",
+        "_content_was_visible",
+        "_dirty_registry_snapshot",
     }
 
     # Heuristic skip prefixes for runtime-only heavy references.
@@ -448,6 +451,7 @@ class EditorPanel(ClosablePanel):
         # Trigger on_enable once.
         if not self._enable_called:
             self._enable_called = True
+            self._dirty_registry_snapshot = None
             self.on_enable()
 
         # Apply the initial size on first use if provided.
@@ -464,10 +468,13 @@ class EditorPanel(ClosablePanel):
 
         visible = self._begin_closable_window(ctx, self._window_flags())
         if visible:
+            self._content_was_visible = True
             self._on_visible_pre(ctx)
             self.on_render_content(ctx)
         else:
-            self._on_not_visible(ctx)
+            if self._content_was_visible is not False:
+                self._on_not_visible(ctx)
+            self._content_was_visible = False
         ctx.end_window()
 
         # Pop window styles.
@@ -478,4 +485,6 @@ class EditorPanel(ClosablePanel):
         # matching the documented "created or reopened" contract.
         if not self._is_open and self._enable_called:
             self._enable_called = False
+            self._content_was_visible = None
             self.on_disable()
+            self._dirty_registry_snapshot = None

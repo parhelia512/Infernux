@@ -326,6 +326,8 @@ class InxVkCoreModular
         PumpPendingTextureLoads();
         PumpPendingMeshUploads();
         ++m_ensureFrameCounter;
+        m_fullObjectBufferEnsureThisFrame = false;
+        m_skipObjectBufferCleanupThisFrame = false;
     }
 
     /// @brief Bulk-stamp all per-object buffer entries with the current frame
@@ -347,6 +349,35 @@ class InxVkCoreModular
     [[nodiscard]] size_t GetPendingMeshUploadCount() const noexcept
     {
         return m_pendingSharedMeshBuffers.size();
+    }
+    [[nodiscard]] bool CanReuseObjectBufferBindings(uint64_t identity, size_t drawCallCount) const noexcept
+    {
+        if (!m_pendingSharedMeshBuffers.empty())
+            return false;
+        for (const auto &entry : m_objectBufferBindingCache) {
+            if (entry.valid && entry.identity == identity && entry.drawCallCount == drawCallCount)
+                return true;
+        }
+        return false;
+    }
+    void PrimeObjectBufferBindingCache(uint64_t identity, size_t drawCallCount) noexcept
+    {
+        m_fullObjectBufferEnsureThisFrame = true;
+        m_skipObjectBufferCleanupThisFrame = false;
+        if (!m_pendingSharedMeshBuffers.empty())
+            return;
+        for (auto &entry : m_objectBufferBindingCache) {
+            if (entry.valid && entry.identity == identity && entry.drawCallCount == drawCallCount)
+                return;
+        }
+        auto &entry =
+            m_objectBufferBindingCache[m_objectBufferBindingCacheCursor++ % m_objectBufferBindingCache.size()];
+        entry = {identity, drawCallCount, true};
+    }
+    void ReuseObjectBufferBindingsThisFrame() noexcept
+    {
+        if (!m_fullObjectBufferEnsureThisFrame)
+            m_skipObjectBufferCleanupThisFrame = true;
     }
     [[nodiscard]] uint64_t GetSubmittedMeshUploadCount() const noexcept
     {
@@ -1169,6 +1200,16 @@ class InxVkCoreModular
     /// Objects with identical mesh storage share the same GPU buffers.
     std::unordered_map<uint64_t, PerObjectBuffers> m_perObjectBuffers;
     uint64_t m_ensureFrameCounter = 0; // incremented once per frame
+    struct ObjectBufferBindingCacheEntry
+    {
+        uint64_t identity = 0;
+        size_t drawCallCount = 0;
+        bool valid = false;
+    };
+    std::array<ObjectBufferBindingCacheEntry, 4> m_objectBufferBindingCache{};
+    size_t m_objectBufferBindingCacheCursor = 0;
+    bool m_fullObjectBufferEnsureThisFrame = false;
+    bool m_skipObjectBufferCleanupThisFrame = false;
 
     /// @brief Shared mesh GPU buffer cache keyed by vertex/index storage pointers.
     std::unordered_map<SharedMeshKey, SharedMeshBuffers, SharedMeshKeyHash> m_sharedMeshBuffers;
@@ -1193,6 +1234,8 @@ class InxVkCoreModular
     // Unity-style draw calls for multi-material rendering (pointer to external storage, no copy)
     const std::vector<DrawCall> *m_drawCallsPtr = nullptr;
     const std::vector<DrawCall> *m_shadowDrawCallsPtr = nullptr;
+    std::vector<int> m_drawQueueValues;
+    bool m_drawQueueValuesOverflow = false;
     static inline const std::vector<DrawCall> s_emptyDrawCalls{};
     const std::vector<DrawCall> &drawCalls() const
     {
@@ -1210,7 +1253,7 @@ class InxVkCoreModular
         float sortKey;
         size_t materialHash;
         VkBuffer vertexBuf;
-        std::shared_ptr<InxMaterial> materialOwner;
+        const std::shared_ptr<InxMaterial> *materialOwner;
         InxMaterial *material; // Resolved once in the filter loop; materialOwner keeps it alive.
         std::unordered_map<uint64_t, PerObjectBuffers>::const_iterator bufIt;
     };

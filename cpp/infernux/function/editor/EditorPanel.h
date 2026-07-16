@@ -53,6 +53,7 @@ class EditorPanel : public InxGUIRenderable
         ctx->RecordSemanticWindow("editor_panel", m_title, m_windowId);
 
         if (visible) {
+            VisiblePreRender(ctx);
             OnRenderContent(ctx);
         }
 
@@ -73,6 +74,11 @@ class EditorPanel : public InxGUIRenderable
 
     /// Override for per-frame work before window begins.
     virtual void PreRender(InxGUIContext * /*ctx*/)
+    {
+    }
+
+    /// Override for preparation needed only while this panel's contents are visible.
+    virtual void VisiblePreRender(InxGUIContext * /*ctx*/)
     {
     }
 

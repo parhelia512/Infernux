@@ -38,6 +38,7 @@
 #include <function/scene/TransformECSStore.h>
 #include <iomanip>
 #include <iostream>
+#include <numeric>
 #include <platform/window/InxView.h>
 #include <sstream>
 #include <stdexcept>
@@ -455,6 +456,9 @@ void InxRenderer::DrawFrame()
     static double _deltaAccumMs = 0.0;
     static double _srpSceneViewMs = 0;
     static double _srpGameViewMs = 0;
+    static std::vector<double> _frameTimeSamples;
+    static std::vector<double> _fixedStepFrameSamples;
+    static std::vector<double> _renderOnlyFrameSamples;
     static InxRenderer::FrameDetailTiming _detailAccum;
     static SceneManager::FrameProfile _sceneAccum;
     static std::unordered_map<std::string, double> _guiAccum;
@@ -614,6 +618,7 @@ void InxRenderer::DrawFrame()
     m_gui->BuildFrame();
     auto _guiBuildEnd = std::chrono::high_resolution_clock::now();
     m_guiBuildMs = std::chrono::duration<double, std::milli>(_guiBuildEnd - _guiBuildStart).count();
+    RecordUIPerformanceFrame();
 #if INFERNUX_FRAME_PROFILE
     _fp.stamp(); // [4] after GUI::BuildFrame (ImGui → Python panels)
 #endif
@@ -832,6 +837,12 @@ void InxRenderer::DrawFrame()
         _detailAccum.lightingUploadMs += m_frameDetailTiming.lightingUploadMs;
 
         const auto &sceneProfile = SceneManager::Instance().GetLastFrameProfile();
+        const double totalFrameMs = _fp.ms(0, 11);
+        _frameTimeSamples.push_back(totalFrameMs);
+        if (sceneProfile.fixedSteps > 0.0)
+            _fixedStepFrameSamples.push_back(totalFrameMs);
+        else
+            _renderOnlyFrameSamples.push_back(totalFrameMs);
         _sceneAccum.editorCameraMs += sceneProfile.editorCameraMs;
         _sceneAccum.editorUpdateMs += sceneProfile.editorUpdateMs;
         _sceneAccum.pendingStartsMs += sceneProfile.pendingStartsMs;
@@ -856,31 +867,44 @@ void InxRenderer::DrawFrame()
             }
         }
 
-        // Accumulate inspector sub-timings
-        {
-            auto sub = m_gui->ConsumePanelSubTimings("inspector");
-            for (const auto &kv : sub)
-                _inspSubAccum[kv.first] += kv.second;
-        }
-        {
-            auto sub = m_gui->ConsumePanelSubTimings("hierarchy");
-            for (const auto &kv : sub)
-                _hierSubAccum[kv.first] += kv.second;
-        }
-        {
-            auto sub = m_gui->ConsumePanelSubTimings("project");
-            for (const auto &kv : sub)
-                _projectSubAccum[kv.first] += kv.second;
-        }
+        const auto &panelSubTimes = m_gui->GetLastPanelSubTimesMs();
+        const auto accumulatePanelSubTimes = [&panelSubTimes](const char *panelName, auto &destination) {
+            const auto panel = panelSubTimes.find(panelName);
+            if (panel == panelSubTimes.end())
+                return;
+            for (const auto &kv : panel->second)
+                destination[kv.first] += kv.second;
+        };
+        accumulatePanelSubTimes("inspector", _inspSubAccum);
+        accumulatePanelSubTimes("hierarchy", _hierSubAccum);
+        accumulatePanelSubTimes("project", _projectSubAccum);
 
         ++_fpCounter;
         const auto _fpReportNow = std::chrono::steady_clock::now();
         if (_fpCounter >= INFERNUX_FRAME_PROFILE_WINDOW &&
             _fpReportNow - _fpLastReport >= std::chrono::seconds(INFERNUX_FRAME_PROFILE_REPORT_INTERVAL_SECONDS)) {
             const double kWindow = static_cast<double>(_fpCounter);
+            const auto percentile = [](const std::vector<double> &samples, double fraction) {
+                if (samples.empty())
+                    return 0.0;
+                std::vector<double> sorted = samples;
+                std::sort(sorted.begin(), sorted.end());
+                const size_t index = static_cast<size_t>(std::round(fraction * static_cast<double>(sorted.size() - 1)));
+                return sorted[index];
+            };
+            const auto sampleMean = [](const std::vector<double> &samples) {
+                return samples.empty()
+                           ? 0.0
+                           : std::accumulate(samples.begin(), samples.end(), 0.0) / static_cast<double>(samples.size());
+            };
             std::ostringstream oss;
             oss << std::fixed << std::setprecision(2);
             oss << "[Profile] avg" << _fpCounter << " frame=" << (_fpAccum[0] / kWindow) << "ms"
+                << " p50=" << percentile(_frameTimeSamples, 0.50) << "ms"
+                << " p95=" << percentile(_frameTimeSamples, 0.95) << "ms"
+                << " p99=" << percentile(_frameTimeSamples, 0.99) << "ms"
+                << " min=" << percentile(_frameTimeSamples, 0.00) << "ms"
+                << " max=" << percentile(_frameTimeSamples, 1.00) << "ms"
                 << " | Delta=" << (_deltaAccumMs / kWindow) << "ms" << " | Input=" << (_fpAccum[1] / kWindow) << "ms"
                 << " | Scene+Late=" << (_fpAccum[2] / kWindow) << "ms" << " | GPUFence=" << (_fpAccum[3] / kWindow)
                 << "ms" << " | UI=" << (_fpAccum[4] / kWindow) << "ms" << " | Prepare=" << (_fpAccum[5] / kWindow)
@@ -1037,7 +1061,10 @@ void InxRenderer::DrawFrame()
                 << "ms gameplay=" << (_sceneAccum.gameplayUpdateMs / kWindow)
                 << "ms late=" << (_sceneAccum.lateUpdateMs / kWindow) << "ms audio=" << (_sceneAccum.audioMs / kWindow)
                 << "ms end=" << (_sceneAccum.endFrameMs / kWindow)
-                << "ms fixedSteps=" << (_sceneAccum.fixedSteps / kWindow);
+                << "ms fixedSteps=" << (_sceneAccum.fixedSteps / kWindow)
+                << " fixedFrame=" << sampleMean(_fixedStepFrameSamples) << "ms(" << _fixedStepFrameSamples.size()
+                << ") renderFrame=" << sampleMean(_renderOnlyFrameSamples) << "ms(" << _renderOnlyFrameSamples.size()
+                << ')';
 
             double guiTotal = 0.0;
             oss << "\n  UI:";
@@ -1097,6 +1124,9 @@ void InxRenderer::DrawFrame()
             _deltaAccumMs = 0.0;
             _srpSceneViewMs = 0;
             _srpGameViewMs = 0;
+            _frameTimeSamples.clear();
+            _fixedStepFrameSamples.clear();
+            _renderOnlyFrameSamples.clear();
             _sceneAccum = {};
             _guiAccum.clear();
             _inspSubAccum.clear();
@@ -2053,6 +2083,96 @@ RendererFrameTelemetrySnapshot InxRenderer::GetFrameTelemetrySnapshot()
     snapshot.sceneUpdateMs = m_sceneUpdateMs;
     snapshot.guiBuildMs = m_guiBuildMs;
     snapshot.prepareFrameMs = m_prepareFrameMs;
+    if (m_gui) {
+        snapshot.guiPanelTimesMs = m_gui->GetLastPanelTimesMs();
+        snapshot.guiPanelSubTimesMs = m_gui->GetLastPanelSubTimesMs();
+    }
+    return snapshot;
+}
+
+void InxRenderer::RecordUIPerformanceFrame()
+{
+    if (!m_gui)
+        return;
+
+    const size_t slot = m_uiPerformanceWriteIndex;
+    // Store a non-zero stamp so default-initialized history slots never look valid.
+    const uint64_t frame = m_frameCount + 1;
+    m_uiBuildHistory.values[slot] = m_guiBuildMs;
+    m_uiBuildHistory.frames[slot] = frame;
+
+    for (const auto &[name, value] : m_gui->GetLastPanelTimesMs()) {
+        auto &history = m_uiPanelHistory[name];
+        history.values[slot] = value;
+        history.frames[slot] = frame;
+    }
+    for (const auto &[panelName, stages] : m_gui->GetLastPanelSubTimesMs()) {
+        auto &panelHistory = m_uiPanelSubHistory[panelName];
+        for (const auto &[stageName, value] : stages) {
+            auto &history = panelHistory[stageName];
+            history.values[slot] = value;
+            history.frames[slot] = frame;
+        }
+    }
+
+    m_uiPerformanceWriteIndex = (slot + 1) % UI_PERFORMANCE_HISTORY_SIZE;
+    m_uiPerformanceSampleCount = (std::min)(m_uiPerformanceSampleCount + 1, UI_PERFORMANCE_HISTORY_SIZE);
+}
+
+RendererUIPerformanceSnapshot InxRenderer::GetUIPerformanceSnapshot(size_t maxSamples) const
+{
+    RendererUIPerformanceSnapshot snapshot;
+    const size_t count = (std::min)({maxSamples, m_uiPerformanceSampleCount, UI_PERFORMANCE_HISTORY_SIZE});
+    if (count == 0)
+        return snapshot;
+
+    const size_t firstSlot =
+        (m_uiPerformanceWriteIndex + UI_PERFORMANCE_HISTORY_SIZE - count) % UI_PERFORMANCE_HISTORY_SIZE;
+    const size_t lastSlot = (m_uiPerformanceWriteIndex + UI_PERFORMANCE_HISTORY_SIZE - 1) % UI_PERFORMANCE_HISTORY_SIZE;
+    snapshot.firstFrame = m_uiBuildHistory.frames[firstSlot] - 1;
+    snapshot.lastFrame = m_uiBuildHistory.frames[lastSlot] - 1;
+    snapshot.sampleCount = count;
+
+    const auto summarize = [&](const UIMetricHistory &history) {
+        std::vector<double> values;
+        values.reserve(count);
+        for (size_t index = 0; index < count; ++index) {
+            const size_t slot = (firstSlot + index) % UI_PERFORMANCE_HISTORY_SIZE;
+            if (history.frames[slot] == m_uiBuildHistory.frames[slot])
+                values.push_back(history.values[slot]);
+        }
+
+        UIPerformanceMetricStats stats;
+        stats.sampleCount = values.size();
+        if (values.empty())
+            return stats;
+        stats.meanMs = std::accumulate(values.begin(), values.end(), 0.0) / static_cast<double>(values.size());
+        std::sort(values.begin(), values.end());
+        const size_t medianIndex = (values.size() - 1) / 2;
+        stats.medianMs =
+            values.size() % 2 == 0 ? (values[medianIndex] + values[medianIndex + 1]) * 0.5 : values[medianIndex];
+        const size_t p95Index = static_cast<size_t>(std::ceil(static_cast<double>(values.size()) * 0.95)) - 1;
+        stats.p95Ms = values[(std::min)(p95Index, values.size() - 1)];
+        stats.maxMs = values.back();
+        return stats;
+    };
+
+    snapshot.guiBuild = summarize(m_uiBuildHistory);
+    for (const auto &[name, history] : m_uiPanelHistory) {
+        auto stats = summarize(history);
+        if (stats.sampleCount > 0)
+            snapshot.panelTimes.emplace(name, stats);
+    }
+    for (const auto &[panelName, stages] : m_uiPanelSubHistory) {
+        auto &outputStages = snapshot.panelSubTimes[panelName];
+        for (const auto &[stageName, history] : stages) {
+            auto stats = summarize(history);
+            if (stats.sampleCount > 0)
+                outputStages.emplace(stageName, stats);
+        }
+        if (outputStages.empty())
+            snapshot.panelSubTimes.erase(panelName);
+    }
     return snapshot;
 }
 

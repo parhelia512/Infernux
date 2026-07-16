@@ -113,6 +113,8 @@ def test_runtime_renderer_state_combines_frame_submission_and_gpu_residency(monk
             "game_render_graph_execution_count": 42,
             "game_render_graph_current_executed": True,
             "game_render_graph_pass_names": ["OpaquePass", "Bloom_Composite"],
+            "ui_panel_times_ms": {"project": 0.42, "console": 0.03},
+            "ui_panel_sub_times_ms": {"project": {"folderTree": 0.19}},
         }
         gpu_residency_snapshot = {
             "tracked_bytes": 4096,
@@ -148,10 +150,42 @@ def test_runtime_renderer_state_combines_frame_submission_and_gpu_residency(monk
     assert state["frame"]["game_render_graph_current_executed"] is True
     assert state["frame"]["game_render_graph_execution_count"] == 42
     assert "Bloom_Composite" in state["frame"]["game_render_graph_pass_names"]
+    assert state["frame"]["ui_panel_times_ms"]["project"] == pytest.approx(0.42)
+    assert state["frame"]["ui_panel_sub_times_ms"]["project"]["folderTree"] == pytest.approx(0.19)
     assert state["gpu_residency"]["tracked_bytes"] == 4096
     assert state["preview_tasks"][0]["ready_generation"] == 2
     assert state["asset_runtime_record_count"] == 3
     assert state["submission_ready"] is True
+
+
+def test_runtime_ui_performance_reads_native_rolling_snapshot(monkeypatch):
+    class _Native:
+        renderer_ui_performance_snapshot = {
+            "first_frame": 10,
+            "last_frame": 249,
+            "sample_count": 240,
+            "gui_build": {"median_ms": 0.5, "p95_ms": 0.7},
+            "panel_times": {"project": {"median_ms": 0.04, "p95_ms": 0.05}},
+            "panel_sub_times": {},
+        }
+
+    class _Engine:
+        @staticmethod
+        def get_native_engine():
+            return _Native()
+
+    class _Bootstrap:
+        engine = _Engine()
+
+    from Infernux.engine.bootstrap import EditorBootstrap
+
+    monkeypatch.setattr(EditorBootstrap, "instance", lambda: _Bootstrap())
+
+    state = runtime._ui_performance_state()
+
+    assert state["sample_count"] == 240
+    assert state["gui_build"]["p95_ms"] == pytest.approx(0.7)
+    assert state["panel_times"]["project"]["median_ms"] == pytest.approx(0.04)
 
 
 def test_runtime_physics_state_uses_public_world_and_frame_profile():
