@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <stdexcept>
 
 #include <imgui_impl_sdl3.h>
 #include <platform/filesystem/InxPath.h>
@@ -615,31 +616,37 @@ void InxView::SDLInit()
 {
     SDL_SetLogPriorities(SDL_LOG_PRIORITY_VERBOSE);
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
-        INXLOG_ERROR("SDL_Init failed: ", SDL_GetError());
-    } else {
-        INXLOG_DEBUG("SDL_Init succeeded.");
+        const std::string error = SDL_GetError();
+        INXLOG_ERROR("SDL_Init failed: ", error);
+        throw std::runtime_error("SDL initialization failed: " + error);
     }
+    INXLOG_DEBUG("SDL_Init succeeded.");
 
     INXLOG_DEBUG("Window engine: SDL Vulkan");
     m_window =
         SDL_CreateWindow(m_appMetadata.appName, m_windowWidth, m_windowHeight,
                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!m_window) {
-        INXLOG_ERROR("Could not create a window: ", SDL_GetError());
-    } else {
-        INXLOG_DEBUG("Window created successfully.");
+        const std::string error = SDL_GetError();
+        INXLOG_ERROR("Could not create a window: ", error);
+        throw std::runtime_error("SDL window creation failed: " + error);
     }
+    INXLOG_DEBUG("Window created successfully.");
 
     SDL_MaximizeWindow(m_window);
 }
 
 void InxView::CreateSurface(VkInstance *vkInstance, VkSurfaceKHR *vkSurface)
 {
-    if (!SDL_Vulkan_CreateSurface(m_window, *vkInstance, nullptr, vkSurface)) {
-        INXLOG_FATAL("Could not create Vulkan surface: ", SDL_GetError());
-    } else {
-        INXLOG_DEBUG("Vulkan surface created successfully.");
+    if (!m_window || !vkInstance || *vkInstance == VK_NULL_HANDLE || !vkSurface) {
+        throw std::runtime_error("Cannot create Vulkan surface before the window and instance are initialized");
     }
+    if (!SDL_Vulkan_CreateSurface(m_window, *vkInstance, nullptr, vkSurface)) {
+        const std::string error = SDL_GetError();
+        INXLOG_ERROR("Could not create Vulkan surface: ", error);
+        throw std::runtime_error("Vulkan surface creation failed: " + error);
+    }
+    INXLOG_DEBUG("Vulkan surface created successfully.");
 }
 
 void InxView::SetAppMetadata(InxAppMetadata appMetaData)

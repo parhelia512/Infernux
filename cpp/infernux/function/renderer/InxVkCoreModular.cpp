@@ -186,7 +186,7 @@ InxVkCoreModular::~InxVkCoreModular()
 // Initialization
 // ============================================================================
 
-void InxVkCoreModular::Init(InxAppMetadata appMetaData, InxAppMetadata rendererMetaData, uint32_t vkWindowExtCount,
+bool InxVkCoreModular::Init(InxAppMetadata appMetaData, InxAppMetadata rendererMetaData, uint32_t vkWindowExtCount,
                             const char **vkWindowExts)
 {
     INXLOG_INFO("Initializing InxVkCoreModular...");
@@ -202,33 +202,34 @@ void InxVkCoreModular::Init(InxAppMetadata appMetaData, InxAppMetadata rendererM
     // Initialize instance only (device will be created in PrepareSurface after surface is available)
     if (!m_deviceContext.InitializeInstance(m_deviceConfig)) {
         INXLOG_ERROR("Failed to initialize Vulkan instance");
-        return;
+        return false;
     }
 
     // Store instance for InxRenderer access
     m_instance = m_deviceContext.GetInstance();
 
     INXLOG_INFO("InxVkCoreModular instance initialized successfully");
+    return true;
 }
 
-void InxVkCoreModular::PrepareSurface()
+bool InxVkCoreModular::PrepareSurface()
 {
     // Surface should be set by InxRenderer before calling this
     if (m_surface == VK_NULL_HANDLE) {
         INXLOG_ERROR("Surface not set. Call CreateSurface first.");
-        return;
+        return false;
     }
 
     // Complete device initialization with the surface
     if (!m_deviceContext.InitializeDevice(m_surface, m_deviceConfig)) {
         INXLOG_ERROR("Failed to initialize Vulkan device");
-        return;
+        return false;
     }
 
     // Now that device is ready, initialize resource manager
     if (!m_resourceManager.Initialize(m_deviceContext)) {
         INXLOG_ERROR("Failed to initialize resource manager");
-        return;
+        return false;
     }
 
     // Initialize the async-transfer context. On GPUs without a dedicated
@@ -283,7 +284,7 @@ void InxVkCoreModular::PrepareSurface()
     // Create swapchain
     if (!m_swapchain.Create(m_deviceContext, width, height)) {
         INXLOG_ERROR("Failed to create swapchain");
-        return;
+        return false;
     }
 
     // Create depth resources
@@ -300,6 +301,7 @@ void InxVkCoreModular::PrepareSurface()
     }
 
     INXLOG_INFO("Surface prepared successfully");
+    return true;
 }
 
 void InxVkCoreModular::PreparePipeline()

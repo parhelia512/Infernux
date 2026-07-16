@@ -189,7 +189,7 @@ void InxRenderer::Init(int width, int height, InxAppMetadata appMetaData)
     uint32_t extCount = 0;
     auto ext = m_view->GetVkExtensions(&extCount);
     if (!ext) {
-        INXLOG_FATAL("Failed to get Vulkan extensions.");
+        throw std::runtime_error("Failed to get Vulkan extensions");
     }
 
     INXLOG_DEBUG("Vulkan extensions count: ", extCount);
@@ -197,12 +197,16 @@ void InxRenderer::Init(int width, int height, InxAppMetadata appMetaData)
         INXLOG_DEBUG("Vulkan extension: ", ext[i]);
     }
 
-    m_vkCore->Init(m_appMetadata, m_rendererMetadata, extCount, const_cast<const char **>(ext));
+    if (!m_vkCore->Init(m_appMetadata, m_rendererMetadata, extCount, const_cast<const char **>(ext))) {
+        throw std::runtime_error("Failed to initialize Vulkan instance");
+    }
 
     m_view->CreateSurface(&m_vkCore->m_instance, &m_vkCore->m_surface);
 
     INXLOG_DEBUG("Prepare surface.");
-    m_vkCore->PrepareSurface();
+    if (!m_vkCore->PrepareSurface()) {
+        throw std::runtime_error("Failed to initialize Vulkan device or swapchain");
+    }
 }
 
 void InxRenderer::PreparePipeline()

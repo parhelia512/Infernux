@@ -117,13 +117,13 @@ class InxVkCoreModular
      * @param vkWindowExtCount Number of window extensions
      * @param vkWindowExts Window extension names
      */
-    void Init(InxAppMetadata appMetaData, InxAppMetadata rendererMetaData, uint32_t vkWindowExtCount,
-              const char **vkWindowExts);
+    [[nodiscard]] bool Init(InxAppMetadata appMetaData, InxAppMetadata rendererMetaData, uint32_t vkWindowExtCount,
+                            const char **vkWindowExts);
 
     /**
      * @brief Prepare surface for rendering
      */
-    void PrepareSurface();
+    [[nodiscard]] bool PrepareSurface();
 
     /**
      * @brief Prepare graphics pipeline
