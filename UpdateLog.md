@@ -1,4 +1,4 @@
-# Infernux v0.3.0 Preview
+# Infernux v0.2.9 · 0.3.0 Preview
 
 This preview is the first large architecture update after `v0.2.1`. It rebuilds the scene, asset, rendering, physics, editor, automation, and distribution paths around stricter native data ownership while keeping Python as the public gameplay and tooling layer. It also adds new VFX, capture, build, and agent-facing workflows instead of being an MCP-only release.
 

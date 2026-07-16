@@ -24,7 +24,28 @@ const heading = markdown.match(/^#\s+Infernux\s+v([^\s·]+)(?:\s+·\s+(.+))?$/m)
 if (!heading) throw new Error("UpdateLog.md must start with '# Infernux v<version> · <codename>'");
 const version = heading[1];
 if (version !== release.version || version !== manifest.documented_release) {
-  throw new Error(`UpdateLog version ${version} must match release.json and docs-manifest.json`);
+  if (release.version !== manifest.documented_release) {
+    throw new Error("release.json version must match docs-manifest.json documented_release");
+  }
+  const publishedNotes = JSON.parse(await readFile(outputFile, "utf8"));
+  const publishedItems = Array.isArray(publishedNotes.sections)
+    ? publishedNotes.sections.reduce((count, section) => count + (Array.isArray(section.items) ? section.items.length : 0), 0)
+    : 0;
+  if (
+    publishedNotes.schema_version !== 1
+    || publishedNotes.version !== release.version
+    || publishedNotes.tag !== `v${release.version}`
+    || publishedNotes.published_at !== release.published_at
+    || publishedNotes.release_url !== release.release_url
+    || publishedNotes.source !== "UpdateLog.md"
+    || publishedNotes.section_count !== publishedNotes.sections?.length
+    || publishedNotes.item_count !== publishedItems
+    || publishedNotes.comparison?.to !== release.version
+  ) {
+    throw new Error(`release-notes.json must remain synchronized with published release v${release.version}`);
+  }
+  console.log(`Verified published release notes for v${release.version}; UpdateLog.md targets upcoming v${version}.`);
+  process.exit(0);
 }
 
 const bodyAfterTitle = markdown.slice(heading.index + heading[0].length).trim();

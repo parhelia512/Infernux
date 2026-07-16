@@ -13,8 +13,9 @@ const directoryStart = "<!-- BEGIN GENERATED WIKI DIRECTORY -->";
 const directoryEnd = "<!-- END GENERATED WIKI DIRECTORY -->";
 
 const source = await readFile(sourceFile);
-const catalog = JSON.parse(source.toString("utf8"));
-const hash = createHash("sha256").update(source).digest("hex").slice(0, 16);
+const canonicalSource = Buffer.from(source.toString("utf8").replace(/\r\n/g, "\n"), "utf8");
+const catalog = JSON.parse(canonicalSource.toString("utf8"));
+const hash = createHash("sha256").update(canonicalSource).digest("hex").slice(0, 16);
 const targetName = `wiki-docs.${hash}.json`;
 const targetFile = path.join(assetsRoot, targetName);
 const expectedReference = `assets/${targetName}`;

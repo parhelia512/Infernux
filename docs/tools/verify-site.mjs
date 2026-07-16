@@ -1270,7 +1270,8 @@ async function verifyPublishingFiles() {
             fail(`wiki.html: hashed Wiki catalog does not exist '${catalogReference}'`);
         } else {
             const hashedCatalog = await readFile(hashedCatalogPath);
-            const actualHash = createHash("sha256").update(sourceCatalog).digest("hex").slice(0, 16);
+            const canonicalCatalog = Buffer.from(sourceCatalog.toString("utf8").replace(/\r\n/g, "\n"), "utf8");
+            const actualHash = createHash("sha256").update(canonicalCatalog).digest("hex").slice(0, 16);
             if (catalogMatch[1] !== actualHash) fail("wiki.html: Wiki catalog hash does not match source content");
             if (!hashedCatalog.equals(sourceCatalog)) fail("wiki.html: hashed Wiki catalog content differs from canonical catalog");
         }
