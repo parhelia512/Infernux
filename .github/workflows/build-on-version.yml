@@ -54,14 +54,27 @@ jobs:
           fi
           echo "version=$NEW_VER" >> "$GITHUB_OUTPUT"
           RELEASE_EXISTS=false
-          set +e
-          HTTP_STATUS=$(curl --silent --show-error --output /tmp/infernux-release.json --write-out "%{http_code}" \
-            --header "Accept: application/vnd.github+json" \
-            --header "Authorization: Bearer $GH_TOKEN" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/v$NEW_VER")
-          CURL_EXIT=$?
-          set -e
+          HTTP_STATUS=""
+          CURL_EXIT=0
+          for ATTEMPT in 1 2 3 4 5; do
+            set +e
+            HTTP_STATUS=$(curl --silent --show-error --output /tmp/infernux-release.json --write-out "%{http_code}" \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/v$NEW_VER")
+            CURL_EXIT=$?
+            set -e
+            if [ "$CURL_EXIT" -eq 0 ] && { [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "404" ]; }; then
+              break
+            fi
+            if [ "$ATTEMPT" -lt 5 ] && { [ "$CURL_EXIT" -ne 0 ] || [ "$HTTP_STATUS" = "429" ] || [[ "$HTTP_STATUS" == 5?? ]]; }; then
+              echo "Release lookup attempt $ATTEMPT failed (curl=$CURL_EXIT, HTTP=$HTTP_STATUS); retrying."
+              sleep $((ATTEMPT * 3))
+              continue
+            fi
+            break
+          done
           if [ "$CURL_EXIT" -ne 0 ]; then
             echo "::error::Could not verify whether Release v$NEW_VER exists; refusing to rebuild an unverified version."
             exit "$CURL_EXIT"
