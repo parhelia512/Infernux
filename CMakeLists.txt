@@ -471,6 +471,7 @@ if(INFERNUX_BUILD_TESTS)
         ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
         TIMEOUT 30
         RUN_SERIAL TRUE
+        LABELS performance
     )
 
     add_test(
@@ -481,6 +482,7 @@ if(INFERNUX_BUILD_TESTS)
         ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
         TIMEOUT 30
         RUN_SERIAL TRUE
+        LABELS performance
     )
 
     add_test(
@@ -491,6 +493,7 @@ if(INFERNUX_BUILD_TESTS)
         ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
         TIMEOUT 180
         RUN_SERIAL TRUE
+        LABELS performance
     )
 endif()
 
