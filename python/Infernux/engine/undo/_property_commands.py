@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Callable, Optional
 
 from Infernux.debug import Debug
@@ -73,17 +74,17 @@ BuiltinPropertyCommand = SetPropertyCommand
 
 
 class GenericComponentCommand(UndoCommand):
-    """Undo/redo for a component edited via serialize/deserialize JSON."""
+    """Undo/redo for a native component document edit."""
 
     _is_property_edit = True
     MERGE_WINDOW: float = 0.3
 
-    def __init__(self, comp: Any, old_json: str, new_json: str,
+    def __init__(self, comp: Any, old_document: dict, new_document: dict,
                  description: str = ""):
         super().__init__(description or f"Edit {getattr(comp, 'type_name', 'Component')}")
         self._comp = comp
-        self._old_json = old_json
-        self._new_json = new_json
+        self._old_document = copy.deepcopy(old_document)
+        self._new_document = copy.deepcopy(new_document)
         self._comp_id: int = getattr(comp, "component_id", id(comp))
         self._game_object_id: int = _game_object_id_of(comp)
         self._comp_type_name: str = _comp_type_name_of(comp)
@@ -92,7 +93,9 @@ class GenericComponentCommand(UndoCommand):
         return _resolve_target(self._comp, self._game_object_id, self._comp_type_name)
 
     def execute(self) -> None:
-        self._comp.deserialize(self._new_json)
+        comp = self._live()
+        if comp is None or not comp.deserialize_document(self._new_document):
+            raise RuntimeError(f"GenericComponent('{self._comp_type_name}').execute failed")
 
     def undo(self) -> None:
         comp = self._live()
@@ -100,7 +103,8 @@ class GenericComponentCommand(UndoCommand):
             Debug.log_error(
                 f"[Undo] GenericComponent('{self._comp_type_name}').undo: not found")
             return
-        comp.deserialize(self._old_json)
+        if not comp.deserialize_document(self._old_document):
+            raise RuntimeError(f"GenericComponent('{self._comp_type_name}').undo failed")
 
     def redo(self) -> None:
         comp = self._live()
@@ -108,7 +112,8 @@ class GenericComponentCommand(UndoCommand):
             Debug.log_error(
                 f"[Undo] GenericComponent('{self._comp_type_name}').redo: not found")
             return
-        comp.deserialize(self._new_json)
+        if not comp.deserialize_document(self._new_document):
+            raise RuntimeError(f"GenericComponent('{self._comp_type_name}').redo failed")
 
     def can_merge(self, other: UndoCommand) -> bool:
         if not isinstance(other, GenericComponentCommand):
@@ -117,25 +122,25 @@ class GenericComponentCommand(UndoCommand):
                 and (other.timestamp - self.timestamp) <= self.MERGE_WINDOW)
 
     def merge(self, other: GenericComponentCommand) -> None:
-        self._new_json = other._new_json
+        self._new_document = copy.deepcopy(other._new_document)
         self.timestamp = other.timestamp
 
 
-class MaterialJsonCommand(UndoCommand):
-    """Undo/redo for material asset edits (deserialize + save to disk)."""
+class MaterialDocumentCommand(UndoCommand):
+    """Undo/redo for typed material edits followed by an atomic save."""
 
     _is_property_edit = False
     MERGE_WINDOW: float = 0.3
     marks_dirty: bool = False
 
-    def __init__(self, material: Any, old_json: str, new_json: str,
+    def __init__(self, material: Any, old_document: dict, new_document: dict,
                  description: str = "Edit Material",
                  refresh_callback: Optional[Callable[[Any], None]] = None,
                  edit_key: str = ""):
         super().__init__(description)
         self._material = material
-        self._old_json = old_json
-        self._new_json = new_json
+        self._old_document = copy.deepcopy(old_document)
+        self._new_document = copy.deepcopy(new_document)
         self._refresh_callback = refresh_callback
         self._material_id = self._stable_id(material)
         self._edit_key = edit_key or ""
@@ -151,27 +156,28 @@ class MaterialJsonCommand(UndoCommand):
         return id(material)
 
     def execute(self) -> None:
-        self._apply(self._new_json)
+        self._apply(self._new_document)
 
     def undo(self) -> None:
-        self._apply(self._old_json)
+        self._apply(self._old_document)
 
     def redo(self) -> None:
-        self._apply(self._new_json)
+        self._apply(self._new_document)
 
     def can_merge(self, other: UndoCommand) -> bool:
-        if not isinstance(other, MaterialJsonCommand):
+        if not isinstance(other, MaterialDocumentCommand):
             return False
         return (self._material_id == other._material_id
                 and self._edit_key == other._edit_key
                 and (other.timestamp - self.timestamp) <= self.MERGE_WINDOW)
 
-    def merge(self, other: MaterialJsonCommand) -> None:
-        self._new_json = other._new_json
+    def merge(self, other: MaterialDocumentCommand) -> None:
+        self._new_document = copy.deepcopy(other._new_document)
         self.timestamp = other.timestamp
 
-    def _apply(self, json_str: str) -> None:
-        self._material.deserialize(json_str)
+    def _apply(self, document: dict) -> None:
+        if not self._material.deserialize_document(document):
+            raise RuntimeError("material document restore failed")
         save = getattr(self._material, "save", None)
         save_ok = False
         if callable(save):
@@ -187,6 +193,71 @@ class MaterialJsonCommand(UndoCommand):
                     Debug.log_suppressed("undo._property_commands.AssetManager.on_material_saved", exc)
         if self._refresh_callback:
             self._refresh_callback(self._material)
+
+
+class ResourceDocumentCommand(UndoCommand):
+    """Undo/redo a strict resource document and publish it through one callback."""
+
+    _is_property_edit = False
+    MERGE_WINDOW: float = 0.3
+    marks_dirty: bool = False
+
+    def __init__(self, resource: Any, old_document: dict, new_document: dict,
+                 description: str = "Edit Resource",
+                 publish_callback: Optional[Callable[[Any], None]] = None,
+                 edit_key: str = ""):
+        super().__init__(description)
+        self._resource = resource
+        self._old_document = copy.deepcopy(old_document)
+        self._new_document = copy.deepcopy(new_document)
+        self._publish_callback = publish_callback
+        self._resource_id = self._stable_id(resource)
+        self._edit_key = edit_key
+
+    @staticmethod
+    def _stable_id(resource: Any) -> int:
+        guid = getattr(resource, "guid", "")
+        if guid:
+            return hash((type(resource), "guid", guid))
+        native = getattr(resource, "native", None)
+        file_path = getattr(resource, "file_path", "") or getattr(native, "file_path", "")
+        if file_path:
+            return hash((type(resource), "file", file_path))
+        return id(resource)
+
+    def execute(self) -> None:
+        self._apply(self._new_document)
+
+    def undo(self) -> None:
+        self._apply(self._old_document)
+
+    def redo(self) -> None:
+        self._apply(self._new_document)
+
+    def can_merge(self, other: UndoCommand) -> bool:
+        if not isinstance(other, ResourceDocumentCommand):
+            return False
+        return (self._resource_id == other._resource_id
+                and self._edit_key == other._edit_key
+                and (other.timestamp - self.timestamp) <= self.MERGE_WINDOW)
+
+    def merge(self, other: ResourceDocumentCommand) -> None:
+        self._new_document = copy.deepcopy(other._new_document)
+        self.timestamp = other.timestamp
+
+    def _apply(self, document: dict) -> None:
+        result = self._resource.deserialize_document(document)
+        if result is False:
+            raise RuntimeError("resource document restore failed")
+        if self._publish_callback is not None:
+            self._publish_callback(self._resource)
+            return
+        save = getattr(self._resource, "save", None)
+        if not callable(save):
+            raise RuntimeError("resource document command requires a publish callback or save()")
+        save_result = save()
+        if save_result is False:
+            raise RuntimeError("resource document save failed")
 
 
 class SetMaterialSlotCommand(UndoCommand):

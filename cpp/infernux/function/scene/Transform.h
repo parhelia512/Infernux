@@ -451,8 +451,9 @@ class Transform : public Component
     // Serialization
     // ========================================================================
 
-    [[nodiscard]] std::string Serialize() const override;
-    bool Deserialize(const std::string &jsonStr) override;
+    [[nodiscard]] nlohmann::json SerializeDocument() const override;
+    static void ValidateSerializedDocument(const nlohmann::json &document);
+    bool DeserializeDocument(const nlohmann::json &document) override;
 
     /// @brief Native clone: copy all ECS transform data to target (no JSON).
     /// The target keeps its own component ID and instance GUID.

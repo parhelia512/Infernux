@@ -1,6 +1,15 @@
 ---
+title: "Why Infernux Exists"
+description: "A non-technical project-origin essay explaining why Infernux chose a C++ core with a Python authoring layer and what the project is trying to become."
 category: Musings
 tags: ["vision"]
+status: stable
+since: "0.1.0"
+last_verified: "2026-07-15"
+audience: ["user", "contributor"]
+related_api: []
+agent_summary: "A non-technical project-origin essay explaining why Infernux chose a C++ core with a Python authoring layer and what the project is trying to become."
+source_paths: ["README.md"]
 date: "2026-03-28"
 ---
 

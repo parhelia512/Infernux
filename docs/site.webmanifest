@@ -1,0 +1,65 @@
+{
+  "name": "Infernux · 熔炉",
+  "short_name": "Infernux",
+  "id": "/",
+  "description": "Documentation, learning paths, releases, and community access for the Infernux game engine.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "prefer_related_applications": false,
+  "background_color": "#0a0c11",
+  "theme_color": "#0a0c11",
+  "lang": "en",
+  "categories": ["developer", "education", "games"],
+  "icons": [
+    {
+      "src": "/assets/infernux-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/infernux-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/infernux-icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Start learning Infernux",
+      "short_name": "Start",
+      "description": "Open the first guided Infernux project.",
+      "url": "/wiki/site/en/learn/getting-started.html",
+      "icons": [{ "src": "/assets/infernux-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Infernux Documentation",
+      "short_name": "Docs",
+      "description": "Search guides, manuals, architecture notes, and API symbols.",
+      "url": "/wiki.html",
+      "icons": [{ "src": "/assets/infernux-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Infernux Community",
+      "short_name": "Community",
+      "description": "Browse GitHub Discussions, support channels, and engineering queues.",
+      "url": "/community.html",
+      "icons": [{ "src": "/assets/infernux-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Download Infernux",
+      "short_name": "Download",
+      "description": "Open verified release artifacts and installation guidance.",
+      "url": "/download.html",
+      "icons": [{ "src": "/assets/infernux-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}

@@ -77,6 +77,8 @@ void RegisterInputBindings(py::module_ &m)
              "Enable or disable editor-only Scene view mouse capture without marking gameplay cursor lock")
         .def_property_readonly("is_editor_mouse_capture_active", &InputManager::IsEditorMouseCaptureActive,
                                "True when the Scene view editor camera is using relative mouse capture")
+        .def_property_readonly("is_synthetic_input_frame", &InputManager::IsSyntheticInputFrame,
+                               "True when trusted automation supplied input during the current frame")
 
         // ---- Utility ----
         .def("reset_all", &InputManager::ResetAll, "Clear all input state (focus loss, scene change, etc.)")

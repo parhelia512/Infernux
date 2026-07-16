@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Callable, Optional
 
 from Infernux.debug import Debug
@@ -17,16 +18,16 @@ class InspectorSnapshotCommand(UndoCommand):
 
     MERGE_WINDOW: float = 0.3
 
-    def __init__(self, target_key: str, old_snapshot: str,
-                 new_snapshot: str,
-                 restore_fn: Callable[[str], None],
+    def __init__(self, target_key: str, old_snapshot: Any,
+                 new_snapshot: Any,
+                 restore_fn: Callable[[Any], None],
                  description: str = "",
                  marks_dirty: bool = True):
         super().__init__(description or "Inspector Edit")
         self.marks_dirty = marks_dirty
         self._target_key = target_key
-        self._old_snapshot = old_snapshot
-        self._new_snapshot = new_snapshot
+        self._old_snapshot = copy.deepcopy(old_snapshot)
+        self._new_snapshot = copy.deepcopy(new_snapshot)
         self._restore_fn = restore_fn
 
     def execute(self) -> None:
@@ -45,7 +46,7 @@ class InspectorSnapshotCommand(UndoCommand):
                 and (other.timestamp - self.timestamp) <= self.MERGE_WINDOW)
 
     def merge(self, other: InspectorSnapshotCommand) -> None:
-        self._new_snapshot = other._new_snapshot
+        self._new_snapshot = copy.deepcopy(other._new_snapshot)
         self.timestamp = other.timestamp
 
 
@@ -53,12 +54,12 @@ class _TrackedEntry:
     __slots__ = ('pre_snapshot', 'snapshot_fn', 'restore_fn', 'description',
                  'seen_generation', 'marks_dirty')
 
-    def __init__(self, pre_snapshot: str,
-                 snapshot_fn: Callable[[], str],
-                 restore_fn: Callable[[str], None],
+    def __init__(self, pre_snapshot: Any,
+                 snapshot_fn: Callable[[], Any],
+                 restore_fn: Callable[[Any], None],
                  description: str,
                  marks_dirty: bool = True):
-        self.pre_snapshot = pre_snapshot
+        self.pre_snapshot = copy.deepcopy(pre_snapshot)
         self.snapshot_fn = snapshot_fn
         self.restore_fn = restore_fn
         self.description = description
@@ -89,8 +90,8 @@ class InspectorUndoTracker:
     def mark_all_active(self) -> None:
         self._all_active_current_frame = True
 
-    def track(self, key: str, snapshot_fn: Callable[[], str],
-              restore_fn: Callable[[str], None],
+    def track(self, key: str, snapshot_fn: Callable[[], Any],
+              restore_fn: Callable[[Any], None],
               description: str = "",
               marks_dirty: bool = True) -> None:
         existing = self._entries.get(key)
@@ -141,7 +142,7 @@ class InspectorUndoTracker:
                     entry.restore_fn, entry.description,
                     marks_dirty=entry.marks_dirty)
                 mgr.record(cmd)
-                entry.pre_snapshot = post
+                entry.pre_snapshot = copy.deepcopy(post)
 
 
 class HierarchyUndoTracker:

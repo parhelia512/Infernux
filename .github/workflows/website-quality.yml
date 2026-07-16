@@ -1,0 +1,192 @@
+name: Website Quality
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "UpdateLog.md"
+      - ".github/workflows/website-quality.yml"
+      - ".github/workflows/build-wiki.yml"
+      - ".github/workflows/website-health.yml"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/DISCUSSION_TEMPLATE/**"
+      - "update_api_docs.bat"
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "docs/**"
+      - "UpdateLog.md"
+      - ".github/workflows/website-quality.yml"
+      - ".github/workflows/build-wiki.yml"
+      - ".github/workflows/website-health.yml"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/DISCUSSION_TEMPLATE/**"
+      - "update_api_docs.bat"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify docs, indexes, and static build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify content-hashed Wiki catalog
+        run: node docs/tools/build-wiki-catalog.mjs --check
+
+      - name: Verify deterministic Wiki configuration
+        run: node docs/tools/normalize-wiki-config.mjs --check
+
+      - name: Verify documentation build provenance schema
+        run: node docs/tools/stamp-docs-manifest.mjs --check
+
+      - name: Verify generated indexes are current
+        run: node docs/tools/build-doc-index.mjs --check
+
+      - name: Verify curated front matter is synchronized
+        run: node docs/tools/sync-curated-frontmatter.mjs --check
+
+      - name: Verify documentation health report
+        run: node docs/tools/build-doc-health.mjs --check
+
+      - name: Verify curated core API guidance is current
+        run: node docs/tools/apply-api-curation.mjs --check
+
+      - name: Verify structured release notes
+        run: node docs/tools/build-release-notes.mjs --check
+
+      - name: Verify compact Agent documentation index
+        run: node docs/tools/build-llms-index.mjs --check
+
+      - name: Test compact Agent documentation index
+        run: node docs/tools/test-llms-index.mjs
+
+      - name: Verify full Agent documentation corpus
+        run: node docs/tools/build-agent-corpus.mjs --check
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: docs/wiki/requirements.txt
+
+      - name: Install documentation dependencies
+        run: python -m pip install -r docs/wiki/requirements.txt
+
+      - name: Build Wiki in strict mode
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python -m mkdocs build --strict --clean -f docs/wiki/mkdocs.yml
+
+      - name: Optimize static Wiki output
+        run: node docs/tools/optimize-static-site.mjs
+
+      - name: Verify unified sitemap
+        run: node docs/tools/build-sitemap.mjs --check
+
+      - name: Verify route-localized bundles
+        run: node docs/tools/build-i18n.mjs --check
+
+      - name: Verify deterministic Service Worker
+        run: node docs/tools/build-service-worker.mjs --check
+
+      - name: Verify responsive evidence images
+        run: node docs/tools/check-image-variants.mjs
+
+      - name: Verify installable PWA assets
+        run: node docs/tools/check-pwa-assets.mjs
+
+      - name: Test PWA installation interaction
+        run: node docs/tools/test-pwa-install.mjs
+
+      - name: Test route-localized bundles
+        run: node docs/tools/test-i18n-bundles.mjs
+
+      - name: Test download trust boundary
+        run: node docs/tools/test-download-client.mjs
+
+      - name: Test home starter interaction
+        run: node docs/tools/test-home-client.mjs
+
+      - name: Audit shipped runtime assets and visual state
+        run: node docs/tools/check-runtime-assets.mjs
+
+      - name: Test runtime visual state
+        run: node docs/tools/test-runtime-visual-state.mjs
+
+      - name: Test installed website update flow
+        run: node docs/tools/test-service-worker-update.mjs
+
+      - name: Enforce static performance budget
+        run: node docs/tools/check-static-budget.mjs
+
+      - name: Enforce design-token color contrast
+        run: node docs/tools/check-color-contrast.mjs
+
+      - name: Verify website contracts
+        run: node docs/tools/verify-site.mjs
+
+      - name: Test community client
+        run: node docs/tools/test-community-client.mjs
+
+      - name: Test community readiness rules
+        run: node docs/tools/test-community-readiness.mjs
+
+      - name: Test generated documentation context
+        run: node docs/tools/test-doc-context.mjs
+
+      - name: Test bilingual section continuity
+        run: node docs/tools/test-doc-language-continuity.mjs
+
+      - name: Test Wiki learning continuity
+        run: node docs/tools/test-wiki-learning-progress.mjs
+
+      - name: Test recent-document continuity
+        run: node docs/tools/test-doc-recent.mjs
+
+      - name: Test documentation printing
+        run: node docs/tools/test-doc-print.mjs
+
+      - name: Test documentation search
+        run: node docs/tools/test-doc-search.mjs
+
+      - name: Test documentation health client
+        run: node docs/tools/test-doc-health.mjs
+
+      - name: Test website health reporting
+        run: node docs/tools/test-website-health-report.mjs
+
+      - name: Test offline caching strategy
+        run: node docs/tools/test-service-worker.mjs
+
+      - name: Test mobile navigation focus management
+        run: node docs/tools/test-mobile-navigation.mjs
+
+      - name: Test responsive layout contracts
+        run: node docs/tools/test-responsive-contracts.mjs
+
+      - name: Verify committed Wiki output is current
+        shell: bash
+        run: |
+          changes="$(git status --short --untracked-files=all -- docs/wiki/site docs/sitemap.xml ':(glob)docs/css/wiki-template.*.css')"
+          if [ -n "$changes" ]; then
+            printf '%s\n' "$changes"
+            exit 1
+          fi

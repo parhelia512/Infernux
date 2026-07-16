@@ -1,23 +1,26 @@
 import os
 from PySide6.QtWidgets import (
-    QMessageBox, QDialog, QVBoxLayout, QLabel, QProgressBar
+    QMessageBox, QDialog, QVBoxLayout, QLabel, QProgressBar, QFileDialog, QInputDialog
 )
 from PySide6.QtCore import QThread, Signal, QObject, QTimer, Qt
 from model.project_model import ProjectModel
 from hub_utils import is_frozen, is_project_open
+from project_paths import ProjectPathError
+from project_migration import ProjectMigrationService
+from i18n import tr
 import random
 
 
 class CustomProgressDialog(QDialog):
     """Indeterminate progress dialog shown during project initialization."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, title=None):
         super().__init__(parent)
-        self.setWindowTitle("Initializing")
+        self.setWindowTitle(title or tr("Initializing"))
         self.setWindowModality(Qt.WindowModal)
         self.setFixedSize(340, 110)
 
-        self.label = QLabel("Preparing project...", self)
+        self.label = QLabel(tr("Preparing project..."), self)
         self.label.setAlignment(Qt.AlignCenter)
 
         self.progress_bar = QProgressBar(self)
@@ -30,11 +33,11 @@ class CustomProgressDialog(QDialog):
         self.setLayout(layout)
 
         self.messages = [
-            "Setting up project structure...",
-            "Copying engine libraries...",
-            "Setting up Python runtime...",
-            "Preparing asset folders...",
-            "Almost there...",
+            tr("Setting up project structure..."),
+            tr("Copying engine libraries..."),
+            tr("Setting up Python runtime..."),
+            tr("Preparing asset folders..."),
+            tr("Almost there..."),
         ]
 
         self.timer = QTimer(self)
@@ -44,7 +47,7 @@ class CustomProgressDialog(QDialog):
     def set_status(self, message: str):
         if self.timer.isActive():
             self.timer.stop()
-        self.label.setText(message)
+        self.label.setText(tr(message))
 
     def _rotate_message(self):
         self.label.setText(random.choice(self.messages))
@@ -62,10 +65,11 @@ class InitProjectWorker(QObject):
         self.name = name
         self.path = path
         self.engine_version = engine_version
+        self.project_dir = ""
 
     def run(self):
         try:
-            self.model.init_project_folder(
+            self.project_dir = self.model.init_project_folder(
                 self.name,
                 self.path,
                 self.engine_version,
@@ -77,6 +81,30 @@ class InitProjectWorker(QObject):
         self.finished.emit()
 
 
+class MigrationWorker(QObject):
+    progress = Signal(str)
+    finished = Signal(object)
+    error = Signal(str)
+
+    def __init__(self, service, project_path: str, target_version: str):
+        super().__init__()
+        self.service = service
+        self.project_path = project_path
+        self.target_version = target_version
+
+    def run(self):
+        try:
+            result = self.service.migrate(
+                self.project_path,
+                self.target_version,
+                on_status=self.progress.emit,
+            )
+        except Exception as exc:
+            self.error.emit(str(exc))
+            return
+        self.finished.emit(result)
+
+
 class ControlPaneViewModel:
     def __init__(self, model, project_list, version_manager=None, runtime_manager=None):
         self.model = model
@@ -85,20 +113,40 @@ class ControlPaneViewModel:
         self.runtime_manager = runtime_manager
 
     def launch_project(self, parent):
-        project_name = self.project_list.get_selected_project()
-        if not project_name:
-            QMessageBox.warning(parent, "No Selection", "Please select a project to launch.")
+        record = self.project_list.get_selected_record()
+        if record is None:
+            QMessageBox.warning(parent, tr("No Selection"), tr("Please select a project to launch."))
             return
-        
+
         import sys
-        
-        project_path = os.path.join(self.project_list.get_selected_project_path(), project_name)
+
+        project_name = record.name
+        project_path = record.path
+
+        if not os.path.isdir(project_path):
+            QMessageBox.warning(
+                parent,
+                tr("Project Path Missing"),
+                f"The project folder could not be found:\n{project_path}\n\n"
+                "Remove this entry from Hub, then use Open Existing to register its new location.",
+            )
+            return
 
         if is_project_open(project_path):
             QMessageBox.warning(
                 parent,
-                "Project Already Open",
+                tr("Project Already Open"),
                 f"The project is already open in Infernux and cannot be opened again:\n{project_path}",
+            )
+            return
+
+        pinned_version = self.version_manager.read_project_version(project_path) if self.version_manager else ""
+        if pinned_version and self.version_manager and not self.version_manager.is_installed(pinned_version):
+            QMessageBox.warning(
+                parent,
+                tr("Engine Version Not Installed"),
+                f"Infernux {pinned_version} is required by this project. "
+                f"Open {tr('Installs')} and install it before launching.",
             )
             return
 
@@ -109,7 +157,7 @@ class ControlPaneViewModel:
             if not os.path.isfile(python_exe):
                 QMessageBox.critical(
                     parent,
-                    "Missing Runtime",
+                    tr("Missing Runtime"),
                     f"Project Python runtime not found at:\n"
                     f"{os.path.join(project_path, '.runtime', 'python312')}\n\n"
                     "Please recreate the project or reinstall the engine version.",
@@ -120,7 +168,7 @@ class ControlPaneViewModel:
             except RuntimeError as exc:
                 QMessageBox.critical(
                     parent,
-                    "Native Runtime Check Failed",
+                    tr("Native Runtime Check Failed"),
                     "The project runtime exists, but the Infernux native module could not be loaded.\n\n"
                     f"{exc}",
                 )
@@ -149,38 +197,159 @@ class ControlPaneViewModel:
         )
         self._splash = splash
 
-    def delete_project(self, parent):
-        project_name = self.project_list.get_selected_project()
-        if not project_name:
-            QMessageBox.warning(parent, "No Selection", "Please select a project to delete.")
+    def open_existing_project(self, parent):
+        initial_dir = self.model.db.get_setting("last_open_project_dir", "") if self.model.db else ""
+        selected_dir = QFileDialog.getExistingDirectory(
+            parent, tr("Open Existing Infernux Project"), initial_dir,
+        )
+        if not selected_dir:
             return
 
-        project_root = self.project_list.get_selected_project_path()
-        project_dir = os.path.join(project_root, project_name) if project_root else project_name
+        try:
+            record, info = self.model.register_existing_project(selected_dir)
+        except (ProjectPathError, RuntimeError) as exc:
+            QMessageBox.critical(parent, tr("Cannot Open Project"), str(exc))
+            return
 
-        if project_root and is_project_open(project_dir):
-            QMessageBox.warning(
+        if self.model.db:
+            self.model.db.set_setting("last_open_project_dir", os.path.dirname(info.path))
+        self.project_list.refresh()
+        self.project_list.select_project(record.project_id)
+
+        if info.engine_version and self.version_manager is not None and not self.version_manager.is_installed(info.engine_version):
+            QMessageBox.information(
                 parent,
-                "Project Is Open",
-                f"The project is currently open in Infernux and cannot be deleted:\n{project_dir}",
+                tr("Engine Version Not Installed"),
+                f"Project '{info.name}' was added to Hub, but engine version "
+                f"{info.engine_version} is not installed yet.\n\nOpen Installs to install it before launching.",
             )
+
+    def remove_project(self, parent):
+        record = self.project_list.get_selected_record()
+        if record is None:
+            QMessageBox.warning(parent, tr("No Selection"), tr("Please select a project to remove from Hub."))
             return
 
         confirm = QMessageBox.question(
             parent,
-            "Confirm Deletion",
-            f"Delete project '{project_name}' and remove its folder from disk?\n\n{project_dir}",
+            tr("Remove Project from Hub"),
+            f"Remove '{record.name}' from Infernux Hub?\n\n"
+            f"{tr('Project files will not be deleted.')}\n{record.path}",
         )
         if confirm != QMessageBox.Yes:
             return
 
-        try:
-            self.model.delete_project(project_name)
-        except Exception as exc:
-            QMessageBox.critical(parent, "Project Deletion Failed", str(exc))
+        self.model.remove_project(record.project_id)
+        self.project_list.refresh()
+
+    def relocate_project(self, parent):
+        record = self.project_list.get_selected_record()
+        if record is None:
+            QMessageBox.warning(parent, tr("No Selection"), tr("Please select a project to relocate."))
             return
 
+        initial_dir = record.path if os.path.isdir(record.path) else os.path.dirname(record.path)
+        selected_dir = QFileDialog.getExistingDirectory(
+            parent, tr("Relocate Infernux Project"), initial_dir,
+        )
+        if not selected_dir:
+            return
+
+        try:
+            relocated, info = self.model.relocate_project(record.project_id, selected_dir)
+        except (ProjectPathError, RuntimeError) as exc:
+            QMessageBox.critical(parent, tr("Cannot Relocate Project"), str(exc))
+            return
+
+        if self.model.db:
+            self.model.db.set_setting("last_open_project_dir", os.path.dirname(info.path))
         self.project_list.refresh()
+        self.project_list.select_project(relocated.project_id)
+
+    def migrate_project(self, parent):
+        record = self.project_list.get_selected_record()
+        if record is None:
+            QMessageBox.warning(parent, tr("No Selection"), tr("Please select a project to migrate."))
+            return
+        if not os.path.isdir(record.path):
+            QMessageBox.warning(parent, tr("Project Path Missing"), record.path)
+            return
+
+        current = self.version_manager.read_project_version(record.path) or ""
+        versions = [version for version in self.version_manager.installed_versions() if version != current]
+        if not versions:
+            QMessageBox.information(
+                parent,
+                tr("No Other Version"),
+                tr("Install another engine version before migrating this project."),
+            )
+            return
+
+        target, accepted = QInputDialog.getItem(
+            parent,
+            tr("Migrate Project"),
+            tr("Select target engine version:"),
+            versions,
+            0,
+            False,
+        )
+        if not accepted or not target:
+            return
+
+        confirmation = QMessageBox.question(
+            parent,
+            tr("Confirm Project Migration"),
+            f"{record.name}: {current or '(unversioned)'} → {target}\n\n"
+            + tr("A backup of Assets and ProjectSettings will be created before the runtime and version pin are changed."),
+        )
+        if confirmation != QMessageBox.Yes:
+            return
+
+        progress = CustomProgressDialog(parent, tr("Migrate Project"))
+        progress.show()
+        service = ProjectMigrationService(self.model, self.version_manager)
+        self._migration_error = ""
+        self._migration_result = None
+        self._migration_thread = QThread()
+        self._migration_worker = MigrationWorker(service, record.path, target)
+        self._migration_worker.moveToThread(self._migration_thread)
+
+        def store_result(result):
+            self._migration_result = result
+
+        def store_error(message):
+            self._migration_error = message
+
+        def cleanup():
+            progress.accept()
+            if self._migration_error:
+                QMessageBox.critical(parent, tr("Project Migration Failed"), self._migration_error)
+            elif self._migration_result is not None:
+                QMessageBox.information(
+                    parent,
+                    tr("Project Migration Complete"),
+                    tr("Backup created at:\n{path}", path=self._migration_result.backup_path),
+                )
+            self.project_list.refresh()
+            self.project_list.select_project(record.project_id)
+            self._migration_worker.deleteLater()
+            self._migration_thread.deleteLater()
+
+        self._migration_timer = QTimer()
+        self._migration_timer.setSingleShot(True)
+        self._migration_timer.timeout.connect(cleanup)
+        self._migration_thread.started.connect(self._migration_worker.run)
+        self._migration_worker.progress.connect(progress.set_status)
+        self._migration_worker.finished.connect(store_result)
+        self._migration_worker.finished.connect(self._migration_thread.quit)
+        self._migration_worker.error.connect(store_error)
+        self._migration_worker.error.connect(self._migration_thread.quit)
+        self._migration_thread.finished.connect(self._migration_timer.start)
+        self._migration_thread.start()
+
+    def delete_project(self, parent):
+        """Compatibility alias for older views."""
+        self.remove_project(parent)
 
     def create_project(self, parent):
         from view.new_project_view import NewProjectView
@@ -188,9 +357,8 @@ class ControlPaneViewModel:
         if is_frozen() and self.runtime_manager is not None and not self.runtime_manager.has_runtime():
             QMessageBox.warning(
                 parent,
-                "Python 3.12 Required",
-                "Python 3.12 is not installed yet.\n"
-                "Open the Installs page or restart the Hub and let it finish runtime setup first.",
+                tr("Python 3.12 Required"),
+                tr("Python 3.12 is not installed yet. Open the Installs page or restart the Hub and let it finish runtime setup first."),
             )
             return
 
@@ -200,17 +368,13 @@ class ControlPaneViewModel:
 
         new_name, project_path, engine_version = dialog.get_data()
         if not new_name:
-            QMessageBox.warning(parent, "Missing Name", "Please enter a project name.")
+            QMessageBox.warning(parent, tr("Missing Name"), tr("Please enter a project name."))
             return
         if not project_path:
-            QMessageBox.warning(parent, "Missing Location", "Please choose a project location.")
+            QMessageBox.warning(parent, tr("Missing Location"), tr("Please choose a project location."))
             return
         if is_frozen() and not engine_version:
-            QMessageBox.warning(parent, "Missing Version", "Please select an installed engine version.")
-            return
-
-        if not self.model.add_project(new_name, project_path):
-            QMessageBox.critical(parent, "Duplicate Name", f"Project '{new_name}' already exists.")
+            QMessageBox.warning(parent, tr("Missing Version"), tr("Please select an installed engine version."))
             return
 
         progress_dialog = CustomProgressDialog(parent)
@@ -229,13 +393,25 @@ class ControlPaneViewModel:
         def _cleanup():
             # Guaranteed to run on the main thread (QTimer fires in main loop).
             progress_dialog.accept()
-            if self._init_error:
-                self.model.delete_project(new_name)
+            record = None
+            error_message = self._init_error
+            self._init_error = ""
+            if error_message:
                 QMessageBox.critical(
-                    parent, "Project Creation Failed", self._init_error,
+                    parent, tr("Project Creation Failed"), error_message,
                 )
-                self._init_error = ""
+            elif self.worker.project_dir:
+                record = self.model.add_project(new_name, self.worker.project_dir)
+                if record is None:
+                    QMessageBox.warning(
+                        parent,
+                        tr("Project Created"),
+                        "The project was created successfully, but it is already registered in Hub.\n\n"
+                        f"{self.worker.project_dir}",
+                    )
             self.project_list.refresh()
+            if not error_message and self.worker.project_dir and record is not None:
+                self.project_list.select_project(record.project_id)
             self.worker.deleteLater()
             self.thread.deleteLater()
 

@@ -104,6 +104,14 @@ class Material:
         """Wrap an existing C++ InxMaterial."""
         return Material(native)
 
+    def to_dict(self) -> dict:
+        """Return the material document without encoding JSON text."""
+        return self._native.serialize_document()
+
+    def apply_dict(self, document: dict) -> bool:
+        """Transactionally apply a material document."""
+        return bool(self._native.deserialize_document(document))
+
     @staticmethod
     def _parse_embedded_model_material_path(file_path: str) -> Optional[Tuple[str, int]]:
         if _EMBEDDED_MODEL_MAT_TOKEN not in file_path:
@@ -525,14 +533,12 @@ class Material:
         self._auto_save()
 
     def set_texture(self, name: str, value):
-        """Set a texture property from GUID, path, Texture, or None.
+        """Set a texture property from a GUID, builtin token, texture object, or None.
 
         Supported values:
             - ``None``: clears the texture
-            - texture GUID string
-            - texture asset path string
-            - object with ``guid`` or ``source_path``
-            - wrapper exposing ``native`` with those fields
+            - texture asset GUID string or builtin texture token
+            - object with a non-empty ``guid``
         """
         self._native.set_texture(name, value)
         self._auto_save()
@@ -628,7 +634,11 @@ class Material:
 
     def save(self, file_path: str) -> bool:
         """Save material to a .mat file."""
-        return self._native.serialize_to_file(file_path)
+        try:
+            self._native.save_to(file_path)
+            return True
+        except (OSError, RuntimeError, ValueError):
+            return False
 
     # ==========================================================================
     # Dunder methods

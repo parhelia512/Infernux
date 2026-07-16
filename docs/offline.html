@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>Infernux · Signal interrupted</title>
+    <link rel="icon" type="image/png" href="assets/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/infernux-apple-touch-icon.png">
+    <link rel="manifest" href="site.webmanifest">
+    <style>
+        :root {
+            --offline-bg: #0a0c11;
+            --offline-panel: #12151d;
+            --offline-elevated: #191d27;
+            --offline-text: #edf0f7;
+            --offline-muted: #aeb5c4;
+            --offline-soft: #858d9e;
+            --offline-accent: #ff6e6e;
+            --offline-accent-fill: #ff4953;
+            --offline-on-accent: #090b10;
+            --offline-border: #687181;
+            --offline-focus: #ff9ca2;
+            color-scheme: dark;
+            font-family: system-ui, sans-serif;
+            background: var(--offline-bg);
+            color: var(--offline-text);
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
+        }
+        * { box-sizing: border-box; }
+        body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 78% 16%, rgba(255, 73, 83, .16), transparent 34%), var(--offline-bg); }
+        main { width: min(680px, 100%); padding: clamp(28px, 7vw, 58px); border: 1px solid var(--offline-border); border-left: 4px solid var(--offline-accent-fill); background: var(--offline-panel); box-shadow: 0 24px 70px rgba(0, 0, 0, .38); }
+        .brand { display: flex; align-items: center; gap: 12px; color: var(--offline-soft); font: 700 .76rem/1.4 ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; }
+        .brand img { width: 38px; height: 38px; }
+        .code { display: block; margin-top: 38px; color: var(--offline-accent); font: 700 .7rem/1.4 ui-monospace, monospace; letter-spacing: .18em; }
+        h1 { margin: 12px 0 18px; font-size: clamp(2rem, 8vw, 4rem); line-height: 1; letter-spacing: -.04em; }
+        p { margin: 0; max-width: 56ch; color: var(--offline-muted); line-height: 1.75; }
+        .zh { margin-top: 12px; color: var(--offline-soft); }
+        nav { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
+        a, button { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; padding: 10px 16px; border: 1px solid var(--offline-border); border-radius: 6px; background: var(--offline-elevated); color: var(--offline-text); font: 700 .75rem/1 ui-monospace, monospace; text-decoration: none; cursor: pointer; }
+        .retry { border-color: var(--offline-accent-fill); background: var(--offline-accent-fill); color: var(--offline-on-accent); }
+        a:focus-visible, button:focus-visible { outline: 3px solid var(--offline-focus); outline-offset: 3px; }
+        small { display: block; margin-top: 32px; color: var(--offline-soft); font: .68rem/1.6 ui-monospace, monospace; }
+        @media (forced-colors: active) {
+            * { box-shadow: none !important; }
+            body { background: Canvas; color: CanvasText; }
+            main, a, button { border-color: CanvasText; background: Canvas; color: CanvasText; }
+            a:focus-visible, button:focus-visible { outline: 3px solid Highlight; }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <div class="brand"><img src="assets/logo.png" width="256" height="256" alt=""><span>Infernux · 熔炉 · Offline relay</span></div>
+        <span class="code">SIGNAL-LOST · LOCAL FALLBACK</span>
+        <h1>Connection interrupted.</h1>
+        <p>The requested page is not available in this device's local cache. Reconnect to retrieve the current authoritative documentation.</p>
+        <p class="zh" lang="zh-CN">当前设备没有缓存所请求的页面。恢复网络后即可读取最新的权威文档。</p>
+        <nav aria-label="Offline recovery actions">
+            <a class="retry" href="">Retry · 重试</a>
+            <a href="/index.html">Home · 首页</a>
+            <a href="/wiki.html">Docs · 文档</a>
+        </nav>
+        <small>Visited pages may remain available offline. Machine indexes and documentation always prefer the network so an older cache cannot silently replace current evidence.</small>
+    </main>
+</body>
+</html>

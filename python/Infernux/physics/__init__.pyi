@@ -8,6 +8,12 @@ class Physics:
 
     @classmethod
     @property
+    def body_count(cls) -> int:
+        """Number of native physics bodies currently owned by the world."""
+        ...
+
+    @classmethod
+    @property
     def gravity(cls) -> Any:
         """The global gravity vector applied to all rigidbodies."""
         ...
@@ -60,11 +66,15 @@ class Physics:
     def overlap_box(
         center: Any,
         half_extents: Any,
+        orientation: Any = ...,
         layer_mask: int = ...,
         query_triggers: bool = ...,
     ) -> List[Any]:
-        """Find all colliders within an axis-aligned box."""
+        """Find all colliders within an oriented box."""
         ...
+
+    @staticmethod
+    def overlap_capsule(point0: Any, point1: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) -> List[Any]: ...
 
     @staticmethod
     def sphere_cast(
@@ -83,12 +93,16 @@ class Physics:
         center: Any,
         half_extents: Any,
         direction: Any,
+        orientation: Any = ...,
         max_distance: float = ...,
         layer_mask: int = ...,
         query_triggers: bool = ...,
     ) -> Optional[Any]:
         """Cast a box along a direction and return the first hit, or None."""
         ...
+
+    @staticmethod
+    def capsule_cast(point0: Any, point1: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) -> Optional[Any]: ...
 
     @staticmethod
     def ignore_layer_collision(layer1: int, layer2: int, ignore: bool = ...) -> None:

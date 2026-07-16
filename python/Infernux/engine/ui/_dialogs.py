@@ -351,3 +351,15 @@ def save_file_dialog(
         )
     finally:
         root.destroy()
+
+
+def is_synthetic_input_frame() -> bool:
+    """Return whether the current Editor frame is driven by trusted automation."""
+    try:
+        from Infernux.lib import InputManager
+
+        return bool(InputManager.instance().is_synthetic_input_frame)
+    except Exception:
+        # The native module is intentionally optional for lightweight tools and
+        # unit tests. Those callers always use the normal user-facing workflow.
+        return False

@@ -1,7 +1,10 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <function/renderer/InxRenderStruct.h>
+#include <unordered_map>
 #include <vector>
 
 namespace infernux
@@ -54,32 +57,28 @@ class PrimitiveMeshes
         return indices;
     }
 
-    /// @brief Get sphere vertices (UV sphere)
+    /// @brief Get sphere vertices (subdivided icosahedron)
     static const std::vector<Vertex> &GetSphereVertices()
     {
-        static std::vector<Vertex> vertices = CreateSphereVertices(64, 32);
-        return vertices;
+        return GetGeodesicSphereMesh().vertices;
     }
 
     /// @brief Get sphere indices
     static const std::vector<uint32_t> &GetSphereIndices()
     {
-        static std::vector<uint32_t> indices = CreateSphereIndices(64, 32);
-        return indices;
+        return GetGeodesicSphereMesh().indices;
     }
 
     /// @brief Get capsule vertices
     static const std::vector<Vertex> &GetCapsuleVertices()
     {
-        static std::vector<Vertex> vertices = CreateCapsuleVertices(16, 8, 0.5f, 1.0f);
-        return vertices;
+        return GetCapsuleMesh().vertices;
     }
 
     /// @brief Get capsule indices
     static const std::vector<uint32_t> &GetCapsuleIndices()
     {
-        static std::vector<uint32_t> indices = CreateCapsuleIndices(16, 8);
-        return indices;
+        return GetCapsuleMesh().indices;
     }
 
     /// @brief Get plane vertices (XZ plane, facing up)
@@ -143,59 +142,22 @@ class PrimitiveMeshes
     }
 
   private:
-    /// @brief Shared ring-based index generation for sphere, capsule, cylinder side, etc.
-    static void AppendRingIndices(std::vector<uint32_t> &indices, int segments, int rings, uint32_t baseVertex = 0)
+    struct GeneratedMesh
     {
-        int vertsPerRing = segments + 1;
-        for (int ring = 0; ring < rings; ++ring) {
-            for (int seg = 0; seg < segments; ++seg) {
-                uint32_t current = baseVertex + static_cast<uint32_t>(ring * vertsPerRing + seg);
-                uint32_t next = current + 1;
-                uint32_t below = static_cast<uint32_t>(current + vertsPerRing);
-                uint32_t belowNext = below + 1;
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indices;
+    };
 
-                indices.push_back(current);
-                indices.push_back(next);
-                indices.push_back(below);
-
-                indices.push_back(next);
-                indices.push_back(belowNext);
-                indices.push_back(below);
-            }
-        }
+    static const GeneratedMesh &GetGeodesicSphereMesh()
+    {
+        static const GeneratedMesh mesh = CreateGeodesicSphereMesh(4, 0.5f);
+        return mesh;
     }
 
-    /// @brief Shared hemisphere vertex generation for capsule top/bottom.
-    /// @param ySign +1 for top hemisphere, -1 for bottom hemisphere
-    /// @param yOffset  vertical center offset (±cylinderHeight/2)
-    /// @param vBase    UV v-coordinate start (0.0 for top, 0.75 for bottom)
-    /// @param vScale   UV v-coordinate range (0.25 for both hemispheres)
-    static void GenerateHemisphereVertices(std::vector<Vertex> &vertices, int segments, int hemisphereRings,
-                                           float radius, float ySign, float yOffset, float vBase, float vScale)
+    static const GeneratedMesh &GetCapsuleMesh()
     {
-        const float PI = 3.14159265358979323846f;
-        for (int ring = 0; ring <= hemisphereRings; ++ring) {
-            float phi =
-                (ySign > 0) ? (PI / 2.0f) * ring / hemisphereRings : (PI / 2.0f) + (PI / 2.0f) * ring / hemisphereRings;
-            float y = std::cos(phi) * radius + yOffset;
-            float ringRadius = std::sin(phi) * radius;
-
-            for (int seg = 0; seg <= segments; ++seg) {
-                float theta = 2.0f * PI * seg / segments;
-                float x = std::cos(theta) * ringRadius;
-                float z = std::sin(theta) * ringRadius;
-
-                glm::vec3 localPos(std::cos(theta) * std::sin(phi), std::cos(phi), std::sin(theta) * std::sin(phi));
-                glm::vec3 normal = glm::normalize(localPos);
-                glm::vec3 tangent = glm::normalize(glm::vec3(-std::sin(theta), 0.0f, std::cos(theta)));
-
-                float u = static_cast<float>(seg) / segments;
-                float v = vBase + vScale * ring / hemisphereRings;
-
-                vertices.push_back(
-                    Vertex::CreateFull({x, y, z}, normal, glm::vec4(tangent, 1.0f), {1.0f, 1.0f, 1.0f}, {u, v}));
-            }
-        }
+        static const GeneratedMesh mesh = CreateCapsuleMesh(32, 8, 0.5f, 2.0f);
+        return mesh;
     }
 
     static std::vector<Vertex> CreateCubeVertices()
@@ -280,100 +242,172 @@ class PrimitiveMeshes
     }
 
     // ========================================================================
-    // Sphere generation (UV sphere)
+    // Sphere generation (geodesic icosphere with seam-aware UV duplication)
     // ========================================================================
-    static std::vector<Vertex> CreateSphereVertices(int segments, int rings)
+    static GeneratedMesh CreateGeodesicSphereMesh(int subdivisions, float radius)
     {
-        std::vector<Vertex> vertices;
         const float PI = 3.14159265358979323846f;
-        const float radius = 0.5f;
+        const float goldenRatio = (1.0f + std::sqrt(5.0f)) * 0.5f;
+        std::vector<glm::vec3> positions = {
+            {-1.0f, goldenRatio, 0.0f},  {1.0f, goldenRatio, 0.0f},   {-1.0f, -goldenRatio, 0.0f},
+            {1.0f, -goldenRatio, 0.0f},  {0.0f, -1.0f, goldenRatio},  {0.0f, 1.0f, goldenRatio},
+            {0.0f, -1.0f, -goldenRatio}, {0.0f, 1.0f, -goldenRatio},  {goldenRatio, 0.0f, -1.0f},
+            {goldenRatio, 0.0f, 1.0f},   {-goldenRatio, 0.0f, -1.0f}, {-goldenRatio, 0.0f, 1.0f},
+        };
+        for (glm::vec3 &position : positions)
+            position = glm::normalize(position) * radius;
 
-        for (int ring = 0; ring <= rings; ++ring) {
-            float phi = PI * ring / rings;
-            float y = std::cos(phi) * radius;
-            float ringRadius = std::sin(phi) * radius;
+        std::vector<std::array<uint32_t, 3>> faces = {
+            {0, 11, 5},  {0, 5, 1},  {0, 1, 7},  {0, 7, 10}, {0, 10, 11}, {1, 5, 9}, {5, 11, 4},
+            {11, 10, 2}, {10, 7, 6}, {7, 1, 8},  {3, 9, 4},  {3, 4, 2},   {3, 2, 6}, {3, 6, 8},
+            {3, 8, 9},   {4, 9, 5},  {2, 4, 11}, {6, 2, 10}, {8, 6, 7},   {9, 8, 1},
+        };
 
-            for (int seg = 0; seg <= segments; ++seg) {
-                float theta = 2.0f * PI * seg / segments;
-                float x = std::cos(theta) * ringRadius;
-                float z = std::sin(theta) * ringRadius;
+        for (int level = 0; level < subdivisions; ++level) {
+            std::unordered_map<uint64_t, uint32_t> midpointCache;
+            auto midpoint = [&](uint32_t first, uint32_t second) {
+                const uint32_t lower = std::min(first, second);
+                const uint32_t upper = std::max(first, second);
+                const uint64_t key = (static_cast<uint64_t>(lower) << 32U) | upper;
+                const auto existing = midpointCache.find(key);
+                if (existing != midpointCache.end())
+                    return existing->second;
+                const uint32_t index = static_cast<uint32_t>(positions.size());
+                positions.push_back(glm::normalize(positions[first] + positions[second]) * radius);
+                midpointCache.emplace(key, index);
+                return index;
+            };
 
-                // Normal is the normalized position for a unit sphere
-                glm::vec3 normal = glm::normalize(glm::vec3(x, y, z));
+            std::vector<std::array<uint32_t, 3>> subdivided;
+            subdivided.reserve(faces.size() * 4);
+            for (const auto &face : faces) {
+                const uint32_t ab = midpoint(face[0], face[1]);
+                const uint32_t bc = midpoint(face[1], face[2]);
+                const uint32_t ca = midpoint(face[2], face[0]);
+                subdivided.push_back({face[0], ab, ca});
+                subdivided.push_back({face[1], bc, ab});
+                subdivided.push_back({face[2], ca, bc});
+                subdivided.push_back({ab, bc, ca});
+            }
+            faces = std::move(subdivided);
+        }
 
-                // Tangent follows the longitude direction. Near the poles fall back to
-                // an orthogonal tangent to avoid unstable normal-map seams.
-                glm::vec3 tangent = glm::vec3(CalculateTangent(normal));
-                if (ringRadius > 1e-5f) {
-                    tangent = glm::normalize(glm::vec3(-std::sin(theta), 0.0f, std::cos(theta)));
+        GeneratedMesh mesh;
+        mesh.vertices.reserve(positions.size() + 64);
+        mesh.indices.reserve(faces.size() * 3);
+        std::unordered_map<uint64_t, uint32_t> renderVertexCache;
+        for (auto face : faces) {
+            const glm::vec3 &a = positions[face[0]];
+            const glm::vec3 &b = positions[face[1]];
+            const glm::vec3 &c = positions[face[2]];
+            if (glm::dot(glm::cross(b - a, c - a), a + b + c) < 0.0f)
+                std::swap(face[1], face[2]);
+
+            std::array<float, 3> u{};
+            std::array<float, 3> v{};
+            std::array<bool, 3> seamShifted{};
+            for (size_t corner = 0; corner < 3; ++corner) {
+                const glm::vec3 normal = glm::normalize(positions[face[corner]]);
+                u[corner] = std::atan2(normal.z, normal.x) / (2.0f * PI) + 0.5f;
+                v[corner] = std::acos(std::clamp(normal.y, -1.0f, 1.0f)) / PI;
+            }
+            if (*std::max_element(u.begin(), u.end()) - *std::min_element(u.begin(), u.end()) > 0.5f) {
+                for (size_t corner = 0; corner < 3; ++corner) {
+                    if (u[corner] < 0.5f) {
+                        u[corner] += 1.0f;
+                        seamShifted[corner] = true;
+                    }
                 }
+            }
 
-                // Use white vertex color - material baseColor controls actual color
-                glm::vec3 color(1.0f, 1.0f, 1.0f);
-
-                float u = static_cast<float>(seg) / segments;
-                float v = static_cast<float>(ring) / rings;
-
-                vertices.push_back(Vertex::CreateFull({x, y, z}, normal, glm::vec4(tangent, 1.0f), color, {u, v}));
+            for (size_t corner = 0; corner < 3; ++corner) {
+                const uint32_t sourceIndex = face[corner];
+                const uint64_t cacheKey = (static_cast<uint64_t>(sourceIndex) << 1U) | (seamShifted[corner] ? 1U : 0U);
+                auto existing = renderVertexCache.find(cacheKey);
+                if (existing == renderVertexCache.end()) {
+                    const glm::vec3 normal = glm::normalize(positions[sourceIndex]);
+                    glm::vec3 tangent(-normal.z, 0.0f, normal.x);
+                    if (glm::dot(tangent, tangent) < 1e-8f)
+                        tangent = glm::vec3(CalculateTangent(normal));
+                    else
+                        tangent = glm::normalize(tangent);
+                    const uint32_t renderIndex = static_cast<uint32_t>(mesh.vertices.size());
+                    mesh.vertices.push_back(Vertex::CreateFull(positions[sourceIndex], normal, glm::vec4(tangent, 1.0f),
+                                                               {1.0f, 1.0f, 1.0f}, {u[corner], v[corner]}));
+                    existing = renderVertexCache.emplace(cacheKey, renderIndex).first;
+                }
+                mesh.indices.push_back(existing->second);
             }
         }
-        return vertices;
-    }
-
-    static std::vector<uint32_t> CreateSphereIndices(int segments, int rings)
-    {
-        std::vector<uint32_t> indices;
-        AppendRingIndices(indices, segments, rings);
-        return indices;
+        return mesh;
     }
 
     // ========================================================================
     // Capsule generation (cylinder + hemispheres)
     // ========================================================================
-    static std::vector<Vertex> CreateCapsuleVertices(int segments, int hemisphereRings, float radius, float height)
+    static GeneratedMesh CreateCapsuleMesh(int segments, int hemisphereRings, float radius, float height)
     {
-        std::vector<Vertex> vertices;
+        GeneratedMesh mesh;
         const float PI = 3.14159265358979323846f;
-        float cylinderHeight = height - 2.0f * radius;
-        if (cylinderHeight < 0)
-            cylinderHeight = 0;
+        const float halfCylinder = (height - 2.0f * radius) * 0.5f;
+        const glm::vec3 white(1.0f);
+        mesh.vertices.push_back(Vertex::CreateFull({0.0f, halfCylinder + radius, 0.0f}, {0.0f, 1.0f, 0.0f},
+                                                   {1.0f, 0.0f, 0.0f, 1.0f}, white, {0.5f, 0.0f}));
 
-        // Top hemisphere
-        GenerateHemisphereVertices(vertices, segments, hemisphereRings, radius, +1.0f, cylinderHeight / 2.0f, 0.0f,
-                                   0.25f);
-
-        // Cylinder body
-        for (int ring = 0; ring <= 1; ++ring) {
-            float y = (ring == 0) ? cylinderHeight / 2.0f : -cylinderHeight / 2.0f;
+        std::vector<uint32_t> ringStarts;
+        auto appendRing = [&](float y, float ringRadius, float normalY, float normalRadius) {
+            ringStarts.push_back(static_cast<uint32_t>(mesh.vertices.size()));
             for (int seg = 0; seg <= segments; ++seg) {
-                float theta = 2.0f * PI * seg / segments;
-                float x = std::cos(theta) * radius;
-                float z = std::sin(theta) * radius;
-
-                glm::vec3 normal = glm::normalize(glm::vec3(x, 0.0f, z));
-                glm::vec3 tangent(0.0f, 1.0f, 0.0f);
-
-                float u = static_cast<float>(seg) / segments;
-                float v = 0.25f + 0.5f * ring;
-
-                vertices.push_back(
-                    Vertex::CreateFull({x, y, z}, normal, glm::vec4(tangent, 1.0f), {1.0f, 1.0f, 1.0f}, {u, v}));
+                const float theta = 2.0f * PI * static_cast<float>(seg) / static_cast<float>(segments);
+                const float cosine = std::cos(theta);
+                const float sine = std::sin(theta);
+                const glm::vec3 normal(cosine * normalRadius, normalY, sine * normalRadius);
+                const glm::vec3 tangent(-sine, 0.0f, cosine);
+                const float u = static_cast<float>(seg) / static_cast<float>(segments);
+                const float v = (height * 0.5f - y) / height;
+                mesh.vertices.push_back(Vertex::CreateFull({cosine * ringRadius, y, sine * ringRadius}, normal,
+                                                           glm::vec4(tangent, 1.0f), white, {u, v}));
             }
+        };
+
+        for (int ring = 1; ring <= hemisphereRings; ++ring) {
+            const float phi = (PI * 0.5f) * static_cast<float>(ring) / static_cast<float>(hemisphereRings);
+            appendRing(halfCylinder + std::cos(phi) * radius, std::sin(phi) * radius, std::cos(phi), std::sin(phi));
+        }
+        appendRing(-halfCylinder, radius, 0.0f, 1.0f);
+        for (int ring = 1; ring < hemisphereRings; ++ring) {
+            const float phi = (PI * 0.5f) * static_cast<float>(ring) / static_cast<float>(hemisphereRings);
+            appendRing(-halfCylinder - std::sin(phi) * radius, std::cos(phi) * radius, -std::sin(phi), std::cos(phi));
         }
 
-        // Bottom hemisphere
-        GenerateHemisphereVertices(vertices, segments, hemisphereRings, radius, -1.0f, -cylinderHeight / 2.0f, 0.75f,
-                                   0.25f);
+        const uint32_t bottomPole = static_cast<uint32_t>(mesh.vertices.size());
+        mesh.vertices.push_back(Vertex::CreateFull({0.0f, -halfCylinder - radius, 0.0f}, {0.0f, -1.0f, 0.0f},
+                                                   {1.0f, 0.0f, 0.0f, 1.0f}, white, {0.5f, 1.0f}));
 
-        return vertices;
-    }
-
-    static std::vector<uint32_t> CreateCapsuleIndices(int segments, int hemisphereRings)
-    {
-        std::vector<uint32_t> indices;
-        int totalRings = hemisphereRings + 2 + hemisphereRings; // top + cylinder + bottom
-        AppendRingIndices(indices, segments, totalRings);
-        return indices;
+        const uint32_t firstRing = ringStarts.front();
+        for (int segment = 0; segment < segments; ++segment) {
+            mesh.indices.push_back(0);
+            mesh.indices.push_back(firstRing + static_cast<uint32_t>(segment + 1));
+            mesh.indices.push_back(firstRing + static_cast<uint32_t>(segment));
+        }
+        for (size_t ring = 0; ring + 1 < ringStarts.size(); ++ring) {
+            const uint32_t currentStart = ringStarts[ring];
+            const uint32_t nextStart = ringStarts[ring + 1];
+            for (int segment = 0; segment < segments; ++segment) {
+                const uint32_t current = currentStart + static_cast<uint32_t>(segment);
+                const uint32_t next = current + 1;
+                const uint32_t below = nextStart + static_cast<uint32_t>(segment);
+                const uint32_t belowNext = below + 1;
+                mesh.indices.insert(mesh.indices.end(), {current, next, below, next, belowNext, below});
+            }
+        }
+        const uint32_t lastRing = ringStarts.back();
+        for (int segment = 0; segment < segments; ++segment) {
+            mesh.indices.push_back(lastRing + static_cast<uint32_t>(segment));
+            mesh.indices.push_back(lastRing + static_cast<uint32_t>(segment + 1));
+            mesh.indices.push_back(bottomPole);
+        }
+        return mesh;
     }
 
     // ========================================================================

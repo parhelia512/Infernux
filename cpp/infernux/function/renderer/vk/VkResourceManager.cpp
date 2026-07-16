@@ -5,22 +5,21 @@
 
 #include "VkResourceManager.h"
 #include "AsyncTransferContext.h"
+#include "RhiVulkanTypes.h"
 #include "VkDeviceContext.h"
 #include <SDL3/SDL.h>
 #include <core/error/InxError.h>
 #include <function/resources/InxFileLoader/InxTextureLoader.hpp>
 #include <platform/filesystem/InxPath.h>
 
-// STB_IMAGE_IMPLEMENTATION moved here after InxVkCore removal
-#define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-#define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include <stb_image_resize2.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace infernux
 {
@@ -29,6 +28,45 @@ namespace vk
 
 namespace
 {
+constexpr VkDeviceSize MinimumStagingClass = 4ULL * 1024ULL;
+constexpr VkDeviceSize MaximumPooledStagingClass = 16ULL * 1024ULL * 1024ULL;
+constexpr VkDeviceSize StagingPoolBudget = 64ULL * 1024ULL * 1024ULL;
+
+VkDeviceSize StagingClassFor(VkDeviceSize requestedSize)
+{
+    if (requestedSize > MaximumPooledStagingClass)
+        return requestedSize;
+    VkDeviceSize sizeClass = MinimumStagingClass;
+    while (sizeClass < requestedSize)
+        sizeClass *= 2;
+    return sizeClass;
+}
+
+struct ReadbackFormatInfo
+{
+    uint32_t channels;
+    uint32_t bytesPerPixel;
+    const char *elementType;
+};
+
+ReadbackFormatInfo GetReadbackFormatInfo(VkFormat format)
+{
+    switch (format) {
+    case VK_FORMAT_R8G8B8A8_UNORM:
+    case VK_FORMAT_R8G8B8A8_SRGB:
+    case VK_FORMAT_B8G8R8A8_UNORM:
+    case VK_FORMAT_B8G8R8A8_SRGB:
+        return {4, 4, "uint8"};
+    case VK_FORMAT_R16G16B16A16_SFLOAT:
+        return {4, 8, "float16"};
+    case VK_FORMAT_R32G32B32A32_SFLOAT:
+        return {4, 16, "float32"};
+    case VK_FORMAT_R32_SFLOAT:
+        return {1, 4, "float32"};
+    default:
+        throw std::invalid_argument("Image format is not supported by GPU readback");
+    }
+}
 
 void WaitForFencePumpingEvents(VkDevice device, VkFence fence)
 {
@@ -57,44 +95,72 @@ VkResourceManager::~VkResourceManager()
     Destroy();
 }
 
-VkResourceManager::VkResourceManager(VkResourceManager &&other) noexcept
-    : m_device(other.m_device), m_physicalDevice(other.m_physicalDevice), m_vmaAllocator(other.m_vmaAllocator),
-      m_graphicsQueue(other.m_graphicsQueue), m_commandPool(other.m_commandPool),
-      m_linearSampler(other.m_linearSampler), m_nearestSampler(other.m_nearestSampler),
-      m_descriptorPools(std::move(other.m_descriptorPools))
+const std::shared_ptr<VkBufferHandle> &BufferUploadTicket::GetBuffer() const
 {
-    other.m_device = VK_NULL_HANDLE;
-    other.m_physicalDevice = VK_NULL_HANDLE;
-    other.m_vmaAllocator = VK_NULL_HANDLE;
-    other.m_graphicsQueue = VK_NULL_HANDLE;
-    other.m_commandPool = VK_NULL_HANDLE;
-    other.m_linearSampler = VK_NULL_HANDLE;
-    other.m_nearestSampler = VK_NULL_HANDLE;
+    if (!m_published || !m_destination)
+        throw std::logic_error("GPU buffer upload has not been published");
+    return m_destination;
 }
 
-VkResourceManager &VkResourceManager::operator=(VkResourceManager &&other) noexcept
+const std::shared_ptr<VkTexture> &TextureUploadTicket::GetTexture() const
 {
-    if (this != &other) {
-        Destroy();
+    if (!m_published || !m_texture)
+        throw std::logic_error("GPU texture upload has not been published");
+    return m_texture;
+}
 
-        m_device = other.m_device;
-        m_physicalDevice = other.m_physicalDevice;
-        m_vmaAllocator = other.m_vmaAllocator;
-        m_graphicsQueue = other.m_graphicsQueue;
-        m_commandPool = other.m_commandPool;
-        m_linearSampler = other.m_linearSampler;
-        m_nearestSampler = other.m_nearestSampler;
-        m_descriptorPools = std::move(other.m_descriptorPools);
+const std::vector<uint8_t> &ImageReadbackTicket::GetData() const
+{
+    const ImageReadbackStatus status = GetStatus();
+    if (status == ImageReadbackStatus::Failed)
+        throw std::runtime_error(m_error);
+    if (status != ImageReadbackStatus::Completed)
+        throw std::logic_error("GPU image readback has not completed");
+    return m_data;
+}
 
-        other.m_device = VK_NULL_HANDLE;
-        other.m_physicalDevice = VK_NULL_HANDLE;
-        other.m_vmaAllocator = VK_NULL_HANDLE;
-        other.m_graphicsQueue = VK_NULL_HANDLE;
-        other.m_commandPool = VK_NULL_HANDLE;
-        other.m_linearSampler = VK_NULL_HANDLE;
-        other.m_nearestSampler = VK_NULL_HANDLE;
-    }
+void ImageReadbackTicket::Cancel() noexcept
+{
+    ImageReadbackStatus expected = ImageReadbackStatus::Pending;
+    m_status.compare_exchange_strong(expected, ImageReadbackStatus::Cancelled, std::memory_order_acq_rel);
+}
+
+GraphicsImageReadbackRecorder::~GraphicsImageReadbackRecorder()
+{
+    Reset();
+}
+
+GraphicsImageReadbackRecorder::GraphicsImageReadbackRecorder(GraphicsImageReadbackRecorder &&other) noexcept
+    : m_manager(other.m_manager), m_ticket(std::move(other.m_ticket)), m_commandBuffer(other.m_commandBuffer)
+{
+    other.m_manager = nullptr;
+    other.m_commandBuffer = VK_NULL_HANDLE;
+}
+
+GraphicsImageReadbackRecorder &GraphicsImageReadbackRecorder::operator=(GraphicsImageReadbackRecorder &&other) noexcept
+{
+    if (this == &other)
+        return *this;
+    Reset();
+    m_manager = other.m_manager;
+    m_ticket = std::move(other.m_ticket);
+    m_commandBuffer = other.m_commandBuffer;
+    other.m_manager = nullptr;
+    other.m_commandBuffer = VK_NULL_HANDLE;
     return *this;
+}
+
+std::shared_ptr<ImageReadbackTicket> GraphicsImageReadbackRecorder::Submit(std::function<void()> releaseResources)
+{
+    if (!m_manager)
+        throw std::logic_error("Graphics image readback recorder is no longer active");
+    return m_manager->SubmitGraphicsImageReadback(*this, std::move(releaseResources));
+}
+
+void GraphicsImageReadbackRecorder::Reset() noexcept
+{
+    if (m_manager)
+        m_manager->AbandonGraphicsImageReadback(*this);
 }
 
 // ============================================================================
@@ -103,6 +169,7 @@ VkResourceManager &VkResourceManager::operator=(VkResourceManager &&other) noexc
 
 bool VkResourceManager::Initialize(const VkDeviceContext &context)
 {
+    m_ownerThread = std::this_thread::get_id();
     m_device = context.GetDevice();
     m_physicalDevice = context.GetPhysicalDevice();
     m_vmaAllocator = context.GetVmaAllocator();
@@ -129,9 +196,14 @@ void VkResourceManager::Destroy() noexcept
         return;
     }
 
+    DrainBufferUploads();
+    DrainAsyncGraphicsSubmissions();
+    DrainImageReadbacks();
+
     if (!m_skipWaitIdle) {
         vkDeviceWaitIdle(m_device);
     }
+    ClearStagingPool();
 
     // Destroy samplers
     if (m_linearSampler != VK_NULL_HANDLE) {
@@ -175,6 +247,8 @@ void VkResourceManager::Destroy() noexcept
     m_device = VK_NULL_HANDLE;
     m_physicalDevice = VK_NULL_HANDLE;
     m_graphicsQueue = VK_NULL_HANDLE;
+    m_asyncTransfer = nullptr;
+    m_asyncReadback = nullptr;
 }
 
 // ============================================================================
@@ -231,6 +305,556 @@ std::unique_ptr<VkBufferHandle> VkResourceManager::CreateIndexBuffer(const void 
     return indexBuffer;
 }
 
+std::shared_ptr<BufferUploadTicket> VkResourceManager::BeginBufferUpload(const rhi::BufferUploadRequest &request)
+{
+    const void *data = request.data;
+    const VkDeviceSize size = static_cast<VkDeviceSize>(request.byteSize);
+    const VkBufferUsageFlags finalUsage = rhi::ToVkBufferUsage(request.usage);
+    if (m_device == VK_NULL_HANDLE || m_vmaAllocator == VK_NULL_HANDLE)
+        throw std::logic_error("GPU buffer upload requires an initialized resource manager");
+    if (!data || size == 0)
+        throw std::invalid_argument("GPU buffer upload requires non-empty source data");
+    if (finalUsage == 0)
+        throw std::invalid_argument("GPU buffer upload has no supported destination usage");
+
+    auto ticket = std::make_shared<BufferUploadTicket>();
+    ticket->m_manager = this;
+    ticket->m_size = size;
+    ticket->m_staging = AcquireStagingBuffer(size);
+    if (!ticket->m_staging)
+        throw std::runtime_error("failed to allocate GPU upload staging buffer");
+    ticket->m_staging->CopyFrom(data, size, 0);
+
+    std::vector<uint32_t> queueFamilies;
+    const bool canSubmitAsync = m_asyncTransfer && m_asyncTransfer->IsAsyncCapable();
+    if (canSubmitAsync)
+        queueFamilies = {m_graphicsQueueFamily, m_asyncTransfer->GetQueueFamily()};
+    ticket->m_destination =
+        std::shared_ptr<VkBufferHandle>(CreateBufferInternal(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | finalUsage,
+                                                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, queueFamilies)
+                                            .release());
+    if (!ticket->m_destination)
+        throw std::runtime_error("failed to allocate GPU upload destination buffer");
+
+    if (!canSubmitAsync) {
+        CopyBuffer(ticket->m_staging->GetBuffer(), ticket->m_destination->GetBuffer(), size);
+        RecycleStagingBuffer(std::move(ticket->m_staging));
+        ticket->m_complete = true;
+        ticket->m_published = true;
+        return ticket;
+    }
+
+    VkCommandBuffer commandBuffer = m_asyncTransfer->Begin();
+    if (commandBuffer == VK_NULL_HANDLE)
+        throw std::runtime_error("failed to begin asynchronous GPU buffer upload");
+    VkBufferCopy copy{};
+    copy.size = size;
+    vkCmdCopyBuffer(commandBuffer, ticket->m_staging->GetBuffer(), ticket->m_destination->GetBuffer(), 1, &copy);
+    ticket->m_upload = m_asyncTransfer->EndAsync(commandBuffer);
+    if (!ticket->m_upload.IsValid())
+        throw std::runtime_error("failed to submit asynchronous GPU buffer upload");
+    ticket->m_async = true;
+    m_pendingBufferUploads.push_back(ticket);
+    return ticket;
+}
+
+bool VkResourceManager::TryPublishBufferUpload(const std::shared_ptr<BufferUploadTicket> &ticket)
+{
+    if (!ticket || ticket->m_manager != this)
+        throw std::invalid_argument("GPU buffer upload ticket belongs to another resource manager");
+    if (ticket->m_published)
+        return true;
+    if (ticket->m_complete) {
+        ticket->m_published = true;
+        return true;
+    }
+    if (!ticket->m_upload.IsValid() || !m_asyncTransfer)
+        throw std::logic_error("GPU buffer upload ticket has no live transfer submission");
+    if (ticket->m_upload.timelineValue != 0 && m_asyncTransfer->GetTimelineSemaphore() != VK_NULL_HANDLE) {
+        m_requiredUploadTimelineValue = std::max(m_requiredUploadTimelineValue, ticket->m_upload.timelineValue);
+        ++m_timelineUploadPublicationCount;
+        ticket->m_published = true;
+        return true;
+    }
+    if (!m_asyncTransfer->IsComplete(ticket->m_upload))
+        return false;
+
+    ticket->m_upload = {};
+    RecycleStagingBuffer(std::move(ticket->m_staging));
+    ticket->m_complete = true;
+    ticket->m_published = true;
+    m_pendingBufferUploads.erase(std::remove(m_pendingBufferUploads.begin(), m_pendingBufferUploads.end(), ticket),
+                                 m_pendingBufferUploads.end());
+    return true;
+}
+
+void VkResourceManager::DrainBufferUploads() noexcept
+{
+    if (m_asyncTransfer) {
+        for (const auto &ticket : m_pendingBufferUploads) {
+            if (!ticket || ticket->m_complete || !ticket->m_upload.IsValid())
+                continue;
+            try {
+                m_asyncTransfer->Wait(ticket->m_upload);
+                ticket->m_upload = {};
+                RecycleStagingBuffer(std::move(ticket->m_staging));
+                ticket->m_complete = true;
+            } catch (...) {
+                INXLOG_ERROR("Failed while draining a pending GPU buffer upload");
+            }
+        }
+    }
+    m_pendingBufferUploads.clear();
+
+    if (m_asyncTransfer) {
+        for (const auto &ticket : m_pendingTextureUploads) {
+            if (!ticket || ticket->m_complete || !ticket->m_upload.IsValid())
+                continue;
+            try {
+                m_asyncTransfer->Wait(ticket->m_upload);
+                ticket->m_upload = {};
+                RecycleStagingBuffer(std::move(ticket->m_staging));
+                ticket->m_complete = true;
+            } catch (...) {
+                INXLOG_ERROR("Failed while draining a pending GPU texture upload");
+            }
+        }
+    }
+    m_pendingTextureUploads.clear();
+}
+
+std::shared_ptr<TextureUploadTicket> VkResourceManager::BeginTextureUpload(const TextureCpuData &cpuData,
+                                                                           VkFormat format, VkFilter filter,
+                                                                           VkSamplerAddressMode addressMode, int aniso)
+{
+    if (m_device == VK_NULL_HANDLE || m_vmaAllocator == VK_NULL_HANDLE)
+        throw std::logic_error("GPU texture upload requires an initialized resource manager");
+    if (!cpuData.IsValid() || cpuData.mipLevels.size() > std::numeric_limits<uint32_t>::max())
+        throw std::invalid_argument("GPU texture upload requires a valid CPU mip payload");
+    const bool rgba8 = cpuData.storage == TexturePixelStorage::Rgba8;
+    const bool rgba32Float = cpuData.storage == TexturePixelStorage::Rgba32Float;
+    if ((rgba8 && format != VK_FORMAT_R8G8B8A8_SRGB && format != VK_FORMAT_R8G8B8A8_UNORM) ||
+        (rgba32Float && format != VK_FORMAT_R32G32B32A32_SFLOAT) || (!rgba8 && !rgba32Float))
+        throw std::invalid_argument("GPU texture format does not match the CPU pixel storage");
+
+    const uint64_t bytesPerPixel = rgba8 ? 4ULL : 16ULL;
+    for (const auto &mip : cpuData.mipLevels) {
+        const uint64_t expectedSize = static_cast<uint64_t>(mip.width) * mip.height * bytesPerPixel;
+        if (mip.width == 0 || mip.height == 0 || mip.byteSize != expectedSize ||
+            mip.byteOffset > cpuData.bytes.size() || mip.byteSize > cpuData.bytes.size() - mip.byteOffset)
+            throw std::invalid_argument("GPU texture upload contains an invalid mip byte range");
+    }
+
+    auto ticket = std::make_shared<TextureUploadTicket>();
+    ticket->m_manager = this;
+    ticket->m_format = format;
+    ticket->m_filter = filter;
+    ticket->m_addressMode = addressMode;
+    ticket->m_aniso = aniso;
+    ticket->m_mipLevels = static_cast<uint32_t>(cpuData.mipLevels.size());
+    ticket->m_residentBytes = cpuData.bytes.size();
+    ticket->m_staging = AcquireStagingBuffer(cpuData.bytes.size());
+    if (!ticket->m_staging)
+        throw std::runtime_error("failed to allocate GPU texture staging buffer");
+    ticket->m_staging->CopyFrom(cpuData.bytes.data(), cpuData.bytes.size(), 0);
+    ticket->m_texture = std::make_shared<VkTexture>();
+
+    const auto &baseMip = cpuData.mipLevels.front();
+    const bool canSubmitAsync = m_asyncTransfer && m_asyncTransfer->IsAsyncCapable();
+    const VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    bool created = false;
+    if (canSubmitAsync) {
+        created = ticket->m_texture->m_image.CreateConcurrent(
+            m_vmaAllocator, m_device, baseMip.width, baseMip.height, format, VK_IMAGE_TILING_OPTIMAL, usage,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, {m_graphicsQueueFamily, m_asyncTransfer->GetQueueFamily()},
+            VK_SAMPLE_COUNT_1_BIT, ticket->m_mipLevels);
+    } else {
+        created = ticket->m_texture->m_image.Create(m_vmaAllocator, m_device, baseMip.width, baseMip.height, format,
+                                                    VK_IMAGE_TILING_OPTIMAL, usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                                    VK_SAMPLE_COUNT_1_BIT, ticket->m_mipLevels);
+    }
+    if (!created)
+        throw std::runtime_error("failed to allocate GPU texture image");
+
+    VkCommandBuffer commandBuffer = canSubmitAsync ? m_asyncTransfer->Begin() : BeginSingleTimeCommands();
+    if (commandBuffer == VK_NULL_HANDLE)
+        throw std::runtime_error("failed to begin GPU texture upload");
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = ticket->m_texture->m_image.GetImage();
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = ticket->m_mipLevels;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
+                         nullptr, 0, nullptr, 1, &barrier);
+
+    std::vector<VkBufferImageCopy> regions;
+    regions.reserve(cpuData.mipLevels.size());
+    for (uint32_t level = 0; level < ticket->m_mipLevels; ++level) {
+        const auto &mip = cpuData.mipLevels[level];
+        VkBufferImageCopy region{};
+        region.bufferOffset = mip.byteOffset;
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = level;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = {mip.width, mip.height, 1};
+        regions.push_back(region);
+    }
+    vkCmdCopyBufferToImage(commandBuffer, ticket->m_staging->GetBuffer(), ticket->m_texture->m_image.GetImage(),
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, static_cast<uint32_t>(regions.size()), regions.data());
+
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = canSubmitAsync ? 0 : VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         canSubmitAsync ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0,
+                         nullptr, 0, nullptr, 1, &barrier);
+
+    if (canSubmitAsync) {
+        ticket->m_upload = m_asyncTransfer->EndAsync(commandBuffer);
+        if (!ticket->m_upload.IsValid())
+            throw std::runtime_error("failed to submit asynchronous GPU texture upload");
+        ticket->m_async = true;
+        m_pendingTextureUploads.push_back(ticket);
+    } else {
+        EndSingleTimeCommands(commandBuffer);
+        RecycleStagingBuffer(std::move(ticket->m_staging));
+        FinalizeTextureUpload(*ticket);
+        ticket->m_complete = true;
+        ticket->m_published = true;
+    }
+    return ticket;
+}
+
+bool VkResourceManager::TryPublishTextureUpload(const std::shared_ptr<TextureUploadTicket> &ticket)
+{
+    if (!ticket || ticket->m_manager != this)
+        throw std::invalid_argument("GPU texture upload ticket belongs to another resource manager");
+    if (ticket->m_published)
+        return true;
+    if (ticket->m_complete) {
+        FinalizeTextureUpload(*ticket);
+        ticket->m_published = true;
+        return true;
+    }
+    if (!ticket->m_upload.IsValid() || !m_asyncTransfer)
+        throw std::logic_error("GPU texture upload ticket has no live transfer submission");
+    if (ticket->m_upload.timelineValue != 0 && m_asyncTransfer->GetTimelineSemaphore() != VK_NULL_HANDLE) {
+        FinalizeTextureUpload(*ticket);
+        m_requiredUploadTimelineValue = std::max(m_requiredUploadTimelineValue, ticket->m_upload.timelineValue);
+        ++m_timelineUploadPublicationCount;
+        ticket->m_published = true;
+        return true;
+    }
+    if (!m_asyncTransfer->IsComplete(ticket->m_upload))
+        return false;
+    ticket->m_upload = {};
+    RecycleStagingBuffer(std::move(ticket->m_staging));
+    m_pendingTextureUploads.erase(std::remove(m_pendingTextureUploads.begin(), m_pendingTextureUploads.end(), ticket),
+                                  m_pendingTextureUploads.end());
+    try {
+        FinalizeTextureUpload(*ticket);
+        ticket->m_complete = true;
+        ticket->m_published = true;
+    } catch (...) {
+        ticket->m_texture.reset();
+        throw;
+    }
+    return true;
+}
+
+void VkResourceManager::PollGpuUploads()
+{
+    if (!m_asyncTransfer)
+        return;
+
+    size_t bufferWriteIndex = 0;
+    for (size_t index = 0; index < m_pendingBufferUploads.size(); ++index) {
+        auto &ticket = m_pendingBufferUploads[index];
+        if (ticket && m_asyncTransfer->IsComplete(ticket->m_upload)) {
+            ticket->m_upload = {};
+            RecycleStagingBuffer(std::move(ticket->m_staging));
+            ticket->m_complete = true;
+            continue;
+        }
+        if (bufferWriteIndex != index)
+            m_pendingBufferUploads[bufferWriteIndex] = std::move(ticket);
+        ++bufferWriteIndex;
+    }
+    m_pendingBufferUploads.resize(bufferWriteIndex);
+
+    size_t textureWriteIndex = 0;
+    for (size_t index = 0; index < m_pendingTextureUploads.size(); ++index) {
+        auto &ticket = m_pendingTextureUploads[index];
+        if (ticket && m_asyncTransfer->IsComplete(ticket->m_upload)) {
+            ticket->m_upload = {};
+            RecycleStagingBuffer(std::move(ticket->m_staging));
+            ticket->m_complete = true;
+            continue;
+        }
+        if (textureWriteIndex != index)
+            m_pendingTextureUploads[textureWriteIndex] = std::move(ticket);
+        ++textureWriteIndex;
+    }
+    m_pendingTextureUploads.resize(textureWriteIndex);
+}
+
+VkSemaphore VkResourceManager::GetUploadTimelineSemaphore() const noexcept
+{
+    return m_asyncTransfer ? m_asyncTransfer->GetTimelineSemaphore() : VK_NULL_HANDLE;
+}
+
+void VkResourceManager::FinalizeTextureUpload(TextureUploadTicket &ticket)
+{
+    if (!ticket.m_texture ||
+        !ticket.m_texture->m_image.CreateView(ticket.m_format, VK_IMAGE_ASPECT_COLOR_BIT, ticket.m_mipLevels) ||
+        !ticket.m_texture->m_sampler.Create(m_device, m_physicalDevice, ticket.m_filter, ticket.m_addressMode,
+                                            ticket.m_mipLevels, ticket.m_aniso))
+        throw std::runtime_error("failed to finalize GPU texture view or sampler");
+    ticket.m_texture->m_residentBytes = ticket.m_residentBytes;
+}
+
+std::shared_ptr<ImageReadbackTicket> VkResourceManager::BeginImageReadback(VkImage image, VkImageLayout layout,
+                                                                           VkImageAspectFlags aspect,
+                                                                           VkPipelineStageFlags sourceStage,
+                                                                           VkAccessFlags sourceAccess, uint32_t width,
+                                                                           uint32_t height, VkFormat format)
+{
+    AssertReadbackThread();
+    if (image == VK_NULL_HANDLE || width == 0 || height == 0)
+        throw std::invalid_argument("GPU image readback requires a live image and non-zero dimensions");
+    if (!m_asyncReadback)
+        throw std::logic_error("GPU image readback context is unavailable");
+
+    const ReadbackFormatInfo formatInfo = GetReadbackFormatInfo(format);
+    const uint64_t pixelCount = static_cast<uint64_t>(width) * height;
+    if (pixelCount > std::numeric_limits<size_t>::max() / formatInfo.bytesPerPixel)
+        throw std::overflow_error("GPU image readback byte size overflow");
+
+    auto ticket = std::make_shared<ImageReadbackTicket>();
+    ticket->m_width = width;
+    ticket->m_height = height;
+    ticket->m_channelCount = formatInfo.channels;
+    ticket->m_elementType = formatInfo.elementType;
+    ticket->m_byteSize = static_cast<size_t>(pixelCount * formatInfo.bytesPerPixel);
+    ticket->m_staging = AcquireStagingBuffer(ticket->m_byteSize);
+    if (!ticket->m_staging)
+        throw std::runtime_error("Failed to allocate GPU image readback staging buffer");
+
+    VkCommandBuffer commandBuffer = m_asyncReadback->Begin();
+    if (commandBuffer == VK_NULL_HANDLE)
+        throw std::runtime_error("Failed to begin GPU image readback command buffer");
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = layout;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = aspect;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = sourceAccess;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(commandBuffer, sourceStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                         &barrier);
+
+    VkBufferImageCopy region{};
+    region.imageSubresource.aspectMask = aspect;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = {width, height, 1};
+    vkCmdCopyImageToBuffer(commandBuffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, ticket->m_staging->GetBuffer(),
+                           1, &region);
+
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    barrier.newLayout = layout;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    barrier.dstAccessMask = sourceAccess;
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, sourceStage, 0, 0, nullptr, 0, nullptr, 1,
+                         &barrier);
+
+    ticket->m_submission = m_asyncReadback->EndAsync(commandBuffer);
+    if (!ticket->m_submission.IsValid())
+        throw std::runtime_error("Failed to submit asynchronous GPU image readback");
+    m_pendingImageReadbacks.push_back(ticket);
+    return ticket;
+}
+
+GraphicsImageReadbackRecorder VkResourceManager::BeginGraphicsImageReadback(uint32_t width, uint32_t height,
+                                                                            VkFormat format)
+{
+    AssertReadbackThread();
+    if (width == 0 || height == 0)
+        throw std::invalid_argument("Graphics image readback requires non-zero dimensions");
+
+    const ReadbackFormatInfo formatInfo = GetReadbackFormatInfo(format);
+    const uint64_t pixelCount = static_cast<uint64_t>(width) * height;
+    if (pixelCount > std::numeric_limits<size_t>::max() / formatInfo.bytesPerPixel)
+        throw std::overflow_error("Graphics image readback byte size overflow");
+
+    auto ticket = std::make_shared<ImageReadbackTicket>();
+    ticket->m_width = width;
+    ticket->m_height = height;
+    ticket->m_channelCount = formatInfo.channels;
+    ticket->m_elementType = formatInfo.elementType;
+    ticket->m_byteSize = static_cast<size_t>(pixelCount * formatInfo.bytesPerPixel);
+    ticket->m_staging = AcquireStagingBuffer(ticket->m_byteSize);
+    if (!ticket->m_staging)
+        throw std::runtime_error("Failed to allocate graphics image readback staging buffer");
+
+    VkCommandBuffer commandBuffer = BeginSingleTimeCommands();
+    if (commandBuffer == VK_NULL_HANDLE) {
+        RecycleStagingBuffer(std::move(ticket->m_staging));
+        throw std::runtime_error("Failed to begin graphics image readback command buffer");
+    }
+
+    GraphicsImageReadbackRecorder recorder;
+    recorder.m_manager = this;
+    recorder.m_ticket = std::move(ticket);
+    recorder.m_commandBuffer = commandBuffer;
+    return recorder;
+}
+
+std::shared_ptr<ImageReadbackTicket>
+VkResourceManager::SubmitGraphicsImageReadback(GraphicsImageReadbackRecorder &recorder,
+                                               std::function<void()> releaseResources)
+{
+    AssertReadbackThread();
+    if (recorder.m_manager != this || !recorder.m_ticket || recorder.m_commandBuffer == VK_NULL_HANDLE)
+        throw std::invalid_argument("Graphics image readback recorder belongs to another resource manager");
+
+    auto ticket = std::move(recorder.m_ticket);
+    const VkCommandBuffer commandBuffer = recorder.m_commandBuffer;
+    recorder.m_manager = nullptr;
+    recorder.m_commandBuffer = VK_NULL_HANDLE;
+
+    try {
+        ticket->m_graphicsSubmission = EndSingleTimeCommandsAsync(commandBuffer, std::move(releaseResources));
+    } catch (...) {
+        RecycleStagingBuffer(std::move(ticket->m_staging));
+        throw;
+    }
+    m_pendingImageReadbacks.push_back(ticket);
+    return ticket;
+}
+
+void VkResourceManager::AbandonGraphicsImageReadback(GraphicsImageReadbackRecorder &recorder) noexcept
+{
+    auto ticket = std::move(recorder.m_ticket);
+    const VkCommandBuffer commandBuffer = recorder.m_commandBuffer;
+    recorder.m_manager = nullptr;
+    recorder.m_commandBuffer = VK_NULL_HANDLE;
+
+    if (commandBuffer != VK_NULL_HANDLE) {
+        vkResetCommandBuffer(commandBuffer, 0);
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        m_freeSingleTimeCmdBuffers.push_back(commandBuffer);
+    }
+    if (ticket)
+        RecycleStagingBuffer(std::move(ticket->m_staging));
+}
+
+void VkResourceManager::FinalizeImageReadback(const std::shared_ptr<ImageReadbackTicket> &ticket) noexcept
+{
+    if (!ticket)
+        return;
+    if (ticket->GetStatus() == ImageReadbackStatus::Pending) {
+        void *mapped = ticket->m_staging ? ticket->m_staging->Map() : nullptr;
+        if (mapped) {
+            ticket->m_data.resize(ticket->m_byteSize);
+            std::memcpy(ticket->m_data.data(), mapped, ticket->m_byteSize);
+            ticket->m_staging->Unmap();
+            ticket->m_status.store(ImageReadbackStatus::Completed, std::memory_order_release);
+        } else {
+            ticket->m_error = "Failed to map GPU image readback staging buffer";
+            ticket->m_status.store(ImageReadbackStatus::Failed, std::memory_order_release);
+        }
+    }
+    RecycleStagingBuffer(std::move(ticket->m_staging));
+    ticket->m_submission = {};
+    ticket->m_graphicsSubmission.reset();
+}
+
+void VkResourceManager::PollImageReadbacks()
+{
+    AssertReadbackThread();
+    size_t writeIndex = 0;
+    for (size_t index = 0; index < m_pendingImageReadbacks.size(); ++index) {
+        auto &ticket = m_pendingImageReadbacks[index];
+        const bool graphicsComplete =
+            ticket && ticket->m_graphicsSubmission && ticket->m_graphicsSubmission->IsComplete();
+        const bool transferComplete = ticket && !ticket->m_graphicsSubmission && m_asyncReadback &&
+                                      m_asyncReadback->IsComplete(ticket->m_submission);
+        if (graphicsComplete || transferComplete) {
+            FinalizeImageReadback(ticket);
+            continue;
+        }
+        if (writeIndex != index)
+            m_pendingImageReadbacks[writeIndex] = std::move(ticket);
+        ++writeIndex;
+    }
+    m_pendingImageReadbacks.resize(writeIndex);
+}
+
+void VkResourceManager::DrainImageReadbacks() noexcept
+{
+    if (std::any_of(m_pendingImageReadbacks.begin(), m_pendingImageReadbacks.end(), [](const auto &ticket) {
+            return ticket && ticket->m_graphicsSubmission && !ticket->m_graphicsSubmission->IsComplete();
+        }))
+        DrainAsyncGraphicsSubmissions();
+
+    for (const auto &ticket : m_pendingImageReadbacks) {
+        if (!ticket)
+            continue;
+        if (ticket->m_graphicsSubmission && ticket->m_graphicsSubmission->IsComplete()) {
+            FinalizeImageReadback(ticket);
+            continue;
+        }
+        if (m_asyncReadback && ticket->m_submission.IsValid()) {
+            try {
+                m_asyncReadback->Wait(ticket->m_submission);
+                FinalizeImageReadback(ticket);
+            } catch (...) {
+                ticket->m_error = "Failed while draining a pending GPU image readback";
+                ticket->m_status.store(ImageReadbackStatus::Failed, std::memory_order_release);
+            }
+        }
+    }
+    m_pendingImageReadbacks.clear();
+}
+
+uint64_t VkResourceManager::GetPendingImageReadbackBytes() const noexcept
+{
+    uint64_t bytes = 0;
+    for (const auto &ticket : m_pendingImageReadbacks) {
+        if (ticket)
+            bytes += ticket->m_byteSize;
+    }
+    return bytes;
+}
+
+void VkResourceManager::AssertReadbackThread() const
+{
+    if (std::this_thread::get_id() != m_ownerThread)
+        throw std::logic_error("GPU image readback submission and polling require the renderer owner thread");
+}
+
 std::unique_ptr<VkBufferHandle> VkResourceManager::CreateUniformBuffer(VkDeviceSize size)
 {
     // TRANSFER_DST_BIT is required for vkCmdUpdateBuffer (multi-camera UBO updates)
@@ -244,9 +868,9 @@ std::unique_ptr<VkBufferHandle> VkResourceManager::CreateStorageBuffer(VkDeviceS
         deviceLocal ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
                     : (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-    VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     if (deviceLocal) {
-        usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     }
 
     return CreateBufferInternal(size, usage, properties);
@@ -254,8 +878,56 @@ std::unique_ptr<VkBufferHandle> VkResourceManager::CreateStorageBuffer(VkDeviceS
 
 std::unique_ptr<VkBufferHandle> VkResourceManager::CreateStagingBuffer(VkDeviceSize size)
 {
-    return CreateBufferInternal(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    return CreateBufferInternal(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+}
+
+std::shared_ptr<VkBufferHandle> VkResourceManager::AcquireStagingBuffer(VkDeviceSize size)
+{
+    if (size == 0)
+        throw std::invalid_argument("staging buffer acquisition requires a non-zero size");
+    const VkDeviceSize sizeClass = StagingClassFor(size);
+    if (sizeClass <= MaximumPooledStagingClass) {
+        auto found = m_stagingPool.find(sizeClass);
+        if (found != m_stagingPool.end() && !found->second.empty()) {
+            auto buffer = std::move(found->second.back());
+            found->second.pop_back();
+            if (found->second.empty())
+                m_stagingPool.erase(found);
+            m_stagingPoolBytes -= sizeClass;
+            --m_stagingPoolBufferCount;
+            ++m_stagingReuseCount;
+            return buffer;
+        }
+    }
+
+    auto buffer = CreateStagingBuffer(sizeClass);
+    if (!buffer)
+        return {};
+    ++m_stagingAllocationCount;
+    return std::shared_ptr<VkBufferHandle>(std::move(buffer));
+}
+
+void VkResourceManager::RecycleStagingBuffer(std::shared_ptr<VkBufferHandle> buffer) noexcept
+{
+    if (!buffer || !buffer->IsValid())
+        return;
+    const VkDeviceSize sizeClass = buffer->GetSize();
+    if (sizeClass > MaximumPooledStagingClass || sizeClass > StagingPoolBudget - m_stagingPoolBytes ||
+        buffer.use_count() != 1) {
+        ++m_stagingDiscardCount;
+        return;
+    }
+    m_stagingPool[sizeClass].push_back(std::move(buffer));
+    m_stagingPoolBytes += sizeClass;
+    ++m_stagingPoolBufferCount;
+}
+
+void VkResourceManager::ClearStagingPool() noexcept
+{
+    m_stagingPool.clear();
+    m_stagingPoolBytes = 0;
+    m_stagingPoolBufferCount = 0;
 }
 
 void VkResourceManager::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
@@ -270,10 +942,11 @@ void VkResourceManager::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDev
 }
 
 std::unique_ptr<VkBufferHandle> VkResourceManager::CreateBufferInternal(VkDeviceSize size, VkBufferUsageFlags usage,
-                                                                        VkMemoryPropertyFlags properties)
+                                                                        VkMemoryPropertyFlags properties,
+                                                                        const std::vector<uint32_t> &queueFamilies)
 {
     auto buffer = std::make_unique<VkBufferHandle>();
-    if (!buffer->Create(m_vmaAllocator, m_device, size, usage, properties)) {
+    if (!buffer->Create(m_vmaAllocator, m_device, size, usage, properties, queueFamilies)) {
         return nullptr;
     }
     return buffer;
@@ -340,9 +1013,10 @@ std::unique_ptr<VkTexture> VkResourceManager::LoadTexture(const std::string &fil
 
         VkFormat hdrFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
         auto texture = std::make_unique<VkTexture>();
-        if (!texture->CreateFromPixels(m_vmaAllocator, m_device, m_physicalDevice, m_commandPool, m_graphicsQueue,
-                                       reinterpret_cast<const unsigned char *>(floatPixels), texWidth, texHeight,
-                                       hdrFormat, generateMipmaps, filter, addressMode, aniso)) {
+        if (!texture->CreateFromPixelsImmediate(m_vmaAllocator, m_device, m_physicalDevice, m_commandPool,
+                                                m_graphicsQueue, reinterpret_cast<const unsigned char *>(floatPixels),
+                                                texWidth, texHeight, hdrFormat, generateMipmaps, filter, addressMode,
+                                                aniso)) {
             stbi_image_free(floatPixels);
             return nullptr;
         }
@@ -391,8 +1065,8 @@ std::unique_ptr<VkTexture> VkResourceManager::LoadTexture(const std::string &fil
     }
 
     const unsigned char *srcPixels = resizedBuf.empty() ? basePixels : resizedBuf.data();
-    auto texture =
-        CreateTextureFromPixels(srcPixels, finalW, finalH, format, generateMipmaps, filter, addressMode, aniso);
+    auto texture = CreateTextureFromPixelsImmediate(srcPixels, finalW, finalH, format, generateMipmaps, filter,
+                                                    addressMode, aniso);
 
     if (pixels) {
         stbi_image_free(pixels);
@@ -401,32 +1075,16 @@ std::unique_ptr<VkTexture> VkResourceManager::LoadTexture(const std::string &fil
     return texture;
 }
 
-std::unique_ptr<VkTexture> VkResourceManager::CreateTextureFromPixels(const unsigned char *pixels, uint32_t width,
-                                                                      uint32_t height, VkFormat format,
-                                                                      bool generateMipmaps, VkFilter filter,
-                                                                      VkSamplerAddressMode addressMode, int aniso)
+std::unique_ptr<VkTexture>
+VkResourceManager::CreateTextureFromPixelsImmediate(const unsigned char *pixels, uint32_t width, uint32_t height,
+                                                    VkFormat format, bool generateMipmaps, VkFilter filter,
+                                                    VkSamplerAddressMode addressMode, int aniso)
 {
     auto texture = std::make_unique<VkTexture>();
 
-    // Phase 5d-1: prefer the async transfer queue when the device exposes
-    // a dedicated DMA family AND we don't need graphics-queue features
-    // (e.g. mipmap blits). CreateFromPixelsAsync returns false when it
-    // can't satisfy the request, in which case we transparently fall
-    // through to the legacy synchronous graphics-queue path so callers
-    // never observe the difference beyond perf.
-    if (m_asyncTransfer != nullptr && m_asyncTransfer->IsAsyncCapable()) {
-        if (texture->CreateFromPixelsAsync(m_vmaAllocator, m_device, m_physicalDevice, *m_asyncTransfer,
-                                           m_graphicsQueueFamily, pixels, width, height, format, generateMipmaps,
-                                           filter, addressMode, aniso)) {
-            return texture;
-        }
-        // Reset the in-progress texture so the synchronous fallback below
-        // gets a clean handle to write into.
-        texture = std::make_unique<VkTexture>();
-    }
-
-    if (!texture->CreateFromPixels(m_vmaAllocator, m_device, m_physicalDevice, m_commandPool, m_graphicsQueue, pixels,
-                                   width, height, format, generateMipmaps, filter, addressMode, aniso)) {
+    if (!texture->CreateFromPixelsImmediate(m_vmaAllocator, m_device, m_physicalDevice, m_commandPool, m_graphicsQueue,
+                                            pixels, width, height, format, generateMipmaps, filter, addressMode,
+                                            aniso)) {
         return nullptr;
     }
 
@@ -667,6 +1325,20 @@ void VkResourceManager::EndSingleTimeCommands(VkCommandBuffer cmdBuffer)
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &cmdBuffer;
 
+    VkTimelineSemaphoreSubmitInfo timelineSubmit{};
+    VkSemaphore uploadTimeline = GetUploadTimelineSemaphore();
+    VkPipelineStageFlags uploadWaitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    uint64_t uploadValue = GetRequiredUploadTimelineValue();
+    if (uploadTimeline != VK_NULL_HANDLE && uploadValue != 0) {
+        timelineSubmit.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+        timelineSubmit.waitSemaphoreValueCount = 1;
+        timelineSubmit.pWaitSemaphoreValues = &uploadValue;
+        submitInfo.pNext = &timelineSubmit;
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &uploadTimeline;
+        submitInfo.pWaitDstStageMask = &uploadWaitStage;
+    }
+
     vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, submitFence);
     WaitForFencePumpingEvents(m_device, submitFence);
 
@@ -677,6 +1349,153 @@ void VkResourceManager::EndSingleTimeCommands(VkCommandBuffer cmdBuffer)
         std::lock_guard<std::mutex> guard(m_singleTimeMutex);
         m_freeSingleTimeFences.push_back(submitFence);
         m_freeSingleTimeCmdBuffers.push_back(cmdBuffer);
+    }
+}
+
+std::shared_ptr<GraphicsSubmissionTicket>
+VkResourceManager::EndSingleTimeCommandsAsync(VkCommandBuffer cmdBuffer, std::function<void()> releaseResources)
+{
+    AssertReadbackThread();
+    if (cmdBuffer == VK_NULL_HANDLE)
+        throw std::invalid_argument("Asynchronous graphics submission requires a live command buffer");
+
+    auto recycleUnsubmitted = [&](VkFence fence = VK_NULL_HANDLE) {
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        if (fence != VK_NULL_HANDLE)
+            m_freeSingleTimeFences.push_back(fence);
+        m_freeSingleTimeCmdBuffers.push_back(cmdBuffer);
+    };
+    if (vkEndCommandBuffer(cmdBuffer) != VK_SUCCESS) {
+        recycleUnsubmitted();
+        throw std::runtime_error("Failed to end asynchronous graphics command buffer");
+    }
+
+    VkFence submitFence = VK_NULL_HANDLE;
+    {
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        if (!m_freeSingleTimeFences.empty()) {
+            submitFence = m_freeSingleTimeFences.back();
+            m_freeSingleTimeFences.pop_back();
+        }
+    }
+    if (submitFence == VK_NULL_HANDLE) {
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        if (vkCreateFence(m_device, &fenceInfo, nullptr, &submitFence) != VK_SUCCESS) {
+            recycleUnsubmitted();
+            throw std::runtime_error("Failed to create asynchronous graphics submission fence");
+        }
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        m_allSingleTimeFences.push_back(submitFence);
+    } else if (vkResetFences(m_device, 1, &submitFence) != VK_SUCCESS) {
+        recycleUnsubmitted(submitFence);
+        throw std::runtime_error("Failed to reset asynchronous graphics submission fence");
+    }
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmdBuffer;
+
+    VkTimelineSemaphoreSubmitInfo timelineSubmit{};
+    const VkSemaphore uploadTimeline = GetUploadTimelineSemaphore();
+    const VkPipelineStageFlags uploadWaitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    const uint64_t uploadValue = GetRequiredUploadTimelineValue();
+    if (uploadTimeline != VK_NULL_HANDLE && uploadValue != 0) {
+        timelineSubmit.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+        timelineSubmit.waitSemaphoreValueCount = 1;
+        timelineSubmit.pWaitSemaphoreValues = &uploadValue;
+        submitInfo.pNext = &timelineSubmit;
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &uploadTimeline;
+        submitInfo.pWaitDstStageMask = &uploadWaitStage;
+    }
+
+    if (vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, submitFence) != VK_SUCCESS) {
+        recycleUnsubmitted(submitFence);
+        throw std::runtime_error("Failed to submit asynchronous graphics command buffer");
+    }
+
+    auto ticket = std::make_shared<GraphicsSubmissionTicket>();
+    ticket->m_commandBuffer = cmdBuffer;
+    ticket->m_fence = submitFence;
+    ticket->m_releaseResources = std::move(releaseResources);
+    {
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        m_pendingAsyncGraphicsSubmissions.push_back(ticket);
+    }
+    ++m_asyncGraphicsSubmissionCount;
+    return ticket;
+}
+
+void VkResourceManager::PollAsyncGraphicsSubmissions()
+{
+    AssertReadbackThread();
+    std::vector<std::shared_ptr<GraphicsSubmissionTicket>> completed;
+    {
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        size_t writeIndex = 0;
+        for (size_t index = 0; index < m_pendingAsyncGraphicsSubmissions.size(); ++index) {
+            auto &submission = m_pendingAsyncGraphicsSubmissions[index];
+            const VkResult status = vkGetFenceStatus(m_device, submission->m_fence);
+            if (status == VK_SUCCESS) {
+                m_freeSingleTimeFences.push_back(submission->m_fence);
+                m_freeSingleTimeCmdBuffers.push_back(submission->m_commandBuffer);
+                submission->m_fence = VK_NULL_HANDLE;
+                submission->m_commandBuffer = VK_NULL_HANDLE;
+                completed.push_back(std::move(submission));
+                continue;
+            }
+            if (status != VK_NOT_READY)
+                throw std::runtime_error("Failed to poll asynchronous graphics submission fence");
+            if (writeIndex != index)
+                m_pendingAsyncGraphicsSubmissions[writeIndex] = std::move(submission);
+            ++writeIndex;
+        }
+        m_pendingAsyncGraphicsSubmissions.resize(writeIndex);
+    }
+
+    for (const auto &submission : completed) {
+        try {
+            if (submission->m_releaseResources)
+                submission->m_releaseResources();
+        } catch (const std::exception &error) {
+            INXLOG_ERROR("Asynchronous graphics resource release failed: ", error.what());
+        } catch (...) {
+            INXLOG_ERROR("Asynchronous graphics resource release failed with an unknown exception");
+        }
+        submission->m_releaseResources = {};
+        submission->m_complete.store(true, std::memory_order_release);
+    }
+}
+
+void VkResourceManager::DrainAsyncGraphicsSubmissions() noexcept
+{
+    std::vector<std::shared_ptr<GraphicsSubmissionTicket>> completed;
+    {
+        std::lock_guard<std::mutex> guard(m_singleTimeMutex);
+        for (auto &submission : m_pendingAsyncGraphicsSubmissions) {
+            if (!submission || submission->m_fence == VK_NULL_HANDLE)
+                continue;
+            WaitForFencePumpingEvents(m_device, submission->m_fence);
+            m_freeSingleTimeFences.push_back(submission->m_fence);
+            m_freeSingleTimeCmdBuffers.push_back(submission->m_commandBuffer);
+            submission->m_fence = VK_NULL_HANDLE;
+            submission->m_commandBuffer = VK_NULL_HANDLE;
+            completed.push_back(std::move(submission));
+        }
+        m_pendingAsyncGraphicsSubmissions.clear();
+    }
+
+    for (const auto &submission : completed) {
+        try {
+            if (submission->m_releaseResources)
+                submission->m_releaseResources();
+        } catch (...) {
+            INXLOG_ERROR("Asynchronous graphics resource release failed during shutdown");
+        }
+        submission->m_releaseResources = {};
+        submission->m_complete.store(true, std::memory_order_release);
     }
 }
 

@@ -3,6 +3,7 @@
 #include "AssetImporter.h"
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -32,9 +33,15 @@ class ImporterRegistry
     void Register(std::unique_ptr<AssetImporter> importer)
     {
         if (!importer)
-            return;
+            throw std::invalid_argument("ImporterRegistry cannot register a null importer");
 
         auto exts = importer->GetSupportedExtensions();
+        for (const auto &ext : exts) {
+            if (ext.empty() || ext.front() != '.')
+                throw std::invalid_argument("Importer extension must start with '.': " + ext);
+            if (m_extensionMap.find(ext) != m_extensionMap.end())
+                throw std::logic_error("Importer extension is already registered: " + ext);
+        }
         AssetImporter *raw = importer.get();
         m_importers.push_back(std::move(importer));
 

@@ -111,6 +111,8 @@ class AudioClip
         m_guid = guid;
     }
 
+    [[nodiscard]] size_t GetRuntimeMemoryBytes() const noexcept;
+
   private:
     bool m_loaded = false;
     std::string m_filePath;

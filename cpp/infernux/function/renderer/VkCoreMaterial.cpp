@@ -23,13 +23,9 @@
 #include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <function/resources/InxFileLoader/InxShaderLoader.hpp>
 #include <function/resources/InxMaterial/InxMaterial.h>
-#include <function/resources/InxResource/InxResourceMeta.h>
 #include <function/resources/InxTexture/InxTexture.h>
-#include <platform/filesystem/InxPath.h>
 
 #include <algorithm>
-#include <cctype>
-#include <filesystem>
 #include <glm/glm.hpp>
 #include <set>
 #include <unordered_set>
@@ -39,106 +35,108 @@
 namespace infernux
 {
 
-static std::string ToLowerCopy(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return value;
-}
-
-static bool IsLinearMaterialTextureBinding(const std::string &bindingName)
-{
-    const std::string lower = ToLowerCopy(bindingName);
-    return lower.find("normal") != std::string::npos || lower.find("metal") != std::string::npos ||
-           lower.find("rough") != std::string::npos || lower.find("smooth") != std::string::npos ||
-           lower.find("ao") != std::string::npos || lower.find("occlusion") != std::string::npos ||
-           lower.find("mask") != std::string::npos || lower.find("height") != std::string::npos;
-}
-
 // ============================================================================
 // Shared texture resolution for material Texture2D properties
 // ============================================================================
 
-std::pair<VkImageView, VkSampler> InxVkCoreModular::ResolveTextureForMaterial(const std::string &textureRef,
-                                                                              const std::string &bindingName)
+void InxVkCoreModular::PumpPendingTextureLoads()
 {
-    // GUID-only contract: textureRef must be an asset GUID. Resolve GUID →
-    // file path via the AssetDatabase; lazily heal legacy refs created before
-    // the database existed (builtin materials) through the single normalizer.
-    std::string textureGuid = textureRef;
+    auto &registry = AssetRegistry::Instance();
+    for (auto pending = m_pendingTextureCpuLoads.begin(); pending != m_pendingTextureCpuLoads.end();) {
+        try {
+            if (!registry.TryCommitAssetLoad(pending->second)) {
+                ++pending;
+                continue;
+            }
+            m_materialPipelineManager.InvalidateMaterialsUsingTexture(pending->first);
+        } catch (const std::exception &exception) {
+            INXLOG_ERROR("Texture CPU load failed for GUID '", pending->first, "': ", exception.what());
+        }
+        pending = m_pendingTextureCpuLoads.erase(pending);
+    }
+
+    for (auto pending = m_pendingTextureGpuUploads.begin(); pending != m_pendingTextureGpuUploads.end();) {
+        try {
+            if (!m_resourceManager.TryPublishTextureUpload(pending->second.ticket)) {
+                ++pending;
+                continue;
+            }
+            auto texture = pending->second.ticket->GetTexture();
+            if (!registry.IsLoaded(pending->second.guid) ||
+                registry.GetAssetVersion(pending->second.guid) != pending->second.runtimeVersion) {
+                pending = m_pendingTextureGpuUploads.erase(pending);
+                continue;
+            }
+            (void)m_textureCache.Insert(pending->first, std::move(texture), m_ensureFrameCounter, false,
+                                        pending->second.guid, pending->second.runtimeVersion);
+            m_materialPipelineManager.InvalidateMaterialsUsingTexture(pending->second.guid);
+            ++m_completedTextureUploadCount;
+        } catch (const std::exception &exception) {
+            INXLOG_ERROR("Texture GPU upload failed for GUID '", pending->second.guid, "': ", exception.what());
+        }
+        pending = m_pendingTextureGpuUploads.erase(pending);
+    }
+}
+
+TextureResolveResult InxVkCoreModular::ResolveTextureForMaterial(const std::string &textureRef,
+                                                                 const std::string &bindingName)
+{
+    // Material texture properties store asset GUIDs. Path normalization belongs
+    // at the public material/asset boundary, never in the renderer.
+    const std::string &textureGuid = textureRef;
     std::string texturePath;
     auto &registry = AssetRegistry::Instance();
     auto *adb = registry.GetAssetDatabase();
-    if (adb) {
+    if (adb)
         texturePath = adb->GetPathFromGuid(textureGuid);
-        if (texturePath.empty()) {
-            std::string healed = InxMaterial::ResolveToTextureGuid(textureRef);
-            if (!healed.empty() && healed != textureGuid) {
-                textureGuid = healed;
-                texturePath = adb->GetPathFromGuid(textureGuid);
-            }
-        }
-    }
 
     if (texturePath.empty()) {
         INXLOG_WARN("TextureResolver: texture reference '", textureRef, "' is not a resolvable asset GUID (binding='",
                     bindingName, "'). Texture properties must hold GUIDs.");
-        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+        return {TextureResolveStatus::Failed, {}};
     }
 
-    // ── Load InxTexture via AssetRegistry (caches import settings) ──────────
-    // This replaces the ad-hoc .meta reading that was here before.
-    bool isLinearTexture = IsLinearMaterialTextureBinding(bindingName);
-    bool generateMipmaps = true;
-    bool normalMapMode = false;
-    int maxSize = 0; // 0 = no clamping
-    std::string filterMode = "bilinear";
-    std::string wrapMode = "repeat";
-    int anisoLevel = -1;
-
-    auto infTex = registry.LoadAsset<InxTexture>(textureGuid, ResourceType::Texture);
-    if (infTex) {
-        // InxTexture import settings take full precedence over binding-name heuristic.
-        // Two-way: if texture says sRGB, honour it even when the binding name
-        // would otherwise default to linear (e.g. user overrides a normal-map slot).
-        isLinearTexture = infTex->IsLinear();
-        generateMipmaps = infTex->GenerateMipmaps();
-        normalMapMode = infTex->IsNormalMapMode();
-        maxSize = infTex->GetMaxSize();
-        filterMode = infTex->GetFilterMode();
-        wrapMode = infTex->GetWrapMode();
-        anisoLevel = infTex->GetAnisoLevel();
-    } else {
-        // Fallback: read .meta directly (texture not in AssetDatabase, e.g. engine-internal)
-        // Use explicit metadata values as the single source of truth.
-        std::string metaPath = InxResourceMeta::GetMetaFilePath(texturePath);
-        InxResourceMeta meta;
-        if (meta.LoadFromFile(metaPath)) {
-            if (meta.HasKey("texture_type")) {
-                normalMapMode = meta.GetDataAs<std::string>("texture_type") == "normal_map";
-            }
-            if (meta.HasKey("srgb")) {
-                isLinearTexture = !meta.GetDataAs<bool>("srgb");
-            }
-            if (meta.HasKey("generate_mipmaps")) {
-                generateMipmaps = meta.GetDataAs<bool>("generate_mipmaps");
-            }
-            if (meta.HasKey("max_size")) {
-                maxSize = meta.GetDataAs<int>("max_size");
-            }
-            if (meta.HasKey("filter_mode")) {
-                filterMode = meta.GetDataAs<std::string>("filter_mode");
-            }
-            if (meta.HasKey("wrap_mode")) {
-                wrapMode = meta.GetDataAs<std::string>("wrap_mode");
-            }
-            if (meta.HasKey("aniso_level")) {
-                anisoLevel = meta.GetDataAs<int>("aniso_level");
+    auto infTex = registry.GetAsset<InxTexture>(textureGuid);
+    if (!infTex) {
+        auto pending = m_pendingTextureCpuLoads.find(textureGuid);
+        if (pending == m_pendingTextureCpuLoads.end()) {
+            try {
+                pending = m_pendingTextureCpuLoads
+                              .emplace(textureGuid, registry.BeginLoadAsset(textureGuid, ResourceType::Texture))
+                              .first;
+            } catch (const std::exception &exception) {
+                INXLOG_ERROR("TextureResolver: failed to schedule CPU load for '", textureGuid,
+                             "': ", exception.what());
+                return {TextureResolveStatus::Failed, {}};
             }
         }
+        try {
+            if (!registry.TryCommitAssetLoad(pending->second))
+                return {TextureResolveStatus::Pending, {}};
+            m_pendingTextureCpuLoads.erase(pending);
+            infTex = registry.GetAsset<InxTexture>(textureGuid);
+        } catch (const std::exception &exception) {
+            INXLOG_ERROR("TextureResolver: CPU load failed for '", textureGuid, "': ", exception.what());
+            m_pendingTextureCpuLoads.erase(pending);
+            return {TextureResolveStatus::Failed, {}};
+        }
+    }
+    if (!infTex || !infTex->GetCpuData() || !infTex->GetCpuData()->IsValid()) {
+        INXLOG_ERROR("TextureResolver: texture asset has no decoded CPU payload: ", textureGuid);
+        return {TextureResolveStatus::Failed, {}};
     }
 
-    VkFormat format = isLinearTexture ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_SRGB;
+    const bool isLinearTexture = infTex->IsLinear();
+    const uint64_t runtimeVersion = registry.GetAssetVersion(textureGuid);
+    if (runtimeVersion == 0)
+        throw std::logic_error("TextureResolver resolved a payload without a published runtime version");
+    const bool normalMapMode = infTex->IsNormalMapMode();
+    const std::string &filterMode = infTex->GetFilterMode();
+    const std::string &wrapMode = infTex->GetWrapMode();
+    const int anisoLevel = infTex->GetAnisoLevel();
+    const VkFormat format = infTex->GetCpuData()->storage == TexturePixelStorage::Rgba32Float
+                                ? VK_FORMAT_R32G32B32A32_SFLOAT
+                                : (isLinearTexture ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_SRGB);
 
     // Map string settings to Vulkan enums
     VkFilter vkFilter = VK_FILTER_LINEAR;
@@ -158,24 +156,49 @@ std::pair<VkImageView, VkSampler> InxVkCoreModular::ResolveTextureForMaterial(co
 
     // Check texture cache (thread-safe)
     {
-        auto *cached = m_textureCache.Find(cacheKey);
+        auto cached = m_textureCache.FindAsset(cacheKey, textureGuid, runtimeVersion, m_ensureFrameCounter);
         if (cached) {
-            return {cached->GetView(), cached->GetSampler()};
+            return {TextureResolveStatus::Ready, {cached->GetView(), cached->GetSampler(), std::move(cached)}};
         }
     }
 
-    // Load texture from disk → GPU with correct format, mipmaps, and size limit
-    auto texture = m_resourceManager.LoadTexture(texturePath, generateMipmaps, format, maxSize, normalMapMode, vkFilter,
-                                                 vkAddressMode, anisoLevel);
-    if (!texture) {
-        INXLOG_WARN("TextureResolver: failed to load '", texturePath, "'");
-        return {VK_NULL_HANDLE, VK_NULL_HANDLE};
+    auto pendingGpu = m_pendingTextureGpuUploads.find(cacheKey);
+    if (pendingGpu == m_pendingTextureGpuUploads.end()) {
+        try {
+            auto ticket = m_resourceManager.BeginTextureUpload(*infTex->GetCpuData(), format, vkFilter, vkAddressMode,
+                                                               anisoLevel);
+            ++m_submittedTextureUploadCount;
+            if (ticket->IsAsync())
+                ++m_asyncTextureUploadCount;
+            pendingGpu = m_pendingTextureGpuUploads
+                             .emplace(cacheKey, PendingTextureGpuUpload{textureGuid, runtimeVersion, std::move(ticket)})
+                             .first;
+        } catch (const std::exception &exception) {
+            INXLOG_ERROR("TextureResolver: failed to schedule GPU upload for '", textureGuid, "': ", exception.what());
+            return {TextureResolveStatus::Failed, {}};
+        }
     }
-
-    VkImageView view = texture->GetView();
-    VkSampler sampler = texture->GetSampler();
-    m_textureCache.Insert(cacheKey, std::move(texture));
-    return {view, sampler};
+    try {
+        if (!m_resourceManager.TryPublishTextureUpload(pendingGpu->second.ticket))
+            return {TextureResolveStatus::Pending, {}};
+        auto texture = pendingGpu->second.ticket->GetTexture();
+        const VkImageView view = texture->GetView();
+        const VkSampler sampler = texture->GetSampler();
+        if (!registry.IsLoaded(textureGuid) ||
+            registry.GetAssetVersion(textureGuid) != pendingGpu->second.runtimeVersion) {
+            m_pendingTextureGpuUploads.erase(pendingGpu);
+            return {TextureResolveStatus::Pending, {}};
+        }
+        auto resident = m_textureCache.Insert(cacheKey, std::move(texture), m_ensureFrameCounter, false, textureGuid,
+                                              pendingGpu->second.runtimeVersion);
+        m_pendingTextureGpuUploads.erase(pendingGpu);
+        ++m_completedTextureUploadCount;
+        return {TextureResolveStatus::Ready, {view, sampler, std::move(resident)}};
+    } catch (const std::exception &exception) {
+        INXLOG_ERROR("TextureResolver: GPU upload failed for '", textureGuid, "': ", exception.what());
+        m_pendingTextureGpuUploads.erase(pendingGpu);
+        return {TextureResolveStatus::Failed, {}};
+    }
 }
 
 // ============================================================================
@@ -395,12 +418,12 @@ void InxVkCoreModular::InitializeMaterialSystem()
                                              m_deviceContext.IsDescriptorIndexingEnabled());
         m_materialPipelineManagerInitialized = true;
 
-        auto *whiteTex = m_textureCache.Find("white");
+        auto whiteTex = m_textureCache.Find("white", m_ensureFrameCounter);
         if (whiteTex) {
             m_materialPipelineManager.SetDefaultTexture(whiteTex->GetView(), whiteTex->GetSampler());
         }
 
-        auto *normalTex = m_textureCache.Find("_default_normal");
+        auto normalTex = m_textureCache.Find("_default_normal", m_ensureFrameCounter);
         if (normalTex) {
             m_materialPipelineManager.SetDefaultNormalTexture(normalTex->GetView(), normalTex->GetSampler());
         }
@@ -408,7 +431,7 @@ void InxVkCoreModular::InitializeMaterialSystem()
         // Set up texture resolver for material Texture2D properties
         // Delegates to ResolveTextureForMaterial which uses GUID-based cache keys.
         m_materialPipelineManager.SetTextureResolver(
-            [this](const std::string &textureRef, const std::string &bindingName) -> std::pair<VkImageView, VkSampler> {
+            [this](const std::string &textureRef, const std::string &bindingName) -> TextureResolveResult {
                 return ResolveTextureForMaterial(textureRef, bindingName);
             });
     }
@@ -471,6 +494,7 @@ void InxVkCoreModular::ReinitializeMaterialPipelines(VkSampleCountFlagBits newSa
     }
 
     // Shutdown existing pipelines (caller must have called WaitIdle already)
+    m_deletionQueue.FlushAll();
     m_materialPipelineManager.Shutdown(/* skipWaitIdle */ true);
     m_materialPipelineManagerInitialized = false;
 
@@ -483,18 +507,18 @@ void InxVkCoreModular::ReinitializeMaterialPipelines(VkSampleCountFlagBits newSa
     m_materialPipelineManagerInitialized = true;
 
     // Restore default textures
-    auto *whiteTex = m_textureCache.Find("white");
+    auto whiteTex = m_textureCache.Find("white", m_ensureFrameCounter);
     if (whiteTex) {
         m_materialPipelineManager.SetDefaultTexture(whiteTex->GetView(), whiteTex->GetSampler());
     }
-    auto *normalTex = m_textureCache.Find("_default_normal");
+    auto normalTex = m_textureCache.Find("_default_normal", m_ensureFrameCounter);
     if (normalTex) {
         m_materialPipelineManager.SetDefaultNormalTexture(normalTex->GetView(), normalTex->GetSampler());
     }
 
     // Restore texture resolver
     m_materialPipelineManager.SetTextureResolver(
-        [this](const std::string &textureRef, const std::string &bindingName) -> std::pair<VkImageView, VkSampler> {
+        [this](const std::string &textureRef, const std::string &bindingName) -> TextureResolveResult {
             return ResolveTextureForMaterial(textureRef, bindingName);
         });
 
@@ -506,6 +530,23 @@ void InxVkCoreModular::ReinitializeMaterialPipelines(VkSampleCountFlagBits newSa
 
 bool InxVkCoreModular::RefreshMaterialPipeline(std::shared_ptr<InxMaterial> material, const std::string &vertShaderName,
                                                const std::string &fragShaderName)
+{
+    return RefreshPreviewMaterialPipeline(material, vertShaderName, fragShaderName,
+                                          m_sceneUbo ? m_sceneUbo->GetBuffer() : VK_NULL_HANDLE,
+                                          m_lightingUbo ? m_lightingUbo->GetBuffer() : VK_NULL_HANDLE);
+}
+
+void InxVkCoreModular::ReleaseGpuPreviews()
+{
+    m_resourceManager.DrainAsyncGraphicsSubmissions();
+    m_gpuMeshPreview.reset();
+    m_gpuMaterialPreview.reset();
+}
+
+bool InxVkCoreModular::RefreshPreviewMaterialPipeline(std::shared_ptr<InxMaterial> material,
+                                                      const std::string &vertShaderName,
+                                                      const std::string &fragShaderName, VkBuffer sceneUbo,
+                                                      VkBuffer lightingUbo)
 {
     if (!material) {
         return false;
@@ -524,9 +565,7 @@ bool InxVkCoreModular::RefreshMaterialPipeline(std::shared_ptr<InxMaterial> mate
     const auto *fragCode = m_shaderCache.FindFragCode(fragShaderName);
 
     if (vertCode && fragCode && m_materialPipelineManagerInitialized) {
-        VkBuffer sceneUbo = m_sceneUbo ? m_sceneUbo->GetBuffer() : VK_NULL_HANDLE;
         VkDeviceSize sceneUboSize = sizeof(UniformBufferObject);
-        VkBuffer lightingUbo = m_lightingUbo ? m_lightingUbo->GetBuffer() : VK_NULL_HANDLE;
         VkDeviceSize lightingUboSize = sizeof(ShaderLightingUBO);
         auto *renderData = m_materialPipelineManager.GetOrCreateRenderDataWithReflection(
             material, *vertCode, *fragCode, material->GetShaderId(), sceneUbo, sceneUboSize, lightingUbo,
@@ -535,14 +574,12 @@ bool InxVkCoreModular::RefreshMaterialPipeline(std::shared_ptr<InxMaterial> mate
         bool forwardOk = renderData && renderData->isValid;
 
         if (forwardOk && m_shadowPipelineReady) {
-            std::string shadowFragName = fragShaderName + "/shadow";
-            bool hasShadowFrag = (GetShaderModule(shadowFragName, "fragment") != VK_NULL_HANDLE);
-            if (hasShadowFrag) {
-                // Shadow pipelines are owned by m_shadowPipelineCache — do NOT
-                // push the old handle to the deletion queue (it is shared).
-                material->SetPassPipeline(ShaderCompileTarget::Shadow, VK_NULL_HANDLE);
-                CreateMaterialShadowPipeline(material, vertShaderName, fragShaderName);
-            }
+            // Shadow resources are created lazily by DrawShadowCasters. Eagerly
+            // allocating here makes every transient/runtime material consume a
+            // descriptor even when it never reaches a shadow pass, and repeated
+            // 2D animation material refreshes eventually exhaust the fixed pool.
+            // The next real shadow draw will rebuild the pass if needed.
+            material->SetPassPipeline(ShaderCompileTarget::Shadow, VK_NULL_HANDLE);
         }
 
         return forwardOk;
@@ -798,7 +835,7 @@ bool InxVkCoreModular::EnsureShadowMaterialDummyDescriptorSet()
     if (m_shadowMaterialDescPool == VK_NULL_HANDLE || m_shadowMaterialDescSetLayout == VK_NULL_HANDLE)
         return false;
     VkDevice device = GetDevice();
-    auto *defaultTex = m_textureCache.Find("white");
+    auto defaultTex = m_textureCache.Find("white", m_ensureFrameCounter);
     if (!defaultTex || defaultTex->GetView() == VK_NULL_HANDLE || defaultTex->GetSampler() == VK_NULL_HANDLE)
         return false;
     if (!m_sceneUbo)
@@ -885,12 +922,16 @@ void InxVkCoreModular::CreateMaterialShadowPipeline(std::shared_ptr<InxMaterial>
             return;
         }
 
-        // Runtime texture/material invalidation can recreate shadow descriptor sets
-        // while previously recorded command buffers still reference older handles.
-        // Freeing an individual set here can invalidate an in-flight command buffer.
-        // Keep old sets alive and reclaim in bulk when shadow descriptor pool is
-        // destroyed/reset during shadow pipeline cleanup.
-        (void)descriptorSet;
+        // Runtime texture/material invalidation can recreate shadow descriptor
+        // sets while recorded command buffers still reference older handles.
+        // Reclaim after all frames that could reference the set have retired.
+        VkDevice retireDevice = device;
+        VkDescriptorPool retirePool = m_shadowMaterialDescPool;
+        m_deletionQueue.Push([retireDevice, retirePool, descriptorSet] {
+            VkResult result = vkFreeDescriptorSets(retireDevice, retirePool, 1, &descriptorSet);
+            if (result != VK_SUCCESS)
+                INXLOG_WARN("Failed to retire shadow material descriptor set: ", static_cast<int>(result));
+        });
     };
 
     if (needsShadowMaterialDesc) {
@@ -1025,7 +1066,7 @@ void InxVkCoreModular::CreateMaterialShadowPipeline(std::shared_ptr<InxMaterial>
         // Vulkan requires every binding in the layout to be updated before use.
         // Use the default white texture for unused sampler slots and a dummy
         // buffer for the fragment UBO slot if it wasn't written.
-        auto *defaultTex = m_textureCache.Find("white");
+        auto defaultTex = m_textureCache.Find("white", m_ensureFrameCounter);
         if (defaultTex) {
             std::set<uint32_t> writtenTexBindings(texShadowBindings.begin(), texShadowBindings.end());
             for (uint32_t i = 0; i < kMaxShadowTextures; ++i) {
@@ -1258,57 +1299,45 @@ void InxVkCoreModular::CreateMaterialShadowPipeline(std::shared_ptr<InxMaterial>
 // GPU Material Preview
 // ============================================================================
 
-bool InxVkCoreModular::RenderMaterialPreviewGPU(std::shared_ptr<InxMaterial> material, int size,
-                                                std::vector<unsigned char> &outPixels)
+std::shared_ptr<vk::ImageReadbackTicket>
+InxVkCoreModular::BeginMaterialPreviewGPU(const std::shared_ptr<InxMaterial> &material, int size)
 {
     if (!material || size <= 0 || !m_materialPipelineManagerInitialized)
-        return false;
+        return nullptr;
 
-    // Ensure the material has a valid forward pipeline
-    if (!material->HasPassPipeline(ShaderCompileTarget::Forward)) {
-        const std::string &vertName = material->GetVertShaderName();
-        const std::string &fragName = material->GetFragShaderName();
-        if (fragName.empty())
-            return false;
-        if (!RefreshMaterialPipeline(material, vertName, fragName))
-            return false;
-    }
-
-    // Lazy-init GPUMaterialPreview
-    if (!m_gpuMaterialPreview) {
+    if (!m_gpuMaterialPreview)
         m_gpuMaterialPreview = std::make_unique<GPUMaterialPreview>(this);
-    }
 
-    return m_gpuMaterialPreview->RenderToPixels(*material, size, outPixels);
+    return m_gpuMaterialPreview->BeginRenderToPixels(*material, size);
 }
 
-bool InxVkCoreModular::RenderMeshPreviewGPU(const InxMesh &mesh,
-                                            const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
-                                            std::vector<unsigned char> &outPixels)
+bool InxVkCoreModular::TryCompleteMaterialPreviewGPU(const std::shared_ptr<vk::ImageReadbackTicket> &ticket,
+                                                     int outputSize, std::vector<unsigned char> &outPixels)
+{
+    if (!m_gpuMaterialPreview)
+        return false;
+    return m_gpuMaterialPreview->TryCompleteRenderToPixels(ticket, outputSize, outPixels);
+}
+
+std::shared_ptr<vk::ImageReadbackTicket>
+InxVkCoreModular::BeginMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials,
+                                      int size)
 {
     if (size <= 0 || !m_materialPipelineManagerInitialized)
-        return false;
+        return nullptr;
 
     if (!m_gpuMeshPreview)
         m_gpuMeshPreview = std::make_unique<GPUMeshPreview>(this);
 
-    return m_gpuMeshPreview->RenderToPixels(mesh, materials, size, outPixels);
+    return m_gpuMeshPreview->BeginRenderToPixels(mesh, materials, size);
 }
 
-bool InxVkCoreModular::RenderMeshPreviewGPUCamera(const InxMesh &mesh,
-                                                  const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
-                                                  const glm::mat4 &view, const glm::mat4 &proj,
-                                                  const glm::vec3 &cameraPos, std::vector<unsigned char> &outPixels,
-                                                  bool cloneMaterials)
+bool InxVkCoreModular::TryCompleteMeshPreviewGPU(const std::shared_ptr<vk::ImageReadbackTicket> &ticket, int outputSize,
+                                                 std::vector<unsigned char> &outPixels)
 {
-    if (size <= 0 || !m_materialPipelineManagerInitialized)
-        return false;
-
     if (!m_gpuMeshPreview)
-        m_gpuMeshPreview = std::make_unique<GPUMeshPreview>(this);
-
-    return m_gpuMeshPreview->RenderToPixelsCamera(mesh, materials, size, view, proj, cameraPos, outPixels,
-                                                  cloneMaterials);
+        return false;
+    return m_gpuMeshPreview->TryCompleteRenderToPixels(ticket, outputSize, outPixels);
 }
 
 uint64_t InxVkCoreModular::RenderMeshPreviewGPUImGuiCamera(const InxMesh &mesh,

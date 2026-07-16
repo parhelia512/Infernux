@@ -35,7 +35,8 @@ void CommandBuffer::Clear()
 // Render Target Management
 // ============================================================================
 
-RenderTargetHandle CommandBuffer::GetTemporaryRT(int width, int height, VkFormat format, VkSampleCountFlagBits samples)
+RenderTargetHandle CommandBuffer::GetTemporaryRT(int width, int height, rhi::PixelFormat format,
+                                                 rhi::SampleCount samples)
 {
     if (width <= 0 || height <= 0) {
         INXLOG_WARN("CommandBuffer '", m_name, "': GetTemporaryRT with invalid size (", width, "x", height, ")");
@@ -141,28 +142,6 @@ void CommandBuffer::SetGlobalMatrix(const std::string &name, const std::array<fl
     params.data = data;
 
     m_commands.push_back({RenderCommandType::SetGlobalMatrix, params});
-}
-
-// ============================================================================
-// Async Readback
-// ============================================================================
-
-void CommandBuffer::RequestAsyncReadback(RenderTargetHandle handle, const std::string &callbackId)
-{
-    if (!handle.IsValid()) {
-        INXLOG_WARN("CommandBuffer '", m_name, "': RequestAsyncReadback with invalid handle");
-        return;
-    }
-    if (callbackId.empty()) {
-        INXLOG_WARN("CommandBuffer '", m_name, "': RequestAsyncReadback with empty callbackId");
-        return;
-    }
-
-    RequestAsyncReadbackParams params;
-    params.handleId = handle.id;
-    params.callbackId = callbackId;
-
-    m_commands.push_back({RenderCommandType::RequestAsyncReadback, params});
 }
 
 } // namespace infernux

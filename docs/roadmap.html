@@ -3,17 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="Follow the public Infernux roadmap from the current technical preview toward stronger authoring, content, shipping, and platform workflows.">
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <link rel="canonical" href="https://infernux-engine.com/roadmap.html">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Infernux · 熔炉">
+    <meta property="og:title" content="Infernux Roadmap">
+    <meta property="og:description" content="A public engineering roadmap for the Infernux open-source game engine.">
+    <meta property="og:url" content="https://infernux-engine.com/roadmap.html">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Infernux Roadmap">
+    <meta name="twitter:description" content="A public engineering roadmap for the Infernux open-source game engine.">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status">
     <title>Infernux · 熔炉 — Roadmap</title>
     <link rel="icon" type="image/png" href="assets/logo.png">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
-    <link rel="stylesheet" href="css/style.css?v=6">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/infernux-apple-touch-icon.png">
+    <link rel="manifest" href="site.webmanifest">
+    <link rel="stylesheet" href="css/fonts.css?v=1">
+    <link rel="stylesheet" href="css/style.css?v=17">
+    <link rel="stylesheet" href="css/docs-search.css?v=3">
     <link rel="stylesheet" href="css/mission.css?v=2">
     <link rel="stylesheet" href="css/roadmap.css?v=3">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/fontawesome-subset.css?v=6.4.0">
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header" role="banner">
         <div class="mission-ribbon" aria-label="Engine identity strip">
             <div class="mission-ribbon-inner">
@@ -22,38 +45,40 @@
                 <span class="mission-sub" data-i18n="brand.ribbonSub">熔炉 · ENG-CORE</span>
             </div>
         </div>
-        <nav class="navbar">
+        <nav class="navbar" aria-label="Primary navigation">
             <div class="nav-container">
                 <a href="index.html" class="nav-logo">
-                    <span class="logo-icon"><img src="assets/logo.png" alt="Infernux logo"></span>
+                    <span class="logo-icon"><img src="assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
                     <span class="logo-text" data-i18n="brand.navShort">熔炉 · INFERNUX</span>
                 </a>
-                <div class="nav-links">
-                    <a href="index.html" data-i18n="nav.home">Home</a>
-                    <a href="index.html#system" data-i18n="nav.features">Principles</a>
-                    <a href="index.html#capabilities" data-i18n="nav.showcase">Capabilities</a>
-                    <a href="roadmap.html" class="active" data-i18n="nav.roadmap">Roadmap</a>
-                    <a href="wiki.html" data-i18n="nav.docs">Docs</a>
+                <div class="nav-links" id="primary-navigation">
+                    <a href="wiki/site/en/learn/getting-started.html" data-href-en="wiki/site/en/learn/getting-started.html" data-href-zh="wiki/site/zh/learn/getting-started.html" class="nav-priority" data-i18n="nav.start">Start</a>
+                    <a href="wiki.html#start-here" data-i18n="nav.learn">Learn</a>
+                    <a href="wiki.html?layer=manual#written-guides" data-i18n="nav.manual">Manual</a>
+                    <a href="wiki/site/en/api/index.html" data-href-en="wiki/site/en/api/index.html" data-href-zh="wiki/site/zh/api/index.html" data-i18n="nav.api">API</a>
+                    <a href="roadmap.html" class="active" aria-current="page" data-i18n="nav.roadmap">Roadmap</a>
+                    <a href="community.html" class="nav-priority" data-i18n="nav.community">Community</a>
+                    <a href="download.html" data-i18n="nav.download">Download</a>
                     <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
-                        <i class="fab fa-github"></i> GitHub
+                        <i class="fab fa-github" aria-hidden="true"></i> GitHub
                     </a>
                 </div>
                 <div class="nav-right">
-                    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
-                        <i class="fas fa-moon" id="theme-icon"></i>
+                    <button class="theme-toggle" type="button" data-site-action="theme" title="Toggle theme" aria-label="Switch color theme" aria-pressed="false">
+                        <i class="fas fa-moon" id="theme-icon" aria-hidden="true"></i>
                     </button>
-                    <button class="lang-toggle" onclick="toggleLanguage()">
+                    <button class="lang-toggle" type="button" data-site-action="language" aria-label="Switch language">
                         <span id="lang-text">中文</span>
                     </button>
-                    <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
-                        <i class="fas fa-bars"></i>
+                    <button class="mobile-menu-btn" type="button" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                        <i class="fas fa-bars" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>
         </nav>
     </header>
 
-    <main class="page-shell roadmap-layout">
+    <main class="page-shell roadmap-layout" id="main-content">
         <div class="container">
             <section class="subpage-hero roadmap-hero">
                 <div class="hero-codename">
@@ -188,7 +213,7 @@
             <div class="footer-content">
                 <div class="footer-brand">
                     <div class="nav-logo">
-                        <span class="logo-icon"><img src="assets/logo.png" alt="Infernux logo"></span>
+                        <span class="logo-icon"><img src="assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
                         <span class="logo-text" data-i18n="brand.footerTitle">熔炉 · INFERNUX</span>
                     </div>
                     <p data-i18n="footer.tagline">Open code, explicit architecture, and a render stack you can actually reason about.</p>
@@ -210,7 +235,23 @@
         </div>
     </footer>
 
-    <script src="js/i18n.js?v=5"></script>
-    <script src="js/main.js?v=4"></script>
+    <script src="js/i18n-roadmap.js?v=1"></script>
+    <script src="js/i18n.js?v=18"></script>
+    <script src="js/main.js?v=14"></script>
+    <script src="js/docs-search.js?v=5"></script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      "@id": "https://infernux-engine.com/roadmap.html#page",
+      "name": "Infernux Roadmap",
+      "description": "A public engineering roadmap for the Infernux open-source game engine.",
+      "url": "https://infernux-engine.com/roadmap.html",
+      "inLanguage": ["en", "zh-CN"],
+      "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+      "about": { "@id": "https://infernux-engine.com/#software" },
+      "significantLink": "https://github.com/ChenlizheMe/Infernux"
+    }
+    </script>
 </body>
 </html>

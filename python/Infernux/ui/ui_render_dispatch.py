@@ -15,6 +15,7 @@ from typing import Callable, Dict, Optional
 
 from Infernux.ui.enums import TextAlignH, TextAlignV
 from Infernux.engine.ui.theme import Theme
+from Infernux.ui.ui_render_revision import get_runtime_ui_revision
 
 
 # ── Shared attribute helpers ─────────────────────────────────────────
@@ -76,6 +77,27 @@ def text_align_to_float(align_h, align_v) -> tuple[float, float]:
 # Keyed by (component class name, backend_name)
 _RENDERERS: Dict[tuple[str, str], Callable] = {}
 _RESOLVED_RENDERERS: Dict[tuple[type, str], Optional[Callable]] = {}
+_REVISION_MASK = (1 << 64) - 1
+
+
+def runtime_ui_revision(scene, canvases, width: int, height: int,
+                        texture_generation: int = 0) -> int:
+    """Build an O(1) content revision for native command-list reuse.
+
+    UI components increment a shared generation on visual mutation. Scene
+    structure covers hierarchy and active-state changes, so an unchanged frame
+    no longer crosses Python/pybind once per visible UI element.
+    """
+    del canvases
+    signature = hash((
+        id(scene),
+        int(getattr(scene, "structure_version", 0)),
+        int(width),
+        int(height),
+        int(texture_generation),
+        get_runtime_ui_revision(),
+    )) & _REVISION_MASK
+    return signature or 1
 
 
 def register_ui_renderer(component_cls_name: str, backend: str, fn: Callable):
@@ -192,6 +214,13 @@ def _draw_editor_placeholder(ctx, x, y, w, h, cr, cg, cb, ca, rounding, rect_rou
 def _runtime_render_text(elem, renderer, ui_list, sx, sy, sw, sh,
                          ref_w, ref_h, scale_x, scale_y, text_scale, get_tex_id, **_kw):
     """Render a UIText element via the GPU ScreenUI renderer."""
+    revision = int(getattr(elem, "_ui_render_revision", 0))
+    packet_key = (id(renderer), ui_list, revision, sx, sy, sw, sh, text_scale)
+    packet = getattr(elem, "_runtime_text_packet", None)
+    if packet is not None and packet[0] == packet_key:
+        renderer.add_text(*packet[1])
+        return
+
     attrs = extract_common(elem)
     color = attrs["color"]
     ta = _extract_text_attrs(elem, scale=text_scale)
@@ -242,7 +271,7 @@ def _runtime_render_text(elem, renderer, ui_list, sx, sy, sw, sh,
 
     font_size = max(1.0, font_size_raw * text_scale)
     ca = color[3] * attrs["opacity"]
-    renderer.add_text(
+    arguments = (
         ui_list,
         sx, sy, sx + sw, sy + sh,
         elem.text,
@@ -252,11 +281,24 @@ def _runtime_render_text(elem, renderer, ui_list, sx, sy, sw, sh,
         attrs["rotation"], attrs["mirror_h"], attrs["mirror_v"],
         ta["font_path"], ta["line_height"], ta["letter_spacing"],
     )
+    elem._runtime_text_packet = (packet_key, arguments)
+    renderer.add_text(*arguments)
 
 
 def _runtime_render_image(elem, renderer, ui_list, sx, sy, sw, sh,
                           scale_x, scale_y, get_tex_id, **_kw):
     """Render a UIImage element via the GPU ScreenUI renderer."""
+    revision = int(getattr(elem, "_ui_render_revision", 0))
+    packet_key = (id(renderer), ui_list, revision, sx, sy, sw, sh, scale_x, scale_y)
+    packet = getattr(elem, "_runtime_image_packet", None)
+    if packet is not None and packet[0] == packet_key:
+        kind, arguments = packet[1]
+        if kind == "image":
+            renderer.add_image(*arguments)
+        else:
+            renderer.add_filled_rect(*arguments)
+        return
+
     attrs = extract_common(elem)
     color = attrs["color"]
     cr, cg, cb = color[0], color[1], color[2]
@@ -265,7 +307,8 @@ def _runtime_render_image(elem, renderer, ui_list, sx, sy, sw, sh,
     tex_id = get_tex_id(tex_path) if tex_path else 0
     rounding = attrs["corner_radius"] * min(scale_x, scale_y)
     if tex_id:
-        renderer.add_image(
+        kind = "image"
+        arguments = (
             ui_list, tex_id,
             sx, sy, sx + sw, sy + sh,
             0.0, 0.0, 1.0, 1.0,
@@ -274,12 +317,18 @@ def _runtime_render_image(elem, renderer, ui_list, sx, sy, sw, sh,
             rounding,
         )
     else:
-        renderer.add_filled_rect(
+        kind = "rect"
+        arguments = (
             ui_list,
             sx, sy, sx + sw, sy + sh,
             cr, cg, cb, ca,
             rounding,
         )
+    elem._runtime_image_packet = (packet_key, (kind, arguments))
+    if kind == "image":
+        renderer.add_image(*arguments)
+    else:
+        renderer.add_filled_rect(*arguments)
 
 
 # ── Register built-in renderers ──────────────────────────────────────
@@ -364,6 +413,20 @@ def _editor_render_button(elem, ctx, base_sx, base_sy, base_sw, base_sh, zoom, g
 def _runtime_render_button(elem, renderer, ui_list, sx, sy, sw, sh,
                            scale_x, scale_y, text_scale, get_tex_id, **_kw):
     """Render a UIButton element via the GPU ScreenUI renderer."""
+    revision = int(getattr(elem, "_ui_render_revision", 0))
+    state = getattr(elem, "_current_state", None)
+    packet_key = (id(renderer), ui_list, revision, state, sx, sy, sw, sh, scale_x, scale_y, text_scale)
+    packet = getattr(elem, "_runtime_button_packet", None)
+    if packet is not None and packet[0] == packet_key:
+        for kind, arguments in packet[1]:
+            if kind == "image":
+                renderer.add_image(*arguments)
+            elif kind == "rect":
+                renderer.add_filled_rect(*arguments)
+            else:
+                renderer.add_text(*arguments)
+        return
+
     attrs = extract_common(elem)
     tint = _pad_rgba(elem.get_current_tint() if hasattr(elem, "get_current_tint") else None)
     bg = _get_button_bg(elem)
@@ -376,8 +439,9 @@ def _runtime_render_button(elem, renderer, ui_list, sx, sy, sw, sh,
     # Background: texture image or solid fill
     tex_path = getattr(elem, "texture_path", "") or ""
     tex_id = get_tex_id(tex_path) if tex_path else 0
+    commands = []
     if tex_id:
-        renderer.add_image(
+        arguments = (
             ui_list, tex_id,
             sx, sy, sx + sw, sy + sh,
             0.0, 0.0, 1.0, 1.0,
@@ -385,14 +449,15 @@ def _runtime_render_button(elem, renderer, ui_list, sx, sy, sw, sh,
             attrs["rotation"], attrs["mirror_h"], attrs["mirror_v"],
             rounding,
         )
+        commands.append(("image", arguments))
     else:
-        renderer.add_filled_rect(ui_list, sx, sy, sx + sw, sy + sh, r, g, b, a, rounding)
+        commands.append(("rect", (ui_list, sx, sy, sx + sw, sy + sh, r, g, b, a, rounding)))
 
     # Label
     label, lc, ta = _get_label_attrs(elem, scale=text_scale)
     if label:
         font_size = max(1.0, ta["font_size"] * text_scale)
-        renderer.add_text(
+        commands.append(("text", (
             ui_list,
             sx, sy, sx + sw, sy + sh,
             label,
@@ -401,7 +466,16 @@ def _runtime_render_button(elem, renderer, ui_list, sx, sy, sw, sh,
             sw,
             attrs["rotation"], attrs["mirror_h"], attrs["mirror_v"],
             ta["font_path"], ta["line_height"], ta["letter_spacing"],
-        )
+        )))
+
+    elem._runtime_button_packet = (packet_key, commands)
+    for kind, arguments in commands:
+        if kind == "image":
+            renderer.add_image(*arguments)
+        elif kind == "rect":
+            renderer.add_filled_rect(*arguments)
+        else:
+            renderer.add_text(*arguments)
 
 
 register_ui_renderer("UIButton", "editor", _editor_render_button)

@@ -1,8 +1,10 @@
 #pragma once
 
 #include "Component.h"
+#include "ObjectHandle.h"
 #include "Transform.h"
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <typeindex>
 #include <unordered_map>
@@ -55,6 +57,14 @@ class GameObject
         return m_id;
     }
 
+    /// @brief Get the stable handle for this object's current native lifetime.
+    [[nodiscard]] ObjectHandle GetHandle() const;
+
+    [[nodiscard]] uint64_t GetLifetimeGeneration() const
+    {
+        return m_lifetimeGeneration;
+    }
+
     // ========================================================================
     // Tag & Layer
     // ========================================================================
@@ -98,6 +108,11 @@ class GameObject
 
     /// @brief Check if this object and all parents are active. Unity: gameObject.activeInHierarchy
     [[nodiscard]] bool IsActiveInHierarchy() const;
+
+    [[nodiscard]] bool IsDestroying() const
+    {
+        return m_isDestroying;
+    }
 
     // ========================================================================
     // Static flag (Unity: gameObject.isStatic)
@@ -320,6 +335,17 @@ class GameObject
     /// @brief Add a pre-created component (used for PyComponentProxy)
     Component *AddExistingComponent(std::unique_ptr<Component> component);
 
+    /// Attach a deserialized Python proxy without Reset/Awake/OnEnable.
+    /// Scene publication activates the complete batch only after every proxy
+    /// is attached, re-keyed, and its post-deserialize hook succeeds.
+    Component *AddPreparedPythonComponent(std::unique_ptr<Component> component, size_t componentIndex);
+
+    /// Activate one proxy previously attached by AddPreparedPythonComponent.
+    void ActivatePreparedPythonComponent(Component *component);
+
+    /// Remove an unactivated prepared proxy without RequireComponent blocking.
+    bool RemovePreparedPythonComponent(Component *component);
+
     /// @brief Add a component by registered type name
     Component *AddComponentByTypeName(const std::string &typeName);
 
@@ -406,8 +432,11 @@ class GameObject
     /// @brief Serialize GameObject and all components to JSON string
     [[nodiscard]] std::string Serialize() const;
 
-    /// @brief Deserialize GameObject from JSON string
-    bool Deserialize(const std::string &jsonStr);
+    /// @brief Build the structured current-schema document without text conversion.
+    [[nodiscard]] nlohmann::json SerializeDocument() const;
+
+    /// @brief Commit an already parsed and cross-language-preflighted document.
+    bool DeserializeDocument(const nlohmann::json &document, bool preserveDocumentIds = true);
 
     /// @brief Deep clone this GameObject and all children (native, no JSON).
     /// Creates fresh IDs for all objects and components. Python components
@@ -421,6 +450,7 @@ class GameObject
 
   private:
     friend class Scene;
+    friend class SceneCommitToken;
     friend class SceneManager;
     friend void InvalidateGameObjectLifecycleCaches(GameObject *gameObject);
 
@@ -438,7 +468,9 @@ class GameObject
 
     std::string m_name;
     uint64_t m_id;
+    uint64_t m_lifetimeGeneration;
     bool m_active = true;
+    bool m_isDestroying = false;
     bool m_isStatic = false;
     bool m_persistent = false;
     bool m_hasPyProxy = false; // true when a PyComponentProxy is attached

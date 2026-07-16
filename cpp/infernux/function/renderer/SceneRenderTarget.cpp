@@ -83,11 +83,27 @@ VkFormat SceneRenderTarget::GetDepthFormat() const
     return VK_FORMAT_D32_SFLOAT;
 }
 
+uint64_t SceneRenderTarget::GetResidentBytes() const
+{
+    const VmaAllocator allocator = m_vkCore->GetDeviceContext().GetVmaAllocator();
+    uint64_t bytes = 0;
+    for (const VmaAllocation allocation :
+         {m_colorAllocation, m_msaaColorAllocation, m_depthAllocation, m_outlineMaskAllocation}) {
+        if (allocation == VK_NULL_HANDLE)
+            continue;
+        VmaAllocationInfo info{};
+        vmaGetAllocationInfo(allocator, allocation, &info);
+        bytes += info.size;
+    }
+    return bytes;
+}
+
 void SceneRenderTarget::CreateColorAttachment()
 {
-    auto imageInfo = vkrender::MakeImageCreateInfo2D(m_width, m_height, VK_FORMAT_R16G16B16A16_SFLOAT,
-                                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    auto imageInfo =
+        vkrender::MakeImageCreateInfo2D(m_width, m_height, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
 
     VmaAllocator allocator = m_vkCore->GetDeviceContext().GetVmaAllocator();
     VmaAllocationCreateInfo allocCreateInfo{};
@@ -216,15 +232,19 @@ void SceneRenderTarget::CreateOutlineMaskAttachment()
     VmaAllocationCreateInfo allocCreateInfo{};
     allocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 
-    vmaCreateImage(allocator, &imageInfo, &allocCreateInfo, &m_outlineMaskImage, &m_outlineMaskAllocation, nullptr);
+    if (vmaCreateImage(allocator, &imageInfo, &allocCreateInfo, &m_outlineMaskImage, &m_outlineMaskAllocation,
+                       nullptr) != VK_SUCCESS)
+        throw std::runtime_error("Failed to create outline mask image via VMA");
 
     auto viewInfo =
         vkrender::MakeImageViewCreateInfo2D(m_outlineMaskImage, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
-    vkCreateImageView(device, &viewInfo, nullptr, &m_outlineMaskImageView);
+    if (vkCreateImageView(device, &viewInfo, nullptr, &m_outlineMaskImageView) != VK_SUCCESS)
+        throw std::runtime_error("Failed to create outline mask image view");
 
     // Sampler for composite pass
     auto samplerInfo = vkrender::MakeLinearClampSamplerInfo(VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK);
-    vkCreateSampler(device, &samplerInfo, nullptr, &m_outlineMaskSampler);
+    if (vkCreateSampler(device, &samplerInfo, nullptr, &m_outlineMaskSampler) != VK_SUCCESS)
+        throw std::runtime_error("Failed to create outline mask sampler");
 
     // Transition to shader-read initially (will be transitioned at runtime)
     VkCommandBuffer cmdBuf = m_vkCore->BeginSingleTimeCommands();

@@ -30,6 +30,8 @@ class UITextureCache:
         self._cache: dict[str, int] = {}        # GUID (or path fallback) → tid
         self._path_to_key: dict[str, str] = {}  # path → cache key (GUID or path)
         self._stamp: dict[str, int] = {}        # GUID/path key → latest stamp
+        self._pending_keys: set[str] = set()
+        self._generation: int = 0
 
     # ── internal ─────────────────────────────────────────────────────
 
@@ -70,14 +72,20 @@ class UITextureCache:
             return 0
         abs_path = os.path.normpath(tex_path if os.path.isabs(tex_path) else os.path.join(project_root, tex_path))
         if not os.path.isfile(abs_path):
+            if self._cache.get(key, 0) != 0:
+                self._generation += 1
             self._cache[key] = 0
             self._stamp[key] = 0
+            self._pending_keys.discard(key)
             return 0
 
         stamp = texture_stamp(abs_path, "ui_cache")
         if stamp == 0:
+            if self._cache.get(key, 0) != 0:
+                self._generation += 1
             self._cache[key] = 0
             self._stamp[key] = 0
+            self._pending_keys.discard(key)
             return 0
 
         if cached is not None and cached != 0 and self._stamp.get(key) == stamp:
@@ -96,12 +104,26 @@ class UITextureCache:
         # request was queued or failed for this frame; do not cache it as final,
         # or the UI will keep returning 0 forever for the same content stamp.
         if tid != 0:
+            if self._cache.get(key) != tid or self._stamp.get(key) != int(stamp):
+                self._generation += 1
             self._cache[key] = tid
             self._stamp[key] = int(stamp)
+            self._pending_keys.discard(key)
         else:
             self._cache.pop(key, None)
             self._stamp.pop(key, None)
+            self._pending_keys.add(key)
         return tid
+
+    @property
+    def generation(self) -> int:
+        """Monotonic revision for native UI command-list caching."""
+        return self._generation
+
+    @property
+    def has_pending(self) -> bool:
+        """Whether asynchronous UI textures still need polling."""
+        return bool(self._pending_keys)
 
     def get_bound(self, engine):
         """Return a callable ``f(tex_path) -> tid`` bound to *engine*.
@@ -126,15 +148,20 @@ class UITextureCache:
             self._cache.clear()
             self._path_to_key.clear()
             self._stamp.clear()
+            self._pending_keys.clear()
+            self._generation += 1
         else:
             # Direct removal (identifier is a GUID key)
             self._cache.pop(identifier, None)
             self._stamp.pop(identifier, None)
+            self._pending_keys.discard(identifier)
             # Resolve path → key and remove that too
             resolved = self._path_to_key.pop(identifier, None)
             if resolved and resolved != identifier:
                 self._cache.pop(resolved, None)
                 self._stamp.pop(resolved, None)
+                self._pending_keys.discard(resolved)
+            self._generation += 1
 
 
 # ── module-level singleton ────────────────────────────────────────────

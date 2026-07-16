@@ -153,8 +153,8 @@ class InxShaderLoader
         return s_additionalSearchPaths;
     }
 
-    bool LoadMeta(const char *content, const std::string &filePath, InxResourceMeta &metaData);
-    void CreateMeta(const char *content, size_t contentSize, const std::string &filePath, InxResourceMeta &metaData);
+    void CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
+                    InxResourceMeta &metaData) const;
 
     /// Compile shader source to SPIR-V and populate variant caches.
     /// Returns compiled data as shared_ptr<vector<char>> (forward SPIR-V), or nullptr on failure.
@@ -168,12 +168,12 @@ class InxShaderLoader
     ShaderDescriptor ParseShaderSource(const std::string &source, const std::string &filePath) const;
 
     /// Last shader compile error message (empty on success).
-    /// Set by Load() when glslang parse/link fails; read by Infernux::ReloadShader.
+    /// Set by Load() when glslang parse/link fails; read by Infernux::ReloadShaderRuntime.
     static std::string s_lastCompileError;
 
     /// Shadow fragment variant SPIR-V cache.
     /// Populated by Load() when a surface .frag is compiled; keyed by file path.
-    /// Consumed by Infernux::ReloadShader to register the shadow variant.
+    /// Consumed by Infernux::ReloadShaderRuntime to register the shadow variant.
     static std::unordered_map<std::string, std::vector<char>> s_shadowVariantCache;
 
     /// Shadow vertex variant SPIR-V cache.

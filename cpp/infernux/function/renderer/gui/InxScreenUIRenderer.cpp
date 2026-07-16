@@ -527,6 +527,7 @@ bool InxScreenUIRenderer::Initialize(VkDevice device, VmaAllocator allocator, Vk
 
 void InxScreenUIRenderer::Destroy()
 {
+    m_commandCacheValid = false;
     if (m_cameraDrawList) {
         IM_DELETE(m_cameraDrawList);
         m_cameraDrawList = nullptr;
@@ -583,9 +584,33 @@ void InxScreenUIRenderer::BeginFrame(uint32_t width, uint32_t height)
 
     m_cameraHDRRanges.clear();
     m_overlayHDRRanges.clear();
+    m_commandCacheValid = false;
 
     ResetDrawListForFrame(*m_cameraDrawList, width, height);
     ResetDrawListForFrame(*m_overlayDrawList, width, height);
+}
+
+bool InxScreenUIRenderer::BeginFrameCached(uint32_t width, uint32_t height, uint64_t contentRevision)
+{
+    if (!m_initialized)
+        return false;
+
+    const ImTextureID fontTextureId = ImGui::GetIO().Fonts->TexRef.GetTexID();
+    if (m_commandCacheValid && m_cachedWidth == width && m_cachedHeight == height &&
+        m_cachedContentRevision == contentRevision && m_cachedFontTextureId == fontTextureId) {
+        return true;
+    }
+
+    m_cameraHDRRanges.clear();
+    m_overlayHDRRanges.clear();
+    ResetDrawListForFrame(*m_cameraDrawList, width, height);
+    ResetDrawListForFrame(*m_overlayDrawList, width, height);
+    m_cachedWidth = width;
+    m_cachedHeight = height;
+    m_cachedContentRevision = contentRevision;
+    m_cachedFontTextureId = fontTextureId;
+    m_commandCacheValid = true;
+    return false;
 }
 
 void InxScreenUIRenderer::AddFilledRect(ScreenUIList list, float minX, float minY, float maxX, float maxY, float r,

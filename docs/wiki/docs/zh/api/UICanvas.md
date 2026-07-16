@@ -11,7 +11,9 @@
 UI 画布组件。所有 UI 元素的根容器——UI 的舞台。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+使用参考分辨率像素设计，然后为支持的宽高比选择缩放与屏幕匹配策略。装饰元素不应参与 Raycast。
 <!-- USER CONTENT END -->
 
 ## 属性
@@ -51,12 +53,23 @@ UI 画布组件。所有 UI 元素的根容器——UI 的舞台。
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for UICanvas
+from Infernux import GameObject
+from Infernux.ui import UICanvas, UIScaleMode
+
+ui_root = GameObject.find("UI")
+if ui_root is not None:
+    canvas = ui_root.get_component(UICanvas)
+    if canvas is not None:
+        canvas.ui_scale_mode = UIScaleMode.ScaleWithScreenSize
+        scale_x, scale_y, text_scale = canvas.compute_scale(1280, 720)
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [屏幕空间 UI 手册](../manual/ui.md)
+- [UIText](UIText.md)
+- [UIImage](UIImage.md)
+- [UIButton](UIButton.md)
 <!-- USER CONTENT END -->

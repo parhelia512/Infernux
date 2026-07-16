@@ -184,8 +184,8 @@ def register_asset_tools(mcp, project_path: str) -> None:
             ensure_not_active_scene_file(project_path, file_path, "write")
             track_project_path_before_change(project_path, file_path, "write_text")
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, "w", encoding="utf-8", newline="\n") as f:
-                f.write(text or "")
+            from Infernux.core.document_store import write_document_text
+            write_document_text(file_path, text or "")
             notify_asset_changed(file_path, "modified" if existed else "created")
             return {
                 "path": os.path.relpath(file_path, project_path).replace("\\", "/"),
@@ -212,8 +212,8 @@ def register_asset_tools(mcp, project_path: str) -> None:
             updated = original.replace(old_text, new_text, replace_count)
             ensure_not_active_scene_file(project_path, file_path, "edit")
             track_project_path_before_change(project_path, file_path, "edit_text")
-            with open(file_path, "w", encoding="utf-8", newline="\n") as f:
-                f.write(updated)
+            from Infernux.core.document_store import write_document_text
+            write_document_text(file_path, updated)
             notify_asset_changed(file_path, "modified")
             return {
                 "path": os.path.relpath(file_path, project_path).replace("\\", "/"),
@@ -326,20 +326,11 @@ def register_asset_tools(mcp, project_path: str) -> None:
             track_project_path_before_change(project_path, dst, "create")
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             adb = get_asset_database()
-            try:
-                from Infernux.engine.ui.project_file_ops import move_path
-                moved = move_path(src, dst, adb)
-                if moved:
-                    dst = moved
-                else:
-                    shutil.move(src, dst)
-            except Exception:
-                shutil.move(src, dst)
-            if adb:
-                try:
-                    adb.on_asset_moved(src, dst)
-                except Exception:
-                    pass
+            from Infernux.engine.ui.project_file_ops import move_path
+            moved = move_path(src, dst, adb)
+            if not moved:
+                raise RuntimeError(f"Failed to move '{src}' to '{dst}'")
+            dst = moved
             return {
                 "old_path": os.path.relpath(src, project_path).replace("\\", "/"),
                 "path": os.path.relpath(dst, project_path).replace("\\", "/"),
@@ -443,7 +434,7 @@ def register_asset_tools(mcp, project_path: str) -> None:
             if adb is None:
                 raise RuntimeError("AssetDatabase is not available.")
             matches = []
-            for guid in adb.get_all_resource_guids():
+            for guid in adb.get_all_guids():
                 path = adb.get_path_from_guid(guid)
                 type_name = ""
                 try:
@@ -486,9 +477,8 @@ def register_asset_tools(mcp, project_path: str) -> None:
             ensure_not_active_scene_file(project_path, file_path, "write")
             track_project_path_before_change(project_path, file_path, "write_json")
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, "w", encoding="utf-8", newline="\n") as f:
-                json.dump(value, f, ensure_ascii=False, indent=int(indent))
-                f.write("\n")
+            from Infernux.core.document_store import write_document_text
+            write_document_text(file_path, json.dumps(value, ensure_ascii=False, indent=int(indent)) + "\n")
             notify_asset_changed(file_path, "modified" if existed else "created")
             return {"path": os.path.relpath(file_path, project_path).replace("\\", "/"), "bytes": os.path.getsize(file_path), "created": not existed}
 
@@ -516,8 +506,8 @@ def register_asset_tools(mcp, project_path: str) -> None:
                 trace.append({"old": old[:80], "hits": hits, "replaced": hits if count <= 0 else min(hits, count)})
             ensure_not_active_scene_file(project_path, file_path, "patch")
             track_project_path_before_change(project_path, file_path, "patch_text")
-            with open(file_path, "w", encoding="utf-8", newline="\n") as f:
-                f.write(text)
+            from Infernux.core.document_store import write_document_text
+            write_document_text(file_path, text)
             notify_asset_changed(file_path, "modified")
             return {"path": os.path.relpath(file_path, project_path).replace("\\", "/"), "replacements": trace}
 

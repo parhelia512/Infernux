@@ -1,28 +1,58 @@
 #pragma once
 
 #include <core/types/InxFwdType.h>
+#include <function/resources/InxResource/InxResourceMeta.h>
 
+#include <cstdint>
+#include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace infernux
 {
 
-class InxResourceMeta;
+/**
+ * @brief Immutable input captured before importer execution.
+ */
+struct ImportRequest
+{
+    std::string sourcePath;
+    std::string guid;
+    ResourceType resourceType = ResourceType::DefaultText;
+    InxResourceMeta metadata;
+    std::function<std::string(const std::string &)> resolveAssetGuid;
+    bool isReimport = false;
+};
 
 /**
- * @brief Import context passed to each AssetImporter.
- *
- * Contains information about the asset being imported and
- * accessors for the meta / import settings.
+ * @brief Pure CPU result. AssetDatabase is the only owner allowed to publish it.
  */
-struct ImportContext
+struct ImportArtifact
 {
-    std::string sourcePath;          ///< Absolute path of the source asset file
-    std::string guid;                ///< GUID assigned by AssetDatabase
-    ResourceType resourceType;       ///< Detected resource type
-    InxResourceMeta *meta = nullptr; ///< Meta object (read/write)
-    bool isReimport = false;         ///< true when re-importing an existing asset
+    explicit ImportArtifact(InxResourceMeta metadataSnapshot) : metadata(std::move(metadataSnapshot))
+    {
+    }
+
+    InxResourceMeta metadata;
+    std::vector<std::string> dependencies;
+    bool dependenciesAuthoritative = false;
+
+    enum class RuntimeArtifactKind : uint8_t
+    {
+        Primary,
+        SkinnedMesh,
+    };
+
+    struct RuntimeCpuArtifact
+    {
+        RuntimeArtifactKind kind = RuntimeArtifactKind::Primary;
+        ResourceType resourceType = ResourceType::DefaultBinary;
+        uint32_t formatVersion = 0;
+        std::string bytes;
+    };
+
+    std::vector<RuntimeCpuArtifact> runtimeCpuArtifacts;
 };
 
 /**
@@ -65,23 +95,18 @@ class AssetImporter
     /// @brief File extensions this importer supports (e.g. {".png", ".jpg"})
     [[nodiscard]] virtual std::vector<std::string> GetSupportedExtensions() const = 0;
 
-    /// @brief Import an asset for the first time (or overwrite)
-    /// @param ctx Import context with source path, meta, etc.
-    /// @return true if import succeeded
-    virtual bool Import(const ImportContext &ctx) = 0;
+    /// @brief Build a pure CPU artifact without publishing shared engine state.
+    /// External input failures are reported with exceptions.
+    [[nodiscard]] virtual ImportArtifact Import(const ImportRequest &request) const = 0;
 
-    /// @brief Re-import an existing asset (e.g. after settings changed)
-    /// @param ctx Import context (isReimport = true)
-    /// @return true if reimport succeeded
-    virtual bool Reimport(const ImportContext &ctx)
+    [[nodiscard]] virtual ImportArtifact Reimport(const ImportRequest &request) const
     {
-        // Default: just re-run Import
-        return Import(ctx);
+        return Import(request);
     }
 
     /// @brief Called after meta is loaded, before Import. Allows the importer
     ///        to fill default import settings if missing.
-    virtual void EnsureDefaultSettings(InxResourceMeta & /*meta*/)
+    virtual void EnsureDefaultSettings(InxResourceMeta & /*meta*/) const
     {
         // Override in concrete importers to populate import_settings
     }

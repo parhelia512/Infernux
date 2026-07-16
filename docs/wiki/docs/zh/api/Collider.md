@@ -20,8 +20,7 @@
 |------|------|------|
 | center | `Any` | 碰撞体在本地空间的中心偏移。 |
 | is_trigger | `bool` | 是否为触发器模式。 |
-| friction | `float` | The friction coefficient of the collider surface. |
-| bounciness | `float` | The bounciness of the collider surface. |
+| physic_material | `PhysicMaterialRef` |  |
 
 <!-- USER CONTENT START --> properties
 
@@ -30,9 +29,7 @@
 ## 示例
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for Collider
-```
+> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。
 <!-- USER CONTENT END -->
 
 ## 另请参阅

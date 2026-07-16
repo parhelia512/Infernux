@@ -11,7 +11,9 @@ class in <b>Infernux.components.builtin</b>
 Renders a mesh with assigned materials.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+A MeshRenderer can use an inline primitive or an imported mesh asset and supports multiple material slots. Prove mesh and material assignment before debugging lighting effects.
 <!-- USER CONTENT END -->
 
 ## Properties
@@ -39,7 +41,6 @@ Renders a mesh with assigned materials.
 | `has_render_material() → bool` | Return whether a material is assigned at slot 0. |
 | `get_effective_material(slot: int = ...) → Any` | Return the effective material for the given slot, including fallbacks. |
 | `get_material(slot: int) → Any` | Return the material at the specified slot index. |
-| `set_material(slot: int, guid: str) → None` | Assign a material to the specified slot by asset GUID. |
 | `get_material_guids() → List[str]` | Return the list of material GUIDs for all slots. |
 | `set_materials(guids: List[str]) → None` | Set all material slots from a list of asset GUIDs. |
 | `set_material_slot_count(count: int) → None` | Set the number of material slots on this renderer. |
@@ -64,12 +65,22 @@ Renders a mesh with assigned materials.
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for MeshRenderer
+from Infernux import GameObject, MeshRenderer, PrimitiveType
+
+display = GameObject.find("DisplayObject")
+if display is not None:
+    renderer = display.get_component(MeshRenderer)
+    if renderer is not None:
+        renderer.set_primitive_mesh(PrimitiveType.Cube)
+        renderer.casts_shadows = True
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [3D Foundations](../learn/3d-foundations.md)
+- [Material](Material.md)
+- [Light](Light.md)
+- [RenderStack](RenderStack.md)
 <!-- USER CONTENT END -->

@@ -197,7 +197,7 @@ class InspectorPanel : public EditorPanel
 
   protected:
     void OnRenderContent(InxGUIContext *ctx) override;
-    void PreRender(InxGUIContext *ctx) override;
+    void VisiblePreRender(InxGUIContext *ctx) override;
 
   private:
     // ── Translation cache ────────────────────────────────────────────
@@ -224,7 +224,7 @@ class InspectorPanel : public EditorPanel
     // ── Add Component popup state ────────────────────────────────────
     char m_addCompSearch[256] = {};
     std::vector<AddComponentEntry> m_addCompEntries;
-    bool m_addCompPopupOpen = false;
+    bool m_addCompNeedsFocus = false;
 
     // ── Idle-skip state ──────────────────────────────────────────────
     int m_idleFrames = 0;
@@ -295,8 +295,8 @@ class InspectorPanel : public EditorPanel
     /// Returns (headerOpen, newEnabled).
     std::pair<bool, bool> RenderComponentHeader(InxGUIContext *ctx, const std::string &typeName,
                                                 const std::string &headerId, uint64_t iconId, bool showEnabled,
-                                                bool isEnabled, const std::string &suffix = "",
-                                                bool defaultOpen = true);
+                                                bool isEnabled, const std::string &suffix = "", bool defaultOpen = true,
+                                                const std::string &semanticId = "");
 
     bool RenderInspectorCheckbox(InxGUIContext *ctx, const char *label, bool value);
 
@@ -304,16 +304,6 @@ class InspectorPanel : public EditorPanel
     void RenderAddComponentPopup(InxGUIContext *ctx);
 
     void RefreshTagLayerCache();
-
-    // ── Searchable combo helper ──────────────────────────────────────
-    struct ComboState
-    {
-        char filter[256] = {};
-        bool needsFocus = false;
-    };
-    std::unordered_map<std::string, ComboState> m_comboStates;
-    int SearchableCombo(InxGUIContext *ctx, const char *label, int currentIdx, const std::vector<std::string> &items,
-                        float width = 0.0f);
 };
 
 } // namespace infernux

@@ -1,11 +1,41 @@
 #include "InxMesh.h"
 
+#include <function/resources/InxSkinnedMesh/InxSkinnedMesh.h>
+
 #include <core/log/InxLog.h>
 
 #include <limits>
+#include <stdexcept>
 
 namespace infernux
 {
+
+size_t InxMesh::GetRuntimeMemoryBytes() const noexcept
+{
+    size_t bytes = sizeof(*this) + m_name.capacity() + m_guid.capacity() + m_filePath.capacity();
+    bytes += m_vertices.capacity() * sizeof(Vertex);
+    bytes += m_indices.capacity() * sizeof(uint32_t);
+    bytes += m_subMeshes.capacity() * sizeof(SubMesh);
+    for (const auto &subMesh : m_subMeshes)
+        bytes += subMesh.name.capacity();
+    bytes += m_materialSlotNames.capacity() * sizeof(std::string);
+    for (const auto &name : m_materialSlotNames)
+        bytes += name.capacity();
+    bytes += m_materialSlotData.capacity() * sizeof(MaterialSlotData);
+    bytes += m_nodeNames.capacity() * sizeof(std::string);
+    for (const auto &name : m_nodeNames)
+        bytes += name.capacity();
+    if (m_skinnedData)
+        bytes += m_skinnedData->GetRuntimeMemoryBytes();
+    return bytes;
+}
+
+void InxMesh::SetSkinnedData(std::shared_ptr<const InxSkinnedMesh> skinnedData)
+{
+    if (skinnedData && !skinnedData->IsValid())
+        throw std::invalid_argument("InxMesh cannot attach invalid skinned data");
+    m_skinnedData = std::move(skinnedData);
+}
 
 void InxMesh::SetData(std::vector<Vertex> vertices, std::vector<uint32_t> indices, std::vector<SubMesh> subMeshes)
 {

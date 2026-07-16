@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -16,6 +17,17 @@ namespace infernux
 class ComponentDataStore
 {
   public:
+    struct SlotHandle
+    {
+        uint32_t index = UINT32_MAX;
+        uint32_t generation = 0;
+
+        [[nodiscard]] bool IsValid() const noexcept
+        {
+            return index != UINT32_MAX && generation != 0;
+        }
+    };
+
     enum class DataType : uint8_t
     {
         Float64, // Python float → double
@@ -37,50 +49,54 @@ class ComponentDataStore
 
     // ── slot lifecycle ──
 
-    uint32_t AllocateSlot(uint32_t classId);
-    void ReleaseSlot(uint32_t classId, uint32_t slot);
+    SlotHandle AllocateSlot(uint32_t classId);
+    void ReleaseSlot(uint32_t classId, SlotHandle handle);
+    void ReserveClass(uint32_t classId, size_t capacity);
+    [[nodiscard]] size_t GetClassCapacity(uint32_t classId) const;
+    [[nodiscard]] size_t GetClassAliveCount(uint32_t classId) const;
+    [[nodiscard]] bool IsAlive(uint32_t classId, SlotHandle handle) const;
 
     // ── per-element scalar access ──
 
-    double GetFloat(uint32_t classId, uint32_t fieldId, uint32_t slot) const;
-    void SetFloat(uint32_t classId, uint32_t fieldId, uint32_t slot, double value);
+    double GetFloat(uint32_t classId, uint32_t fieldId, SlotHandle handle) const;
+    void SetFloat(uint32_t classId, uint32_t fieldId, SlotHandle handle, double value);
 
-    int64_t GetInt(uint32_t classId, uint32_t fieldId, uint32_t slot) const;
-    void SetInt(uint32_t classId, uint32_t fieldId, uint32_t slot, int64_t value);
+    int64_t GetInt(uint32_t classId, uint32_t fieldId, SlotHandle handle) const;
+    void SetInt(uint32_t classId, uint32_t fieldId, SlotHandle handle, int64_t value);
 
-    bool GetBool(uint32_t classId, uint32_t fieldId, uint32_t slot) const;
-    void SetBool(uint32_t classId, uint32_t fieldId, uint32_t slot, bool value);
+    bool GetBool(uint32_t classId, uint32_t fieldId, SlotHandle handle) const;
+    void SetBool(uint32_t classId, uint32_t fieldId, SlotHandle handle, bool value);
 
     // ── per-element vector access ──
 
-    void GetVec2(uint32_t classId, uint32_t fieldId, uint32_t slot, float out[2]) const;
-    void SetVec2(uint32_t classId, uint32_t fieldId, uint32_t slot, const float in[2]);
+    void GetVec2(uint32_t classId, uint32_t fieldId, SlotHandle handle, float out[2]) const;
+    void SetVec2(uint32_t classId, uint32_t fieldId, SlotHandle handle, const float in[2]);
 
-    void GetVec3(uint32_t classId, uint32_t fieldId, uint32_t slot, float out[3]) const;
-    void SetVec3(uint32_t classId, uint32_t fieldId, uint32_t slot, const float in[3]);
+    void GetVec3(uint32_t classId, uint32_t fieldId, SlotHandle handle, float out[3]) const;
+    void SetVec3(uint32_t classId, uint32_t fieldId, SlotHandle handle, const float in[3]);
 
-    void GetVec4(uint32_t classId, uint32_t fieldId, uint32_t slot, float out[4]) const;
-    void SetVec4(uint32_t classId, uint32_t fieldId, uint32_t slot, const float in[4]);
+    void GetVec4(uint32_t classId, uint32_t fieldId, SlotHandle handle, float out[4]) const;
+    void SetVec4(uint32_t classId, uint32_t fieldId, SlotHandle handle, const float in[4]);
 
     // ── batch gather/scatter ──
 
-    void GatherFloat(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, double *out) const;
-    void ScatterFloat(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, const double *in);
+    void GatherFloat(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, double *out) const;
+    void ScatterFloat(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, const double *in);
 
-    void GatherInt(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, int64_t *out) const;
-    void ScatterInt(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, const int64_t *in);
+    void GatherInt(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, int64_t *out) const;
+    void ScatterInt(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, const int64_t *in);
 
-    void GatherBool(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, uint8_t *out) const;
-    void ScatterBool(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, const uint8_t *in);
+    void GatherBool(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, uint8_t *out) const;
+    void ScatterBool(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, const uint8_t *in);
 
-    void GatherVec3(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, float *out) const;
-    void ScatterVec3(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, const float *in);
+    void GatherVec3(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, float *out) const;
+    void ScatterVec3(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, const float *in);
 
-    void GatherVec2(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, float *out) const;
-    void ScatterVec2(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, const float *in);
+    void GatherVec2(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, float *out) const;
+    void ScatterVec2(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, const float *in);
 
-    void GatherVec4(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, float *out) const;
-    void ScatterVec4(uint32_t classId, uint32_t fieldId, const uint32_t *slots, size_t count, const float *in);
+    void GatherVec4(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, float *out) const;
+    void ScatterVec4(uint32_t classId, uint32_t fieldId, const SlotHandle *handles, size_t count, const float *in);
 
     /// Reset everything (e.g. scene unload).
     void Clear();
@@ -93,7 +109,7 @@ class ComponentDataStore
     struct FieldStorage
     {
         DataType type{};
-        std::vector<uint8_t> data; // raw byte buffer
+        std::vector<std::max_align_t> data;
         size_t elementSize = 0;
 
         void Grow(size_t newCapacity);
@@ -101,20 +117,24 @@ class ComponentDataStore
 
         template <typename T> T &At(size_t slot)
         {
-            return *reinterpret_cast<T *>(data.data() + slot * elementSize);
+            return *reinterpret_cast<T *>(Bytes() + slot * elementSize);
         }
         template <typename T> const T &At(size_t slot) const
         {
-            return *reinterpret_cast<const T *>(data.data() + slot * elementSize);
+            return *reinterpret_cast<const T *>(Bytes() + slot * elementSize);
         }
         float *FloatsAt(size_t slot)
         {
-            return reinterpret_cast<float *>(data.data() + slot * elementSize);
+            return reinterpret_cast<float *>(Bytes() + slot * elementSize);
         }
         const float *FloatsAt(size_t slot) const
         {
-            return reinterpret_cast<const float *>(data.data() + slot * elementSize);
+            return reinterpret_cast<const float *>(Bytes() + slot * elementSize);
         }
+
+      private:
+        std::byte *Bytes();
+        const std::byte *Bytes() const;
     };
 
     struct ClassStorage
@@ -122,9 +142,11 @@ class ComponentDataStore
         std::vector<FieldStorage> fields;
         std::unordered_map<std::string, uint32_t> fieldNameToId;
         std::vector<uint8_t> alive;
+        std::vector<uint32_t> generations;
         std::vector<uint32_t> nextFree;
         uint32_t freeHead = UINT32_MAX;
         size_t capacity = 0;
+        size_t slotCount = 0;
         size_t aliveCount = 0;
 
         void GrowTo(size_t newCapacity);
@@ -132,6 +154,13 @@ class ComponentDataStore
 
     std::vector<ClassStorage> m_classes;
     std::unordered_map<std::string, uint32_t> m_classNameToId;
+
+    ClassStorage &RequireClass(uint32_t classId);
+    const ClassStorage &RequireClass(uint32_t classId) const;
+    FieldStorage &RequireField(uint32_t classId, uint32_t fieldId, DataType expectedType);
+    const FieldStorage &RequireField(uint32_t classId, uint32_t fieldId, DataType expectedType) const;
+    static void RequireAlive(const ClassStorage &storage, SlotHandle handle);
+    static void RequireAllAlive(const ClassStorage &storage, const SlotHandle *handles, size_t count);
 };
 
 } // namespace infernux

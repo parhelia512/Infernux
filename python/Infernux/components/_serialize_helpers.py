@@ -8,14 +8,14 @@ serializable_object.py.
 
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .serialized_field import FieldMetadata
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Asset ref serialization table (type → dict key)
+# Asset reference typed documents
 # ──────────────────────────────────────────────────────────────────────
 
 def _serialize_asset_ref(value: Any) -> Optional[dict]:
@@ -23,32 +23,17 @@ def _serialize_asset_ref(value: Any) -> Optional[dict]:
 
     Returns None if *value* is not a recognised asset-ref type.
     """
-    from Infernux.core.asset_ref import (
-        TextureRef, ShaderRef, AssetRefBase,
-        get_all_asset_type_configs,
-    )
+    from Infernux.core.asset_ref import TextureRef, ShaderRef, AssetRefBase, get_asset_type_for_ref
+    from .value_document import make_asset_ref
 
-    # Fixed non-ASSET ref types (TEXTURE / SHADER have their own FieldType)
-    _FIXED_KEY_MAP: list[Tuple[type, str]] = [
-        (TextureRef, "__texture_ref__"),
-        (ShaderRef, "__shader_ref__"),
-    ]
-
-    for ref_type, dict_key in _FIXED_KEY_MAP:
-        if isinstance(value, ref_type):
-            d: dict = {dict_key: value.guid}
-            if value.path_hint:
-                d["__path_hint__"] = value.path_hint
-            return d
-
-    # Dynamic ASSET-typed refs from the registry
+    if isinstance(value, TextureRef):
+        return make_asset_ref("Texture", value.guid, value.path_hint)
+    if isinstance(value, ShaderRef):
+        return make_asset_ref("Shader", value.guid, value.path_hint)
     if isinstance(value, AssetRefBase):
-        for _name, cfg in get_all_asset_type_configs().items():
-            if isinstance(value, cfg["ref_class"]):
-                d = {cfg["dict_key"]: value.guid}
-                if value.path_hint:
-                    d["__path_hint__"] = value.path_hint
-                return d
+        asset_type = get_asset_type_for_ref(value)
+        if asset_type is not None:
+            return make_asset_ref(asset_type, value.guid, value.path_hint)
 
     return None
 
@@ -72,7 +57,7 @@ def serialize_vec(value: Any) -> Optional[list]:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Dict-key ref deserialization dispatch
+# Typed value-document deserialization dispatch
 # ──────────────────────────────────────────────────────────────────────
 
 def deserialize_dict_ref(value: dict) -> Any:
@@ -81,48 +66,43 @@ def deserialize_dict_ref(value: dict) -> Any:
     Returns the deserialized ref object, or *value* unchanged if no
     recognised dict-key marker was found.
     """
-    if "__game_object__" in value:
+    from .value_document import (
+        TYPE_KEY,
+        GAME_OBJECT_REF,
+        COMPONENT_REF,
+        ASSET_REF,
+        SERIALIZABLE_OBJECT,
+    )
+
+    document_type = value.get(TYPE_KEY)
+    if document_type == GAME_OBJECT_REF:
         from .ref_wrappers import GameObjectRef
-        return GameObjectRef(persistent_id=int(value["__game_object__"]))
-
-    if "__prefab_ref__" in value:
-        from .ref_wrappers import PrefabRef
-        return PrefabRef(guid=value["__prefab_ref__"],
-                         path_hint=value.get("__path_hint__", ""))
-
-    if "__material_ref__" in value:
-        from .ref_wrappers import MaterialRef
-        return MaterialRef(guid=value["__material_ref__"],
-                           path_hint=value.get("__path_hint__", ""))
-
-    if "__texture_ref__" in value:
-        from Infernux.core.asset_ref import TextureRef
-        return TextureRef(guid=value["__texture_ref__"],
-                          path_hint=value.get("__path_hint__", ""))
-
-    if "__shader_ref__" in value:
-        from Infernux.core.asset_ref import ShaderRef
-        return ShaderRef(guid=value["__shader_ref__"],
-                         path_hint=value.get("__path_hint__", ""))
-
-    if "__audio_clip_ref__" in value:
-        from Infernux.core.asset_ref import AudioClipRef
-        return AudioClipRef(guid=value["__audio_clip_ref__"],
-                            path_hint=value.get("__path_hint__", ""))
-
-    # Dynamic ASSET-typed refs from the registry
-    from Infernux.core.asset_ref import get_all_asset_type_configs
-    for _name, cfg in get_all_asset_type_configs().items():
-        dk = cfg["dict_key"]
-        if dk in value:
-            return cfg["ref_class"](guid=value[dk],
-                                    path_hint=value.get("__path_hint__", ""))
-
-    if "__component_ref__" in value:
+        return GameObjectRef(persistent_id=value["object_id"])
+    if document_type == COMPONENT_REF:
         from .ref_wrappers import ComponentRef
-        return ComponentRef._from_dict(value["__component_ref__"])
-
-    if "__serializable_type__" in value:
+        return ComponentRef._from_dict(value)
+    if document_type == ASSET_REF:
+        asset_type = value["asset_type"]
+        guid = value["guid"]
+        path_hint = value["path_hint"]
+        if asset_type == "Prefab":
+            from .ref_wrappers import PrefabRef
+            return PrefabRef(guid=guid, path_hint=path_hint)
+        if asset_type == "Material":
+            from .ref_wrappers import MaterialRef
+            return MaterialRef(guid=guid, path_hint=path_hint)
+        if asset_type == "Texture":
+            from Infernux.core.asset_ref import TextureRef
+            return TextureRef(guid=guid, path_hint=path_hint)
+        if asset_type == "Shader":
+            from Infernux.core.asset_ref import ShaderRef
+            return ShaderRef(guid=guid, path_hint=path_hint)
+        from Infernux.core.asset_ref import get_asset_type_config
+        config = get_asset_type_config(asset_type)
+        if config is None:
+            raise ValueError(f"unknown asset reference type {asset_type!r}")
+        return config["ref_class"](guid=guid, path_hint=path_hint)
+    if document_type == SERIALIZABLE_OBJECT:
         from .serializable_object import SerializableObject
         return SerializableObject._deserialize(value)
 

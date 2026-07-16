@@ -9,6 +9,7 @@ AssetManager, Inspector asset editors, and serialized-field references.
 from __future__ import annotations
 
 import json
+import math
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -203,15 +204,12 @@ class ShaderAssetInfo:
 
     guid: str = ""
     source_path: str = ""
-    shader_type: str = ""  # "vertex", "fragment", "geometry", "tess_control", etc.
+    shader_type: str = ""  # "vertex" or "fragment"
 
     @classmethod
     def from_path(cls, path: str, guid: str = "") -> "ShaderAssetInfo":
         ext = os.path.splitext(path)[1].lower()
-        _type_map = {
-            ".vert": "vertex", ".frag": "fragment", ".geom": "geometry",
-            ".tesc": "tess_control", ".tese": "tess_eval",
-        }
+        _type_map = {".vert": "vertex", ".frag": "fragment"}
         return cls(guid=guid, source_path=path, shader_type=_type_map.get(ext, "unknown"))
 
 
@@ -294,6 +292,38 @@ class AudioImportSettings:
 # Meta-file utilities (read / write .meta JSON directly)
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _load_strict_meta_root(meta_path: str) -> Dict[str, Any]:
+    with open(meta_path, "r", encoding="utf-8") as f:
+        root = json.load(f)
+    if type(root) is not dict or set(root) != {"meta_version", "metadata"}:
+        raise ValueError("meta document must contain exactly meta_version and metadata")
+    if type(root["meta_version"]) is not int or root["meta_version"] != 2:
+        raise ValueError("meta_version must be 2")
+    entries = root["metadata"]
+    if type(entries) is not dict:
+        raise TypeError("metadata must be an object")
+    for key, entry in entries.items():
+        if not isinstance(key, str) or not key or type(entry) is not dict or set(entry) != {"type", "value"}:
+            raise ValueError(f"invalid metadata entry: {key!r}")
+        tag = entry["type"]
+        value = entry["value"]
+        if type(tag) is not str:
+            raise TypeError(f"metadata type tag must be a string: {key}")
+        valid = (
+            (tag == "string" and type(value) is str)
+            or (tag == "int" and type(value) is int)
+            or (tag == "bool" and type(value) is bool)
+            or (tag == "size_t" and type(value) is int and value >= 0)
+            or (tag == "float" and type(value) in (int, float) and math.isfinite(value))
+            or (tag == "enum infernux::ResourceType" and type(value) is str)
+            or (tag == "json_array" and type(value) is list)
+            or (tag == "json_object" and type(value) is dict)
+        )
+        if not valid:
+            raise TypeError(f"metadata value does not match type '{tag}': {key}")
+    return root
+
+
 def read_meta_file(asset_path: str) -> Optional[Dict[str, Any]]:
     """Read a .meta file for *asset_path* and return flat key→value dict.
 
@@ -304,9 +334,7 @@ def read_meta_file(asset_path: str) -> Optional[Dict[str, Any]]:
     if not os.path.isfile(meta_path):
         return None
     try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            root = json.load(f)
-        entries = root.get("metadata", {})
+        entries = _load_strict_meta_root(meta_path)["metadata"]
         result: Dict[str, Any] = {}
         for key, entry in entries.items():
             result[key] = entry.get("value")
@@ -318,16 +346,11 @@ def read_meta_file(asset_path: str) -> Optional[Dict[str, Any]]:
 
 
 def read_meta_guid(asset_path: str) -> str:
-    """Return the asset GUID stored in the ``.meta`` sidecar (metadata map or legacy root)."""
+    """Return the asset GUID stored in the current ``.meta`` schema."""
     meta_path = asset_path + ".meta"
     if not os.path.isfile(meta_path):
         return ""
     try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            root = json.load(f)
-        root_guid = root.get("guid")
-        if isinstance(root_guid, str) and root_guid.strip():
-            return root_guid.strip()
         meta = read_meta_file(asset_path)
         if meta:
             guid = meta.get("guid")
@@ -348,15 +371,14 @@ def write_meta_fields(asset_path: str, updates: Dict[str, Any]) -> bool:
     if not os.path.isfile(meta_path):
         return False
     try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            root = json.load(f)
-        entries = root.setdefault("metadata", {})
+        root = _load_strict_meta_root(meta_path)
+        entries = root["metadata"]
         for key, value in updates.items():
             type_tag = _python_type_to_meta_tag(value)
             entries[key] = {"type": type_tag, "value": value}
         blob = json.dumps(root, indent=4) + "\n"
-        with open(meta_path, "w", encoding="utf-8") as f:
-            f.write(blob)
+        from Infernux.core.document_store import write_document_text
+        write_document_text(meta_path, blob)
         return True
     except Exception as e:
         from Infernux.debug import Debug
@@ -385,7 +407,9 @@ def _python_type_to_meta_tag(value) -> str:
         return "json_array"
     if isinstance(value, dict):
         return "json_object"
-    return "string"
+    if isinstance(value, str):
+        return "string"
+    raise TypeError(f"unsupported metadata value type: {type(value).__name__}")
 
 
 def read_texture_import_settings(asset_path: str) -> TextureImportSettings:
@@ -511,11 +535,12 @@ IMAGE_EXTENSIONS = frozenset({
 
 # Shader extensions supported by ShaderImporter
 SHADER_EXTENSIONS = frozenset({
-    ".vert", ".frag", ".geom", ".tesc", ".tese",
+    ".vert", ".frag",
 })
 
 # Material extension
 MATERIAL_EXTENSIONS = frozenset({".mat"})
+PHYSIC_MATERIAL_EXTENSIONS = frozenset({".physicmaterial"})
 
 # Audio extensions supported by AudioImporter
 AUDIO_EXTENSIONS = frozenset({".wav"})
@@ -540,6 +565,9 @@ ANIMCLIP3D_EXTENSIONS = frozenset({".animclip3d"})
 # Animation state machine extension
 ANIMFSM_EXTENSIONS = frozenset({".animfsm"})
 
+# VFX system authoring asset extension
+VFXSYSTEM_EXTENSIONS = frozenset({".vfxsystem"})
+
 # Transform timeline extension
 ANIMTIMELINE_EXTENSIONS = frozenset({".animtimeline"})
 
@@ -552,6 +580,8 @@ def asset_category_from_extension(ext: str) -> Optional[str]:
     ext = ext.lower()
     if ext in MATERIAL_EXTENSIONS:
         return "material"
+    if ext in PHYSIC_MATERIAL_EXTENSIONS:
+        return "physic_material"
     if ext in IMAGE_EXTENSIONS:
         return "texture"
     if ext in SHADER_EXTENSIONS:
@@ -570,6 +600,8 @@ def asset_category_from_extension(ext: str) -> Optional[str]:
         return "animclip3d"
     if ext in ANIMFSM_EXTENSIONS:
         return "animfsm"
+    if ext in VFXSYSTEM_EXTENSIONS:
+        return "vfxsystem"
     if ext in ANIMTIMELINE_EXTENSIONS:
         return "animtimeline"
     if ext in TIMELINEFSM_EXTENSIONS:

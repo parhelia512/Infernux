@@ -54,28 +54,16 @@ class Texture:
     @staticmethod
     def load(file_path: str) -> Optional["Texture"]:
         """Load a texture from an image file (PNG, JPG, BMP, TGA)."""
-        if TextureLoader is None:
-            return None
-        if hasattr(TextureLoader, "load_from_file"):
-            native = TextureLoader.load_from_file(file_path)
-        elif hasattr(TextureLoader, "load"):
-            native = TextureLoader.load(file_path)
-        else:
-            raise AttributeError("TextureLoader has neither load_from_file() nor load()")
+        native = TextureLoader.load_from_file(file_path)
         if native and native.width > 0:
             return Texture(native)
         return None
 
     @staticmethod
-    def from_memory(data: bytes, width: int, height: int, channels: int = 4,
-                    name: str = "memory_texture") -> Optional["Texture"]:
-        """Create a texture from raw pixel data in memory."""
-        if TextureLoader is None:
-            return None
-        # The current native binding decodes image bytes directly and only
-        # accepts (data, name).
+    def decode(data: bytes, name: str = "memory_texture") -> Optional["Texture"]:
+        """Decode PNG/JPEG/BMP/TGA bytes into a texture."""
         native = TextureLoader.load_from_memory(data, name)
-        if native:
+        if native and native.width > 0:
             return Texture(native)
         return None
 
@@ -83,8 +71,6 @@ class Texture:
     def solid_color(width: int, height: int, r: int = 255, g: int = 255,
                     b: int = 255, a: int = 255) -> Optional["Texture"]:
         """Create a solid color texture."""
-        if TextureLoader is None:
-            return None
         native = TextureLoader.create_solid_color(width, height, r, g, b, a)
         if native:
             return Texture(native)
@@ -93,8 +79,6 @@ class Texture:
     @staticmethod
     def checkerboard(width: int, height: int, cell_size: int = 32) -> Optional["Texture"]:
         """Create a checkerboard pattern texture."""
-        if TextureLoader is None:
-            return None
         native = TextureLoader.create_checkerboard(width, height, cell_size)
         if native:
             return Texture(native)

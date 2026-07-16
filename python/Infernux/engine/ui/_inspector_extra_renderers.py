@@ -5,7 +5,13 @@ import os
 from Infernux.debug import Debug
 from Infernux.lib import InxGUIContext
 from Infernux.engine.i18n import t
-from .inspector_utils import max_label_w, field_label, float_close as _float_close
+from .inspector_utils import (
+    max_label_w,
+    field_label,
+    float_close as _float_close,
+    semantic_capture_enabled,
+    inspector_component_semantic_id,
+)
 from .theme import Theme, ImGuiCol
 from ._inspector_undo import (
     _notify_scene_modified, _record_track_volume, _record_material_slot,
@@ -58,6 +64,11 @@ def _render_audio_source_extra(ctx: InxGUIContext, comp):
                 "AudioClip",
                 accept_drag_type="AUDIO_FILE",
                 on_drop_callback=lambda payload, _c=comp, _i=i: _apply_track_audio_clip_drop(_c, _i, payload),
+                picker_asset_items=_audio_clip_picker_items,
+                on_pick=lambda path, _c=comp, _i=i: _apply_track_audio_clip_pick(_c, _i, path),
+                on_clear=lambda _c=comp, _i=i: _clear_track_audio_clip(_c, _i),
+                semantic_id=(inspector_component_semantic_id(comp, f"track_{i}.clip")
+                             if semantic_capture_enabled(ctx) else ""),
             )
 
             # Track volume
@@ -85,21 +96,58 @@ def _render_audio_source_extra(ctx: InxGUIContext, comp):
                 ctx.pop_style_color(1)
 
 
+def _audio_clip_picker_items(filter_text: str):
+    items = []
+    for pattern in ("*.wav", "*.mp3", "*.ogg"):
+        items += _picker_assets(filter_text, pattern)
+    return items
+
+
+def _record_audio_track_change(comp, old_document) -> None:
+    new_document = comp.serialize_document()
+    if new_document != old_document:
+        _record_generic_component(comp, old_document, new_document)
+
+
+def _apply_track_audio_clip_pick(comp, track_index: int, file_path) -> None:
+    """Assign a registered audio asset selected by the Inspector picker."""
+    try:
+        file_path = str(file_path)
+        old_document = comp.serialize_document()
+
+        from Infernux.lib import AssetRegistry
+        registry = AssetRegistry.instance()
+        adb = registry.get_asset_database()
+        guid = adb.get_guid_from_path(file_path) if adb else ""
+        if not guid:
+            Debug.log_warning(f"Audio clip is not registered: {file_path}")
+            return
+        comp.set_track_clip_by_guid(track_index, guid)
+        _record_audio_track_change(comp, old_document)
+    except Exception as e:
+        Debug.log_error(f"Audio clip assignment failed: {e}")
+
+
+def _clear_track_audio_clip(comp, track_index: int) -> None:
+    try:
+        old_document = comp.serialize_document()
+        comp.set_track_clip_by_guid(track_index, "")
+        _record_audio_track_change(comp, old_document)
+    except Exception as e:
+        Debug.log_error(f"Audio clip clear failed: {e}")
+
+
 def _apply_track_audio_clip_drop(comp, track_index: int, payload):
     """Handle an AUDIO_FILE drag-drop onto a track clip field."""
     try:
         file_path = str(payload) if not isinstance(payload, str) else payload
 
-        # Try GUID-based loading via AssetRegistry
         from Infernux.lib import AssetRegistry
         registry = AssetRegistry.instance()
         adb = registry.get_asset_database()
-        if adb:
-            guid = adb.get_guid_from_path(file_path)
-            if guid and hasattr(comp, 'set_track_clip_by_guid'):
-                comp.set_track_clip_by_guid(track_index, guid)
-                _notify_scene_modified()
-                return
+        if adb and adb.get_guid_from_path(file_path):
+            _apply_track_audio_clip_pick(comp, track_index, file_path)
+            return
 
         # Fallback: load from file path directly
         from Infernux.core.audio_clip import AudioClip as PyAudioClip
@@ -108,8 +156,9 @@ def _apply_track_audio_clip_drop(comp, track_index: int, payload):
         if clip is None:
             return
 
+        old_document = comp.serialize_document()
         comp.set_track_clip(track_index, clip.native)
-        _notify_scene_modified()
+        _record_audio_track_change(comp, old_document)
     except Exception as e:
         Debug.log_error(f"Audio clip drop failed: {e}")
 
@@ -230,15 +279,15 @@ def _mesh_picker_items(filter_text: str):
     return items
 
 
-def _record_mesh_renderer_change(comp, old_json: str, description: str) -> None:
+def _record_mesh_renderer_change(comp, old_document: dict, description: str) -> None:
     try:
-        new_json = comp.serialize()
+        new_document = comp.serialize_document()
     except Exception as exc:
         Debug.log_warning(f"Mesh assignment could not be serialized: {exc}")
         _notify_scene_modified()
         return
-    if new_json != old_json:
-        _record_generic_component(comp, old_json, new_json)
+    if new_document != old_document:
+        _record_generic_component(comp, old_document, new_document)
 
 
 def _assign_primitive_mesh(comp, primitive_name: str) -> None:
@@ -249,14 +298,14 @@ def _assign_primitive_mesh(comp, primitive_name: str) -> None:
         Debug.log_warning(f"Unknown primitive mesh '{primitive_name}': {exc}")
         return
 
-    old_json = comp.serialize()
+    old_document = comp.serialize_document()
     if getattr(comp, 'type_name', '') == 'SkinnedMeshRenderer':
         if hasattr(comp, 'set_source_model_guid'):
             comp.set_source_model_guid("")
         if hasattr(comp, 'set_source_model_path'):
             comp.set_source_model_path("")
     comp.set_primitive_mesh(primitive_type)
-    _record_mesh_renderer_change(comp, old_json, f"Set Mesh {primitive_name}")
+    _record_mesh_renderer_change(comp, old_document, f"Set Mesh {primitive_name}")
 
 
 def _assign_model_mesh(comp, payload) -> None:
@@ -265,16 +314,16 @@ def _assign_model_mesh(comp, payload) -> None:
         Debug.log_warning(f"Mesh assignment failed: model is not registered ({path or payload})")
         return
 
-    old_json = comp.serialize()
+    old_document = comp.serialize_document()
     if getattr(comp, 'type_name', '') == 'SkinnedMeshRenderer' and hasattr(comp, 'set_source_model_guid'):
         comp.set_source_model_guid(guid)
     elif hasattr(comp, 'set_mesh_asset_guid'):
         comp.set_mesh_asset_guid(guid)
-    _record_mesh_renderer_change(comp, old_json, "Set Mesh")
+    _record_mesh_renderer_change(comp, old_document, "Set Mesh")
 
 
 def _clear_mesh(comp) -> None:
-    old_json = comp.serialize()
+    old_document = comp.serialize_document()
     if getattr(comp, 'type_name', '') == 'SkinnedMeshRenderer':
         if hasattr(comp, 'set_source_model_guid'):
             comp.set_source_model_guid("")
@@ -282,7 +331,7 @@ def _clear_mesh(comp) -> None:
             comp.set_source_model_path("")
     if hasattr(comp, 'clear_mesh_asset'):
         comp.clear_mesh_asset()
-    _record_mesh_renderer_change(comp, old_json, "Clear Mesh")
+    _record_mesh_renderer_change(comp, old_document, "Clear Mesh")
 
 
 def _apply_mesh_pick(comp, picked_value) -> None:

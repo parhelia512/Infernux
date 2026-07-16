@@ -15,7 +15,8 @@ enum class ResourceType
     Script,   // Python script (.py) - for component scripts and editor tools
     Audio,    // Audio (.wav) - audio clip for playback via AudioSource
     DefaultText,
-    DefaultBinary
+    DefaultBinary,
+    PhysicMaterial // Physics surface material (.physicMaterial)
 };
 
 } // namespace infernux

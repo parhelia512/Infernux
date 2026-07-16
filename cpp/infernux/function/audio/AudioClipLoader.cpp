@@ -14,8 +14,7 @@ namespace infernux
 // Load — decode audio file and create a new AudioClip
 // =============================================================================
 
-std::shared_ptr<void> AudioClipLoader::Load(const std::string &filePath, const std::string &guid,
-                                            AssetDatabase * /*adb*/)
+RuntimeAssetPayload AudioClipLoader::Load(const std::string &filePath, const std::string &guid, AssetDatabase * /*adb*/)
 {
     if (filePath.empty() || guid.empty()) {
         INXLOG_WARN("AudioClipLoader::Load: empty filePath or guid");
@@ -45,10 +44,10 @@ std::shared_ptr<void> AudioClipLoader::Load(const std::string &filePath, const s
 // Reload — re-decode audio and replace PCM data in-place
 // =============================================================================
 
-bool AudioClipLoader::Reload(std::shared_ptr<void> existing, const std::string &filePath, const std::string &guid,
+bool AudioClipLoader::Reload(const RuntimeAssetPayload &existing, const std::string &filePath, const std::string &guid,
                              AssetDatabase * /*adb*/)
 {
-    auto clip = std::static_pointer_cast<AudioClip>(existing);
+    auto clip = existing.Get<AudioClip>();
     if (!clip) {
         INXLOG_WARN("AudioClipLoader::Reload: null existing instance");
         return false;
@@ -72,22 +71,17 @@ bool AudioClipLoader::Reload(std::shared_ptr<void> existing, const std::string &
 // ScanDependencies — audio clips have no outgoing asset dependencies
 // =============================================================================
 
+size_t AudioClipLoader::EstimateRuntimeBytes(const RuntimeAssetPayload &payload) const
+{
+    const auto clip = payload.Get<AudioClip>();
+    if (!clip)
+        throw std::invalid_argument("AudioClipLoader cannot estimate an empty runtime payload");
+    return clip->GetRuntimeMemoryBytes();
+}
+
 std::set<std::string> AudioClipLoader::ScanDependencies(const std::string & /*filePath*/, AssetDatabase * /*adb*/)
 {
     return {};
-}
-
-// =============================================================================
-// LoadMeta — try to load existing .meta from disk
-// =============================================================================
-
-bool AudioClipLoader::LoadMeta(const char * /*content*/, const std::string &filePath, InxResourceMeta &metaData)
-{
-    std::string metaFilePath = InxResourceMeta::GetMetaFilePath(filePath);
-    if (metaData.LoadFromFile(metaFilePath)) {
-        return true;
-    }
-    return false;
 }
 
 // =============================================================================
@@ -95,7 +89,7 @@ bool AudioClipLoader::LoadMeta(const char * /*content*/, const std::string &file
 // =============================================================================
 
 void AudioClipLoader::CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
-                                 InxResourceMeta &metaData)
+                                 InxResourceMeta &metaData) const
 {
     metaData.Init(content, contentSize, filePath, ResourceType::Audio);
 

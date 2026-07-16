@@ -13,6 +13,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // Forward declaration
@@ -38,6 +39,13 @@ namespace infernux
 class GameObject;
 class Collider;
 class Rigidbody;
+
+struct PhysicsBodyPoseUpdate
+{
+    uint32_t bodyId = 0xFFFFFFFF;
+    glm::vec3 position{0.0f};
+    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+};
 
 /**
  * @brief Result of a physics raycast (Unity: RaycastHit).
@@ -73,6 +81,10 @@ class PhysicsWorld
     ///   4. Jolt globals (Factory, registered types) torn down.
     /// Idempotent: subsequent calls are no-ops.
     void Shutdown();
+    [[nodiscard]] size_t GetBodyCount() const noexcept
+    {
+        return m_bodyToCollider.size();
+    }
 
     /// @return true if initialised
     [[nodiscard]] bool IsInitialized() const
@@ -82,6 +94,19 @@ class PhysicsWorld
 
     /// Advance the simulation by one fixed step.
     void Step(float deltaTime);
+
+    /// Bodies that were active immediately before or after the latest step.
+    /// The union includes bodies that entered sleep during the step so their
+    /// final solver pose is still read back exactly once.
+    [[nodiscard]] const std::vector<uint32_t> &GetPoseReadbackBodyIds() const
+    {
+        return m_poseReadbackBodyIds;
+    }
+
+    [[nodiscard]] size_t GetLastDynamicCCDSplitCount() const
+    {
+        return m_lastDynamicCCDSplitCount;
+    }
 
     // ========================================================================
     // Body management (called by Collider components)
@@ -101,6 +126,9 @@ class PhysicsWorld
 
     /// Inform the physics world that a body has moved (kinematic / editor move).
     void SetBodyPosition(uint32_t bodyId, const glm::vec3 &pos, const glm::quat &rot);
+
+    /// Update many static body poses with one broadphase notification.
+    void SetBodyPositionsBatch(const std::vector<PhysicsBodyPoseUpdate> &updates);
 
     /// Notify that a body's shape or properties changed.
     void UpdateBodyShape(Collider *collider, const Collider *exclude = nullptr);
@@ -208,8 +236,8 @@ class PhysicsWorld
     [[nodiscard]] glm::quat GetBodyRotation(uint32_t bodyId) const;
     [[nodiscard]] glm::vec3 GetBodyCenterOfMassPosition(uint32_t bodyId) const;
 
-    /// Get world-space inertia tensor (3x3) for dynamic bodies.
-    /// Returns identity for invalid/static bodies.
+    /// Get the world-space inertia tensor on the body's allowed angular subspace.
+    /// Frozen axes and invalid/static bodies produce zero rows and columns.
     [[nodiscard]] glm::mat3 GetBodyWorldSpaceInertiaTensor(uint32_t bodyId) const;
 
     // ========================================================================
@@ -234,10 +262,16 @@ class PhysicsWorld
                                           uint32_t layerMask = (0xFFFFFFFFu & ~(1u << 2)),
                                           bool queryTriggers = true) const;
 
-    /// Find all Colliders within an axis-aligned box.
+    /// Find all Colliders within an oriented box.
     std::vector<Collider *> OverlapBox(const glm::vec3 &center, const glm::vec3 &halfExtents,
+                                       const glm::quat &orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
                                        uint32_t layerMask = (0xFFFFFFFFu & ~(1u << 2)),
                                        bool queryTriggers = true) const;
+
+    /// Find all Colliders within a capsule defined by world-space segment endpoints.
+    std::vector<Collider *> OverlapCapsule(const glm::vec3 &point0, const glm::vec3 &point1, float radius,
+                                           uint32_t layerMask = (0xFFFFFFFFu & ~(1u << 2)),
+                                           bool queryTriggers = true) const;
 
     // ========================================================================
     // Shape cast queries (Unity: Physics.SphereCast / BoxCast)
@@ -249,8 +283,14 @@ class PhysicsWorld
                     bool queryTriggers = true) const;
 
     /// Cast a box along a direction. Returns closest RaycastHit or empty.
-    bool BoxCast(const glm::vec3 &center, const glm::vec3 &halfExtents, const glm::vec3 &direction, float maxDistance,
-                 RaycastHit &outHit, uint32_t layerMask = (0xFFFFFFFFu & ~(1u << 2)), bool queryTriggers = true) const;
+    bool BoxCast(const glm::vec3 &center, const glm::vec3 &halfExtents, const glm::vec3 &direction,
+                 const glm::quat &orientation, float maxDistance, RaycastHit &outHit,
+                 uint32_t layerMask = (0xFFFFFFFFu & ~(1u << 2)), bool queryTriggers = true) const;
+
+    /// Cast a capsule defined by world-space segment endpoints.
+    bool CapsuleCast(const glm::vec3 &point0, const glm::vec3 &point1, float radius, const glm::vec3 &direction,
+                     float maxDistance, RaycastHit &outHit, uint32_t layerMask = (0xFFFFFFFFu & ~(1u << 2)),
+                     bool queryTriggers = true) const;
 
     // ========================================================================
     // Lookup
@@ -274,7 +314,7 @@ class PhysicsWorld
 
     /// @brief Dispatch buffered contact events to Component callbacks.
     ///        Call once per fixed step, immediately after Step().
-    void DispatchContactEvents();
+    [[nodiscard]] size_t DispatchContactEvents();
 
     /// Get the Jolt PhysicsSystem (for advanced usage). May be nullptr.
     JPH::PhysicsSystem *GetJoltSystem() const
@@ -289,12 +329,16 @@ class PhysicsWorld
     PhysicsWorld &operator=(const PhysicsWorld &) = delete;
 
     /// @brief Shared overlap implementation for OverlapSphere/OverlapBox.
-    std::vector<Collider *> OverlapShapeImpl(const JPH::Shape &shape, const glm::vec3 &center, uint32_t layerMask,
+    std::vector<Collider *> OverlapShapeImpl(const JPH::Shape &shape, const glm::vec3 &center,
+                                             const glm::quat &orientation, uint32_t layerMask,
                                              bool queryTriggers) const;
 
     /// @brief Shared shape cast implementation for SphereCast/BoxCast.
-    bool ShapeCastImpl(const JPH::Shape &shape, const glm::vec3 &origin, const glm::vec3 &direction, float maxDistance,
-                       RaycastHit &outHit, uint32_t layerMask, bool queryTriggers) const;
+    bool ShapeCastImpl(const JPH::Shape &shape, const glm::vec3 &origin, const glm::quat &orientation,
+                       const glm::vec3 &direction, float maxDistance, RaycastHit &outHit, uint32_t layerMask,
+                       bool queryTriggers) const;
+
+    [[nodiscard]] float FindEarliestDynamicCCDFraction(float deltaTime) const;
 
     bool m_initialized = false;
 
@@ -308,6 +352,13 @@ class PhysicsWorld
 
     // Mapping: Jolt body index → Collider*
     std::unordered_map<uint32_t, Collider *> m_bodyToCollider;
+
+    // Dense active-body union produced by the latest completed Step().
+    std::vector<uint32_t> m_poseReadbackBodyIds;
+
+    // Full Jolt IDs of bodies configured for dynamic continuous collision.
+    std::unordered_set<uint32_t> m_continuousBodyIds;
+    size_t m_lastDynamicCCDSplitCount = 0;
 
     // Contact listener for collision/trigger callbacks
     std::unique_ptr<InxContactListener> m_contactListener;

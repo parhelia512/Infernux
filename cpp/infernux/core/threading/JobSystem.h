@@ -42,15 +42,23 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
 namespace infernux
 {
+
+class JobCancelled final : public std::runtime_error
+{
+  public:
+    using std::runtime_error::runtime_error;
+};
 
 /**
  * @brief Opaque, move-only handle identifying a single scheduled job.
@@ -63,10 +71,6 @@ class JobHandle
 {
   public:
     JobHandle() = default;
-    explicit JobHandle(std::shared_ptr<std::atomic<int>> counter) : m_counter(std::move(counter))
-    {
-    }
-
     JobHandle(const JobHandle &) = default;
     JobHandle &operator=(const JobHandle &) = default;
     JobHandle(JobHandle &&) noexcept = default;
@@ -74,18 +78,49 @@ class JobHandle
 
     [[nodiscard]] bool IsValid() const noexcept
     {
-        return static_cast<bool>(m_counter);
+        return static_cast<bool>(m_state);
     }
 
     /// @brief Non-blocking poll. Returns true once all referenced jobs have completed.
     [[nodiscard]] bool IsComplete() const noexcept
     {
-        return m_counter && m_counter->load(std::memory_order_acquire) == 0;
+        return !m_state || m_state->remaining.load(std::memory_order_acquire) == 0;
+    }
+
+    bool Cancel() noexcept
+    {
+        if (!m_state || IsComplete())
+            return false;
+        m_state->cancelRequested.store(true, std::memory_order_release);
+        return true;
+    }
+
+    [[nodiscard]] bool IsCancellationRequested() const noexcept
+    {
+        return m_state && m_state->cancelRequested.load(std::memory_order_acquire);
     }
 
   private:
     friend class JobSystem;
-    std::shared_ptr<std::atomic<int>> m_counter;
+
+    struct State
+    {
+        explicit State(uint32_t count) : remaining(count)
+        {
+        }
+
+        std::atomic<uint32_t> remaining;
+        std::atomic<bool> cancelRequested{false};
+        std::mutex completionMutex;
+        std::condition_variable completionCv;
+        std::exception_ptr failure;
+    };
+
+    explicit JobHandle(std::shared_ptr<State> state) : m_state(std::move(state))
+    {
+    }
+
+    std::shared_ptr<State> m_state;
 };
 
 /**
@@ -101,6 +136,13 @@ class JobSystem
 {
   public:
     using JobFn = std::function<void()>;
+
+    enum class State : uint8_t
+    {
+        Running,
+        Draining,
+        Stopped,
+    };
 
     /// @brief Bring up the global pool with @p workerCount worker threads.
     /// @p workerCount = 0 picks (hw_concurrency - 1) clamped to [1, 32].
@@ -145,10 +187,23 @@ class JobSystem
     /// scheduled by helper code.
     void Wait(const JobHandle &handle);
 
+    /// @brief Wait without executing queued work on the calling thread.
+    /// Use when the caller owns thread-affine state and jobs must stay on workers.
+    void WaitPassive(const JobHandle &handle);
+
     /// @brief How many worker threads are running. 0 if Shutdown.
     [[nodiscard]] uint32_t GetWorkerCount() const noexcept
     {
         return static_cast<uint32_t>(m_workers.size());
+    }
+    [[nodiscard]] State GetState() const noexcept
+    {
+        return m_state.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] size_t GetQueuedTaskCount() const;
+    [[nodiscard]] uint32_t GetActiveTaskCount() const noexcept
+    {
+        return m_activeTasks.load(std::memory_order_acquire);
     }
 
   private:
@@ -158,17 +213,22 @@ class JobSystem
     struct Task
     {
         JobFn fn;
-        std::shared_ptr<std::atomic<int>> counter;
+        std::shared_ptr<JobHandle::State> state;
     };
 
     void WorkerLoop();
     bool TryRunOne(); // Returns true if a task was executed.
+    void Execute(Task task) noexcept;
+    void StopAndJoin() noexcept;
 
     std::vector<std::thread> m_workers;
     std::queue<Task> m_queue;
-    std::mutex m_queueMutex;
+    mutable std::mutex m_queueMutex;
     std::condition_variable m_queueCv;
-    std::atomic<bool> m_running{false};
+    std::atomic<State> m_state{State::Stopped};
+    std::atomic<uint32_t> m_activeTasks{0};
+    bool m_accepting = true;
+    bool m_stopRequested = false;
 };
 
 } // namespace infernux

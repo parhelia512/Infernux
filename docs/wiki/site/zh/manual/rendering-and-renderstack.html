@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="解释场景 RenderStack 单例、前向/延迟管线、注入点、Pass 顺序、Graph 失效、后处理效果与安全扩展边界。">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>渲染与 RenderStack - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/zh/manual/rendering-and-renderstack.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="渲染与 RenderStack - Infernux Documentation">
+    <meta property="og:description" content="解释场景 RenderStack 单例、前向/延迟管线、注入点、Pass 顺序、Graph 失效、后处理效果与安全扩展边界。">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/zh/manual/rendering-and-renderstack.html">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="手册">
+    <meta property="article:tag" content="渲染"><meta property="article:tag" content="RenderStack"><meta property="article:tag" content="管线"><meta property="article:tag" content="RenderGraph"><meta property="article:tag" content="后处理">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="渲染与 RenderStack - Infernux Documentation">
+    <meta name="twitter:description" content="解释场景 RenderStack 单例、前向/延迟管线、注入点、Pass 顺序、Graph 失效、后处理效果与安全扩展边界。">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://infernux-engine.com/wiki/site/zh/manual/rendering-and-renderstack.html#document",
+          "headline": "\u6e32\u67d3\u4e0e RenderStack",
+          "name": "\u6e32\u67d3\u4e0e RenderStack",
+          "description": "\u89e3\u91ca\u573a\u666f RenderStack \u5355\u4f8b\u3001\u524d\u5411/\u5ef6\u8fdf\u7ba1\u7ebf\u3001\u6ce8\u5165\u70b9\u3001Pass \u987a\u5e8f\u3001Graph \u5931\u6548\u3001\u540e\u5904\u7406\u6548\u679c\u4e0e\u5b89\u5168\u6269\u5c55\u8fb9\u754c\u3002",
+          "url": "https://infernux-engine.com/wiki/site/zh/manual/rendering-and-renderstack.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/zh/manual/rendering-and-renderstack.html"
+          },
+          "inLanguage": "zh-CN",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Manual",
+          "articleSection": "\u624b\u518c",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": "Infernux NASA Punk \u4efb\u52a1\u5361\uff0c\u5305\u542b\u7f16\u8f91\u5668\u3001\u7194\u7089\u6807\u5fd7\u548c\u6280\u672f\u9884\u89c8\u72b6\u6001\u3002"
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["\u6e32\u67d3", "RenderStack", "\u7ba1\u7ebf", "RenderGraph", "\u540e\u5904\u7406"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/zh/manual/rendering-and-renderstack.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "\u6587\u6863",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "\u624b\u518c",
+              "item": "https://infernux-engine.com/wiki.html?layer=manual#written-guides"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "\u6e32\u67d3\u4e0e RenderStack",
+              "item": "https://infernux-engine.com/wiki/site/zh/manual/rendering-and-renderstack.html"
+            }
+            
+          ]
+        }
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/manual/rendering-and-renderstack.html">
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/manual/rendering-and-renderstack.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/manual/rendering-and-renderstack.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
+    <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
+</head>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <!-- Top Navigation -->
+    <nav class="navbar" aria-label="主导航">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/zh/learn/getting-started.html" class="nav-priority">开始使用</a>
+                <a href="/wiki.html#start-here">学习</a>
+                <a href="/wiki.html?layer=manual#written-guides" class="active" aria-current="page">手册</a>
+                <a href="/wiki/site/zh/api/index.html">API</a>
+                <a href="/roadmap.html">路线图</a>
+                <a href="/community.html" class="nav-priority">社区</a>
+                <a href="/download.html">下载</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="复制版本、来源和权威链接" aria-label="复制供 Agent 使用的页面上下文">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>复制给 Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>搜索文档</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell article-page-shell" id="main-content">
+        <div class="container article-page-container">
+            <div class="api-main article-page-content">
+                
+    <nav class="doc-breadcrumb" aria-label="面包屑">
+        <a href="/wiki.html">文档</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html?layer=manual#written-guides">手册</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">渲染与 RenderStack</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="文档版本与来源" data-status="preview" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">preview</strong>
+                        <span class="doc-provenance-item"><span>始于</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>已验证</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>读者</span> user, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">文档清单</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/en/manual/rendering-and-renderstack.html" lang="en">Read in English</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>源码证据 · 3</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/tree/master/python/Infernux/renderstack" target="_blank" rel="noopener">python/Infernux/renderstack</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/tree/master/python/Infernux/rendergraph" target="_blank" rel="noopener">python/Infernux/rendergraph</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/core/material.py" target="_blank" rel="noopener">python/Infernux/core/material.py</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>本页目录</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>收起章节</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="本页章节"></nav>
+    </aside>
+    
+                <h1 id="renderstack">渲染与 RenderStack<a class="headerlink" href="#renderstack" title="Permanent link">&para;</a></h1>
+<p>Infernux 将“渲染什么”与“一帧如何调度”分离。Camera、可渲染组件、灯光与材质描述场景内容；场景级 <code>RenderStack</code> 选择管线、构建 RenderGraph 拓扑，并把可选 Pass 挂载到声明的注入点。</p>
+<h2 id="stack">一个 Stack，一条管线<a class="headerlink" href="#stack" title="Permanent link">&para;</a></h2>
+<p><code>RenderStack</code> 是场景单例组件；存在活动实例时，<code>RenderStack.instance()</code> 会返回它。序列化状态记录管线类、挂载 Pass 和管线参数。</p>
+<p>内置选择面向不同约束：</p>
+<table>
+<thead>
+<tr>
+<th>管线</th>
+<th>结构</th>
+<th>主要设置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Default Forward</td>
+<td>阴影 → 不透明 → 天空 → 透明</td>
+<td>阴影分辨率、MSAA、屏幕 UI</td>
+</tr>
+<tr>
+<td>Default Deferred</td>
+<td>G-buffer / 延迟光照拓扑</td>
+<td>阴影分辨率、屏幕 UI；延迟 MSAA 关闭</td>
+</tr>
+</tbody>
+</table>
+<p>应根据光照、材质、透明和抗锯齿需求为整个场景选择管线，不要每帧切换。</p>
+<figure class="doc-diagram doc-diagram--pipeline" role="group" aria-label="场景数据经 RenderStack 生成最终帧"><figcaption><span>INX / SYSTEM MAP</span>场景数据经 RenderStack 生成最终帧</figcaption><pre><code><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>场景内容             RenderStack               RenderGraph                 最终帧
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Camera ────────┐     ┌ 选择管线       ┐       ┌ 稳定拓扑       ┐
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>灯光 ──────────┼───▶ │ 挂载 Pass      │ ───▶  │ 资源依赖       │ ───▶  屏幕目标
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>材质 ──────────┤     └ 注入与排序     ┘       └ 执行 Pass      ┘
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>可渲染对象 ────┘             ▲
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                             └── 配置改变 → invalidate → rebuild
+</code></pre></figure>
+<h2 id="_1">注入点与效果<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>管线公开具名 <code>InjectionPoint</code>。默认前向管线提供 <code>after_opaque</code>、<code>after_sky</code>、<code>after_transparent</code>。Pass 声明其位置，以及需要或修改的资源。</p>
+<p><code>RenderStack.add_pass()</code> 挂载 Pass；启用、移除、重排和 move-before 操作控制执行。Stack 会序列化这些配置，因此应使用这些操作或 Inspector，不要直接编辑 <code>mounted_passes_json</code>。</p>
+<p>内置全屏效果包括 Bloom、Tone Mapping、Color Adjustments、White Balance、Vignette、Film Grain、Sharpen 与 Chromatic Aberration。顺序有语义：Tone Mapping 与依赖颜色空间的效果不能随意互换。</p>
+<h2 id="graph">Graph 生命周期<a class="headerlink" href="#graph" title="Permanent link">&para;</a></h2>
+<p>管线定义稳定拓扑，可选 Pass 对其扩展。配置改变时，<code>invalidate_graph()</code> 标记 Graph 为脏；<code>build_graph()</code> 在渲染前重建。不要在逐帧玩法循环中反复失效。</p>
+<p>自定义管线应覆盖 <code>define_topology(graph)</code>；自定义全屏效果应声明资源契约并实现 <code>setup_passes(graph, bus)</code>，不要直接获取其他 Pass 的私有对象。</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux.renderstack</span><span class="w"> </span><span class="kn">import</span> <span class="n">BloomEffect</span><span class="p">,</span> <span class="n">RenderStack</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">stack</span> <span class="o">=</span> <span class="n">RenderStack</span><span class="o">.</span><span class="n">instance</span><span class="p">()</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">if</span> <span class="n">stack</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">bloom</span> <span class="o">=</span> <span class="n">BloomEffect</span><span class="p">()</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">bloom</span><span class="o">.</span><span class="n">threshold</span> <span class="o">=</span> <span class="mf">1.0</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">bloom</span><span class="o">.</span><span class="n">intensity</span> <span class="o">=</span> <span class="mf">0.7</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">stack</span><span class="o">.</span><span class="n">add_pass</span><span class="p">(</span><span class="n">bloom</span><span class="p">)</span>
+</code></pre></div>
+<p>应在场景初始化阶段配置挂载，而不是在 <code>update</code> 中持续执行。</p>
+<h2 id="_2">材质与透明<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>材质决定 Shader、属性、纹理、表面类型、Alpha 裁剪、深度、混合、剔除与渲染队列。默认使用不透明表面；透明混合具有排序和 overdraw 成本。可接受硬边时用 Alpha Clip 表现镂空形状。</p>
+<p>材质属性只有在 Shader 暴露对应名称时才生效。编写通用工具时可先检查 <code>has_property()</code>。</p>
+<h2 id="_3">排查顺序<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<ol>
+<li>确认场景只有一个活动 RenderStack，且管线可被发现。</li>
+<li>确认活动 Camera 符合管线渲染条件。</li>
+<li>检查材质、Shader、网格与纹理引用是否可解析。</li>
+<li>检查 Pass 已启用且位于兼容注入点。</li>
+<li>检查所需 ResourceBus 名称与 Pass 顺序。</li>
+<li>配置改变后使 Graph 失效，但不要每帧执行。</li>
+<li>逐一关闭可选效果，隔离第一个失败 Pass。</li>
+</ol>
+<h2 id="_4">相关参考<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../api/RenderStack.html">RenderStack</a></li>
+<li><a href="../api/RenderPipeline.html">RenderPipeline</a></li>
+<li><a href="../api/RenderGraph.html">RenderGraph</a></li>
+<li><a href="../api/BloomEffect.html">BloomEffect</a></li>
+<li><a href="../api/ToneMappingEffect.html">ToneMappingEffect</a></li>
+<li><a href="../api/Material.html">Material</a></li>
+</ul>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="文档连续阅读与反馈">
+        <a class="doc-trail-fallback" href="/wiki.html">返回文档中心</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="文档发布证据">
+        <span class="doc-build-label">发布证据</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">正在读取发布版本与来源…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">机器清单 JSON</a>
+    </section>
+    
+    
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">搜索 Infernux 文档</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="关闭文档搜索"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API 符号、系统、工作流…">
+            </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="文档搜索筛选器"></div>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </dialog>
+
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
+</body>
+</html>

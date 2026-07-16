@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # Engine
 from Infernux.engine import release_engine as release_engine
+from Infernux.engine import run_headless as run_headless
 from Infernux.engine import Engine as Engine
 from Infernux.engine import LogLevel as LogLevel
 # Math

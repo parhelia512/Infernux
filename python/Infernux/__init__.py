@@ -7,7 +7,7 @@ user scripts can simply do ``from Infernux import *``.
 import importlib
 
 # ── Runtime API (used by game scripts) ─────────────────────────────
-from Infernux.engine import release_engine, Engine, LogLevel
+from Infernux.engine import release_engine, run_headless, Engine, LogLevel
 from Infernux.math import Vector2, Vector3, vec4f, quatf, vector2, vector3, vector4, quaternion
 from Infernux import components as _components_module
 from Infernux.components import *
@@ -15,12 +15,8 @@ from Infernux import core
 from Infernux.core import *
 from Infernux.lib import GameObject, Transform, Component, Space, PrimitiveType
 from Infernux.debug import Debug, debug, log, log_warning, log_error, log_exception
-from Infernux import rendergraph
-from Infernux import renderstack
 from Infernux import scene
 from Infernux.scene import GameObjectQuery, LayerMask, SceneManager
-from Infernux import input
-from Infernux import ui
 from Infernux.timing import Time
 from Infernux.mathf import Mathf
 from Infernux.coroutine import (
@@ -52,6 +48,10 @@ def __getattr__(name: str):
     }:
         jit_module = importlib.import_module("Infernux.jit")
         return getattr(jit_module, name)
+    if name in {"input", "rendergraph", "renderstack", "ui"}:
+        module = importlib.import_module(f"Infernux.{name}")
+        globals()[name] = module
+        return module
     raise AttributeError(f"module 'Infernux' has no attribute {name!r}")
 
 
@@ -64,6 +64,7 @@ __all__ = [
     "Engine",
     "LogLevel",
     "release_engine",
+    "run_headless",
     # Math
     "Vector2",
     "Vector3",

@@ -16,7 +16,6 @@ from Infernux.engine.ui.game_view_panel import GameViewPanel as GameViewPanel
 from Infernux.lib import ProjectPanel as ProjectPanel
 from Infernux.engine.ui.window_manager import WindowManager as WindowManager, WindowInfo as WindowInfo
 from Infernux.lib import ToolbarPanel as ToolbarPanel
-from Infernux.engine.ui.frame_scheduler_panel import FrameSchedulerPanel as FrameSchedulerPanel
 from Infernux.engine.ui.tag_layer_settings import TagLayerSettingsPanel as TagLayerSettingsPanel
 from Infernux.lib import StatusBarPanel as StatusBarPanel
 from Infernux.engine.ui.engine_status import EngineStatus as EngineStatus
@@ -33,7 +32,6 @@ from Infernux.engine.ui import panel_state as panel_state
 __all__ = [
     "MenuBarPanel",
     "ToolbarPanel",
-    "FrameSchedulerPanel",
     "HierarchyPanel",
     "InspectorPanel",
     "ConsolePanel",

@@ -17,6 +17,8 @@ def save_prefab(
     game_object: Any,
     file_path: str,
     asset_database: Any = None,
+    source_canvas_name: str = "",
+    root_document_template: Optional[dict] = None,
 ) -> bool:
     """Serialize *game_object* and its children as a prefab file.
 

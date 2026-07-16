@@ -9,6 +9,10 @@ from Infernux.math.vector import (
 )
 
 __all__ = [
+    "Vector2",
+    "Vector3",
+    "vec4f",
+    "quatf",
     "vector2",
     "vector3",
     "vector4",

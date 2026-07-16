@@ -19,8 +19,7 @@ This module orchestrates those primitives into a complete workflow.
 """
 
 import os
-import json
-import threading
+import copy
 from typing import Optional, Callable
 
 from Infernux.debug import Debug
@@ -29,7 +28,7 @@ from Infernux.engine.path_utils import safe_path as _safe_path
 from .scene_manager import (
     PREFAB_MODE_SCENE_NAME,
     PREFAB_RESTORE_SCENE_NAME,
-    _empty_scene_json,
+    _empty_scene_document,
     _get_scene_root_objects,
 )
 
@@ -47,8 +46,15 @@ class ScenePrefabMixin:
             return False
 
         from Infernux.lib import SceneManager
-        from Infernux.engine.component_restore import restore_pending_py_components
-        from Infernux.engine.prefab_manager import _strip_prefab_runtime_fields
+        from Infernux.engine.component_restore import (
+            deserialize_scene_document_transactionally,
+            instantiate_prepared_game_object_document,
+            preflight_game_object_python_components,
+        )
+        from Infernux.engine.prefab_manager import (
+            _read_prefab_document,
+            _strip_prefab_runtime_fields,
+        )
         from Infernux.engine.ui.selection_manager import SelectionManager
 
         active_scene = SceneManager.instance().get_active_scene()
@@ -57,31 +63,24 @@ class ScenePrefabMixin:
             return False
 
         try:
-            with open(prefab_path, "r", encoding="utf-8") as f:
-                prefab_data = json.load(f)
-        except (OSError, json.JSONDecodeError) as exc:
+            prefab_data = _read_prefab_document(prefab_path)
+        except (OSError, ValueError) as exc:
             Debug.log_error(f"Failed to open prefab for Prefab Mode: {exc}")
             return False
 
-        root_obj_data = prefab_data.get("root_object")
-        if root_obj_data is None:
-            Debug.log_error("Invalid prefab file: missing 'root_object'.")
-            return False
-
-        # Validate prefab version
-        from Infernux.engine.prefab_manager import PREFAB_VERSION
-        file_version = prefab_data.get("prefab_version", 0)
-        if file_version > PREFAB_VERSION:
-            Debug.log_error(
-                f"Prefab '{prefab_path}' uses version {file_version} but this "
-                f"engine only supports up to version {PREFAB_VERSION}."
-            )
-            return False
-
-        root_obj_data = json.loads(json.dumps(root_obj_data))
+        root_obj_data = copy.deepcopy(prefab_data["root_object"])
         _strip_prefab_runtime_fields(root_obj_data)
+        try:
+            prepared_prefab = preflight_game_object_python_components(
+                root_obj_data,
+                asset_database=self._asset_database,
+                preserve_document_ids=False,
+            )
+        except RuntimeError as exc:
+            Debug.log_error(f"Failed to preflight prefab for Prefab Mode: {exc}")
+            return False
 
-        self._previous_scene_json = active_scene.serialize()
+        self._previous_scene_document = active_scene.serialize_document()
         self._previous_scene_path = self._current_scene_path
         self._previous_scene_dirty = self._dirty
         self.prefab_envelope = prefab_data
@@ -96,7 +95,15 @@ class ScenePrefabMixin:
         # Destroy ALL objects in the original scene so their physics bodies
         # are removed from the global PhysicsWorld.  Without this, invisible
         # colliders from the main scene interfere with the prefab scene.
-        active_scene.deserialize(_empty_scene_json(active_scene.name))
+        if not deserialize_scene_document_transactionally(
+            active_scene,
+            _empty_scene_document(active_scene.name),
+            asset_database=self._asset_database,
+            clear_registries=True,
+        ):
+            prepared_prefab.discard()
+            Debug.log_error("Failed to clear the previous scene for Prefab Mode.")
+            return False
 
         sm = SceneManager.instance()
         new_scene = sm.get_scene(PREFAB_MODE_SCENE_NAME)
@@ -105,20 +112,29 @@ class ScenePrefabMixin:
         # Always deserialize empty JSON to clear old objects and component
         # registries (MeshRenderer, physics, etc.) — prevents the previous
         # scene's renderers from leaking into Prefab Mode.
-        new_scene.deserialize(_empty_scene_json(PREFAB_MODE_SCENE_NAME))
+        if not deserialize_scene_document_transactionally(
+            new_scene,
+            _empty_scene_document(PREFAB_MODE_SCENE_NAME),
+            asset_database=self._asset_database,
+            clear_registries=True,
+        ):
+            prepared_prefab.discard()
+            Debug.log_error("Failed to initialize the Prefab Mode scene.")
+            return False
         sm.set_active_scene(new_scene)
 
-        root_json = json.dumps(root_obj_data)
-        root_obj = new_scene.instantiate_from_json(root_json)
+        try:
+            root_obj = instantiate_prepared_game_object_document(
+                new_scene,
+                root_obj_data,
+                prepared_prefab,
+            )
+        except RuntimeError as exc:
+            Debug.log_error(f"Failed to preflight prefab for Prefab Mode: {exc}")
+            return False
         if root_obj is None:
             Debug.log_error("Failed to instantiate prefab in Prefab Mode.")
             return False
-
-        if new_scene.has_pending_py_components():
-            try:
-                restore_pending_py_components(new_scene, asset_database=self._asset_database)
-            except Exception as exc:
-                Debug.log_error(f"Failed to restore prefab Python components: {exc}")
 
         roots = _get_scene_root_objects(new_scene)
         if roots:
@@ -192,7 +208,7 @@ class ScenePrefabMixin:
             return False
 
         from Infernux.lib import SceneManager
-        from Infernux.engine.component_restore import restore_pending_py_components
+        from Infernux.engine.component_restore import deserialize_scene_document_transactionally
 
         # Always save the prefab on exit
         if self.prefab_mode_path:
@@ -223,23 +239,37 @@ class ScenePrefabMixin:
         # PhysicsWorld before we restore the main scene.
         prefab_scene = sm.get_scene(PREFAB_MODE_SCENE_NAME)
         if prefab_scene is not None:
-            prefab_scene.deserialize(_empty_scene_json(PREFAB_MODE_SCENE_NAME))
+            if not deserialize_scene_document_transactionally(
+                prefab_scene,
+                _empty_scene_document(PREFAB_MODE_SCENE_NAME),
+                asset_database=self._asset_database,
+                clear_registries=True,
+            ):
+                Debug.log_error("Cannot exit Prefab Mode: failed to clear prefab scene.")
+                return False
 
         scene = sm.get_scene(PREFAB_RESTORE_SCENE_NAME)
         if scene is None:
             scene = sm.create_scene(PREFAB_RESTORE_SCENE_NAME)
-        # Always deserialize empty first so ClearComponentRegistries runs,
-        # preventing prefab scene renderers from leaking into the restored scene.
-        scene.deserialize(_empty_scene_json(PREFAB_RESTORE_SCENE_NAME))
         sm.set_active_scene(scene)
 
-        if self._previous_scene_json:
-            scene.deserialize(self._previous_scene_json)
-            if scene.has_pending_py_components():
-                try:
-                    restore_pending_py_components(scene, asset_database=self._asset_database)
-                except Exception as exc:
-                    Debug.log_error(f"Failed to restore scene Python components: {exc}")
+        if self._previous_scene_document:
+            if not deserialize_scene_document_transactionally(
+                scene,
+                self._previous_scene_document,
+                asset_database=self._asset_database,
+                clear_registries=True,
+            ):
+                Debug.log_error("Cannot exit Prefab Mode: previous scene transaction failed.")
+                return False
+        elif not deserialize_scene_document_transactionally(
+            scene,
+            _empty_scene_document(PREFAB_RESTORE_SCENE_NAME),
+            asset_database=self._asset_database,
+            clear_registries=True,
+        ):
+            Debug.log_error("Cannot exit Prefab Mode: failed to initialize restore scene.")
+            return False
 
         # Refresh instances of the edited prefab so changes propagate
         if saved_prefab_guid:
@@ -253,7 +283,7 @@ class ScenePrefabMixin:
         self._current_scene_path = self._previous_scene_path
         self._dirty = self._previous_scene_dirty
         self.prefab_envelope = {}
-        self._previous_scene_json = ""
+        self._previous_scene_document = None
         self._previous_scene_dirty = False
         self._previous_scene_path = None
         if not preserve_undo_history:

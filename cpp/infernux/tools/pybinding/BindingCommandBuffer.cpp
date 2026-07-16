@@ -6,7 +6,7 @@
  *
  * Exposes the deferred-recording CommandBuffer API to Python, allowing
  * users to write custom render pipelines with full control over render
- * targets, global shader parameters, and async readback.
+ * targets and global shader parameters.
  */
 
 #include <function/renderer/CommandBuffer.h>
@@ -23,33 +23,6 @@ namespace infernux
 
 void RegisterCommandBufferBindings(py::module_ &m)
 {
-    // ---- VkFormat enum subset (commonly needed for RT creation) ----
-    // NOTE: Must be registered BEFORE CommandBuffer, because VkFormat values
-    //       are used as default arguments in get_temporary_rt().
-    py::enum_<VkFormat>(m, "VkFormat", "Vulkan image format (subset for render target creation)")
-        .value("R8G8B8A8_UNORM", VK_FORMAT_R8G8B8A8_UNORM)
-        .value("R8G8B8A8_SRGB", VK_FORMAT_R8G8B8A8_SRGB)
-        .value("B8G8R8A8_UNORM", VK_FORMAT_B8G8R8A8_UNORM)
-        .value("R16G16B16A16_SFLOAT", VK_FORMAT_R16G16B16A16_SFLOAT)
-        .value("R32G32B32A32_SFLOAT", VK_FORMAT_R32G32B32A32_SFLOAT)
-        .value("R32_SFLOAT", VK_FORMAT_R32_SFLOAT)
-        .value("R8_UNORM", VK_FORMAT_R8_UNORM)
-        .value("R8G8_UNORM", VK_FORMAT_R8G8_UNORM)
-        .value("R16G16_SFLOAT", VK_FORMAT_R16G16_SFLOAT)
-        .value("A2R10G10B10_UNORM_PACK32", VK_FORMAT_A2R10G10B10_UNORM_PACK32)
-        .value("R16_SFLOAT", VK_FORMAT_R16_SFLOAT)
-        .value("D32_SFLOAT", VK_FORMAT_D32_SFLOAT)
-        .value("D24_UNORM_S8_UINT", VK_FORMAT_D24_UNORM_S8_UINT)
-        .export_values();
-
-    // ---- VkSampleCountFlagBits enum subset ----
-    py::enum_<VkSampleCountFlagBits>(m, "VkSampleCount", "Vulkan MSAA sample count")
-        .value("COUNT_1", VK_SAMPLE_COUNT_1_BIT)
-        .value("COUNT_2", VK_SAMPLE_COUNT_2_BIT)
-        .value("COUNT_4", VK_SAMPLE_COUNT_4_BIT)
-        .value("COUNT_8", VK_SAMPLE_COUNT_8_BIT)
-        .export_values();
-
     // ---- RenderTargetHandle ----
     py::class_<RenderTargetHandle>(m, "RenderTargetHandle", "Opaque handle to a temporary or persistent render target")
         .def(py::init<>())
@@ -87,7 +60,7 @@ void RegisterCommandBufferBindings(py::module_ &m)
 
         // ---- Render Target Management ----
         .def("get_temporary_rt", &CommandBuffer::GetTemporaryRT, py::arg("width"), py::arg("height"),
-             py::arg("format") = VK_FORMAT_R8G8B8A8_UNORM, py::arg("samples") = VK_SAMPLE_COUNT_1_BIT,
+             py::arg("format") = rhi::PixelFormat::RGBA8UNorm, py::arg("samples") = rhi::SampleCount::One,
              "Allocate a temporary render target (lazily created at execution time)")
         .def("release_temporary_rt", &CommandBuffer::ReleaseTemporaryRT, py::arg("handle"),
              "Mark a temporary render target for release (returned to pool at frame end)")
@@ -124,11 +97,6 @@ void RegisterCommandBufferBindings(py::module_ &m)
             },
             py::arg("name"), py::arg("data"),
             "Set a global 4x4 matrix shader parameter (list of 16 floats, column-major)")
-
-        // ---- Async Readback ----
-        .def("request_async_readback", &CommandBuffer::RequestAsyncReadback, py::arg("handle"), py::arg("callback_id"),
-             "Request an asynchronous GPU→CPU readback of a render target.\n"
-             "The result can be retrieved later via the callback ID.")
 
         // ---- Misc ----
         .def("clear", &CommandBuffer::Clear, "Discard all recorded commands (reuse the buffer)")

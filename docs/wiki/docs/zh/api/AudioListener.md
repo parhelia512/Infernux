@@ -11,7 +11,9 @@
 音频监听器组件。场景中的耳朵——通常挂在主摄像机上。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+在场景收听位置保留一个预期活动 Listener，通常位于活动 Camera 或玩家头部。Source 距离以它为基准。
 <!-- USER CONTENT END -->
 
 ## 属性
@@ -39,12 +41,20 @@
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for AudioListener
+from Infernux import AudioListener, GameObject
+
+camera_object = GameObject.find("Main Camera")
+if camera_object is not None:
+    listener = camera_object.get_component(AudioListener)
+    if listener is None:
+        listener = camera_object.add_component(AudioListener)
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [音频工作流](../learn/audio-workflow.md)
+- [AudioSource](AudioSource.md)
+- [Camera](Camera.md)
 <!-- USER CONTENT END -->

@@ -1,4 +1,6 @@
 #include <function/scene/ComponentDataStore.h>
+#include <function/scene/GameObject.h>
+#include <function/scene/Scene.h>
 #include <function/scene/Transform.h>
 #include <function/scene/TransformECSStore.h>
 #include <pybind11/numpy.h>
@@ -23,25 +25,79 @@ static std::vector<Transform *> ExtractTransforms(const py::list &pyList)
     return out;
 }
 
-// ── TransformBatchHandle (caches Transform* array) ───────────────────────
+// ── TransformBatchHandle ─────────────────────────────────────────────────
 
-/// Caches the extracted Transform* pointers so that repeated batch_read /
-/// batch_write calls with the same handle skip the O(N) pybind11 cast loop.
 struct TransformBatchHandle
 {
-    std::vector<Transform *> transforms;
+    enum class Mode : uint8_t
+    {
+        Strict,
+        Compact,
+    };
 
-    explicit TransformBatchHandle(const py::list &pyList) : transforms(ExtractTransforms(pyList))
+    std::vector<TransformECSStore::Handle> handles;
+    std::vector<uint64_t> worldIds;
+    Mode mode = Mode::Strict;
+    mutable std::vector<Transform *> resolved;
+    mutable std::vector<size_t> resolvedIndices;
+    mutable std::vector<uint8_t> validMask;
+    mutable std::vector<float> valueScratch;
+    mutable uint64_t resolvedStructuralVersion = UINT64_MAX;
+
+    explicit TransformBatchHandle(std::vector<Transform *> transforms, Mode validationMode = Mode::Strict)
+        : mode(validationMode)
+    {
+        handles.reserve(transforms.size());
+        worldIds.reserve(transforms.size());
+        resolved.reserve(transforms.size());
+        resolvedIndices.reserve(transforms.size());
+        validMask.resize(transforms.size());
+        valueScratch.reserve(transforms.size() * 4);
+        for (const Transform *transform : transforms) {
+            handles.push_back(transform->GetECSHandle());
+            worldIds.push_back(transform->GetHandle().worldId);
+        }
+    }
+
+    explicit TransformBatchHandle(const py::list &pyList, Mode validationMode = Mode::Strict)
+        : TransformBatchHandle(ExtractTransforms(pyList), validationMode)
     {
     }
 
     [[nodiscard]] size_t size() const
     {
-        return transforms.size();
+        return handles.size();
     }
-    Transform *const *data() const
+
+    [[nodiscard]] bool IsCompact() const noexcept
     {
-        return transforms.data();
+        return mode == Mode::Compact;
+    }
+
+    Transform *const *Resolve() const
+    {
+        auto &store = TransformECSStore::Instance();
+        const uint64_t structuralVersion = store.GetStructuralVersion();
+        if (resolvedStructuralVersion == structuralVersion)
+            return resolved.data();
+
+        resolved.clear();
+        resolvedIndices.clear();
+        std::fill(validMask.begin(), validMask.end(), uint8_t{0});
+        for (size_t i = 0; i < handles.size(); ++i) {
+            Transform *owner = store.IsValid(handles[i]) ? store.GetOwner(handles[i]) : nullptr;
+            const bool valid = owner && owner->GetHandle().worldId == worldIds[i];
+            if (!valid) {
+                if (mode == Mode::Strict)
+                    throw std::runtime_error("TransformBatchHandle contains a stale transform");
+                continue;
+            }
+            validMask[i] = 1;
+            resolved.push_back(owner);
+            resolvedIndices.push_back(i);
+        }
+        resolvedStructuralVersion = structuralVersion;
+        return resolved.data();
     }
 };
 
@@ -194,10 +250,19 @@ static void TransformBatchWrite(const py::list &targets, py::array data, const s
 
 // ── Handle-based batch read/write (avoids repeated ExtractTransforms) ──
 
+static py::array_t<bool> BuildBatchMask(const TransformBatchHandle &handle)
+{
+    auto mask = py::array_t<bool>(static_cast<py::ssize_t>(handle.validMask.size()));
+    auto output = mask.mutable_unchecked<1>();
+    for (size_t i = 0; i < handle.validMask.size(); ++i)
+        output(static_cast<py::ssize_t>(i)) = handle.validMask[i] != 0;
+    return mask;
+}
+
 static py::object HandleBatchRead(const TransformBatchHandle &handle, const std::string &prop)
 {
-    const size_t n = handle.size();
-    Transform *const *tPtr = handle.data();
+    Transform *const *tPtr = handle.Resolve();
+    const size_t n = handle.resolved.size();
     {
         auto it = kTransformVec3Ops.find(prop);
         if (it != kTransformVec3Ops.end()) {
@@ -207,7 +272,9 @@ static py::object HandleBatchRead(const TransformBatchHandle &handle, const std:
                 py::gil_scoped_release release;
                 (TransformECSStore::Instance().*(it->second.gather))(tPtr, outPtr, n);
             }
-            return result;
+            if (handle.IsCompact())
+                return py::make_tuple(std::move(result), BuildBatchMask(handle));
+            return std::move(result);
         }
     }
     {
@@ -219,54 +286,86 @@ static py::object HandleBatchRead(const TransformBatchHandle &handle, const std:
                 py::gil_scoped_release release;
                 (TransformECSStore::Instance().*(it->second.gather))(tPtr, outPtr, n);
             }
-            return result;
+            if (handle.IsCompact())
+                return py::make_tuple(std::move(result), BuildBatchMask(handle));
+            return std::move(result);
         }
     }
     throw py::value_error("Unknown Transform property: '" + prop + "'");
 }
 
-static void HandleBatchWrite(const TransformBatchHandle &handle, py::array data, const std::string &prop)
+static py::object HandleBatchWrite(const TransformBatchHandle &handle, py::array data, const std::string &prop)
 {
     auto fdata = py::array_t<float, py::array::c_style>::ensure(data);
     if (!fdata) {
         throw py::type_error("data must be convertible to float32 array");
     }
-    const size_t n = handle.size();
-    Transform *const *tPtr = handle.data();
+    Transform *const *tPtr = handle.Resolve();
+    const size_t n = handle.resolved.size();
+    const size_t inputRows = handle.IsCompact() ? handle.size() : n;
     {
         auto it = kTransformVec3Ops.find(prop);
         if (it != kTransformVec3Ops.end()) {
             auto buf = fdata.unchecked<2>();
-            if (static_cast<size_t>(buf.shape(0)) < n) {
+            if (static_cast<size_t>(buf.shape(0)) < inputRows) {
                 throw py::value_error("data array has fewer rows than targets");
             }
             const float *inPtr = buf.data(0, 0);
+            if (handle.IsCompact()) {
+                handle.valueScratch.resize(n * 3);
+                for (size_t i = 0; i < n; ++i) {
+                    const float *source = inPtr + handle.resolvedIndices[i] * 3;
+                    std::copy_n(source, 3, handle.valueScratch.data() + i * 3);
+                }
+                inPtr = handle.valueScratch.data();
+            }
             {
                 py::gil_scoped_release release;
                 (TransformECSStore::Instance().*(it->second.scatter))(tPtr, inPtr, n);
             }
-            return;
+            if (handle.IsCompact())
+                return BuildBatchMask(handle);
+            return py::none();
         }
     }
     {
         auto it = kTransformQuatOps.find(prop);
         if (it != kTransformQuatOps.end()) {
             auto buf = fdata.unchecked<2>();
-            if (static_cast<size_t>(buf.shape(0)) < n) {
+            if (static_cast<size_t>(buf.shape(0)) < inputRows) {
                 throw py::value_error("data array has fewer rows than targets");
             }
             const float *inPtr = buf.data(0, 0);
+            if (handle.IsCompact()) {
+                handle.valueScratch.resize(n * 4);
+                for (size_t i = 0; i < n; ++i) {
+                    const float *source = inPtr + handle.resolvedIndices[i] * 4;
+                    std::copy_n(source, 4, handle.valueScratch.data() + i * 4);
+                }
+                inPtr = handle.valueScratch.data();
+            }
             {
                 py::gil_scoped_release release;
                 (TransformECSStore::Instance().*(it->second.scatter))(tPtr, inPtr, n);
             }
-            return;
+            if (handle.IsCompact())
+                return BuildBatchMask(handle);
+            return py::none();
         }
     }
     throw py::value_error("Unknown Transform property: '" + prop + "'");
 }
 
 // ── ComponentDataStore bindings ───────────────────────────────────────────
+
+static ComponentDataStore::DataType CDS_ParseDataType(int typeCode)
+{
+    if (typeCode < static_cast<int>(ComponentDataStore::DataType::Float64) ||
+        typeCode > static_cast<int>(ComponentDataStore::DataType::Vec4)) {
+        throw py::value_error("Invalid ComponentDataStore type code");
+    }
+    return static_cast<ComponentDataStore::DataType>(typeCode);
+}
 
 static uint32_t CDS_RegisterClass(const std::string &name)
 {
@@ -275,65 +374,94 @@ static uint32_t CDS_RegisterClass(const std::string &name)
 
 static uint32_t CDS_RegisterField(uint32_t classId, const std::string &name, int typeCode)
 {
-    return ComponentDataStore::Instance().RegisterField(classId, name,
-                                                        static_cast<ComponentDataStore::DataType>(typeCode));
+    return ComponentDataStore::Instance().RegisterField(classId, name, CDS_ParseDataType(typeCode));
 }
 
-static uint32_t CDS_AllocSlot(uint32_t classId)
+static ComponentDataStore::SlotHandle CDS_ParseHandle(py::handle value)
 {
-    return ComponentDataStore::Instance().AllocateSlot(classId);
+    if (!py::isinstance<py::tuple>(value) && !py::isinstance<py::list>(value))
+        throw py::type_error("CDS slot handle must be a two-item (index, generation) sequence");
+    const py::sequence sequence = py::reinterpret_borrow<py::sequence>(value);
+    if (sequence.size() != 2)
+        throw py::value_error("CDS slot handle must contain exactly index and generation");
+    return {sequence[0].cast<uint32_t>(), sequence[1].cast<uint32_t>()};
 }
 
-static void CDS_FreeSlot(uint32_t classId, uint32_t slot)
+static py::tuple CDS_AllocSlot(uint32_t classId)
 {
-    ComponentDataStore::Instance().ReleaseSlot(classId, slot);
+    const auto handle = ComponentDataStore::Instance().AllocateSlot(classId);
+    return py::make_tuple(handle.index, handle.generation);
+}
+
+static void CDS_FreeSlot(uint32_t classId, py::handle handle)
+{
+    ComponentDataStore::Instance().ReleaseSlot(classId, CDS_ParseHandle(handle));
+}
+
+static void CDS_ReserveClass(uint32_t classId, size_t capacity)
+{
+    ComponentDataStore::Instance().ReserveClass(classId, capacity);
+}
+
+static std::vector<ComponentDataStore::SlotHandle>
+CDS_ParseHandles(const py::array_t<uint32_t, py::array::c_style> &handles)
+{
+    if (handles.ndim() != 2 || handles.shape(1) != 2)
+        throw py::value_error("CDS handles must have shape (N, 2)");
+    const auto input = handles.unchecked<2>();
+    std::vector<ComponentDataStore::SlotHandle> parsed(static_cast<size_t>(input.shape(0)));
+    for (py::ssize_t i = 0; i < input.shape(0); ++i)
+        parsed[static_cast<size_t>(i)] = {input(i, 0), input(i, 1)};
+    return parsed;
 }
 
 // ── per-element accessors ────────────────────────────────────────────────
 
-static py::object CDS_Get(uint32_t classId, uint32_t fieldId, uint32_t slot, int typeCode)
+static py::object CDS_Get(uint32_t classId, uint32_t fieldId, py::handle slot, int typeCode)
 {
     auto &store = ComponentDataStore::Instance();
-    auto type = static_cast<ComponentDataStore::DataType>(typeCode);
+    auto type = CDS_ParseDataType(typeCode);
+    const auto handle = CDS_ParseHandle(slot);
     switch (type) {
     case ComponentDataStore::DataType::Float64:
-        return py::cast(store.GetFloat(classId, fieldId, slot));
+        return py::cast(store.GetFloat(classId, fieldId, handle));
     case ComponentDataStore::DataType::Int64:
-        return py::cast(store.GetInt(classId, fieldId, slot));
+        return py::cast(store.GetInt(classId, fieldId, handle));
     case ComponentDataStore::DataType::Bool:
-        return py::cast(store.GetBool(classId, fieldId, slot));
+        return py::cast(store.GetBool(classId, fieldId, handle));
     case ComponentDataStore::DataType::Vec2: {
         float v[2];
-        store.GetVec2(classId, fieldId, slot, v);
+        store.GetVec2(classId, fieldId, handle, v);
         return py::make_tuple(v[0], v[1]);
     }
     case ComponentDataStore::DataType::Vec3: {
         float v[3];
-        store.GetVec3(classId, fieldId, slot, v);
+        store.GetVec3(classId, fieldId, handle, v);
         return py::make_tuple(v[0], v[1], v[2]);
     }
     case ComponentDataStore::DataType::Vec4: {
         float v[4];
-        store.GetVec4(classId, fieldId, slot, v);
+        store.GetVec4(classId, fieldId, handle, v);
         return py::make_tuple(v[0], v[1], v[2], v[3]);
     }
     }
-    return py::none();
+    throw py::value_error("Invalid ComponentDataStore type code");
 }
 
-static void CDS_Set(uint32_t classId, uint32_t fieldId, uint32_t slot, int typeCode, py::object value)
+static void CDS_Set(uint32_t classId, uint32_t fieldId, py::handle slot, int typeCode, py::object value)
 {
     auto &store = ComponentDataStore::Instance();
-    auto type = static_cast<ComponentDataStore::DataType>(typeCode);
+    auto type = CDS_ParseDataType(typeCode);
+    const auto handle = CDS_ParseHandle(slot);
     switch (type) {
     case ComponentDataStore::DataType::Float64:
-        store.SetFloat(classId, fieldId, slot, value.cast<double>());
+        store.SetFloat(classId, fieldId, handle, value.cast<double>());
         break;
     case ComponentDataStore::DataType::Int64:
-        store.SetInt(classId, fieldId, slot, value.cast<int64_t>());
+        store.SetInt(classId, fieldId, handle, value.cast<int64_t>());
         break;
     case ComponentDataStore::DataType::Bool:
-        store.SetBool(classId, fieldId, slot, value.cast<bool>());
+        store.SetBool(classId, fieldId, handle, value.cast<bool>());
         break;
     case ComponentDataStore::DataType::Vec2: {
         // Accept anything with .x, .y (Vector2, tuple)
@@ -346,7 +474,7 @@ static void CDS_Set(uint32_t classId, uint32_t fieldId, uint32_t slot, int typeC
             v[0] = t[0].cast<float>();
             v[1] = t[1].cast<float>();
         }
-        store.SetVec2(classId, fieldId, slot, v);
+        store.SetVec2(classId, fieldId, handle, v);
         break;
     }
     case ComponentDataStore::DataType::Vec3: {
@@ -361,7 +489,7 @@ static void CDS_Set(uint32_t classId, uint32_t fieldId, uint32_t slot, int typeC
             v[1] = t[1].cast<float>();
             v[2] = t[2].cast<float>();
         }
-        store.SetVec3(classId, fieldId, slot, v);
+        store.SetVec3(classId, fieldId, handle, v);
         break;
     }
     case ComponentDataStore::DataType::Vec4: {
@@ -378,7 +506,7 @@ static void CDS_Set(uint32_t classId, uint32_t fieldId, uint32_t slot, int typeC
             v[2] = t[2].cast<float>();
             v[3] = t[3].cast<float>();
         }
-        store.SetVec4(classId, fieldId, slot, v);
+        store.SetVec4(classId, fieldId, handle, v);
         break;
     }
     }
@@ -390,82 +518,94 @@ static py::array CDS_BatchGather(uint32_t classId, uint32_t fieldId, int typeCod
                                  py::array_t<uint32_t, py::array::c_style> slots)
 {
     auto &store = ComponentDataStore::Instance();
-    auto type = static_cast<ComponentDataStore::DataType>(typeCode);
-    auto slotBuf = slots.unchecked<1>();
-    const size_t n = static_cast<size_t>(slotBuf.shape(0));
+    auto type = CDS_ParseDataType(typeCode);
+    const auto handles = CDS_ParseHandles(slots);
+    const size_t n = handles.size();
 
     switch (type) {
     case ComponentDataStore::DataType::Float64: {
         auto out = py::array_t<double>({static_cast<py::ssize_t>(n)});
-        store.GatherFloat(classId, fieldId, slotBuf.data(0), n, out.mutable_data());
+        store.GatherFloat(classId, fieldId, handles.data(), n, out.mutable_data());
         return out;
     }
     case ComponentDataStore::DataType::Int64: {
         auto out = py::array_t<int64_t>({static_cast<py::ssize_t>(n)});
-        store.GatherInt(classId, fieldId, slotBuf.data(0), n, out.mutable_data());
+        store.GatherInt(classId, fieldId, handles.data(), n, out.mutable_data());
         return out;
     }
     case ComponentDataStore::DataType::Bool: {
         auto out = py::array_t<uint8_t>({static_cast<py::ssize_t>(n)});
-        store.GatherBool(classId, fieldId, slotBuf.data(0), n, out.mutable_data());
+        store.GatherBool(classId, fieldId, handles.data(), n, out.mutable_data());
         return out;
     }
     case ComponentDataStore::DataType::Vec2: {
         auto out = py::array_t<float>({static_cast<py::ssize_t>(n), py::ssize_t(2)});
-        store.GatherVec2(classId, fieldId, slotBuf.data(0), n, out.mutable_data());
+        store.GatherVec2(classId, fieldId, handles.data(), n, out.mutable_data());
         return out;
     }
     case ComponentDataStore::DataType::Vec3: {
         auto out = py::array_t<float>({static_cast<py::ssize_t>(n), py::ssize_t(3)});
-        store.GatherVec3(classId, fieldId, slotBuf.data(0), n, out.mutable_data());
+        store.GatherVec3(classId, fieldId, handles.data(), n, out.mutable_data());
         return out;
     }
     case ComponentDataStore::DataType::Vec4: {
         auto out = py::array_t<float>({static_cast<py::ssize_t>(n), py::ssize_t(4)});
-        store.GatherVec4(classId, fieldId, slotBuf.data(0), n, out.mutable_data());
+        store.GatherVec4(classId, fieldId, handles.data(), n, out.mutable_data());
         return out;
     }
     }
-    return py::array();
+    throw py::value_error("Invalid ComponentDataStore type code");
 }
 
 static void CDS_BatchScatter(uint32_t classId, uint32_t fieldId, int typeCode,
                              py::array_t<uint32_t, py::array::c_style> slots, py::array data)
 {
     auto &store = ComponentDataStore::Instance();
-    auto type = static_cast<ComponentDataStore::DataType>(typeCode);
-    auto slotBuf = slots.unchecked<1>();
-    const size_t n = static_cast<size_t>(slotBuf.shape(0));
+    auto type = CDS_ParseDataType(typeCode);
+    const auto handles = CDS_ParseHandles(slots);
+    const size_t n = handles.size();
 
     switch (type) {
     case ComponentDataStore::DataType::Float64: {
         auto d = py::array_t<double, py::array::c_style>::ensure(data);
-        store.ScatterFloat(classId, fieldId, slotBuf.data(0), n, d.data());
+        if (!d || d.ndim() != 1 || static_cast<size_t>(d.shape(0)) != n)
+            throw py::value_error("CDS Float64 scatter data must have shape (N,)");
+        store.ScatterFloat(classId, fieldId, handles.data(), n, d.data());
         break;
     }
     case ComponentDataStore::DataType::Int64: {
         auto d = py::array_t<int64_t, py::array::c_style>::ensure(data);
-        store.ScatterInt(classId, fieldId, slotBuf.data(0), n, d.data());
+        if (!d || d.ndim() != 1 || static_cast<size_t>(d.shape(0)) != n)
+            throw py::value_error("CDS Int64 scatter data must have shape (N,)");
+        store.ScatterInt(classId, fieldId, handles.data(), n, d.data());
         break;
     }
     case ComponentDataStore::DataType::Bool: {
         auto d = py::array_t<uint8_t, py::array::c_style>::ensure(data);
-        store.ScatterBool(classId, fieldId, slotBuf.data(0), n, d.data());
+        if (!d || d.ndim() != 1 || static_cast<size_t>(d.shape(0)) != n)
+            throw py::value_error("CDS Bool scatter data must have shape (N,)");
+        store.ScatterBool(classId, fieldId, handles.data(), n, d.data());
         break;
     }
     case ComponentDataStore::DataType::Vec2: {
         auto d = py::array_t<float, py::array::c_style>::ensure(data);
-        store.ScatterVec2(classId, fieldId, slotBuf.data(0), n, d.data());
+        if (!d || d.ndim() != 2 || static_cast<size_t>(d.shape(0)) != n || d.shape(1) != 2)
+            throw py::value_error("CDS Vec2 scatter data must have shape (N, 2)");
+        store.ScatterVec2(classId, fieldId, handles.data(), n, d.data());
         break;
     }
     case ComponentDataStore::DataType::Vec3: {
         auto d = py::array_t<float, py::array::c_style>::ensure(data);
-        store.ScatterVec3(classId, fieldId, slotBuf.data(0), n, d.data());
+        if (!d || d.ndim() != 2 || static_cast<size_t>(d.shape(0)) != n || d.shape(1) != 3)
+            throw py::value_error("CDS Vec3 scatter data must have shape (N, 3)");
+        store.ScatterVec3(classId, fieldId, handles.data(), n, d.data());
         break;
     }
     case ComponentDataStore::DataType::Vec4: {
         auto d = py::array_t<float, py::array::c_style>::ensure(data);
-        store.ScatterVec4(classId, fieldId, slotBuf.data(0), n, d.data());
+        if (!d || d.ndim() != 2 || static_cast<size_t>(d.shape(0)) != n || d.shape(1) != 4)
+            throw py::value_error("CDS Vec4 scatter data must have shape (N, 4)");
+        store.ScatterVec4(classId, fieldId, handles.data(), n, d.data());
         break;
     }
     }
@@ -487,22 +627,50 @@ void RegisterBatchBindings(py::module_ &m)
           "Write a numpy array back to a Transform property on all targets.\n"
           "data.shape[0] must be >= len(targets).");
 
-    // ── TransformBatchHandle (cached Transform* pointers) ──
+    py::enum_<TransformBatchHandle::Mode>(m, "TransformBatchMode")
+        .value("STRICT", TransformBatchHandle::Mode::Strict)
+        .value("COMPACT", TransformBatchHandle::Mode::Compact);
+
     py::class_<TransformBatchHandle>(m, "TransformBatchHandle")
-        .def(py::init<const py::list &>(), py::arg("targets"))
-        .def("__len__", &TransformBatchHandle::size);
+        .def(py::init<const py::list &, TransformBatchHandle::Mode>(), py::arg("targets"),
+             py::arg("mode") = TransformBatchHandle::Mode::Strict)
+        .def("__len__", &TransformBatchHandle::size)
+        .def_property_readonly("is_compact", &TransformBatchHandle::IsCompact);
+
+    m.def(
+        "_create_scene_transform_batch_handle",
+        [](Scene &scene, const std::string &namePrefix, TransformBatchHandle::Mode mode) {
+            std::vector<Transform *> transforms;
+            const auto objects = scene.GetAllObjects();
+            transforms.reserve(objects.size());
+            for (GameObject *object : objects) {
+                if (!object || (!namePrefix.empty() && object->GetName().rfind(namePrefix, 0) != 0))
+                    continue;
+                transforms.push_back(object->GetTransform());
+            }
+            return TransformBatchHandle(std::move(transforms), mode);
+        },
+        py::arg("scene"), py::arg("name_prefix") = "", py::arg("mode") = TransformBatchHandle::Mode::Strict,
+        "Build a Transform batch in native code without materializing GameObjects in Python.");
 
     m.def("_transform_batch_read", &HandleBatchRead, py::arg("handle"), py::arg("property"),
-          "Like _transform_batch_read but uses a cached TransformBatchHandle.");
+          "Read through generational handles; compact mode returns (values, valid_mask).");
 
     m.def("_transform_batch_write", &HandleBatchWrite, py::arg("handle"), py::arg("data"), py::arg("property"),
-          "Like _transform_batch_write but uses a cached TransformBatchHandle.");
+          "Write through generational handles; compact mode returns valid_mask.");
 
     // ── ComponentDataStore ──
     m.def("_cds_register_class", &CDS_RegisterClass, py::arg("name"));
     m.def("_cds_register_field", &CDS_RegisterField, py::arg("class_id"), py::arg("name"), py::arg("type_code"));
     m.def("_cds_alloc", &CDS_AllocSlot, py::arg("class_id"));
     m.def("_cds_free", &CDS_FreeSlot, py::arg("class_id"), py::arg("slot"));
+    m.def("_cds_reserve", &CDS_ReserveClass, py::arg("class_id"), py::arg("capacity"));
+    m.def(
+        "_cds_capacity", [](uint32_t classId) { return ComponentDataStore::Instance().GetClassCapacity(classId); },
+        py::arg("class_id"));
+    m.def(
+        "_cds_alive_count", [](uint32_t classId) { return ComponentDataStore::Instance().GetClassAliveCount(classId); },
+        py::arg("class_id"));
     m.def("_cds_get", &CDS_Get, py::arg("class_id"), py::arg("field_id"), py::arg("slot"), py::arg("type_code"));
     m.def("_cds_set", &CDS_Set, py::arg("class_id"), py::arg("field_id"), py::arg("slot"), py::arg("type_code"),
           py::arg("value"));
@@ -510,7 +678,6 @@ void RegisterBatchBindings(py::module_ &m)
           py::arg("slots"));
     m.def("_cds_batch_scatter", &CDS_BatchScatter, py::arg("class_id"), py::arg("field_id"), py::arg("type_code"),
           py::arg("slots"), py::arg("data"));
-    m.def("_cds_clear", []() { ComponentDataStore::Instance().Clear(); });
 }
 
 } // namespace infernux

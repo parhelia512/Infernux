@@ -9,7 +9,9 @@
 场景层级中具有组件的游戏对象。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+GameObject 拥有 Transform 与一组组件。注意 `active_self` 与派生状态 `active_in_hierarchy` 的区别，并优先按类型查找组件。
 <!-- USER CONTENT END -->
 
 ## 属性
@@ -26,6 +28,7 @@
 | active_self | `bool` | 此对象自身是否处于活动状态。active 的别名。 *(只读)* |
 | active_in_hierarchy | `bool` | 此对象在层级中是否处于活动状态。 *(只读)* |
 | id | `int` | 唯一对象标识符。 *(只读)* |
+| handle | `ObjectHandle` |  *(只读)* |
 | is_prefab_instance | `bool` |  *(只读)* |
 | game_object | `Optional[GameObject]` |  *(只读)* |
 | transform | `Transform` | 获取 Transform 组件。 *(只读)* |
@@ -64,7 +67,9 @@
 | `get_component_in_children(component_type: Any, include_inactive: bool = False) → Any` |  |
 | `get_component_in_parent(component_type: Any, include_inactive: bool = False) → Any` |  |
 | `serialize() → str` | 将 GameObject 序列化为 JSON 字符串。 |
-| `deserialize(json_str: str) → None` | 从 JSON 字符串反序列化 GameObject。 |
+| `deserialize(json_str: str) → bool` | 从 JSON 字符串反序列化 GameObject。 |
+| `serialize_document() → Dict[str, Any]` |  |
+| `deserialize_document(document: Dict[str, Any]) → bool` |  |
 
 <!-- USER CONTENT START --> public_methods
 
@@ -88,12 +93,21 @@
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for GameObject
+from Infernux import GameObject, Rigidbody
+
+player = GameObject.find("Player")
+if player is not None and player.active_in_hierarchy:
+    body = player.get_component(Rigidbody)
+    if body is not None:
+        body.use_gravity = True
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [场景与对象](../manual/scenes-and-objects.md)
+- [第一个组件](../learn/first-component.md)
+- [Transform](Transform.md)
+- [InxComponent](InxComponent.md)
 <!-- USER CONTENT END -->

@@ -153,26 +153,30 @@ struct UniformBufferObject
  * Represents a single draw call with its own material, transform,
  * and per-object mesh buffer references.
  *
- * Each DrawCall carries non-owning pointers to the
- * object's vertex/index data. The renderer creates persistent per-object
- * GPU buffers, eliminating the per-frame combined-buffer copy.
+ * Each DrawCall keeps its material alive while carrying non-owning pointers
+ * to the object's vertex/index data. The
+ * renderer creates persistent
+ * per-object GPU buffers, eliminating the per-frame combined-buffer copy.
  */
 struct DrawCall
 {
-    uint32_t indexStart = 0;         // Offset into index buffer
-    uint32_t indexCount = 0;         // Number of indices to draw
-    int32_t vertexStart = 0;         // Base vertex offset (for submesh rendering)
-    glm::mat4 worldMatrix{1.0f};     // Object's world transform matrix
-    InxMaterial *material = nullptr; // Non-owning pointer (lifetime managed by MeshRenderer/AssetRegistry)
-    uint64_t objectId = 0;           // GameObject ID for buffer lookup
-    bool frustumVisible = true;      // Whether object passed main-camera frustum culling
-    AABB worldBounds;                // World-space bounding box for shadow cascade culling
+    uint32_t indexStart = 0;               // Offset into index buffer
+    uint32_t indexCount = 0;               // Number of indices to draw
+    int32_t vertexStart = 0;               // Base vertex offset (for submesh rendering)
+    glm::mat4 worldMatrix{1.0f};           // Object's world transform matrix
+    std::shared_ptr<InxMaterial> material; // Owns the material for the lifetime of cached/render-thread draw calls
+    uint64_t objectId = 0;                 // GameObject ID for buffer lookup
+    bool frustumVisible = true;            // Whether object passed main-camera frustum culling
+    bool castsShadows = true;              // Whether the source renderer participates in shadow passes
+    AABB worldBounds;                      // World-space bounding box for shadow cascade culling
 
     // Per-object mesh data pointers
     // Non-owning references to MeshRenderer's persistent vertex/index data.
     // Used by the renderer to create/update per-object GPU buffers.
     const std::vector<Vertex> *meshVertices = nullptr;
     const std::vector<uint32_t> *meshIndices = nullptr;
+    std::string meshAssetGuid;
+    uint64_t meshRuntimeVersion = 0;
 
     // Optional GPU skinning palette. When present, vertex data is the bind-pose
     // skinned mesh stream and the vertex shader applies these matrices.
@@ -182,6 +186,10 @@ struct DrawCall
     // When true, forces GPU buffer re-upload even if vertex/index count hasn't
     // changed (e.g. vertex colour change for gizmo highlight).
     bool forceBufferUpdate = false;
+
+    // Transparent particles preserve their sorted instance order while sharing
+    // one mesh/material draw. Ordinary transparent draw calls remain unbatched.
+    bool allowTransparentInstancing = false;
 };
 
 /**

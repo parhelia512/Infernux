@@ -1,6 +1,9 @@
 #include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <function/resources/InxMaterial/InxMaterial.h>
 #include <function/resources/InxMesh/InxMesh.h>
+#include <function/resources/InxSkinnedMesh/InxSkinnedMesh.h>
+#include <function/resources/InxTexture/InxTexture.h>
+#include <function/resources/PhysicMaterial/PhysicMaterial.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -12,6 +15,24 @@ namespace infernux
 
 void RegisterAssetRegistryBindings(py::module_ &m)
 {
+    py::class_<AssetLoadTicket, std::shared_ptr<AssetLoadTicket>>(m, "AssetLoadTicket")
+        .def_property_readonly("guid", &AssetLoadTicket::GetGuid)
+        .def_property_readonly("resource_type", &AssetLoadTicket::GetResourceType)
+        .def_property_readonly("complete", &AssetLoadTicket::IsComplete)
+        .def_property_readonly("committed", &AssetLoadTicket::IsCommitted)
+        .def_property_readonly("produced_on_worker", &AssetLoadTicket::WasProducedOnWorker);
+
+    py::class_<AssetResidencyRecord>(m, "AssetResidencyRecord")
+        .def_readonly("guid", &AssetResidencyRecord::guid)
+        .def_readonly("resource_type", &AssetResidencyRecord::type)
+        .def_readonly("runtime_type_name", &AssetResidencyRecord::runtimeTypeName)
+        .def_readonly("runtime_version", &AssetResidencyRecord::runtimeVersion)
+        .def_readonly("cpu_bytes", &AssetResidencyRecord::cpuBytes)
+        .def_readonly("last_access_serial", &AssetResidencyRecord::lastAccessSerial)
+        .def_readonly("explicit_pin_count", &AssetResidencyRecord::explicitPinCount)
+        .def_readonly("external_reference_count", &AssetResidencyRecord::externalReferenceCount)
+        .def_readonly("evictable", &AssetResidencyRecord::evictable);
+
     // ── InxMesh — read-only runtime mesh asset ───────────────────────────
     py::class_<InxMesh, std::shared_ptr<InxMesh>>(m, "InxMesh")
         .def_property_readonly("name", &InxMesh::GetName, "Mesh asset name")
@@ -23,6 +44,29 @@ void RegisterAssetRegistryBindings(py::module_ &m)
         .def_property_readonly("material_slot_count", &InxMesh::GetMaterialSlotCount, "Number of material slots")
         .def_property_readonly("material_slot_names", &InxMesh::GetMaterialSlotNames,
                                "Material slot names from model file")
+        .def_property_readonly("has_skinned_data", &InxMesh::HasSkinnedData,
+                               "Whether this Mesh carries immutable skin/animation data")
+        .def_property_readonly("skinned_bone_count",
+                               [](const InxMesh &mesh) {
+                                   const auto &skinned = mesh.GetSkinnedData();
+                                   return skinned ? skinned->bones.size() : size_t{0};
+                               })
+        .def_property_readonly("skinned_animation_count",
+                               [](const InxMesh &mesh) {
+                                   const auto &skinned = mesh.GetSkinnedData();
+                                   return skinned ? skinned->animations.size() : size_t{0};
+                               })
+        .def_property_readonly("skinned_animation_names",
+                               [](const InxMesh &mesh) {
+                                   std::vector<std::string> names;
+                                   const auto &skinned = mesh.GetSkinnedData();
+                                   if (!skinned)
+                                       return names;
+                                   names.reserve(skinned->animations.size());
+                                   for (const auto &animation : skinned->animations)
+                                       names.push_back(animation.name);
+                                   return names;
+                               })
         .def(
             "get_material_slot_data",
             [](const InxMesh &self) -> py::list {
@@ -69,6 +113,37 @@ void RegisterAssetRegistryBindings(py::module_ &m)
                    std::to_string(self.GetSubMeshCount()) + " submesh(es)>";
         });
 
+    py::class_<InxTexture, std::shared_ptr<InxTexture>>(m, "InxTexture")
+        .def_property_readonly("name", &InxTexture::GetName)
+        .def_property_readonly("guid", &InxTexture::GetGuid)
+        .def_property_readonly("file_path", &InxTexture::GetFilePath)
+        .def_property_readonly("mip_count",
+                               [](const InxTexture &self) {
+                                   const auto &cpu = self.GetCpuData();
+                                   return cpu ? cpu->mipLevels.size() : size_t{0};
+                               })
+        .def_property_readonly("pixel_width",
+                               [](const InxTexture &self) {
+                                   const auto &cpu = self.GetCpuData();
+                                   return cpu && !cpu->mipLevels.empty() ? cpu->mipLevels.front().width : 0U;
+                               })
+        .def_property_readonly("pixel_height",
+                               [](const InxTexture &self) {
+                                   const auto &cpu = self.GetCpuData();
+                                   return cpu && !cpu->mipLevels.empty() ? cpu->mipLevels.front().height : 0U;
+                               })
+        .def_property_readonly("cpu_byte_size",
+                               [](const InxTexture &self) {
+                                   const auto &cpu = self.GetCpuData();
+                                   return cpu ? cpu->bytes.size() : size_t{0};
+                               })
+        .def_property_readonly("pixel_storage", [](const InxTexture &self) {
+            const auto &cpu = self.GetCpuData();
+            if (!cpu)
+                return std::string{};
+            return std::string(cpu->storage == TexturePixelStorage::Rgba8 ? "rgba8" : "rgba32_float");
+        });
+
     // ── AssetRegistry — unified asset cache (singleton) ─────────────────
     py::class_<AssetRegistry, std::unique_ptr<AssetRegistry, py::nodelete>>(m, "AssetRegistry")
         .def_static("instance", &AssetRegistry::Instance, py::return_value_policy::reference,
@@ -99,6 +174,23 @@ void RegisterAssetRegistryBindings(py::module_ &m)
         .def("load_builtin_material_from_file", &AssetRegistry::LoadBuiltinMaterialFromFile, py::arg("key"),
              py::arg("mat_file_path"), "Load/replace a builtin material from a .mat file (e.g. key='DefaultLit')")
 
+        .def(
+            "load_physic_material",
+            [](AssetRegistry &self, const std::string &path) {
+                return self.LoadAssetByPath<PhysicMaterial>(path, ResourceType::PhysicMaterial);
+            },
+            py::arg("path"), "Load a PhysicMaterial by file path")
+        .def(
+            "load_physic_material_by_guid",
+            [](AssetRegistry &self, const std::string &guid) {
+                return self.LoadAsset<PhysicMaterial>(guid, ResourceType::PhysicMaterial);
+            },
+            py::arg("guid"), "Load a PhysicMaterial by GUID")
+        .def(
+            "get_physic_material",
+            [](AssetRegistry &self, const std::string &guid) { return self.GetAsset<PhysicMaterial>(guid); },
+            py::arg("guid"), "Get a cached PhysicMaterial by GUID")
+
         // Mesh convenience wrappers
         .def(
             "load_mesh",
@@ -115,6 +207,28 @@ void RegisterAssetRegistryBindings(py::module_ &m)
         .def(
             "get_mesh", [](AssetRegistry &self, const std::string &guid) { return self.GetAsset<InxMesh>(guid); },
             py::arg("guid"), "Get a cached mesh by GUID (returns None if not loaded)")
+        .def(
+            "begin_load_mesh_by_guid",
+            [](AssetRegistry &self, const std::string &guid) { return self.BeginLoadAsset(guid, ResourceType::Mesh); },
+            py::arg("guid"), "Schedule Assimp CPU mesh preparation on JobSystem")
+        .def(
+            "load_texture_by_guid",
+            [](AssetRegistry &self, const std::string &guid) {
+                return self.LoadAsset<InxTexture>(guid, ResourceType::Texture);
+            },
+            py::arg("guid"), "Load a decoded texture CPU artifact by GUID")
+        .def(
+            "get_texture_asset",
+            [](AssetRegistry &self, const std::string &guid) { return self.GetAsset<InxTexture>(guid); },
+            py::arg("guid"), "Get a cached decoded texture asset by GUID")
+        .def(
+            "begin_load_texture_by_guid",
+            [](AssetRegistry &self, const std::string &guid) {
+                return self.BeginLoadAsset(guid, ResourceType::Texture);
+            },
+            py::arg("guid"), "Schedule texture artifact load/decode on JobSystem")
+        .def("try_commit_asset_load", &AssetRegistry::TryCommitAssetLoad, py::arg("ticket"),
+             "Publish a completed typed CPU payload; false means still pending")
 
         // Hot-reload / invalidation
         .def("reload_asset", &AssetRegistry::ReloadAsset, py::arg("guid"),
@@ -124,16 +238,23 @@ void RegisterAssetRegistryBindings(py::module_ &m)
         .def("remove_asset", &AssetRegistry::RemoveAsset, py::arg("guid"),
              "Fully remove an asset record (e.g. when file is deleted)")
 
-        // File-event hooks
-        .def("on_asset_modified", &AssetRegistry::OnAssetModified, py::arg("path"),
-             "Notify that a file was modified — reloads if cached")
-        .def("on_asset_moved", &AssetRegistry::OnAssetMoved, py::arg("old_path"), py::arg("new_path"),
-             "Notify that a file was moved/renamed")
-        .def("on_asset_deleted", &AssetRegistry::OnAssetDeleted, py::arg("path"),
-             "Notify that a file was deleted — evicts from cache")
+        .def("update_loaded_asset_path", &AssetRegistry::UpdateLoadedAssetPath, py::arg("old_path"),
+             py::arg("new_path"), "Patch path-bearing cached state after a GUID-stable move")
 
         // Queries
-        .def("is_loaded", &AssetRegistry::IsLoaded, py::arg("guid"), "Check if an asset is currently cached");
+        .def("is_loaded", &AssetRegistry::IsLoaded, py::arg("guid"), "Check if an asset is currently cached")
+        .def("get_asset_version", &AssetRegistry::GetAssetVersion, py::arg("guid"),
+             "Get the last successfully published runtime generation, or zero before first publication")
+        .def("get_asset_runtime_type_name", &AssetRegistry::GetAssetRuntimeTypeName, py::arg("guid"),
+             "Get the validated native payload type name, or an empty string")
+        .def("get_asset_residency", &AssetRegistry::GetAssetResidency, py::arg("guid"))
+        .def("get_all_asset_residency", &AssetRegistry::GetAllAssetResidency)
+        .def_property("cpu_budget_bytes", &AssetRegistry::GetCpuBudgetBytes, &AssetRegistry::SetCpuBudgetBytes)
+        .def_property_readonly("total_cpu_bytes", &AssetRegistry::GetTotalCpuBytes)
+        .def_property_readonly("cpu_eviction_count", &AssetRegistry::GetCpuEvictionCount)
+        .def("trim_cpu_budget", &AssetRegistry::TrimCpuBudget)
+        .def("pin_asset", &AssetRegistry::PinAsset, py::arg("guid"))
+        .def("unpin_asset", &AssetRegistry::UnpinAsset, py::arg("guid"));
 }
 
 } // namespace infernux

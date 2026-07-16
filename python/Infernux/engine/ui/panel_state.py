@@ -52,8 +52,8 @@ def save() -> None:
         snapshot = dict(_state)
     try:
         os.makedirs(os.path.dirname(_state_path), exist_ok=True)
-        with open(_state_path, "w", encoding="utf-8") as f:
-            json.dump(snapshot, f, indent=2, ensure_ascii=False)
-    except OSError as _exc:
+        from Infernux.core.document_store import write_document_text
+        write_document_text(_state_path, json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n")
+    except (OSError, RuntimeError) as _exc:
         Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
         pass

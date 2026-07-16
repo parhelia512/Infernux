@@ -14,10 +14,12 @@
  */
 
 #include "Rigidbody.h"
+#include "ComponentDocumentValidation.h"
 
 #include "Collider.h"
 #include "ComponentFactory.h"
 #include "GameObject.h"
+#include "MeshCollider.h"
 #include "SceneManager.h"
 #include "Transform.h"
 #include "physics/PhysicsECSStore.h"
@@ -26,8 +28,9 @@
 #include <core/log/InxLog.h>
 
 #include <algorithm>
+#include <cmath>
 #include <nlohmann/json.hpp>
-#include <unordered_set>
+#include <stdexcept>
 
 namespace infernux
 {
@@ -35,49 +38,20 @@ namespace infernux
 namespace
 {
 
-static std::vector<uint32_t> CollectUniqueBodyIds(GameObject *go)
-{
-    std::vector<uint32_t> result;
-    if (!go) {
-        return result;
-    }
-
-    std::unordered_set<uint32_t> seen;
-    auto colliders = go->GetComponents<Collider>();
-    result.reserve(colliders.size());
-    for (auto *col : colliders) {
-        if (!col) {
-            continue;
-        }
-
-        const uint32_t bodyId = col->GetBodyId();
-        if (bodyId == 0xFFFFFFFF || !seen.insert(bodyId).second) {
-            continue;
-        }
-        result.push_back(bodyId);
-    }
-    return result;
-}
-
 static Collider *GetPrimaryBodyCollider(GameObject *go)
 {
-    if (!go) {
+    if (!go)
         return nullptr;
-    }
 
-    std::unordered_set<uint32_t> seen;
-    auto colliders = go->GetComponents<Collider>();
-    for (auto *col : colliders) {
-        if (!col) {
-            continue;
-        }
-
-        const uint32_t bodyId = col->GetBodyId();
-        if (bodyId != 0xFFFFFFFF && seen.insert(bodyId).second) {
+    const uint32_t bodyId = Collider::GetSharedBodyId(go);
+    if (bodyId == 0xFFFFFFFF)
+        return nullptr;
+    for (const auto &component : go->GetAllComponents()) {
+        auto *col = dynamic_cast<Collider *>(component.get());
+        if (col && col->GetBodyId() == bodyId)
             return col;
-        }
     }
-    return nullptr;
+    throw std::logic_error("Physics actor body exists without an owning collider");
 }
 
 /// Returns the first valid body ID for this game object, or 0xFFFFFFFF.
@@ -91,28 +65,42 @@ static int MapCollisionDetectionModeToMotionQuality(int mode, bool isKinematic)
 {
     switch (mode) {
     case static_cast<int>(CollisionDetectionMode::Continuous):
-        // Unity-style expectation: basic Continuous is primarily aimed at
-        // simulation-driven rigidbodies. For kinematic bodies the closer
-        // default is speculative contacts rather than sweep CCD.
+        // Jolt's LinearCast path only runs for dynamic bodies. Kinematic CCD
+        // would require a separate speculative-contact implementation.
         return isKinematic ? 0 : 1;
-    case static_cast<int>(CollisionDetectionMode::ContinuousDynamic):
-        // Explicit request for the strongest sweep-based CCD mode.
-        return 1;
     case static_cast<int>(CollisionDetectionMode::Discrete):
         return 0;
-    case static_cast<int>(CollisionDetectionMode::ContinuousSpeculative):
-        INXLOG_WARN("Rigidbody: ContinuousSpeculative is not fully implemented — "
-                    "falling back to Discrete motion quality. "
-                    "Use Continuous or ContinuousDynamic for sweep-based CCD.");
-        return 0;
     default:
-        return 0;
+        throw std::invalid_argument("Unsupported collision detection mode");
     }
+}
+
+static bool IsFinite(const glm::vec3 &value)
+{
+    return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+static bool IsFiniteRotation(const glm::quat &value)
+{
+    return std::isfinite(value.w) && std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z) &&
+           glm::dot(value, value) > 1e-12f;
+}
+
+static void ValidateForceMode(ForceMode mode)
+{
+    switch (mode) {
+    case ForceMode::Force:
+    case ForceMode::Acceleration:
+    case ForceMode::Impulse:
+    case ForceMode::VelocityChange:
+        return;
+    }
+    throw std::invalid_argument("unsupported force mode");
 }
 
 } // namespace
 
-INFERNUX_REGISTER_COMPONENT("Rigidbody", Rigidbody)
+INFERNUX_REGISTER_VALIDATED_COMPONENT("Rigidbody", Rigidbody)
 
 // ============================================================================
 // Shared helpers
@@ -124,22 +112,26 @@ template <typename Fn> void Rigidbody::ForEachBody(Fn &&fn)
     auto *pw = GetActivePhysicsWorld(go);
     if (!pw)
         return;
-    for (uint32_t bodyId : CollectUniqueBodyIds(go))
+    const uint32_t bodyId = GetPrimaryBodyId(go);
+    if (bodyId != 0xFFFFFFFF)
         fn(*pw, bodyId);
 }
 
 void Rigidbody::TeleportBodies(PhysicsWorld &pw, GameObject *go, const glm::vec3 &pos, const glm::quat &rot)
 {
+    if (auto *transform = go->GetTransform()) {
+        transform->SetPosition(pos);
+        transform->SetWorldRotation(rot);
+    }
     auto colliders = go->GetComponents<Collider>();
     for (auto *col : colliders) {
         if (col && col->GetBodyId() != 0xFFFFFFFF)
             col->SetLastSyncedTransform(pos, rot);
     }
-    for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
+    const uint32_t bodyId = GetPrimaryBodyId(go);
+    if (bodyId != 0xFFFFFFFF) {
         pw.SetBodyPosition(bodyId, pos, rot);
         pw.ActivateBody(bodyId);
-        pw.SetBodyLinearVelocity(bodyId, glm::vec3(0.0f));
-        pw.SetBodyAngularVelocity(bodyId, glm::vec3(0.0f));
     }
     auto &d = DataMut();
     d.previousPhysicsPosition = pos;
@@ -147,6 +139,10 @@ void Rigidbody::TeleportBodies(PhysicsWorld &pw, GameObject *go, const glm::vec3
     d.currentPhysicsPosition = pos;
     d.currentPhysicsRotation = rot;
     d.hasPhysicsPose = true;
+    d.wasSleeping = false;
+    d.lastSyncedPosition = pos;
+    d.lastSyncedRotation = rot;
+    d.hasSyncedOnce = true;
 }
 
 // ============================================================================
@@ -222,7 +218,8 @@ void Rigidbody::OnDisable()
         }
     }
 
-    for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
+    const uint32_t bodyId = GetPrimaryBodyId(go);
+    if (bodyId != 0xFFFFFFFF) {
         pw->SetBodyMotionType(bodyId, 0); // 0 = Static
     }
 }
@@ -241,20 +238,26 @@ void Rigidbody::OnDestroy()
 
 void Rigidbody::SetMass(float mass)
 {
+    if (!std::isfinite(mass) || mass < 0.001f)
+        throw std::invalid_argument("mass must be finite and at least 0.001");
     auto &d = DataMut();
-    d.mass = (mass < 0.001f) ? 0.001f : mass;
+    d.mass = mass;
     ForEachBody([&](PhysicsWorld &pw, uint32_t id) { pw.SetBodyMassProperties(id, d.mass); });
 }
 
 void Rigidbody::SetDrag(float drag)
 {
-    DataMut().drag = (drag < 0.001f) ? 0.001f : drag;
+    if (!std::isfinite(drag) || drag < 0.0f)
+        throw std::invalid_argument("drag must be finite and non-negative");
+    DataMut().drag = drag;
     ApplyDragSettings();
 }
 
 void Rigidbody::SetAngularDrag(float drag)
 {
-    DataMut().angularDrag = (drag < 0.001f) ? 0.001f : drag;
+    if (!std::isfinite(drag) || drag < 0.0f)
+        throw std::invalid_argument("angular drag must be finite and non-negative");
+    DataMut().angularDrag = drag;
     ApplyDragSettings();
 }
 
@@ -310,6 +313,9 @@ void Rigidbody::SetIsKinematic(bool kinematic)
 
 void Rigidbody::SetConstraints(int constraints)
 {
+    constexpr int kValidConstraintBits = static_cast<int>(RigidbodyConstraints::FreezeAll);
+    if (constraints < 0 || (constraints & ~kValidConstraintBits) != 0)
+        throw std::invalid_argument("constraints contains unsupported bits");
     auto &d = DataMut();
     if (d.constraints == constraints)
         return;
@@ -326,28 +332,39 @@ void Rigidbody::SetFreezeRotation(bool freeze)
 
 void Rigidbody::SetCollisionDetectionMode(int mode)
 {
+    if (mode < static_cast<int>(CollisionDetectionMode::Discrete) ||
+        mode > static_cast<int>(CollisionDetectionMode::Continuous)) {
+        throw std::invalid_argument("collision detection mode must be Discrete or Continuous");
+    }
     auto &d = DataMut();
     if (d.collisionDetectionMode == mode)
         return;
-    d.collisionDetectionMode = std::clamp(mode, 0, 3);
+    d.collisionDetectionMode = mode;
     ApplyMotionQuality();
 }
 
 void Rigidbody::SetInterpolation(int mode)
 {
+    if (mode < static_cast<int>(RigidbodyInterpolation::None) ||
+        mode > static_cast<int>(RigidbodyInterpolation::Interpolate))
+        throw std::invalid_argument("interpolation must be None or Interpolate");
     auto &d = DataMut();
-    d.interpolation = std::clamp(mode, 0, 1);
+    d.interpolation = mode;
 }
 
 void Rigidbody::SetMaxAngularVelocity(float vel)
 {
-    DataMut().maxAngularVelocity = (vel < 0.0f) ? 0.0f : vel;
+    if (!std::isfinite(vel) || vel < 0.0f)
+        throw std::invalid_argument("max angular velocity must be finite and non-negative");
+    DataMut().maxAngularVelocity = vel;
     ApplyVelocityLimits();
 }
 
 void Rigidbody::SetMaxLinearVelocity(float vel)
 {
-    DataMut().maxLinearVelocity = (vel < 0.0f) ? 0.0f : vel;
+    if (!std::isfinite(vel) || vel < 0.0f)
+        throw std::invalid_argument("max linear velocity must be finite and non-negative");
+    DataMut().maxLinearVelocity = vel;
     ApplyVelocityLimits();
 }
 
@@ -358,36 +375,48 @@ void Rigidbody::SetMaxLinearVelocity(float vel)
 glm::vec3 Rigidbody::GetVelocity() const
 {
     uint32_t bid = GetPrimaryBodyId(GetGameObject());
-    return (bid != 0xFFFFFFFF) ? PhysicsWorld::Instance().GetBodyLinearVelocity(bid) : glm::vec3(0.0f);
+    return (bid != 0xFFFFFFFF) ? PhysicsWorld::Instance().GetBodyLinearVelocity(bid) : Data().linearVelocity;
 }
 
 void Rigidbody::SetVelocity(const glm::vec3 &vel)
 {
+    if (!IsFinite(vel))
+        throw std::invalid_argument("velocity must contain finite values");
+    auto &data = DataMut();
+    data.linearVelocity = vel;
+    data.hasLinearVelocity = true;
     auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw.SetBodyLinearVelocity(bodyId, vel);
+    if (go) {
+        auto &pw = PhysicsWorld::Instance();
+        const uint32_t bodyId = GetPrimaryBodyId(go);
+        if (bodyId != 0xFFFFFFFF) {
+            pw.SetBodyLinearVelocity(bodyId, vel);
+            data.hasLinearVelocity = false;
+        }
     }
 }
 
 glm::vec3 Rigidbody::GetAngularVelocity() const
 {
     uint32_t bid = GetPrimaryBodyId(GetGameObject());
-    return (bid != 0xFFFFFFFF) ? PhysicsWorld::Instance().GetBodyAngularVelocity(bid) : glm::vec3(0.0f);
+    return (bid != 0xFFFFFFFF) ? PhysicsWorld::Instance().GetBodyAngularVelocity(bid) : Data().angularVelocity;
 }
 
 void Rigidbody::SetAngularVelocity(const glm::vec3 &vel)
 {
+    if (!IsFinite(vel))
+        throw std::invalid_argument("angular velocity must contain finite values");
+    auto &data = DataMut();
+    data.angularVelocity = vel;
+    data.hasAngularVelocity = true;
     auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw.SetBodyAngularVelocity(bodyId, vel);
+    if (go) {
+        auto &pw = PhysicsWorld::Instance();
+        const uint32_t bodyId = GetPrimaryBodyId(go);
+        if (bodyId != 0xFFFFFFFF) {
+            pw.SetBodyAngularVelocity(bodyId, vel);
+            data.hasAngularVelocity = false;
+        }
     }
 }
 
@@ -397,62 +426,18 @@ void Rigidbody::SetAngularVelocity(const glm::vec3 &vel)
 
 void Rigidbody::AddForce(const glm::vec3 &force, ForceMode mode)
 {
-    auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    for (uint32_t bid : CollectUniqueBodyIds(go)) {
-        switch (mode) {
-        case ForceMode::Force:
-            pw.AddBodyForce(bid, force);
-            break;
-        case ForceMode::Acceleration:
-            // F = m * a → convert acceleration to force
-            pw.AddBodyForce(bid, force * Data().mass);
-            break;
-        case ForceMode::Impulse:
-            pw.AddBodyImpulse(bid, force);
-            break;
-        case ForceMode::VelocityChange:
-            // impulse = m * dv → convert velocity change to impulse
-            pw.AddBodyImpulse(bid, force * Data().mass);
-            break;
-        }
-    }
+    if (!IsFinite(force))
+        throw std::invalid_argument("force must contain finite values");
+    ValidateForceMode(mode);
+    SubmitForceCommand(ForceCommand{ForceCommandKind::Force, force, glm::vec3(0.0f), mode});
 }
 
 void Rigidbody::AddTorque(const glm::vec3 &torque, ForceMode mode)
 {
-    auto *go = GetGameObject();
-    if (!go)
-        return;
-
-    auto &pw = PhysicsWorld::Instance();
-    for (uint32_t bid : CollectUniqueBodyIds(go)) {
-        switch (mode) {
-        case ForceMode::Force:
-            pw.AddBodyTorque(bid, torque);
-            break;
-        case ForceMode::Acceleration: {
-            // Unity semantics: angular acceleration is mass/inertia independent.
-            // Jolt AddTorque expects torque, so convert alpha -> tau via inertia tensor.
-            const glm::mat3 inertia = pw.GetBodyWorldSpaceInertiaTensor(bid);
-            pw.AddBodyTorque(bid, inertia * torque);
-            break;
-        }
-        case ForceMode::Impulse:
-            pw.AddBodyAngularImpulse(bid, torque);
-            break;
-        case ForceMode::VelocityChange: {
-            // Unity semantics: delta angular velocity is mass/inertia independent.
-            // Jolt AddAngularImpulse expects angular impulse, so convert dω -> L.
-            const glm::mat3 inertia = pw.GetBodyWorldSpaceInertiaTensor(bid);
-            pw.AddBodyAngularImpulse(bid, inertia * torque);
-            break;
-        }
-        }
-    }
+    if (!IsFinite(torque))
+        throw std::invalid_argument("torque must contain finite values");
+    ValidateForceMode(mode);
+    SubmitForceCommand(ForceCommand{ForceCommandKind::Torque, torque, glm::vec3(0.0f), mode});
 }
 
 // ============================================================================
@@ -461,27 +446,89 @@ void Rigidbody::AddTorque(const glm::vec3 &torque, ForceMode mode)
 
 void Rigidbody::AddForceAtPosition(const glm::vec3 &force, const glm::vec3 &position, ForceMode mode)
 {
-    auto *go = GetGameObject();
-    if (!go)
-        return;
+    if (!IsFinite(force) || !IsFinite(position))
+        throw std::invalid_argument("force and position must contain finite values");
+    ValidateForceMode(mode);
+    SubmitForceCommand(ForceCommand{ForceCommandKind::ForceAtPosition, force, position, mode});
+}
 
-    auto &pw = PhysicsWorld::Instance();
-    for (uint32_t bid : CollectUniqueBodyIds(go)) {
-        switch (mode) {
+void Rigidbody::SubmitForceCommand(ForceCommand command)
+{
+    const uint32_t bodyId = GetPrimaryBodyId(GetGameObject());
+    if (bodyId == 0xFFFFFFFF) {
+        m_pendingForceCommands.push_back(std::move(command));
+        return;
+    }
+    ApplyForceCommand(PhysicsWorld::Instance(), bodyId, command);
+}
+
+void Rigidbody::ApplyForceCommand(PhysicsWorld &world, uint32_t bodyId, const ForceCommand &command)
+{
+    const float mass = Data().mass;
+    if (command.kind == ForceCommandKind::Force) {
+        switch (command.mode) {
         case ForceMode::Force:
-            pw.AddBodyForceAtPosition(bid, force, position);
-            break;
+            world.AddBodyForce(bodyId, command.value);
+            return;
         case ForceMode::Acceleration:
-            pw.AddBodyForceAtPosition(bid, force * Data().mass, position);
-            break;
+            world.AddBodyForce(bodyId, command.value * mass);
+            return;
         case ForceMode::Impulse:
-            pw.AddBodyImpulseAtPosition(bid, force, position);
-            break;
+            world.AddBodyImpulse(bodyId, command.value);
+            return;
         case ForceMode::VelocityChange:
-            pw.AddBodyImpulseAtPosition(bid, force * Data().mass, position);
-            break;
+            world.AddBodyImpulse(bodyId, command.value * mass);
+            return;
         }
     }
+
+    if (command.kind == ForceCommandKind::Torque) {
+        switch (command.mode) {
+        case ForceMode::Force:
+            world.AddBodyTorque(bodyId, command.value);
+            return;
+        case ForceMode::Acceleration:
+            world.AddBodyTorque(bodyId, world.GetBodyWorldSpaceInertiaTensor(bodyId) * command.value);
+            return;
+        case ForceMode::Impulse:
+            world.AddBodyAngularImpulse(bodyId, command.value);
+            return;
+        case ForceMode::VelocityChange:
+            world.AddBodyAngularImpulse(bodyId, world.GetBodyWorldSpaceInertiaTensor(bodyId) * command.value);
+            return;
+        }
+    }
+
+    switch (command.mode) {
+    case ForceMode::Force:
+        world.AddBodyForceAtPosition(bodyId, command.value, command.position);
+        return;
+    case ForceMode::Acceleration:
+        world.AddBodyForceAtPosition(bodyId, command.value * mass, command.position);
+        return;
+    case ForceMode::Impulse:
+        world.AddBodyImpulseAtPosition(bodyId, command.value, command.position);
+        return;
+    case ForceMode::VelocityChange:
+        world.AddBodyImpulseAtPosition(bodyId, command.value * mass, command.position);
+        return;
+    }
+    throw std::logic_error("validated force command has an invalid mode");
+}
+
+void Rigidbody::FlushPendingForceCommands()
+{
+    if (m_pendingForceCommands.empty())
+        return;
+    const uint32_t bodyId = GetPrimaryBodyId(GetGameObject());
+    if (bodyId == 0xFFFFFFFF)
+        throw std::logic_error("cannot flush force commands without a physics body");
+
+    auto commands = std::move(m_pendingForceCommands);
+    m_pendingForceCommands.clear();
+    auto &world = PhysicsWorld::Instance();
+    for (const auto &command : commands)
+        ApplyForceCommand(world, bodyId, command);
 }
 
 // ============================================================================
@@ -490,48 +537,46 @@ void Rigidbody::AddForceAtPosition(const glm::vec3 &force, const glm::vec3 &posi
 
 void Rigidbody::MovePosition(const glm::vec3 &position)
 {
+    if (!IsFinite(position))
+        throw std::invalid_argument("position must contain finite values");
     if (!Data().isKinematic)
-        return;
+        throw std::logic_error("MovePosition requires a kinematic Rigidbody");
 
     GameObject *go = nullptr;
     auto *pw = GetActivePhysicsWorld(go);
     if (!pw)
-        return;
+        throw std::logic_error("MovePosition requires an active physics world");
 
     // Use current fixed timestep from SceneManager.
     float dt = SceneManager::Instance().GetFixedTimeStep();
 
-    for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        glm::quat rot = pw->GetBodyRotation(bodyId);
-        pw->MoveBodyKinematic(bodyId, position, rot, dt);
-    }
+    const uint32_t bodyId = GetPrimaryBodyId(go);
+    if (bodyId == 0xFFFFFFFF)
+        throw std::logic_error("MovePosition requires an enabled Collider body");
 
-    // Also update Transform for consistency
-    if (auto *tf = go->GetTransform())
-        tf->SetPosition(position);
+    const glm::quat rotation = pw->GetBodyRotation(bodyId);
+    pw->MoveBodyKinematic(bodyId, position, rotation, dt);
 }
 
 void Rigidbody::MoveRotation(const glm::quat &rotation)
 {
+    if (!IsFiniteRotation(rotation))
+        throw std::invalid_argument("rotation must be a finite non-zero quaternion");
     if (!Data().isKinematic)
-        return;
+        throw std::logic_error("MoveRotation requires a kinematic Rigidbody");
 
     GameObject *go = nullptr;
     auto *pw = GetActivePhysicsWorld(go);
     if (!pw)
-        return;
+        throw std::logic_error("MoveRotation requires an active physics world");
 
     float dt = SceneManager::Instance().GetFixedTimeStep();
+    const uint32_t bodyId = GetPrimaryBodyId(go);
+    if (bodyId == 0xFFFFFFFF)
+        throw std::logic_error("MoveRotation requires an enabled Collider body");
 
-    Transform *tf = go->GetTransform();
-    glm::vec3 pos = tf ? tf->GetPosition() : glm::vec3(0.0f);
-
-    for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
-        pw->MoveBodyKinematic(bodyId, pos, rotation, dt);
-    }
-
-    if (tf)
-        tf->SetWorldRotation(rotation);
+    const glm::vec3 position = pw->GetBodyPosition(bodyId);
+    pw->MoveBodyKinematic(bodyId, position, glm::normalize(rotation), dt);
 }
 
 // ============================================================================
@@ -560,6 +605,37 @@ glm::vec3 Rigidbody::GetPosition() const
     return PhysicsWorld::Instance().GetBodyPosition(bid);
 }
 
+void Rigidbody::SetPosition(const glm::vec3 &position)
+{
+    if (!IsFinite(position))
+        throw std::invalid_argument("position must contain finite values");
+    auto *go = GetGameObject();
+    if (!go)
+        throw std::runtime_error("cannot set position on a detached Rigidbody");
+    auto *transform = go->GetTransform();
+    if (!transform)
+        throw std::logic_error("Rigidbody owner has no Transform");
+
+    auto &world = PhysicsWorld::Instance();
+    const uint32_t bodyId = GetPrimaryBodyId(go);
+    const bool hasBody = world.IsInitialized() && bodyId != 0xFFFFFFFF;
+    const glm::quat rotation =
+        hasBody ? glm::normalize(world.GetBodyRotation(bodyId)) : glm::normalize(transform->GetWorldRotation());
+    if (hasBody) {
+        TeleportBodies(world, go, position, rotation);
+    } else {
+        transform->SetPosition(position);
+        auto &d = DataMut();
+        d.previousPhysicsPosition = d.currentPhysicsPosition = position;
+        d.previousPhysicsRotation = d.currentPhysicsRotation = rotation;
+        d.hasPhysicsPose = true;
+        d.wasSleeping = false;
+        d.lastSyncedPosition = position;
+        d.lastSyncedRotation = rotation;
+        d.hasSyncedOnce = true;
+    }
+}
+
 glm::quat Rigidbody::GetRotation() const
 {
     auto *go = GetGameObject();
@@ -574,6 +650,37 @@ glm::quat Rigidbody::GetRotation() const
     }
 
     return PhysicsWorld::Instance().GetBodyRotation(bid);
+}
+
+void Rigidbody::SetRotation(const glm::quat &rotation)
+{
+    if (!IsFiniteRotation(rotation))
+        throw std::invalid_argument("rotation must be a finite non-zero quaternion");
+    auto *go = GetGameObject();
+    if (!go)
+        throw std::runtime_error("cannot set rotation on a detached Rigidbody");
+    auto *transform = go->GetTransform();
+    if (!transform)
+        throw std::logic_error("Rigidbody owner has no Transform");
+
+    const glm::quat normalized = glm::normalize(rotation);
+    auto &world = PhysicsWorld::Instance();
+    const uint32_t bodyId = GetPrimaryBodyId(go);
+    const bool hasBody = world.IsInitialized() && bodyId != 0xFFFFFFFF;
+    const glm::vec3 position = hasBody ? world.GetBodyPosition(bodyId) : transform->GetPosition();
+    if (hasBody) {
+        TeleportBodies(world, go, position, normalized);
+    } else {
+        transform->SetWorldRotation(normalized);
+        auto &d = DataMut();
+        d.previousPhysicsPosition = d.currentPhysicsPosition = position;
+        d.previousPhysicsRotation = d.currentPhysicsRotation = normalized;
+        d.hasPhysicsPose = true;
+        d.wasSleeping = false;
+        d.lastSyncedPosition = position;
+        d.lastSyncedRotation = normalized;
+        d.hasSyncedOnce = true;
+    }
 }
 
 // ============================================================================
@@ -593,9 +700,9 @@ void Rigidbody::WakeUp()
         return;
 
     auto &pw = PhysicsWorld::Instance();
-    for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
+    const uint32_t bodyId = GetPrimaryBodyId(go);
+    if (bodyId != 0xFFFFFFFF)
         pw.ActivateBody(bodyId);
-    }
 }
 
 void Rigidbody::Sleep()
@@ -605,9 +712,9 @@ void Rigidbody::Sleep()
         return;
 
     auto &pw = PhysicsWorld::Instance();
-    for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
+    const uint32_t bodyId = GetPrimaryBodyId(go);
+    if (bodyId != 0xFFFFFFFF)
         pw.DeactivateBody(bodyId);
-    }
 }
 
 // ============================================================================
@@ -617,9 +724,6 @@ void Rigidbody::Sleep()
 void Rigidbody::SyncPhysicsToTransform()
 {
     auto &d = DataMut();
-    if (d.isKinematic)
-        return; // Kinematic bodies are driven by Transform, not physics
-
     auto *go = GetGameObject();
     if (!go)
         return;
@@ -630,11 +734,12 @@ void Rigidbody::SyncPhysicsToTransform()
 
     auto &pw = PhysicsWorld::Instance();
 
-    // Skip sleeping bodies — their position hasn't changed since last sync.
-    // At 10k+ bodies, the vast majority are sleeping, so this avoids the
-    // BodyInterface reads (even with NoLock, they touch Jolt internal arrays).
-    if (pw.IsBodySleeping(bid) && d.hasPhysicsPose)
+    // Read once on the active -> sleeping edge so the final solver pose is not
+    // lost. Only bodies that were already sleeping can skip the Jolt reads.
+    const bool sleeping = pw.IsBodySleeping(bid);
+    if (sleeping && d.wasSleeping && d.hasPhysicsPose)
         return;
+    d.wasSleeping = sleeping;
 
     glm::vec3 bodyPos = pw.GetBodyPosition(bid);
     glm::quat bodyRot = glm::normalize(pw.GetBodyRotation(bid));
@@ -689,7 +794,7 @@ void Rigidbody::SyncPhysicsToTransform()
 void Rigidbody::ApplyInterpolatedTransform(float alpha)
 {
     auto &d = DataMut();
-    if (d.isKinematic || !d.hasPhysicsPose)
+    if (!d.hasPhysicsPose)
         return;
 
     auto *go = GetGameObject();
@@ -765,11 +870,11 @@ void Rigidbody::SyncExternalMovesToPhysics()
         if (!pw.IsInitialized())
             return;
 
-        auto bodyIds = CollectUniqueBodyIds(go);
-        if (bodyIds.empty())
+        const uint32_t bodyId = GetPrimaryBodyId(go);
+        if (bodyId == 0xFFFFFFFF)
             return;
 
-        glm::vec3 bodyPos = pw.GetBodyPosition(bodyIds[0]);
+        glm::vec3 bodyPos = pw.GetBodyPosition(bodyId);
         bool firstFrameDiff = glm::length(currentPos - bodyPos) > posEps;
         if (!firstFrameDiff)
             return;
@@ -808,7 +913,7 @@ bool Rigidbody::HasLinkedColliders() const
     if (!go)
         return false;
 
-    return !CollectUniqueBodyIds(go).empty();
+    return GetPrimaryBodyId(go) != 0xFFFFFFFF;
 }
 
 // ============================================================================
@@ -826,12 +931,23 @@ PhysicsWorld *Rigidbody::GetActivePhysicsWorld(GameObject *&outGo) const
 
 void Rigidbody::NotifyCollidersBodyTypeChanged()
 {
-    GameObject *go = nullptr;
-    auto *pw = GetActivePhysicsWorld(go);
-    if (!pw)
+    GameObject *go = GetGameObject();
+    if (!go)
         return;
 
     const auto &d = Data();
+
+    if (!d.isKinematic) {
+        for (auto *meshCollider : go->GetComponents<MeshCollider>()) {
+            if (meshCollider && meshCollider->IsEnabled() && !meshCollider->IsConvex())
+                meshCollider->SetConvex(true);
+        }
+    }
+
+    auto &physicsWorld = PhysicsWorld::Instance();
+    if (!physicsWorld.IsInitialized())
+        return;
+    auto *pw = &physicsWorld;
 
     // Rebuild shapes first — some colliders (e.g. MeshCollider) produce
     // different shape types depending on whether a dynamic Rigidbody exists.
@@ -848,19 +964,40 @@ void Rigidbody::NotifyCollidersBodyTypeChanged()
     // motionType: 0=Static, 1=Kinematic, 2=Dynamic
     int motionType = d.isKinematic ? 1 : 2;
 
-    for (uint32_t bodyId : CollectUniqueBodyIds(go)) {
+    const uint32_t bodyId = GetPrimaryBodyId(go);
+    if (bodyId != 0xFFFFFFFF) {
         pw->SetBodyMotionType(bodyId, motionType);
-
-        // Apply mass, drag, gravity settings
-        pw->SetBodyMassProperties(bodyId, d.mass);
-        pw->SetBodyDamping(bodyId, d.drag, d.angularDrag);
-        pw->SetBodyGravityFactor(bodyId, d.useGravity ? 1.0f : 0.0f);
+        ApplyConfigurationToBody(bodyId);
+        FlushPendingForceCommands();
     }
+}
 
-    // Also apply the new extended settings
-    ApplyConstraints();
-    ApplyMotionQuality();
-    ApplyVelocityLimits();
+void Rigidbody::ApplyConfigurationToBody(uint32_t bodyId)
+{
+    if (bodyId == 0xFFFFFFFF)
+        throw std::invalid_argument("cannot configure an invalid physics body");
+    auto &world = PhysicsWorld::Instance();
+    if (!world.IsInitialized())
+        throw std::runtime_error("cannot configure a body before PhysicsWorld initialization");
+
+    auto &data = DataMut();
+    world.SetBodyMassProperties(bodyId, data.mass);
+    world.SetBodyDamping(bodyId, data.drag, data.angularDrag);
+    world.SetBodyGravityFactor(bodyId, data.useGravity ? 1.0f : 0.0f);
+    const int allowedDofs = 0x3F & ~(data.constraints >> 1);
+    world.SetBodyAllowedDOFs(bodyId, allowedDofs, data.mass);
+    world.SetBodyMotionQuality(bodyId,
+                               MapCollisionDetectionModeToMotionQuality(data.collisionDetectionMode, data.isKinematic));
+    world.SetBodyMaxAngularVelocity(bodyId, data.maxAngularVelocity);
+    world.SetBodyMaxLinearVelocity(bodyId, data.maxLinearVelocity);
+    if (data.hasLinearVelocity) {
+        world.SetBodyLinearVelocity(bodyId, data.linearVelocity);
+        data.hasLinearVelocity = false;
+    }
+    if (data.hasAngularVelocity) {
+        world.SetBodyAngularVelocity(bodyId, data.angularVelocity);
+        data.hasAngularVelocity = false;
+    }
 }
 
 void Rigidbody::ApplyDragSettings()
@@ -898,10 +1035,10 @@ void Rigidbody::ApplyVelocityLimits()
 // Serialization
 // ============================================================================
 
-std::string Rigidbody::Serialize() const
+nlohmann::json Rigidbody::SerializeDocument() const
 {
     const auto &d = Data();
-    auto j = nlohmann::json::parse(Component::Serialize());
+    auto j = Component::SerializeDocument();
     j["mass"] = d.mass;
     j["drag"] = d.drag;
     j["angular_drag"] = d.angularDrag;
@@ -912,41 +1049,65 @@ std::string Rigidbody::Serialize() const
     j["interpolation"] = d.interpolation;
     j["max_angular_velocity"] = d.maxAngularVelocity;
     j["max_linear_velocity"] = d.maxLinearVelocity;
-    j["max_depenetration_velocity"] = d.maxDepenetrationVelocity;
-    return j.dump();
+    return j;
 }
 
-bool Rigidbody::Deserialize(const std::string &jsonStr)
+void Rigidbody::ValidateSerializedDocument(const nlohmann::json &j)
 {
-    if (!Component::Deserialize(jsonStr))
-        return false;
+    using namespace component_document_validation;
+    ValidateComponentDocument(j, "Rigidbody", 1,
+                              {"mass", "drag", "angular_drag", "use_gravity", "is_kinematic", "constraints",
+                               "collision_detection_mode", "interpolation", "max_angular_velocity",
+                               "max_linear_velocity"});
 
-    auto &d = DataMut();
+    const float mass = RequireFiniteFloat(j, "mass", "Rigidbody");
+    const float drag = RequireFiniteFloat(j, "drag", "Rigidbody");
+    const float angularDrag = RequireFiniteFloat(j, "angular_drag", "Rigidbody");
+    RequireBoolean(j, "use_gravity", "Rigidbody");
+    RequireBoolean(j, "is_kinematic", "Rigidbody");
+    const int constraints = RequireInteger(j, "constraints", "Rigidbody");
+    const int collisionDetectionMode = RequireInteger(j, "collision_detection_mode", "Rigidbody");
+    const int interpolation = RequireInteger(j, "interpolation", "Rigidbody");
+    const float maxAngularVelocity = RequireFiniteFloat(j, "max_angular_velocity", "Rigidbody");
+    const float maxLinearVelocity = RequireFiniteFloat(j, "max_linear_velocity", "Rigidbody");
 
+    if (mass < 0.001f)
+        throw std::invalid_argument("Rigidbody.mass must be at least 0.001");
+    if (drag < 0.0f || angularDrag < 0.0f)
+        throw std::invalid_argument("Rigidbody drag values must be non-negative");
+    constexpr int kValidConstraintBits = static_cast<int>(RigidbodyConstraints::FreezeAll);
+    if (constraints < 0 || (constraints & ~kValidConstraintBits) != 0)
+        throw std::invalid_argument("Rigidbody.constraints contains unsupported bits");
+    if (collisionDetectionMode < static_cast<int>(CollisionDetectionMode::Discrete) ||
+        collisionDetectionMode > static_cast<int>(CollisionDetectionMode::Continuous))
+        throw std::invalid_argument("Rigidbody.collision_detection_mode is unsupported");
+    if (interpolation < static_cast<int>(RigidbodyInterpolation::None) ||
+        interpolation > static_cast<int>(RigidbodyInterpolation::Interpolate))
+        throw std::invalid_argument("Rigidbody.interpolation is unsupported");
+    if (maxAngularVelocity < 0.0f || maxLinearVelocity < 0.0f)
+        throw std::invalid_argument("Rigidbody velocity limits must be non-negative");
+}
+
+bool Rigidbody::DeserializeDocument(const nlohmann::json &j)
+{
     try {
-        auto j = nlohmann::json::parse(jsonStr);
-        if (j.contains("mass"))
-            d.mass = j["mass"].get<float>();
-        if (j.contains("drag"))
-            d.drag = j["drag"].get<float>();
-        if (j.contains("angular_drag"))
-            d.angularDrag = j["angular_drag"].get<float>();
-        if (j.contains("use_gravity"))
-            d.useGravity = j["use_gravity"].get<bool>();
-        if (j.contains("is_kinematic"))
-            d.isKinematic = j["is_kinematic"].get<bool>();
-        if (j.contains("constraints"))
-            d.constraints = j["constraints"].get<int>();
-        if (j.contains("collision_detection_mode"))
-            d.collisionDetectionMode = j["collision_detection_mode"].get<int>();
-        if (j.contains("interpolation"))
-            d.interpolation = std::clamp(j["interpolation"].get<int>(), 0, 1);
-        if (j.contains("max_angular_velocity"))
-            d.maxAngularVelocity = j["max_angular_velocity"].get<float>();
-        if (j.contains("max_linear_velocity"))
-            d.maxLinearVelocity = j["max_linear_velocity"].get<float>();
-        if (j.contains("max_depenetration_velocity"))
-            d.maxDepenetrationVelocity = j["max_depenetration_velocity"].get<float>();
+        ValidateSerializedDocument(j);
+
+        RigidbodyECSData staged = Data();
+        staged.mass = j.at("mass").get<float>();
+        staged.drag = j.at("drag").get<float>();
+        staged.angularDrag = j.at("angular_drag").get<float>();
+        staged.useGravity = j.at("use_gravity").get<bool>();
+        staged.isKinematic = j.at("is_kinematic").get<bool>();
+        staged.constraints = j.at("constraints").get<int>();
+        staged.collisionDetectionMode = j.at("collision_detection_mode").get<int>();
+        staged.interpolation = j.at("interpolation").get<int>();
+        staged.maxAngularVelocity = j.at("max_angular_velocity").get<float>();
+        staged.maxLinearVelocity = j.at("max_linear_velocity").get<float>();
+
+        if (!Component::DeserializeDocument(j))
+            return false;
+        DataMut() = staged;
 
         // Propagate all settings to Jolt bodies (e.g. when edited in Inspector during play)
         NotifyCollidersBodyTypeChanged();
@@ -975,7 +1136,6 @@ std::unique_ptr<Component> Rigidbody::Clone() const
     dst.interpolation = src.interpolation;
     dst.maxAngularVelocity = src.maxAngularVelocity;
     dst.maxLinearVelocity = src.maxLinearVelocity;
-    dst.maxDepenetrationVelocity = src.maxDepenetrationVelocity;
     return clone;
 }
 

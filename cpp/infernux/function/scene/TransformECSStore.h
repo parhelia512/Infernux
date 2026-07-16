@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
@@ -41,6 +42,7 @@ struct TransformECSData
 class TransformECSStore
 {
   public:
+    using InvalidationObserver = std::function<void(Transform *)>;
     // Keep the same Handle type for binary compatibility.
     struct Handle
     {
@@ -75,6 +77,11 @@ class TransformECSStore
     void Reserve(size_t capacity);
 
     void InvalidateSubtree(Transform *root, bool clearWorldEulerExact = false) const;
+
+    void SetInvalidationObserver(InvalidationObserver observer)
+    {
+        m_invalidationObserver = std::move(observer);
+    }
 
     void SyncSceneWorldMatrices(Scene *scene);
 
@@ -251,6 +258,10 @@ class TransformECSStore
     {
         return m_aliveCount;
     }
+    [[nodiscard]] uint64_t GetStructuralVersion() const
+    {
+        return m_structuralVersion;
+    }
     [[nodiscard]] bool IsAlive(uint32_t index) const
     {
         return index < m_alive.size() && m_alive[index];
@@ -363,6 +374,7 @@ class TransformECSStore
     std::vector<uint32_t> m_nextFree;
     uint32_t m_freeListHead = UINT32_MAX;
     size_t m_aliveCount = 0;
+    uint64_t m_structuralVersion = 0;
 
     // ── Frame Cache arrays (same length as Capacity()) ───────────────
     std::vector<glm::vec3> m_fcWorldPositions;
@@ -374,6 +386,7 @@ class TransformECSStore
     std::vector<uint8_t> m_fcDirty;
     bool m_frameCacheActive = false;
     Scene *m_fcScene = nullptr; // scene pointer for EndFrameCache sync
+    InvalidationObserver m_invalidationObserver;
 };
 
 } // namespace infernux

@@ -2,8 +2,7 @@
 Prefab system for Infernux.
 
 Handles saving GameObjects as .prefab files and instantiating them back into scenes.
-Prefab files contain the serialized JSON from GameObject.serialize(), wrapped in an
-envelope with a prefab_version field.
+Prefab files contain a typed GameObject document wrapped in a strict versioned envelope.
 """
 
 import json
@@ -11,12 +10,78 @@ import os
 import copy
 
 from Infernux.debug import Debug
-from Infernux.engine.component_restore import restore_pending_py_components
 
 PREFAB_EXTENSION = ".prefab"
 PREFAB_VERSION = 1
 _PREFAB_TEMPLATE_SCENE_NAME = "__InfernuxPrefabTemplateCache__"
 _PREFAB_TEMPLATE_CACHE = {}
+
+
+class PrefabDocumentError(ValueError):
+    """Raised when a prefab is not the single active document schema."""
+
+
+def _validate_game_object_document(
+    document: dict,
+    location: str = "root_object",
+    local_ids: set[int] = None,
+) -> None:
+    if not isinstance(document, dict):
+        raise PrefabDocumentError(f"{location} must be an object")
+    if local_ids is None:
+        local_ids = set()
+    required = {
+        "schema_version", "local_id", "name", "active", "is_static", "tag", "layer",
+        "transform", "components", "children",
+    }
+    if set(document) != required:
+        missing = sorted(required - set(document))
+        unknown = sorted(set(document) - required)
+        raise PrefabDocumentError(
+            f"{location} fields do not match the current schema; missing={missing}, unknown={unknown}"
+        )
+    if type(document["schema_version"]) is not int or document["schema_version"] != 2:
+        raise PrefabDocumentError(f"{location}.schema_version must be 2")
+    local_id = document["local_id"]
+    if type(local_id) is not int or local_id <= 0 or local_id in local_ids:
+        raise PrefabDocumentError(f"{location}.local_id must be a unique positive integer")
+    local_ids.add(local_id)
+    if not isinstance(document["name"], str) or type(document["active"]) is not bool:
+        raise PrefabDocumentError(f"{location} has invalid name/active fields")
+    if type(document["is_static"]) is not bool or not isinstance(document["tag"], str):
+        raise PrefabDocumentError(f"{location} has invalid is_static/tag fields")
+    if type(document["layer"]) is not int or not 0 <= document["layer"] < 32:
+        raise PrefabDocumentError(f"{location}.layer must be an integer in [0, 31]")
+    if not isinstance(document["transform"], dict):
+        raise PrefabDocumentError(f"{location}.transform must be an object")
+    for field in ("components", "children"):
+        if not isinstance(document[field], list):
+            raise PrefabDocumentError(f"{location}.{field} must be an array")
+    for index, child in enumerate(document["children"]):
+        _validate_game_object_document(child, f"{location}.children[{index}]", local_ids)
+
+
+def _validate_prefab_document(document: dict, file_path: str = "<memory>") -> None:
+    if not isinstance(document, dict):
+        raise PrefabDocumentError(f"Prefab '{file_path}' must contain an object")
+    allowed = {"prefab_version", "root_object", "source_canvas_name"}
+    required = {"prefab_version", "root_object"}
+    if not required.issubset(document) or not set(document).issubset(allowed):
+        raise PrefabDocumentError(f"Prefab '{file_path}' has missing or unknown envelope fields")
+    if type(document["prefab_version"]) is not int or document["prefab_version"] != PREFAB_VERSION:
+        raise PrefabDocumentError(
+            f"Prefab '{file_path}' must use prefab_version {PREFAB_VERSION}"
+        )
+    if "source_canvas_name" in document and not isinstance(document["source_canvas_name"], str):
+        raise PrefabDocumentError(f"Prefab '{file_path}' source_canvas_name must be a string")
+    _validate_game_object_document(document["root_object"])
+
+
+def _read_prefab_document(file_path: str) -> dict:
+    with open(file_path, "r", encoding="utf-8") as file:
+        document = json.load(file)
+    _validate_prefab_document(document, file_path)
+    return document
 
 
 def _invalidate_prefab_template_cache(file_path: str = None, guid: str = ""):
@@ -53,31 +118,12 @@ def _get_file_stamp(file_path: str):
 
 def _load_prefab_template_payload(file_path: str, resolved_guid: str):
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            prefab_data = json.load(f)
-    except (OSError, json.JSONDecodeError) as exc:
+        prefab_data = _read_prefab_document(file_path)
+    except (OSError, json.JSONDecodeError, PrefabDocumentError) as exc:
         Debug.log_error(f"Failed to read prefab file: {exc}")
         return None
 
-    root_obj_data = prefab_data.get("root_object")
-    if root_obj_data is None:
-        Debug.log_error("Invalid prefab file: missing 'root_object'.")
-        return None
-
-    file_version = prefab_data.get("prefab_version", 0)
-    if file_version > PREFAB_VERSION:
-        Debug.log_error(
-            f"Prefab '{file_path}' uses version {file_version} but this "
-            f"engine only supports up to version {PREFAB_VERSION}. "
-            f"Please update Infernux."
-        )
-        return None
-    if file_version < 1:
-        Debug.log_warning(
-            f"Prefab '{file_path}' has no version tag - treating as v1."
-        )
-
-    root_obj_data = copy.deepcopy(root_obj_data)
+    root_obj_data = copy.deepcopy(prefab_data["root_object"])
     _strip_prefab_runtime_fields(root_obj_data)
     if resolved_guid:
         _stamp_prefab_guid(root_obj_data, resolved_guid)
@@ -105,25 +151,24 @@ def _get_cached_prefab_template(file_path: str, resolved_guid: str, asset_databa
     template_scene = _get_prefab_template_scene()
 
     old_template = cached.get("template") if cached else None
-    if old_template is not None:
-        try:
-            template_scene.destroy_game_object(old_template)
-            template_scene.process_pending_destroys()
-        except Exception as exc:
-            Debug.log_suppressed("prefab_manager._get_cached_prefab_template.destroy_old", exc)
-
-    template = template_scene.instantiate_from_json(json.dumps(template_payload), None)
+    from Infernux.engine.component_restore import instantiate_game_object_document_transactionally
+    try:
+        template = instantiate_game_object_document_transactionally(
+            template_scene,
+            template_payload,
+            None,
+            asset_database,
+        )
+    except RuntimeError as exc:
+        Debug.log_error(f"Failed to preflight cached prefab template: {exc}")
+        return None
     if template is None:
         Debug.log_error("Failed to build cached prefab template from JSON.")
         return None
 
-    try:
-        restore_pending_py_components(template_scene, asset_database=asset_database)
-    except Exception as exc:
-        Debug.log_error(f"Failed to restore cached prefab Python components: {exc}")
-        template_scene.destroy_game_object(template)
+    if old_template is not None:
+        template_scene.destroy_game_object(old_template)
         template_scene.process_pending_destroys()
-        return None
 
     _PREFAB_TEMPLATE_CACHE[cache_key] = {
         "stamp": stamp,
@@ -134,24 +179,81 @@ def _get_cached_prefab_template(file_path: str, resolved_guid: str, asset_databa
 
 def _strip_prefab_runtime_fields(obj_data: dict):
     if not isinstance(obj_data, dict):
-        return
+        raise PrefabDocumentError("root_object must be an object")
 
-    for comp in obj_data.get("components", []) or []:
-        if isinstance(comp, dict):
-            comp.pop("component_id", None)
-            comp.pop("instance_guid", None)
+    nodes = []
 
-    for py_comp in obj_data.get("py_components", []) or []:
-        if not isinstance(py_comp, dict):
-            continue
-        py_comp.pop("component_id", None)
-        py_comp.pop("instance_guid", None)
-        py_fields = py_comp.get("py_fields")
-        if isinstance(py_fields, dict):
-            py_fields.pop("__component_id__", None)
+    def collect(node: dict, location: str) -> None:
+        if not isinstance(node, dict):
+            raise PrefabDocumentError(f"{location} must be an object")
+        nodes.append((node, location))
+        children = node.get("children")
+        if not isinstance(children, list):
+            raise PrefabDocumentError(f"{location}.children must be an array")
+        for index, child in enumerate(children):
+            collect(child, f"{location}.children[{index}]")
 
-    for child in obj_data.get("children", []) or []:
-        _strip_prefab_runtime_fields(child)
+    collect(obj_data, "root_object")
+    has_runtime_ids = ["id" in node for node, _location in nodes]
+    has_local_ids = ["local_id" in node for node, _location in nodes]
+    if all(has_runtime_ids) and not any(has_local_ids):
+        runtime_to_local = {}
+        for local_id, (node, location) in enumerate(nodes, start=1):
+            runtime_id = node["id"]
+            if type(runtime_id) is not int or runtime_id <= 0 or runtime_id in runtime_to_local:
+                raise PrefabDocumentError(f"{location}.id must be a unique positive integer")
+            runtime_to_local[runtime_id] = local_id
+            node["local_id"] = local_id
+    elif all(has_local_ids) and not any(has_runtime_ids):
+        runtime_to_local = None
+    else:
+        raise PrefabDocumentError("ObjectGraph must contain either runtime id or local_id on every node")
+
+    def rewrite_references(value, path: str):
+        if isinstance(value, list):
+            return [rewrite_references(item, f"{path}[{index}]") for index, item in enumerate(value)]
+        if not isinstance(value, dict):
+            return value
+        from Infernux.components.value_document import TYPE_KEY, GAME_OBJECT_REF, COMPONENT_REF
+        document_type = value.get(TYPE_KEY)
+        if document_type == GAME_OBJECT_REF:
+            target_id = value["object_id"]
+            if target_id == 0 or runtime_to_local is None:
+                return dict(value)
+            if target_id not in runtime_to_local:
+                raise PrefabDocumentError(f"{path}: prefab cannot reference GameObject {target_id} outside its subtree")
+            remapped = dict(value)
+            remapped["object_id"] = runtime_to_local[target_id]
+            return remapped
+        if document_type == COMPONENT_REF:
+            target_id = value["game_object_id"]
+            if target_id == 0 or runtime_to_local is None:
+                return copy.deepcopy(value)
+            if target_id not in runtime_to_local:
+                raise PrefabDocumentError(f"{path}: prefab cannot reference component outside its subtree")
+            remapped = dict(value)
+            remapped["game_object_id"] = runtime_to_local[target_id]
+            return remapped
+        return {key: rewrite_references(item, f"{path}.{key}") for key, item in value.items()}
+
+    next_local_component_id = 1
+    for node, location in nodes:
+        node.pop("id", None)
+        transform = node.get("transform")
+        if isinstance(transform, dict):
+            transform.pop("component_id", None)
+        for index, component in enumerate(node.get("components", [])):
+            if not isinstance(component, dict):
+                continue
+            component["component_id"] = next_local_component_id
+            next_local_component_id += 1
+            component.pop("instance_guid", None)
+            if not isinstance(component.get("data"), dict):
+                continue
+            component["data"] = rewrite_references(
+                component["data"],
+                f"{location}.components[{index}].data",
+            )
 
 
 def read_prefab_source_canvas(file_path: str = None, guid: str = None,
@@ -162,15 +264,14 @@ def read_prefab_source_canvas(file_path: str = None, guid: str = None,
     if not file_path or not os.path.isfile(file_path):
         return ""
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = _read_prefab_document(file_path)
         return data.get("source_canvas_name", "")
-    except Exception:
+    except (OSError, json.JSONDecodeError, PrefabDocumentError):
         return ""
 
 
 def save_prefab(game_object, file_path: str, asset_database=None,
-               source_canvas_name: str = "") -> bool:
+               source_canvas_name: str = "", root_document_template: dict = None) -> bool:
     """Serialize a GameObject hierarchy to a .prefab file.
 
     Returns True on success, False on failure.
@@ -183,15 +284,30 @@ def save_prefab(game_object, file_path: str, asset_database=None,
         file_path += PREFAB_EXTENSION
 
     try:
-        go_json_str = game_object.serialize()
-        go_data = json.loads(go_json_str)
+        go_data = game_object.serialize_document()
+        if not isinstance(go_data, dict):
+            raise TypeError("GameObject.serialize_document() did not return a dict")
+        if isinstance(root_document_template, dict):
+            for key in ("name", "active", "is_static", "tag", "layer"):
+                if key in root_document_template:
+                    go_data[key] = copy.deepcopy(root_document_template[key])
+            root_transform = go_data.get("transform")
+            template_transform = root_document_template.get("transform")
+            if isinstance(root_transform, dict) and isinstance(template_transform, dict):
+                for key in ("position", "rotation"):
+                    if key in template_transform:
+                        root_transform[key] = copy.deepcopy(template_transform[key])
     except Exception as exc:
         Debug.log_error(f"Failed to serialize GameObject for prefab: {exc}")
         return False
 
-    # Strip any existing prefab linkage and runtime-only IDs from the saved template.
-    _strip_prefab_fields(go_data)
-    _strip_prefab_runtime_fields(go_data)
+    # Strip linkage and convert runtime IDs/references to prefab-local IDs.
+    try:
+        _strip_prefab_fields(go_data)
+        _strip_prefab_runtime_fields(go_data)
+    except PrefabDocumentError as exc:
+        Debug.log_error(f"Refusing to save invalid prefab: {exc}")
+        return False
 
     prefab_data = {
         "prefab_version": PREFAB_VERSION,
@@ -201,16 +317,27 @@ def save_prefab(game_object, file_path: str, asset_database=None,
         prefab_data["source_canvas_name"] = source_canvas_name
 
     try:
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(prefab_data, f, indent=2, ensure_ascii=False)
-    except OSError as exc:
+        _validate_prefab_document(prefab_data, file_path)
+    except PrefabDocumentError as exc:
+        Debug.log_error(f"Refusing to save invalid prefab: {exc}")
+        return False
+
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
+        from Infernux.core.document_store import DocumentStore
+        content = json.dumps(prefab_data, indent=2, ensure_ascii=False)
+        DocumentStore.instance().write_and_wait(file_path, content)
+    except (OSError, RuntimeError) as exc:
         Debug.log_error(f"Failed to write prefab file: {exc}")
         return False
 
     if asset_database:
         try:
-            guid = asset_database.import_asset(file_path)
+            from Infernux.core.assets import AssetManager
+            mutation = AssetManager.import_asset(file_path, database=asset_database)
+            if not mutation:
+                raise RuntimeError(mutation.error)
+            guid = mutation.guid
             Debug.log_internal(f"Registered prefab: {os.path.basename(file_path)} -> {guid}")
             _invalidate_prefab_template_cache(file_path, guid)
         except Exception as exc:
@@ -258,16 +385,20 @@ def instantiate_prefab(file_path: str = None, guid: str = None,
         return None
 
     # Repeated prefab instantiation now uses native C++ clone from a cached template.
-    new_obj = scene.instantiate_game_object(template, parent)
+    from Infernux.engine.component_restore import clone_game_object_transactionally
+    try:
+        new_obj = clone_game_object_transactionally(
+            scene,
+            template,
+            parent,
+            asset_database,
+        )
+    except RuntimeError as exc:
+        Debug.log_error(f"Failed to preflight prefab clone: {exc}")
+        return None
     if new_obj is None:
         Debug.log_error("Failed to instantiate prefab from cached template.")
         return None
-
-    # Restore Python components that were collected as pending during native clone.
-    try:
-        restore_pending_py_components(scene, asset_database=asset_database)
-    except Exception as exc:
-        Debug.log_error(f"Failed to restore prefab Python components: {exc}")
 
     return new_obj
 
@@ -279,6 +410,40 @@ def _stamp_prefab_guid(obj_data: dict, guid: str, is_root: bool = True):
         obj_data["prefab_root"] = True
     for child in obj_data.get("children", []):
         _stamp_prefab_guid(child, guid, is_root=False)
+
+
+def _link_created_prefab_source(game_object, file_path: str, asset_database) -> bool:
+    """Turn the saved source hierarchy into an instance of its new Prefab."""
+    if game_object is None or asset_database is None:
+        return False
+    try:
+        guid = str(asset_database.get_guid_from_path(file_path) or "")
+    except Exception as exc:
+        Debug.log_warning(f"Failed to resolve created prefab GUID: {exc}")
+        return False
+    if not guid:
+        Debug.log_warning(f"Created prefab has no AssetDatabase GUID: {file_path}")
+        return False
+
+    def _link(obj, is_root: bool) -> None:
+        obj.prefab_guid = guid
+        obj.prefab_root = is_root
+        children = list(obj.get_children()) if hasattr(obj, "get_children") else []
+        for child in children:
+            _link(child, False)
+
+    try:
+        _link(game_object, True)
+    except Exception as exc:
+        Debug.log_warning(f"Failed to link created prefab source: {exc}")
+        return False
+
+    from Infernux.engine.scene_manager import SceneFileManager
+
+    manager = SceneFileManager.instance()
+    if manager is not None:
+        manager.mark_dirty()
+    return True
 
 
 def _strip_prefab_fields(obj_data: dict):

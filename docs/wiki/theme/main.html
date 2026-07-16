@@ -1,12 +1,190 @@
 <!DOCTYPE html>
-<html lang="{% if page.url and 'zh/' in page.url %}zh{% else %}en{% endif %}">
+{% set is_zh = page.url and 'zh/' in page.url %}
+{% set is_not_found = not page.title %}
+{% set page_path = '/' ~ (page.url or '') %}
+{% set is_api = '/api/' in page_path %}
+{% set is_learn = '/learn/' in page_path %}
+{% set is_getting_started = '/learn/getting-started.html' in page_path %}
+{% set is_manual = '/manual/' in page_path %}
+{% set is_architecture = '/architecture/' in page_path %}
+{% set is_section_index = page.url and page.url.endswith('/api/index.html') %}
+{% set canonical_url = 'https://infernux-engine.com/wiki/site/' ~ (page.url or '') %}
+{% set document_title = page.title or ('页面未找到' if is_zh else 'Page not found') %}
+{% if page.meta and page.meta.description %}
+{% set page_description = page.meta.description %}
+{% elif page.meta and page.meta.agent_summary %}
+{% set page_description = page.meta.agent_summary %}
+{% elif is_not_found %}
+{% set page_description = 'The requested Infernux documentation page could not be found.' %}
+{% elif is_api %}
+{% set page_description = 'Official Infernux scripting API reference for ' ~ document_title ~ '.' %}
+{% else %}
+{% set page_description = 'Official Infernux documentation for ' ~ document_title ~ '.' %}
+{% endif %}
+{% set page_language = 'zh-CN' if is_zh else 'en' %}
+{% set og_locale = 'zh_CN' if is_zh else 'en_US' %}
+{% set alternate_og_locale = 'en_US' if is_zh else 'zh_CN' %}
+{% set social_image_alt = 'Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。' if is_zh else 'Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status.' %}
+{% if is_api %}
+{% set schema_type = 'TechArticle' %}
+{% set section_name = 'API 参考' if is_zh else 'API Reference' %}
+{% set section_url = 'https://infernux-engine.com/wiki/site/' ~ ('zh' if is_zh else 'en') ~ '/api/index.html' %}
+{% set resource_type = 'API reference' %}
+{% elif is_learn %}
+{% set schema_type = 'LearningResource' %}
+{% set section_name = '学习' if is_zh else 'Learn' %}
+{% set section_url = 'https://infernux-engine.com/wiki.html#start-here' %}
+{% set resource_type = 'Tutorial' %}
+{% elif is_manual %}
+{% set schema_type = 'TechArticle' %}
+{% set section_name = '手册' if is_zh else 'Manual' %}
+{% set section_url = 'https://infernux-engine.com/wiki.html?layer=manual#written-guides' %}
+{% set resource_type = 'Manual' %}
+{% elif is_architecture %}
+{% set schema_type = 'TechArticle' %}
+{% set section_name = '架构' if is_zh else 'Architecture' %}
+{% set section_url = 'https://infernux-engine.com/wiki.html?layer=architecture#written-guides' %}
+{% set resource_type = 'Architecture reference' %}
+{% else %}
+{% set schema_type = 'TechArticle' %}
+{% set section_name = '文档' if is_zh else 'Documentation' %}
+{% set section_url = 'https://infernux-engine.com/wiki.html' %}
+{% set resource_type = 'Documentation' %}
+{% endif %}
+<html lang="{{ page_language }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ page.title }} - Infernux Scripting API</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="{{ page_description }}">
+    {% if is_not_found %}<meta name="robots" content="noindex, follow">{% endif %}
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>{{ document_title }} - Infernux Documentation</title>
+    {% if not is_not_found %}
+    <link rel="canonical" href="{{ canonical_url }}">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="{{ document_title }} - Infernux Documentation">
+    <meta property="og:description" content="{{ page_description }}">
+    <meta property="og:url" content="{{ canonical_url }}">
+    <meta property="og:locale" content="{{ og_locale }}">
+    {% if page.url and ('zh/' in page.url or 'en/' in page.url) %}<meta property="og:locale:alternate" content="{{ alternate_og_locale }}">{% endif %}
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="{{ social_image_alt }}">
+    {% if page.meta and page.meta.last_verified %}<meta property="article:modified_time" content="{{ page.meta.last_verified }}T00:00:00+00:00">{% endif %}
+    {% if page.meta and page.meta.category %}<meta property="article:section" content="{{ page.meta.category }}">{% endif %}
+    {% if page.meta and page.meta.tags %}{% for tag in page.meta.tags %}<meta property="article:tag" content="{{ tag }}">{% endfor %}{% endif %}
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ document_title }} - Infernux Documentation">
+    <meta name="twitter:description" content="{{ page_description }}">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="{{ social_image_alt }}">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": {{ schema_type | tojson }},
+          "@id": {{ (canonical_url ~ '#document') | tojson }},
+          "headline": {{ document_title | tojson }},
+          "name": {{ document_title | tojson }},
+          "description": {{ page_description | tojson }},
+          "url": {{ canonical_url | tojson }},
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": {{ canonical_url | tojson }}
+          },
+          "inLanguage": {{ page_language | tojson }},
+          "isAccessibleForFree": true,
+          "learningResourceType": {{ resource_type | tojson }},
+          "articleSection": {{ section_name | tojson }},
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": {{ social_image_alt | tojson }}
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" }{% if page.meta and page.meta.last_verified %},
+          "dateModified": {{ page.meta.last_verified | tojson }}{% endif %}{% if page.meta and page.meta.tags %},
+          "keywords": {{ page.meta.tags | tojson }}{% endif %}
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": {{ (canonical_url ~ '#breadcrumb') | tojson }},
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": {{ ('文档' if is_zh else 'Documentation') | tojson }},
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            {% if is_section_index or not (is_api or is_learn or is_manual or is_architecture) %}
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": {{ document_title | tojson }},
+              "item": {{ canonical_url | tojson }}
+            }
+            {% else %}
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": {{ section_name | tojson }},
+              "item": {{ section_url | tojson }}
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": {{ document_title | tojson }},
+              "item": {{ canonical_url | tojson }}
+            }
+            {% endif %}
+          ]
+        }
+      ]
+    }
+    </script>
+    {% endif %}
+    {% if page.url and 'zh/' in page.url %}
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/{{ page.url }}">
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/{{ page.url | replace('zh/', 'en/') }}">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/{{ page.url | replace('zh/', 'en/') }}">
+    {% elif page.url and 'en/' in page.url %}
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/{{ page.url }}">
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/{{ page.url | replace('en/', 'zh/') }}">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/{{ page.url }}">
+    {% endif %}
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="{% if page.url and '/api/' in '/' + page.url %}/api-index.json{% else %}/docs-index.json{% endif %}">
+    <link rel="manifest" href="/site.webmanifest">
     <link rel="icon" type="image/png" href="/assets/logo.png">
-    <link rel="stylesheet" href="/css/style.css?v=2">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
     <style>
         /* ======================================================
            Infernux API Reference — Unity-Inspired Dark Theme
@@ -22,7 +200,7 @@
         /* ---- Sidebar ---- */
         .api-sidebar {
             width: 280px;
-            background: #0b0b12;
+            background: var(--bg-panel);
             border-right: 1px solid var(--border);
             position: sticky;
             top: var(--nav-height);
@@ -32,7 +210,7 @@
         }
         .api-sidebar::-webkit-scrollbar { width: 5px; }
         .api-sidebar::-webkit-scrollbar-track { background: transparent; }
-        .api-sidebar::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
+        .api-sidebar::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
 
         .sidebar-hdr {
             padding: 14px 18px;
@@ -68,12 +246,12 @@
             transition: all 0.12s;
         }
         .lang-sw a.on {
-            background: var(--primary);
-            color: #fff;
+            background: var(--accent-fill);
+            color: var(--on-accent);
         }
         .lang-sw a:hover:not(.on) {
-            color: var(--text-primary);
-            background: var(--bg-hover);
+            color: var(--text);
+            background: var(--accent-soft);
         }
 
         /* Namespace tree */
@@ -84,17 +262,23 @@
         .ns-hd {
             display: flex;
             align-items: center;
+            width: 100%;
             padding: 7px 16px;
+            border: 0;
+            background: transparent;
+            color: inherit;
+            font: inherit;
+            text-align: left;
             cursor: pointer;
             user-select: none;
             transition: background 0.1s;
         }
-        .ns-hd:hover { background: rgba(255,255,255,0.025); }
+        .ns-hd:hover { background: var(--accent-soft); }
 
         .ns-arr {
             width: 14px;
             font-size: 0.5rem;
-            color: #555;
+            color: var(--text-soft);
             transition: transform 0.15s;
             margin-right: 8px;
             flex-shrink: 0;
@@ -104,9 +288,9 @@
         .ns-nm {
             font-size: 0.84rem;
             font-weight: 500;
-            color: var(--text-secondary);
+            color: var(--text-muted);
         }
-        .ns-hd.hi .ns-nm { color: var(--primary); }
+        .ns-hd.hi .ns-nm { color: var(--accent); }
 
         .ns-ch {
             display: none;
@@ -124,13 +308,13 @@
             border-left: 2px solid transparent;
         }
         .ns-ch a:hover {
-            color: var(--text-primary);
-            background: rgba(255,255,255,0.02);
+            color: var(--text);
+            background: var(--accent-soft);
         }
         .ns-ch a.cur {
-            color: var(--text-primary);
-            background: rgba(255,107,53,0.07);
-            border-left-color: var(--primary);
+            color: var(--text);
+            background: var(--accent-soft);
+            border-left-color: var(--accent);
             font-weight: 600;
         }
 
@@ -142,6 +326,20 @@
             min-width: 0;
         }
 
+        .article-page-shell {
+            padding-top: calc(var(--nav-height) + 60px);
+            min-height: 80vh;
+            padding-bottom: 80px;
+        }
+        .article-page-container {
+            max-width: 860px;
+            margin: 0 auto;
+        }
+        .api-main.article-page-content {
+            padding: 0;
+            max-width: none;
+        }
+
         /* H1 — class name */
         .api-main h1 {
             font-size: 1.85rem;
@@ -149,7 +347,7 @@
             margin: 0 0 4px;
             padding: 0;
             border: none;
-            color: var(--text-primary);
+            color: var(--text);
         }
 
         /* "class in Package" subtitle */
@@ -160,8 +358,8 @@
             padding-bottom: 18px;
             border-bottom: 1px solid var(--border);
         }
-        .api-main .class-info b { color: var(--text-secondary); }
-        .api-main .class-info a { color: var(--primary); }
+        .api-main .class-info b { color: var(--text-muted); }
+        .api-main .class-info a { color: var(--accent); }
 
         /* H2 — section headers */
         .api-main h2 {
@@ -178,14 +376,14 @@
         .api-main h3 {
             font-size: 0.9rem;
             font-weight: 600;
-            color: var(--text-secondary);
+            color: var(--text-muted);
             margin: 18px 0 6px;
         }
 
         /* Paragraphs */
         .api-main p {
             font-size: 0.9rem;
-            color: var(--text-secondary);
+            color: var(--text-muted);
             line-height: 1.75;
             margin-bottom: 12px;
         }
@@ -193,8 +391,8 @@
         .api-main blockquote {
             margin: 12px 0;
             padding: 10px 16px;
-            background: rgba(255,107,53,0.04);
-            border-left: 3px solid var(--primary);
+            background: var(--accent-soft);
+            border-left: 3px solid var(--accent);
             border-radius: 0 4px 4px 0;
         }
         .api-main blockquote p { margin: 0; font-size: 0.85rem; }
@@ -205,10 +403,20 @@
             border-collapse: collapse;
             margin: 4px 0 18px;
         }
-        .api-main thead { display: none; }
+        .api-reference-page .api-main thead { display: none; }
+
+        .guide-page .api-main th {
+            padding: 9px 12px;
+            border-bottom: 1px solid var(--border-strong);
+            color: var(--text);
+            background: var(--bg-panel);
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-align: left;
+        }
 
         .api-main tbody tr {
-            border-bottom: 1px solid rgba(255,255,255,0.04);
+            border-bottom: 1px solid var(--border);
         }
         .api-main tbody tr:last-child { border-bottom: none; }
 
@@ -217,30 +425,30 @@
             font-size: 0.86rem;
             vertical-align: top;
         }
-        .api-main td:first-child {
+        .api-reference-page .api-main td:first-child {
             width: 200px;
             padding-right: 20px;
-            color: var(--primary);
+            color: var(--accent);
             font-size: 0.86rem;
             font-weight: 500;
         }
-        .api-main td:last-child { color: var(--text-secondary); }
-        .api-main td a { color: var(--primary); }
-        .api-main tbody tr:hover { background: rgba(255,255,255,0.012); }
+        .api-main td:last-child { color: var(--text-muted); }
+        .api-main td a { color: var(--accent); }
+        .api-main tbody tr:hover { background: var(--accent-soft); }
 
         /* Inline code — normal font, subtle highlight */
         .api-main code {
             font-family: inherit;
             font-size: inherit;
-            background: rgba(255,255,255,0.06);
+            background: var(--bg-panel);
             padding: 1px 5px;
             border-radius: 3px;
-            color: var(--primary-light);
+            color: var(--accent-strong);
         }
 
         /* Code blocks */
         .api-main pre {
-            background: #0d0d15;
+            background: var(--bg-deep);
             border: 1px solid var(--border);
             border-radius: 6px;
             padding: 16px 20px;
@@ -253,14 +461,14 @@
             padding: 0;
             font-size: 0.83rem;
             line-height: 1.65;
-            color: var(--text-secondary);
+            color: var(--text-muted);
         }
 
         /* Lists */
         .api-main ul, .api-main ol { padding-left: 18px; margin-bottom: 12px; }
         .api-main li {
             margin-bottom: 4px;
-            color: var(--text-secondary);
+            color: var(--text-muted);
             font-size: 0.88rem;
             line-height: 1.6;
         }
@@ -269,6 +477,112 @@
             border: none;
             border-top: 1px solid var(--border);
             margin: 26px 0;
+        }
+
+        /* ---- Curated document provenance ---- */
+        .doc-provenance {
+            display: grid;
+            gap: 12px;
+            margin: 0 0 28px;
+            padding: 16px 18px;
+            border: 1px solid var(--border-strong);
+            border-left: 3px solid var(--accent);
+            border-radius: var(--radius-md);
+            background: var(--bg-panel);
+        }
+        .doc-provenance-primary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 18px;
+            align-items: center;
+        }
+        .doc-provenance-item {
+            display: inline-flex;
+            gap: 6px;
+            align-items: baseline;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+        }
+        .doc-provenance-item span {
+            color: var(--text-soft);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .doc-status {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 3px 9px;
+            border: 1px solid var(--border-accent);
+            border-radius: 999px;
+            background: var(--accent-soft);
+            color: var(--accent-strong);
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        .doc-sources summary {
+            width: fit-content;
+            cursor: pointer;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 0.76rem;
+        }
+        .doc-sources ul {
+            display: grid;
+            gap: 5px;
+            margin: 10px 0 0;
+            padding-left: 18px;
+        }
+        .doc-sources a {
+            overflow-wrap: anywhere;
+            color: var(--accent);
+            font-family: var(--font-mono);
+            font-size: 0.76rem;
+        }
+        .doc-language-link {
+            color: var(--accent);
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-decoration: none;
+        }
+        .doc-language-link:hover { text-decoration: underline; }
+
+        /* ---- Copyable code blocks ---- */
+        .doc-code-shell {
+            position: relative;
+            margin: 10px 0 18px;
+        }
+        .doc-code-shell .doc-code-pre {
+            margin: 0;
+            padding-top: 54px;
+        }
+        .doc-code-copy {
+            position: absolute;
+            z-index: 1;
+            top: 7px;
+            right: 7px;
+            display: inline-flex;
+            gap: 7px;
+            align-items: center;
+            min-height: 44px;
+            padding: 7px 10px;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
+            background: var(--bg-elevated);
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            cursor: pointer;
+        }
+        .doc-code-copy:hover,
+        .doc-code-copy:focus-visible {
+            border-color: var(--accent);
+            color: var(--accent-strong);
         }
 
         /* ---- Footer ---- */
@@ -285,37 +599,100 @@
             .api-layout { flex-direction: column; }
             .api-sidebar {
                 width: 100%; position: relative; top: 0;
-                height: auto; max-height: 50vh;
+                height: auto; max-height: none;
                 border-right: none; border-bottom: 1px solid var(--border);
             }
             .api-main { padding: 20px; max-width: 100%; }
+            .api-main td,
+            .api-main th { overflow-wrap: anywhere; }
+            .api-reference-page .api-main td:first-child {
+                width: auto;
+                min-width: 7rem;
+            }
             .api-ft { margin-left: 0; }
         }
     </style>
 </head>
-<body>
+<body class="{% if page.url and '/api/' in '/' + page.url %}api-reference-page{% else %}guide-page{% endif %}">
+    {% macro document_breadcrumb() %}
+    <nav class="doc-breadcrumb" aria-label="{% if page.url and 'zh/' in page.url %}面包屑{% else %}Breadcrumb{% endif %}">
+        <a href="/wiki.html">{% if page.url and 'zh/' in page.url %}文档{% else %}Docs{% endif %}</a>
+        <span aria-hidden="true">/</span>
+        {% if page.url and '/api/' in '/' + page.url %}
+        <a href="/wiki/site/{% if 'zh/' in page.url %}zh{% else %}en{% endif %}/api/index.html">API</a>
+        <span aria-hidden="true">/</span>
+        {% elif page.url and '/learn/' in '/' + page.url %}
+        <a href="/wiki.html#start-here">{% if 'zh/' in page.url %}学习{% else %}Learn{% endif %}</a>
+        <span aria-hidden="true">/</span>
+        {% elif page.url and '/manual/' in '/' + page.url %}
+        <a href="/wiki.html?layer=manual#written-guides">{% if 'zh/' in page.url %}手册{% else %}Manual{% endif %}</a>
+        <span aria-hidden="true">/</span>
+        {% elif page.url and '/architecture/' in '/' + page.url %}
+        <a href="/wiki.html?layer=architecture#written-guides">{% if 'zh/' in page.url %}架构{% else %}Architecture{% endif %}</a>
+        <span aria-hidden="true">/</span>
+        {% endif %}
+        <span aria-current="page">{{ page.title }}</span>
+    </nav>
+    {% endmacro %}
+    {% macro document_trail() %}
+    <nav class="doc-trail" data-doc-trail aria-label="{% if page.url and 'zh/' in page.url %}文档连续阅读与反馈{% else %}Document navigation and feedback{% endif %}">
+        <a class="doc-trail-fallback" href="/wiki.html">{% if page.url and 'zh/' in page.url %}返回文档中心{% else %}Back to documentation{% endif %}</a>
+    </nav>
+    {% endmacro %}
+    {% macro document_build_provenance() %}
+    {% if not is_not_found %}
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="{% if is_zh %}文档发布证据{% else %}Documentation build evidence{% endif %}">
+        <span class="doc-build-label">{% if is_zh %}发布证据{% else %}Build evidence{% endif %}</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">{% if is_zh %}正在读取发布版本与来源…{% else %}Reading release and source provenance…{% endif %}</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">{% if is_zh %}机器清单 JSON{% else %}Machine manifest JSON{% endif %}</a>
+    </section>
+    {% endif %}
+    {% endmacro %}
+    {% macro document_outline() %}
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>{% if page.url and 'zh/' in page.url %}本页目录{% else %}On this page{% endif %}</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>{% if page.url and 'zh/' in page.url %}收起章节{% else %}Hide sections{% endif %}</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="{% if page.url and 'zh/' in page.url %}本页章节{% else %}Sections on this page{% endif %}"></nav>
+    </aside>
+    {% endmacro %}
+    <a class="skip-link" href="#main-content">{% if page.url and 'zh/' in page.url %}跳到正文{% else %}Skip to content{% endif %}</a>
     <!-- Top Navigation -->
-    <nav class="navbar">
+    <nav class="navbar" aria-label="{% if page.url and 'zh/' in page.url %}主导航{% else %}Primary navigation{% endif %}">
         <div class="nav-container">
             <a href="/index.html" class="nav-logo">
-                <span class="logo-icon"><img src="/assets/logo.png" alt="Infernux logo"></span>
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
                 <span class="logo-text">Infernux</span>
             </a>
-            <div class="nav-links">
-                <a href="/index.html">{% if page.url and 'zh/' in page.url %}首页{% else %}Home{% endif %}</a>
-                <a href="/index.html#system">{% if page.url and 'zh/' in page.url %}特性{% else %}Features{% endif %}</a>
-                <a href="/index.html#capabilities">{% if page.url and 'zh/' in page.url %}能力{% else %}Showcase{% endif %}</a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/{% if is_zh %}zh{% else %}en{% endif %}/learn/getting-started.html" class="nav-priority{% if is_getting_started %} active{% endif %}"{% if is_getting_started %} aria-current="page"{% endif %}>{% if is_zh %}开始使用{% else %}Start{% endif %}</a>
+                <a href="/wiki.html#start-here"{% if is_learn and not is_getting_started %} class="active" aria-current="page"{% endif %}>{% if is_zh %}学习{% else %}Learn{% endif %}</a>
+                <a href="/wiki.html?layer=manual#written-guides"{% if is_manual or is_architecture %} class="active" aria-current="page"{% endif %}>{% if is_zh %}手册{% else %}Manual{% endif %}</a>
+                <a href="/wiki/site/{% if is_zh %}zh{% else %}en{% endif %}/api/index.html"{% if is_api %} class="active" aria-current="page"{% endif %}>API</a>
                 <a href="/roadmap.html">{% if page.url and 'zh/' in page.url %}路线图{% else %}Roadmap{% endif %}</a>
-                <a href="/wiki.html" class="active">{% if page.url and 'zh/' in page.url %}文档{% else %}Docs{% endif %}</a>
-                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank">
-                    <i class="fab fa-github"></i> GitHub
+                <a href="/community.html" class="nav-priority">{% if is_zh %}社区{% else %}Community{% endif %}</a>
+                <a href="/download.html">{% if is_zh %}下载{% else %}Download{% endif %}</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
                 </a>
             </div>
             <div class="nav-right">
-                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="{% if page.url and 'zh/' in page.url %}复制版本、来源和权威链接{% else %}Copy version, sources, and canonical link{% endif %}" aria-label="{% if page.url and 'zh/' in page.url %}复制供 Agent 使用的页面上下文{% else %}Copy page context for an Agent{% endif %}">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>{% if page.url and 'zh/' in page.url %}复制给 Agent{% else %}Copy for Agent{% endif %}</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>{% if page.url and 'zh/' in page.url %}搜索文档{% else %}Search docs{% endif %}</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
                     <i class="fas fa-moon" id="theme-icon"></i>
                 </button>
-                <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
                     <i class="fas fa-bars"></i>
                 </button>
             </div>
@@ -326,26 +703,32 @@
     <!-- API Reference Layout -->
     <div class="api-layout">
         <!-- Sidebar — namespace / package tree -->
-        <aside class="api-sidebar">
+        <aside class="api-sidebar" aria-label="{% if page.url and 'zh/' in page.url %}API 命名空间{% else %}API namespaces{% endif %}">
             <div class="sidebar-hdr">
-                <h3>{% if page.url and 'zh/' in page.url %}脚本 API{% else %}Scripting API{% endif %}</h3>
-                <div class="lang-sw">
-                    <a href="/wiki/site/en/api/index.html"
-                       class="{% if not page.url or 'zh/' not in page.url %}on{% endif %}">EN</a>
-                    <a href="/wiki/site/zh/api/index.html"
-                       class="{% if page.url and 'zh/' in page.url %}on{% endif %}">中文</a>
+                <div>
+                    <h3>{% if page.url and 'zh/' in page.url %}脚本 API{% else %}Scripting API{% endif %}</h3>
+                    <span class="api-current-page" title="{{ page.title }}">{{ page.title }}</span>
                 </div>
+                <div class="lang-sw">
+                    <a href="/wiki/site/{{ page.url | replace('zh/api/', 'en/api/') }}"
+                       class="{% if not page.url or 'zh/' not in page.url %}on{% endif %}"{% if not page.url or 'zh/' not in page.url %} aria-current="page"{% endif %}>EN</a>
+                    <a href="/wiki/site/{{ page.url | replace('en/api/', 'zh/api/') }}"
+                       class="{% if page.url and 'zh/' in page.url %}on{% endif %}"{% if page.url and 'zh/' in page.url %} aria-current="page"{% endif %}>中文</a>
+                </div>
+                <button type="button" class="api-sidebar-toggle" aria-controls="api-namespace-tree" aria-expanded="true" hidden>
+                    <span>{% if page.url and 'zh/' in page.url %}目录{% else %}Browse{% endif %}</span><span class="api-sidebar-toggle-mark" aria-hidden="true">⌄</span>
+                </button>
             </div>
 
-            <div class="ns-tree">
+            <div class="ns-tree" id="api-namespace-tree">
                 {%- macro render_ns(items) -%}
                 {%- for item in items -%}
                     {%- if item.children -%}
                     <div class="ns-group">
-                        <div class="ns-hd{% if item.active %} open hi{% endif %}">
+                        <button type="button" class="ns-hd{% if item.active %} open hi{% endif %}" aria-expanded="{% if item.active %}true{% else %}false{% endif %}">
                             <span class="ns-arr">&#9654;</span>
                             <span class="ns-nm">{{ item.title }}</span>
-                        </div>
+                        </button>
                         <div class="ns-ch">
                         {%- for child in item.children -%}
                             {%- if child.children -%}
@@ -375,8 +758,12 @@
         </aside>
 
         <!-- Main content -->
-        <main class="api-main">
+        <main class="api-main" id="main-content">
+            {{ document_breadcrumb() }}
+            {{ document_outline() }}
             {{ page.content }}
+            {{ document_trail() }}
+            {{ document_build_provenance() }}
         </main>
     </div>
 
@@ -390,10 +777,41 @@
     </footer>
     {% else %}
     <!-- Article Layout (No Sidebar) -->
-    <main class="page-shell" style="padding-top: calc(var(--nav-height) + 60px); min-height: 80vh; padding-bottom: 80px;">
-        <div class="container" style="max-width: 860px; margin: 0 auto;">
-            <div class="api-main" style="padding: 0; max-width: none;">
+    <main class="page-shell article-page-shell" id="main-content">
+        <div class="container article-page-container">
+            <div class="api-main article-page-content">
+                {{ document_breadcrumb() }}
+                {% if page.meta and page.meta.status %}
+                <section class="doc-provenance" aria-label="{% if page.url and 'zh/' in page.url %}文档版本与来源{% else %}Document version and sources{% endif %}" data-status="{{ page.meta.status }}" data-last-verified="{{ page.meta.last_verified }}">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">{{ page.meta.status }}</strong>
+                        <span class="doc-provenance-item"><span>{% if page.url and 'zh/' in page.url %}始于{% else %}Since{% endif %}</span> {{ page.meta.since }}</span>
+                        <span class="doc-provenance-item"><span>{% if page.url and 'zh/' in page.url %}已验证{% else %}Verified{% endif %}</span> {{ page.meta.last_verified }}</span>
+                        {% if page.meta.audience %}<span class="doc-provenance-item"><span>{% if page.url and 'zh/' in page.url %}读者{% else %}Audience{% endif %}</span> {{ page.meta.audience | join(', ') }}</span>{% endif %}
+                        <a class="doc-provenance-item" href="/docs-manifest.json">{% if page.url and 'zh/' in page.url %}文档清单{% else %}Docs manifest{% endif %}</a>
+                        {% if page.url and 'zh/' in page.url %}
+                        <a class="doc-language-link" href="/wiki/site/{{ page.url | replace('zh/', 'en/') }}" lang="en">Read in English</a>
+                        {% else %}
+                        <a class="doc-language-link" href="/wiki/site/{{ page.url | replace('en/', 'zh/') }}" lang="zh">阅读中文</a>
+                        {% endif %}
+                    </div>
+                    {% if page.meta.source_paths %}
+                    <details class="doc-sources">
+                        <summary>{% if page.url and 'zh/' in page.url %}源码证据{% else %}Source evidence{% endif %} · {{ page.meta.source_paths | length }}</summary>
+                        <ul>
+                            {% for source_path in page.meta.source_paths %}
+                            {% set source_leaf = source_path.rsplit('/', 1)[-1] %}
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/{% if '.' in source_leaf %}blob{% else %}tree{% endif %}/master/{{ source_path }}" target="_blank" rel="noopener">{{ source_path }}</a></li>
+                            {% endfor %}
+                        </ul>
+                    </details>
+                    {% endif %}
+                </section>
+                {% endif %}
+                {{ document_outline() }}
                 {{ page.content }}
+                {{ document_trail() }}
+                {{ document_build_provenance() }}
             </div>
         </div>
     </main>
@@ -408,13 +826,26 @@
     </footer>
     {% endif %}
 
-    <script src="/js/main.js?v=2"></script>
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        document.querySelectorAll('.ns-hd').forEach(function(h) {
-            h.addEventListener('click', function() { this.classList.toggle('open'); });
-        });
-    });
-    </script>
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">{% if page.url and 'zh/' in page.url %}搜索 Infernux 文档{% else %}Search Infernux documentation{% endif %}</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="{% if page.url and 'zh/' in page.url %}关闭文档搜索{% else %}Close documentation search{% endif %}"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="{% if page.url and 'zh/' in page.url %}API 符号、系统、工作流…{% else %}API symbol, system, workflow…{% endif %}">
+            </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="{% if is_zh %}文档搜索筛选器{% else %}Documentation search filters{% endif %}"></div>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </dialog>
+
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
 </body>
 </html>

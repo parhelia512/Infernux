@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="A repeatable Infernux debugging workflow using the Console, Debug logging, lifecycle checks, minimal reproduction, and evidence suitable for GitHub Issues.">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>Debugging and the Console - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/en/manual/debugging.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="Debugging and the Console - Infernux Documentation">
+    <meta property="og:description" content="A repeatable Infernux debugging workflow using the Console, Debug logging, lifecycle checks, minimal reproduction, and evidence suitable for GitHub Issues.">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/en/manual/debugging.html">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status.">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="Manual">
+    <meta property="article:tag" content="debugging"><meta property="article:tag" content="console"><meta property="article:tag" content="logging"><meta property="article:tag" content="troubleshooting">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Debugging and the Console - Infernux Documentation">
+    <meta name="twitter:description" content="A repeatable Infernux debugging workflow using the Console, Debug logging, lifecycle checks, minimal reproduction, and evidence suitable for GitHub Issues.">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status.">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://infernux-engine.com/wiki/site/en/manual/debugging.html#document",
+          "headline": "Debugging and the Console",
+          "name": "Debugging and the Console",
+          "description": "A repeatable Infernux debugging workflow using the Console, Debug logging, lifecycle checks, minimal reproduction, and evidence suitable for GitHub Issues.",
+          "url": "https://infernux-engine.com/wiki/site/en/manual/debugging.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/en/manual/debugging.html"
+          },
+          "inLanguage": "en",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Manual",
+          "articleSection": "Manual",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": "Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status."
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["debugging", "console", "logging", "troubleshooting"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/en/manual/debugging.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Documentation",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Manual",
+              "item": "https://infernux-engine.com/wiki.html?layer=manual#written-guides"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "Debugging and the Console",
+              "item": "https://infernux-engine.com/wiki/site/en/manual/debugging.html"
+            }
+            
+          ]
+        }
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/manual/debugging.html">
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/manual/debugging.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/manual/debugging.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
+    <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
+</head>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <!-- Top Navigation -->
+    <nav class="navbar" aria-label="Primary navigation">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/en/learn/getting-started.html" class="nav-priority">Start</a>
+                <a href="/wiki.html#start-here">Learn</a>
+                <a href="/wiki.html?layer=manual#written-guides" class="active" aria-current="page">Manual</a>
+                <a href="/wiki/site/en/api/index.html">API</a>
+                <a href="/roadmap.html">Roadmap</a>
+                <a href="/community.html" class="nav-priority">Community</a>
+                <a href="/download.html">Download</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="Copy version, sources, and canonical link" aria-label="Copy page context for an Agent">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>Copy for Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>Search docs</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell article-page-shell" id="main-content">
+        <div class="container article-page-container">
+            <div class="api-main article-page-content">
+                
+    <nav class="doc-breadcrumb" aria-label="Breadcrumb">
+        <a href="/wiki.html">Docs</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html?layer=manual#written-guides">Manual</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">Debugging and the Console</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="Document version and sources" data-status="preview" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">preview</strong>
+                        <span class="doc-provenance-item"><span>Since</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>Verified</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>Audience</span> user, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">Docs manifest</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/zh/manual/debugging.html" lang="zh">阅读中文</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>Source evidence · 3</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/debug.py" target="_blank" rel="noopener">python/Infernux/debug.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/engine/ui/console_utils.py" target="_blank" rel="noopener">python/Infernux/engine/ui/console_utils.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/components/component.py" target="_blank" rel="noopener">python/Infernux/components/component.py</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>On this page</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>Hide sections</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="Sections on this page"></nav>
+    </aside>
+    
+                <h1 id="debugging-and-the-console">Debugging and the Console<a class="headerlink" href="#debugging-and-the-console" title="Permanent link">&para;</a></h1>
+<p>Debugging is fastest when you separate the <strong>first cause</strong> from the errors it produces later. Infernux combines Python gameplay, native runtime systems, imported assets, and editor state, so one bad input can appear as several downstream failures.</p>
+<h2 id="the-first-error-rule">The first-error rule<a class="headerlink" href="#the-first-error-rule" title="Permanent link">&para;</a></h2>
+<p>When the Console contains many messages:</p>
+<ol>
+<li>stop Play mode;</li>
+<li>clear the Console;</li>
+<li>reproduce the problem once;</li>
+<li>start with the earliest warning or error;</li>
+<li>fix or isolate that cause before interpreting later messages.</li>
+</ol>
+<p>A script import failure can prevent component discovery, which then causes missing-reference messages, which may finally produce update errors. Debugging the final message first wastes time.</p>
+<h2 id="logging-deliberately">Logging deliberately<a class="headerlink" href="#logging-deliberately" title="Permanent link">&para;</a></h2>
+<p>Use the <code>Debug</code> class for messages that belong to the engine Console:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux</span><span class="w"> </span><span class="kn">import</span> <span class="n">Debug</span><span class="p">,</span> <span class="n">InxComponent</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">class</span><span class="w"> </span><span class="nc">Door</span><span class="p">(</span><span class="n">InxComponent</span><span class="p">):</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        <span class="n">Debug</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="s2">&quot;Door initialized&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">game_object</span><span class="p">)</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">open</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">enabled</span><span class="p">:</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>            <span class="n">Debug</span><span class="o">.</span><span class="n">log_warning</span><span class="p">(</span><span class="s2">&quot;Ignored open request while disabled&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">game_object</span><span class="p">)</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>            <span class="k">return</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        <span class="n">Debug</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="s2">&quot;Door opened&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">game_object</span><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li><code>Debug.log(...)</code> records expected milestones or temporary observations.</li>
+<li><code>Debug.log_warning(...)</code> records a recoverable but suspicious state.</li>
+<li><code>Debug.log_error(...)</code> records a failed operation that should be investigated.</li>
+<li><code>Debug.log_exception(...)</code> preserves exception context.</li>
+<li>Supplying the related object as context makes the report easier to trace.</li>
+</ul>
+<p>Do not log a message every frame unless you are investigating a short capture. Per-frame logs can hide the original failure and distort timing.</p>
+<h2 id="diagnose-a-component-that-does-not-run">Diagnose a component that does not run<a class="headerlink" href="#diagnose-a-component-that-does-not-run" title="Permanent link">&para;</a></h2>
+<p>Check in this order:</p>
+<ol>
+<li><strong>Import:</strong> does the script load without syntax or import errors?</li>
+<li><strong>Discovery:</strong> does the class inherit <code>InxComponent</code>, and can the Inspector add it?</li>
+<li><strong>Ownership:</strong> is it attached to the GameObject you are observing?</li>
+<li><strong>Activation:</strong> are the component, GameObject, and parent hierarchy active?</li>
+<li><strong>Signature:</strong> does <code>update</code> accept <code>(self, delta_time)</code> and <code>fixed_update</code> accept <code>(self, fixed_delta_time)</code>?</li>
+<li><strong>Play state:</strong> are you testing behavior that only runs in Play mode?</li>
+<li><strong>Early return:</strong> is a guard condition intentionally skipping the work?</li>
+</ol>
+<p>Add one log in <code>start()</code> and one at the branch you expect to enter. Avoid scattering many logs until you know which lifecycle boundary fails.</p>
+<h2 id="diagnose-references-and-assets">Diagnose references and assets<a class="headerlink" href="#diagnose-references-and-assets" title="Permanent link">&para;</a></h2>
+<p>For a missing component or object reference:</p>
+<ul>
+<li>log the owner and requested type once during setup;</li>
+<li>confirm the object exists in the active scene;</li>
+<li>confirm the component is attached and enabled;</li>
+<li>avoid relying on duplicate names;</li>
+<li>invalidate or reacquire references after a scene transition.</li>
+</ul>
+<p>For an asset that works in the editor but not in a standalone build:</p>
+<ul>
+<li>confirm it lives inside the project;</li>
+<li>confirm references are project-relative and survive a moved project directory;</li>
+<li>rebuild into a clean output directory;</li>
+<li>inspect the first copy, import, or load error;</li>
+<li>test the entire packaged directory, not a detached executable.</li>
+</ul>
+<h2 id="reduce-the-problem">Reduce the problem<a class="headerlink" href="#reduce-the-problem" title="Permanent link">&para;</a></h2>
+<p>A useful minimal reproduction has:</p>
+<ul>
+<li>one saved scene;</li>
+<li>the smallest number of GameObjects and components that still fail;</li>
+<li>no unrelated assets or plugins;</li>
+<li>a short deterministic sequence of actions;</li>
+<li>the engine version and platform;</li>
+<li>expected and actual results.</li>
+</ul>
+<p>Remove one dependency at a time. If the failure disappears, restore only that dependency and confirm it returns. This turns a vague project failure into a testable engine or usage issue.</p>
+<h2 id="report-evidence">Report evidence<a class="headerlink" href="#report-evidence" title="Permanent link">&para;</a></h2>
+<p>Use GitHub Discussions / Q&amp;A when you are unsure whether behavior is a defect. Use GitHub Issues when you can provide a reproducible failure.</p>
+<p>A strong issue includes:</p>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Engine version:
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>Operating system:
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>Project type / relevant settings:
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>Steps to reproduce:
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>1.
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>2.
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>3.
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>Expected result:
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>Actual result:
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>First relevant Console error:
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>Minimal project or code sample:
+</code></pre></div>
+<p>Remove credentials, local usernames, private paths, and proprietary assets before posting logs or projects publicly.</p>
+<h2 id="related-reference">Related reference<a class="headerlink" href="#related-reference" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../api/Debug.html">Debug</a></li>
+<li><a href="../api/InxComponent.html">InxComponent</a></li>
+<li><a href="scenes-and-objects.html">Scenes and Objects</a></li>
+<li><a href="https://infernux-engine.com/community.html">Community hub</a></li>
+</ul>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="Document navigation and feedback">
+        <a class="doc-trail-fallback" href="/wiki.html">Back to documentation</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="Documentation build evidence">
+        <span class="doc-build-label">Build evidence</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">Reading release and source provenance…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">Machine manifest JSON</a>
+    </section>
+    
+    
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">Search Infernux documentation</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="Close documentation search"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API symbol, system, workflow…">
+            </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="Documentation search filters"></div>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </dialog>
+
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
+</body>
+</html>

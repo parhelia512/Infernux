@@ -182,9 +182,10 @@ class TestComponentRef:
     def test_serialize_round_trip(self):
         ref = ComponentRef(go_id=42, component_type="Rigidbody")
         data = ref._serialize()
-        assert "__component_ref__" in data
+        assert data["$type"] == "component_ref"
+        assert data["$version"] == 1
 
-        restored = ComponentRef._from_dict(data["__component_ref__"])
+        restored = ComponentRef._from_dict(data)
         assert restored.go_id == 42
         assert restored.component_type == "Rigidbody"
 

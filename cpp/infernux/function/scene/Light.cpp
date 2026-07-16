@@ -1,9 +1,11 @@
 #include "Light.h"
+#include "ComponentDocumentValidation.h"
 #include "ComponentFactory.h"
 #include "GameObject.h"
 #include "SceneManager.h"
 #include "Transform.h"
 #include <InxLog.h>
+#include <limits>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
@@ -12,7 +14,7 @@ namespace infernux
 {
 
 // Register Light component with factory
-INFERNUX_REGISTER_COMPONENT("Light", Light)
+INFERNUX_REGISTER_VALIDATED_COMPONENT("Light", Light)
 
 Light::~Light()
 {
@@ -34,13 +36,9 @@ void Light::OnDisable()
     SceneManager::Instance().UnregisterLight(this);
 }
 
-std::string Light::Serialize() const
+nlohmann::json Light::SerializeDocument() const
 {
-    json j;
-    j["schema_version"] = 1;
-    j["type"] = GetTypeName();
-    j["enabled"] = IsEnabled();
-    j["component_id"] = GetComponentID();
+    json j = Component::SerializeDocument();
 
     // Light type
     j["lightType"] = static_cast<int>(m_lightType);
@@ -69,73 +67,67 @@ std::string Light::Serialize() const
     // Baking
     j["baked"] = m_baked;
 
-    return j.dump();
+    return j;
 }
 
-bool Light::Deserialize(const std::string &jsonStr)
+void Light::ValidateSerializedDocument(const nlohmann::json &j)
+{
+    using namespace component_document_validation;
+    ValidateComponentDocument(j, "Light", 1,
+                              {"lightType", "color", "intensity", "range", "spotAngle", "outerSpotAngle", "shadows",
+                               "shadowStrength", "shadowBias", "shadowNormalBias", "renderMode", "cullingMask",
+                               "baked"});
+    const int lightType = RequireInteger(j, "lightType", "Light");
+    RequireFiniteVector(j, "color", 3, "Light");
+    const float intensity = RequireFiniteFloat(j, "intensity", "Light");
+    const float range = RequireFiniteFloat(j, "range", "Light");
+    const float spotAngle = RequireFiniteFloat(j, "spotAngle", "Light");
+    const float outerSpotAngle = RequireFiniteFloat(j, "outerSpotAngle", "Light");
+    const int shadows = RequireInteger(j, "shadows", "Light");
+    const float shadowStrength = RequireFiniteFloat(j, "shadowStrength", "Light");
+    const float shadowBias = RequireFiniteFloat(j, "shadowBias", "Light");
+    const float shadowNormalBias = RequireFiniteFloat(j, "shadowNormalBias", "Light");
+    const int renderMode = RequireInteger(j, "renderMode", "Light");
+    const uint64_t cullingMask = RequireUnsignedInteger(j, "cullingMask", "Light");
+    RequireBoolean(j, "baked", "Light");
+
+    if (lightType < static_cast<int>(LightType::Directional) || lightType > static_cast<int>(LightType::Area))
+        throw std::invalid_argument("Light.lightType is unsupported");
+    if (intensity < 0.0f || range <= 0.0f)
+        throw std::invalid_argument("Light intensity and range are invalid");
+    if (spotAngle <= 0.0f || outerSpotAngle < spotAngle || outerSpotAngle >= 180.0f)
+        throw std::invalid_argument("Light spot cone angles are invalid");
+    if (shadows < static_cast<int>(LightShadows::None) || shadows > static_cast<int>(LightShadows::Soft))
+        throw std::invalid_argument("Light.shadows is unsupported");
+    if (shadowStrength < 0.0f || shadowStrength > 1.0f || shadowBias < 0.0f || shadowNormalBias < 0.0f)
+        throw std::invalid_argument("Light shadow parameters are invalid");
+    if (renderMode < static_cast<int>(LightRenderMode::Auto) ||
+        renderMode > static_cast<int>(LightRenderMode::ForceVertex))
+        throw std::invalid_argument("Light.renderMode is unsupported");
+    if (cullingMask > std::numeric_limits<uint32_t>::max())
+        throw std::invalid_argument("Light.cullingMask exceeds 32 bits");
+}
+
+bool Light::DeserializeDocument(const nlohmann::json &j)
 {
     try {
-        json j = json::parse(jsonStr);
+        ValidateSerializedDocument(j);
+        if (!Component::DeserializeDocument(j))
+            return false;
 
-        if (j.contains("enabled")) {
-            SetEnabled(j["enabled"].get<bool>());
-        }
-        if (j.contains("component_id")) {
-            SetComponentID(j["component_id"].get<uint64_t>());
-        }
-
-        // Light type
-        if (j.contains("lightType")) {
-            m_lightType = static_cast<LightType>(j["lightType"].get<int>());
-        }
-
-        // Color & intensity
-        if (j.contains("color") && j["color"].is_array() && j["color"].size() >= 3) {
-            m_color = glm::vec3(j["color"][0].get<float>(), j["color"][1].get<float>(), j["color"][2].get<float>());
-        }
-        if (j.contains("intensity")) {
-            m_intensity = j["intensity"].get<float>();
-        }
-
-        // Range
-        if (j.contains("range")) {
-            m_range = j["range"].get<float>();
-        }
-
-        // Spot settings
-        if (j.contains("spotAngle")) {
-            m_spotAngle = j["spotAngle"].get<float>();
-        }
-        if (j.contains("outerSpotAngle")) {
-            m_outerSpotAngle = j["outerSpotAngle"].get<float>();
-        }
-
-        // Shadows
-        if (j.contains("shadows")) {
-            m_shadows = static_cast<LightShadows>(j["shadows"].get<int>());
-        }
-        if (j.contains("shadowStrength")) {
-            m_shadowStrength = j["shadowStrength"].get<float>();
-        }
-        if (j.contains("shadowBias")) {
-            m_shadowBias = j["shadowBias"].get<float>();
-        }
-        if (j.contains("shadowNormalBias")) {
-            m_shadowNormalBias = j["shadowNormalBias"].get<float>();
-        }
-
-        // Rendering
-        if (j.contains("renderMode")) {
-            m_renderMode = static_cast<LightRenderMode>(j["renderMode"].get<int>());
-        }
-        if (j.contains("cullingMask")) {
-            m_cullingMask = j["cullingMask"].get<uint32_t>();
-        }
-
-        // Baking
-        if (j.contains("baked")) {
-            m_baked = j["baked"].get<bool>();
-        }
+        m_lightType = static_cast<LightType>(j["lightType"].get<int>());
+        m_color = glm::vec3(j["color"][0].get<float>(), j["color"][1].get<float>(), j["color"][2].get<float>());
+        m_intensity = j["intensity"].get<float>();
+        m_range = j["range"].get<float>();
+        m_spotAngle = j["spotAngle"].get<float>();
+        m_outerSpotAngle = j["outerSpotAngle"].get<float>();
+        m_shadows = static_cast<LightShadows>(j["shadows"].get<int>());
+        m_shadowStrength = j["shadowStrength"].get<float>();
+        m_shadowBias = j["shadowBias"].get<float>();
+        m_shadowNormalBias = j["shadowNormalBias"].get<float>();
+        m_renderMode = static_cast<LightRenderMode>(j["renderMode"].get<int>());
+        m_cullingMask = j["cullingMask"].get<uint32_t>();
+        m_baked = j["baked"].get<bool>();
 
         return true;
     } catch (const std::exception &e) {

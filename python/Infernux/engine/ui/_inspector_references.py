@@ -6,6 +6,7 @@ from Infernux.engine.i18n import t
 from .inspector_utils import (
     max_label_w, field_label, render_serialized_field, has_field_changed,
     render_compact_section_header, render_info_text, pretty_field_name,
+    semantic_capture_enabled, inspector_component_semantic_id,
 )
 from ._inspector_undo import (
     _record_property, _record_builtin_property, _notify_scene_modified,
@@ -343,7 +344,10 @@ def _create_asset_ref_from_payload(metadata, file_path: str):
     return AudioClipRef(guid=guid, path_hint=file_path)
 
 
-def _render_asset_reference_field(ctx, comp, field_name, metadata, current_value, field_type, lw):
+def _render_asset_reference_field(
+    ctx, comp, field_name, metadata, current_value, field_type, lw,
+    *, builtin_attr=None,
+):
     """Render a MATERIAL / TEXTURE / SHADER / ASSET reference field."""
     from Infernux.components.serialized_field import FieldType as _FT
 
@@ -355,18 +359,24 @@ def _render_asset_reference_field(ctx, comp, field_name, metadata, current_value
 
     display = _get_reference_display_name(field_type, current_value)
 
+    def _record_change(old, new, description):
+        if builtin_attr is not None:
+            _record_builtin_property(comp, builtin_attr, old, new, description)
+        else:
+            _record_property(comp, field_name, old, new, description)
+
     def _on_pick(path, _fn=field_name, _comp=comp, _ft=field_type, _meta=metadata):
         if _ft == _FT.ASSET:
             ref = _create_asset_ref_from_payload(_meta, path)
         else:
             ref = _create_reference_value_from_payload(_ft, path)
         if ref is not None:
-            old = getattr(_comp, _fn, None)
-            _record_property(_comp, _fn, old, ref, f"Set {_fn}")
+            old = getattr(_comp, builtin_attr or _fn, None)
+            _record_change(old, ref, f"Set {_fn}")
 
     def _on_clear(_fn=field_name, _comp=comp):
-        old = getattr(_comp, _fn, None)
-        _record_property(_comp, _fn, old, None, f"Clear {_fn}")
+        old = getattr(_comp, builtin_attr or _fn, None)
+        _record_change(old, None, f"Clear {_fn}")
 
     _assets_only = (field_type == _FT.TEXTURE)
 
@@ -381,8 +391,8 @@ def _render_asset_reference_field(ctx, comp, field_name, metadata, current_value
             file_path = str(payload) if not isinstance(payload, str) else payload
             ref = _create_asset_ref_from_payload(_meta, file_path)
             if ref is not None:
-                old = getattr(_comp, _fn, None)
-                _record_property(_comp, _fn, old, ref, f"Set {_fn}")
+                old = getattr(_comp, builtin_attr or _fn, None)
+                _record_change(old, ref, f"Set {_fn}")
         else:
             _apply_reference_drop(_ft, _comp, _fn, payload)
 
@@ -394,6 +404,8 @@ def _render_asset_reference_field(ctx, comp, field_name, metadata, current_value
         picker_asset_items=_picker,
         on_pick=_on_pick,
         on_clear=_on_clear,
+        semantic_id=(inspector_component_semantic_id(comp, field_name)
+                     if semantic_capture_enabled(ctx) else ""),
     )
 
 
@@ -429,6 +441,8 @@ def _render_component_ref_inline(ctx, py_comp, field_name, metadata, lw):
         picker_scene_items=_comp_scene,
         on_pick=_comp_on_pick,
         on_clear=_comp_on_clear,
+        semantic_id=(inspector_component_semantic_id(py_comp, field_name)
+                     if semantic_capture_enabled(ctx) else ""),
     )
 
 
@@ -469,6 +483,8 @@ def _render_gameobject_ref_inline(ctx, py_comp, field_name, metadata, current_va
         picker_scene_items=_go_scene,
         on_pick=_go_on_pick,
         on_clear=_go_on_clear,
+        semantic_id=(inspector_component_semantic_id(py_comp, field_name)
+                     if semantic_capture_enabled(ctx) else ""),
     )
 
 
@@ -596,7 +612,7 @@ def render_object_field(ctx: InxGUIContext, field_id: str, display_text: str,
                         type_hint: str, selected: bool = False, clickable: bool = True,
                         accept_drag_type: str = None, on_drop_callback=None,
                         picker_scene_items=None, picker_asset_items=None,
-                        on_pick=None, on_clear=None) -> bool:
+                        on_pick=None, on_clear=None, semantic_id: str = "") -> bool:
     """Render a Unity-style object field (selectable box showing an object reference)."""
     from .igui import IGUI
     return IGUI.object_field(
@@ -606,4 +622,5 @@ def render_object_field(ctx: InxGUIContext, field_id: str, display_text: str,
         picker_scene_items=picker_scene_items,
         picker_asset_items=picker_asset_items,
         on_pick=on_pick, on_clear=on_clear,
+        semantic_id=semantic_id,
     )

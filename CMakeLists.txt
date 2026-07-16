@@ -20,9 +20,14 @@ set(PYTHON_TARGET_DIR "${CMAKE_SOURCE_DIR}/python/Infernux/lib")
 # ------------------------------------------------------------------------------
 # Source Files
 # ------------------------------------------------------------------------------
-file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS cpp/*.cpp cpp/*.h)
-# Exclude standalone launcher source from the pybind11 module
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX "tools/launcher/")
+file(GLOB_RECURSE INFERNUX_RUNTIME_SOURCES CONFIGURE_DEPENDS cpp/*.cpp cpp/*.h)
+# Runtime implementation and Python bindings are separate binary layers. This
+# keeps pybind template churn out of the engine DLL and prevents a binding-only
+# edit from relinking every renderer, scene, and resource object.
+list(FILTER INFERNUX_RUNTIME_SOURCES EXCLUDE REGEX "tools/launcher/")
+list(FILTER INFERNUX_RUNTIME_SOURCES EXCLUDE REGEX "tools/pybinding/")
+# Tests are separate executables and must never be linked into a shipping binary.
+list(FILTER INFERNUX_RUNTIME_SOURCES EXCLUDE REGEX "cpp/tests/")
 file(GLOB_RECURSE BINDING_SOURCES CONFIGURE_DEPENDS cpp/infernux/tools/pybinding/*.cpp)
 
 # ------------------------------------------------------------------------------
@@ -36,7 +41,7 @@ endforeach()
 list(REMOVE_DUPLICATES INFERNUX_INCLUDE_DIRS)
 
 # ------------------------------------------------------------------------------
-# pybind11 Module Definition
+# Native Runtime And pybind11 Module Definition
 # ------------------------------------------------------------------------------
 set(PYBIND11_FINDPYTHON ON)
 find_package(Python3 COMPONENTS Interpreter Development.Module Development.Embed REQUIRED)
@@ -60,48 +65,102 @@ if(WIN32)
     include(InstallRequiredSystemLibraries)
 endif()
 
-# NO_EXTRAS: pybind11 would otherwise inject -flto=auto, which conflicts with
-# this project's deliberate LTO opt-out (see the Release flags below). On GCC
-# the mix (-fno-lto objects compiled as LTO-IR, non-LTO link) silently drops
-# every object file and produces a 14 KB empty module.
-pybind11_add_module(_Infernux MODULE NO_EXTRAS
-    ${ENGINE_SOURCES}
-    ${BINDING_SOURCES}
+# NO_EXTRAS keeps pybind11 from choosing its own LTO flags. Release IPO/LTO is
+# enabled explicitly below where the target's export strategy supports it, so
+# compile and link settings always agree.
+add_library(InfernuxRuntime SHARED ${INFERNUX_RUNTIME_SOURCES})
+pybind11_add_module(_Infernux MODULE NO_EXTRAS ${BINDING_SOURCES})
+
+if(WIN32)
+    add_executable(InfernuxPlayerLauncher WIN32
+        cpp/infernux/tools/launcher/InfernuxPlayerLauncher.cpp
+        cpp/infernux/tools/launcher/InfernuxPlayerLauncher.rc
+    )
+    set(INFERNUX_PLAYER_LAUNCHER_DIR
+        "${CMAKE_SOURCE_DIR}/python/Infernux/resources/player"
+    )
+    set_target_properties(InfernuxPlayerLauncher PROPERTIES
+        OUTPUT_NAME "InfernuxLauncher"
+        RUNTIME_OUTPUT_DIRECTORY "${INFERNUX_PLAYER_LAUNCHER_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${INFERNUX_PLAYER_LAUNCHER_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${INFERNUX_PLAYER_LAUNCHER_DIR}"
+        PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/symbols"
+        PDB_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/symbols"
+        PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/symbols"
+        COMPILE_PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/symbols"
+        COMPILE_PDB_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/symbols"
+        COMPILE_PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/symbols"
+    )
+    if(MSVC)
+        target_compile_options(InfernuxPlayerLauncher PRIVATE /utf-8 /O1)
+    endif()
+endif()
+
+# Most of the existing runtime API predates explicit visibility annotations.
+# CMake generates the Windows export table while Linux/macOS use their default
+# symbol visibility. A later ABI-hardening pass can replace this with a narrow
+# INFERNUX_API surface without collapsing the binary boundary again.
+set_target_properties(InfernuxRuntime PROPERTIES
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+    CXX_VISIBILITY_PRESET default
+    VISIBILITY_INLINES_HIDDEN OFF
 )
 
-target_include_directories(_Infernux PRIVATE
-    ${INFERNUX_INCLUDE_DIRS}
-    ${CMAKE_SOURCE_DIR}/external
-    ${CMAKE_SOURCE_DIR}/cpp/infernux
-)
+foreach(_infernux_target InfernuxRuntime _Infernux)
+    target_include_directories(${_infernux_target} PRIVATE
+        ${INFERNUX_INCLUDE_DIRS}
+        ${CMAKE_SOURCE_DIR}/external
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+endforeach()
+
+target_link_libraries(InfernuxRuntime PRIVATE pybind11::embed)
+target_link_libraries(_Infernux PRIVATE InfernuxRuntime)
 
 # Set UTF-8 encoding for MSVC to avoid C4819 warnings
 if(MSVC)
-    target_compile_options(_Infernux PRIVATE
-        /utf-8
-        /bigobj   # pybind11 binding TUs exceed the default COFF section limit
-    )
-
-    target_link_options(_Infernux PRIVATE
+    foreach(_infernux_target InfernuxRuntime _Infernux)
+        target_compile_options(${_infernux_target} PRIVATE
+            /utf-8
+            /FS       # Serialize writes to the shared compiler PDB under parallel MSBuild.
+            /bigobj   # pybind11 binding TUs exceed the default COFF section limit
+        )
+    endforeach()
+    # Keep the historical runtime-DLL linker policy until its public ABI uses
+    # explicit INFERNUX_API exports. The pybind module does not need this
+    # workaround and can use the standard optimized Release linker policy.
+    target_link_options(InfernuxRuntime PRIVATE
         $<$<CONFIG:Release>:/OPT:NOREF>
         $<$<CONFIG:Release>:/OPT:NOICF>
     )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    # Optimized but LTO-free, matching the MSVC Release configuration.
-    # (The historical -O0 here was a leftover from a crash investigation and
-    # made Linux Release builds unoptimized.)
-    target_compile_options(_Infernux PRIVATE
-        $<$<CONFIG:Release>:-O2>
-        $<$<CONFIG:Release>:-fno-lto>
-    )
-
-    target_link_options(_Infernux PRIVATE
-        $<$<CONFIG:Release>:-fno-lto>
-    )
+    # IPO/LTO is configured through CMake below; keep only the optimization
+    # level here so the compiler and linker receive one consistent policy.
+    foreach(_infernux_target InfernuxRuntime _Infernux)
+        target_compile_options(${_infernux_target} PRIVATE
+            $<$<CONFIG:Release>:-O2>
+        )
+    endforeach()
 endif()
 
-# Disable target-level IPO/LTO in Release while investigating no-log crashes.
-set_property(TARGET _Infernux PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE FALSE)
+option(INFERNUX_RELEASE_LTO "Enable IPO/LTO for native Release targets" ON)
+if(INFERNUX_RELEASE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT _infernux_ipo_supported OUTPUT _infernux_ipo_error)
+    if(_infernux_ipo_supported)
+        set_property(TARGET _Infernux PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+        if(WIN32)
+            # WINDOWS_EXPORT_ALL_SYMBOLS cannot inspect MSVC /GL objects, so
+            # enabling IPO here removes the DLL export table. Keep the runtime
+            # stable until its public ABI has explicit export annotations.
+            set_property(TARGET InfernuxRuntime PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE FALSE)
+        else()
+            set_property(TARGET InfernuxRuntime PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+        endif()
+    else()
+        message(FATAL_ERROR "Release IPO/LTO is required but unsupported: ${_infernux_ipo_error}")
+    endif()
+endif()
 
 # ------------------------------------------------------------------------------
 # SPIRV-Cross (from Vulkan SDK)
@@ -109,11 +168,11 @@ set_property(TARGET _Infernux PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE FALS
 # SPIRV-Cross is included with the Vulkan SDK for shader reflection
 if(DEFINED ENV{VULKAN_SDK})
     set(VULKAN_SDK_PATH $ENV{VULKAN_SDK})
-    target_include_directories(_Infernux PRIVATE ${VULKAN_SDK_PATH}/Include)
+    target_include_directories(InfernuxRuntime PRIVATE ${VULKAN_SDK_PATH}/Include)
     
     # Link SPIRV-Cross libraries for shader reflection
     if(WIN32)
-        target_link_libraries(_Infernux PRIVATE
+        target_link_libraries(InfernuxRuntime PRIVATE
             ${VULKAN_SDK_PATH}/Lib/spirv-cross-core.lib
             ${VULKAN_SDK_PATH}/Lib/spirv-cross-glsl.lib
             ${VULKAN_SDK_PATH}/Lib/spirv-cross-cpp.lib
@@ -125,7 +184,7 @@ if(DEFINED ENV{VULKAN_SDK})
         foreach(_sc_lib spirv-cross-core spirv-cross-glsl spirv-cross-cpp spirv-cross-reflect)
             find_library(_found_${_sc_lib} NAMES ${_sc_lib} PATHS ${_spirv_cross_lib_dir} NO_DEFAULT_PATH)
             if(_found_${_sc_lib})
-                target_link_libraries(_Infernux PRIVATE ${_found_${_sc_lib}})
+                target_link_libraries(InfernuxRuntime PRIVATE ${_found_${_sc_lib}})
             else()
                 message(WARNING "SPIRV-Cross library ${_sc_lib} not found in ${_spirv_cross_lib_dir}")
             endif()
@@ -137,7 +196,7 @@ else()
     foreach(_sc_lib spirv-cross-core spirv-cross-glsl spirv-cross-cpp spirv-cross-reflect)
         find_library(_sys_${_sc_lib} NAMES ${_sc_lib})
         if(_sys_${_sc_lib})
-            target_link_libraries(_Infernux PRIVATE ${_sys_${_sc_lib}})
+            target_link_libraries(InfernuxRuntime PRIVATE ${_sys_${_sc_lib}})
         else()
             set(_spirv_cross_found FALSE)
         endif()
@@ -149,30 +208,40 @@ endif()
 
 # GLM: Use Vulkan-compatible [0,1] depth range instead of OpenGL [-1,1]
 # GLM: Use left-handed coordinate system (Unity convention: X+=right, Y+=up, Z+=forward)
-target_compile_definitions(_Infernux PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE GLM_FORCE_LEFT_HANDED)
+foreach(_infernux_target InfernuxRuntime _Infernux)
+    target_compile_definitions(${_infernux_target} PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE GLM_FORCE_LEFT_HANDED)
+endforeach()
 
 # Enable frame profiling instrumentation only in RelWithDebInfo builds.
-# Terminal output (stderr) is OFF by default — enable with -DINFERNUX_FRAME_PROFILE_TERMINAL=1
-# at CMake configure time if you need per-window dumps in the console.
+# Terminal output is OFF by default; the dedicated debug-profile preset enables
+# bounded profile dumps without changing the normal development build.
 #
 # File logging is independent from profiling:
 # - Debug / RelWithDebInfo: truncate Logs/engine.log on startup and write through.
 # - Release / MinSizeRel: keep only the last 100 log lines in memory and write them on exit.
-target_compile_definitions(_Infernux PRIVATE
-    $<$<CONFIG:RelWithDebInfo>:INFERNUX_FRAME_PROFILE=1>
-    $<$<CONFIG:Debug>:INFERNUX_FILE_LOGGING=1>
-    $<$<CONFIG:RelWithDebInfo>:INFERNUX_FILE_LOGGING=1>
-    $<$<CONFIG:Release>:INFERNUX_FILE_LOGGING=1>
-    $<$<CONFIG:MinSizeRel>:INFERNUX_FILE_LOGGING=1>
-    $<$<CONFIG:Release>:INFERNUX_DEFERRED_FILE_LOGGING=1>
-    $<$<CONFIG:MinSizeRel>:INFERNUX_DEFERRED_FILE_LOGGING=1>
-    # Vulkan validation layers: on for Debug / RelWithDebInfo (preset "debug"),
-    # off for Release / MinSizeRel (preset "release"). See InxVkCoreModular::Init.
-    $<$<CONFIG:Debug>:INFERNUX_VULKAN_VALIDATION_LAYERS=1>
-    $<$<CONFIG:RelWithDebInfo>:INFERNUX_VULKAN_VALIDATION_LAYERS=1>
-)
+option(INFERNUX_FRAME_PROFILE_TERMINAL "Emit bounded frame-profile reports to stderr" OFF)
 
-target_link_libraries(_Infernux PRIVATE
+foreach(_infernux_target InfernuxRuntime _Infernux)
+    target_compile_definitions(${_infernux_target} PRIVATE
+        $<$<CONFIG:RelWithDebInfo>:INFERNUX_FRAME_PROFILE=1>
+        $<$<CONFIG:Debug>:INFERNUX_FILE_LOGGING=1>
+        $<$<CONFIG:RelWithDebInfo>:INFERNUX_FILE_LOGGING=1>
+        $<$<CONFIG:Release>:INFERNUX_FILE_LOGGING=1>
+        $<$<CONFIG:MinSizeRel>:INFERNUX_FILE_LOGGING=1>
+        $<$<CONFIG:Release>:INFERNUX_DEFERRED_FILE_LOGGING=1>
+        $<$<CONFIG:MinSizeRel>:INFERNUX_DEFERRED_FILE_LOGGING=1>
+        # Vulkan validation layers: on for Debug / RelWithDebInfo (preset "debug"),
+        # off for Release / MinSizeRel (preset "release"). See InxVkCoreModular::Init.
+        $<$<CONFIG:Debug>:INFERNUX_VULKAN_VALIDATION_LAYERS=1>
+        $<$<CONFIG:RelWithDebInfo>:INFERNUX_VULKAN_VALIDATION_LAYERS=1>
+    )
+endforeach()
+
+if(INFERNUX_FRAME_PROFILE_TERMINAL)
+    target_compile_definitions(InfernuxRuntime PRIVATE INFERNUX_FRAME_PROFILE_TERMINAL=1)
+endif()
+
+target_link_libraries(InfernuxRuntime PUBLIC
     assimp::assimp
     glslang::glslang
     SDL3::SDL3
@@ -188,15 +257,258 @@ target_link_libraries(_Infernux PRIVATE
 # ------------------------------------------------------------------------------
 add_subdirectory(external)
 
+if(TARGET zlibstatic)
+    set(INFERNUX_ZLIB_TARGET zlibstatic)
+    set(INFERNUX_ZLIB_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/external/assimp/contrib/zlib
+        ${CMAKE_BINARY_DIR}/external/assimp/contrib/zlib
+    )
+elseif(TARGET ZLIB::zlib)
+    set(INFERNUX_ZLIB_TARGET ZLIB::zlib)
+elseif(TARGET ZLIB::ZLIB)
+    set(INFERNUX_ZLIB_TARGET ZLIB::ZLIB)
+else()
+    message(FATAL_ERROR "Infernux requires a zlib target for document transaction journals")
+endif()
+target_link_libraries(InfernuxRuntime PRIVATE ${INFERNUX_ZLIB_TARGET})
+if(INFERNUX_ZLIB_INCLUDE_DIRS)
+    target_include_directories(InfernuxRuntime PRIVATE ${INFERNUX_ZLIB_INCLUDE_DIRS})
+endif()
+
 # ------------------------------------------------------------------------------
-# Pre-Build Cleanup: remove python __pycache__ directories recursively
+# Native regression tests
+# ------------------------------------------------------------------------------
+option(INFERNUX_BUILD_TESTS "Build Infernux native regression tests" ON)
+if(INFERNUX_BUILD_TESTS)
+    enable_testing()
+    find_package(Threads REQUIRED)
+
+    add_executable(infernux_job_system_tests
+        cpp/tests/JobSystemTests.cpp
+        cpp/infernux/core/log/InxLog.cpp
+        cpp/infernux/core/threading/JobSystem.cpp
+    )
+    target_include_directories(infernux_job_system_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    target_link_libraries(infernux_job_system_tests PRIVATE Threads::Threads)
+    if(MSVC)
+        target_compile_options(infernux_job_system_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.job_system COMMAND infernux_job_system_tests)
+    set_tests_properties(infernux.job_system PROPERTIES TIMEOUT 30)
+
+    add_executable(infernux_atomic_file_tests
+        cpp/tests/AtomicFileTests.cpp
+        cpp/infernux/platform/filesystem/AtomicFile.cpp
+    )
+    target_include_directories(infernux_atomic_file_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    if(MSVC)
+        target_compile_options(infernux_atomic_file_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.atomic_file COMMAND infernux_atomic_file_tests)
+
+    add_executable(infernux_document_store_tests
+        cpp/tests/DocumentStoreTests.cpp
+        cpp/infernux/platform/filesystem/DocumentStore.cpp
+        cpp/infernux/platform/filesystem/AtomicFile.cpp
+    )
+    target_include_directories(infernux_document_store_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    if(MSVC)
+        target_compile_options(infernux_document_store_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.document_store COMMAND infernux_document_store_tests)
+
+    add_executable(infernux_document_transaction_tests
+        cpp/tests/DocumentTransactionTests.cpp
+        cpp/infernux/platform/filesystem/DocumentTransaction.cpp
+        cpp/infernux/platform/filesystem/DocumentStore.cpp
+        cpp/infernux/platform/filesystem/AtomicFile.cpp
+    )
+    target_include_directories(infernux_document_transaction_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    target_link_libraries(infernux_document_transaction_tests PRIVATE Threads::Threads)
+    target_link_libraries(infernux_document_transaction_tests PRIVATE ${INFERNUX_ZLIB_TARGET})
+    if(INFERNUX_ZLIB_INCLUDE_DIRS)
+        target_include_directories(infernux_document_transaction_tests PRIVATE ${INFERNUX_ZLIB_INCLUDE_DIRS})
+    endif()
+    if(MSVC)
+        target_compile_options(infernux_document_transaction_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.document_transaction COMMAND infernux_document_transaction_tests)
+
+    add_executable(infernux_component_data_store_tests
+        cpp/tests/ComponentDataStoreTests.cpp
+        cpp/infernux/function/scene/ComponentDataStore.cpp
+    )
+    target_include_directories(infernux_component_data_store_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    if(MSVC)
+        target_compile_options(infernux_component_data_store_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.component_data_store COMMAND infernux_component_data_store_tests)
+
+    add_executable(infernux_asset_index_tests
+        cpp/tests/AssetIndexTests.cpp
+        cpp/infernux/core/log/InxLog.cpp
+        cpp/infernux/function/resources/AssetDatabase/AssetIndex.cpp
+        cpp/infernux/function/resources/InxResource/InxResourceMeta.cpp
+        cpp/infernux/core/reflection/InxTypeRegistry.cpp
+        cpp/infernux/platform/filesystem/DocumentStore.cpp
+        cpp/infernux/platform/filesystem/AtomicFile.cpp
+    )
+    target_include_directories(infernux_asset_index_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+        ${CMAKE_SOURCE_DIR}/external
+    )
+    target_link_libraries(infernux_asset_index_tests PRIVATE Threads::Threads)
+    if(MSVC)
+        target_compile_options(infernux_asset_index_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.asset_index COMMAND infernux_asset_index_tests)
+
+    add_executable(infernux_asset_dependency_graph_tests
+        cpp/tests/AssetDependencyGraphTests.cpp
+        cpp/infernux/core/log/InxLog.cpp
+        cpp/infernux/function/resources/AssetDependencyGraph.cpp
+    )
+    target_include_directories(infernux_asset_dependency_graph_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    if(MSVC)
+        target_compile_options(infernux_asset_dependency_graph_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.asset_dependency_graph COMMAND infernux_asset_dependency_graph_tests)
+
+    add_executable(infernux_mesh_artifact_tests
+        cpp/tests/MeshArtifactTests.cpp
+        cpp/infernux/core/log/InxLog.cpp
+        cpp/infernux/function/resources/InxMesh/MeshArtifact.cpp
+        cpp/infernux/function/resources/InxMesh/InxMesh.cpp
+        cpp/infernux/function/resources/InxSkinnedMesh/InxSkinnedMesh.cpp
+    )
+    target_include_directories(infernux_mesh_artifact_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+        ${CMAKE_SOURCE_DIR}/external
+    )
+    target_link_libraries(infernux_mesh_artifact_tests PRIVATE Vulkan::Vulkan glm::glm)
+    if(MSVC)
+        target_compile_options(infernux_mesh_artifact_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.mesh_artifact COMMAND infernux_mesh_artifact_tests)
+
+    add_executable(infernux_skinned_mesh_artifact_tests
+        cpp/tests/SkinnedMeshArtifactTests.cpp
+        cpp/infernux/core/log/InxLog.cpp
+        cpp/infernux/function/resources/InxSkinnedMesh/SkinnedMeshArtifact.cpp
+        cpp/infernux/function/resources/InxSkinnedMesh/InxSkinnedMesh.cpp
+    )
+    target_include_directories(infernux_skinned_mesh_artifact_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+        ${CMAKE_SOURCE_DIR}/external
+    )
+    target_link_libraries(infernux_skinned_mesh_artifact_tests PRIVATE Vulkan::Vulkan glm::glm)
+    if(MSVC)
+        target_compile_options(infernux_skinned_mesh_artifact_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.skinned_mesh_artifact COMMAND infernux_skinned_mesh_artifact_tests)
+
+    add_executable(infernux_texture_artifact_tests
+        cpp/tests/TextureArtifactTests.cpp
+        cpp/infernux/function/resources/InxTexture/TextureArtifact.cpp
+    )
+    target_include_directories(infernux_texture_artifact_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/cpp/infernux
+    )
+    if(MSVC)
+        target_compile_options(infernux_texture_artifact_tests PRIVATE /utf-8)
+    endif()
+    add_test(NAME infernux.texture_artifact COMMAND infernux_texture_artifact_tests)
+
+    add_test(
+        NAME infernux.headless
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/headless_smoke_test.py
+    )
+    set_tests_properties(infernux.headless PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 30
+        RUN_SERIAL TRUE
+    )
+
+    add_test(
+        NAME infernux.gpu_upload
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/gpu_upload_smoke_test.py
+    )
+    set_tests_properties(infernux.gpu_upload PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 30
+        RUN_SERIAL TRUE
+        SKIP_RETURN_CODE 77
+    )
+
+    add_test(
+        NAME infernux.scene_residency_soak
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/scene_residency_soak_test.py
+    )
+    set_tests_properties(infernux.scene_residency_soak PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 90
+        RUN_SERIAL TRUE
+        SKIP_RETURN_CODE 77
+    )
+
+    add_test(
+        NAME infernux.physics_profile
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/physics_profile_gate.py
+    )
+    set_tests_properties(infernux.physics_profile PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 30
+        RUN_SERIAL TRUE
+        LABELS performance
+    )
+
+    add_test(
+        NAME infernux.vfx_profile
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/vfx_profile_gate.py
+    )
+    set_tests_properties(infernux.vfx_profile PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 30
+        RUN_SERIAL TRUE
+        LABELS performance
+    )
+
+    add_test(
+        NAME infernux.asset_scan_profile
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/Infernux/test/asset_scan_profile_gate.py
+    )
+    set_tests_properties(infernux.asset_scan_profile PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        TIMEOUT 180
+        RUN_SERIAL TRUE
+        LABELS performance
+    )
+endif()
+
+# ------------------------------------------------------------------------------
+# Release Pre-Build Cleanup: remove generated Python artifacts recursively
 # ------------------------------------------------------------------------------
 add_custom_target(clean_python_pycache
     COMMAND ${CMAKE_COMMAND}
+            "-DINFERNUX_BUILD_CONFIG=$<CONFIG>"
             -DPYTHON_DIR=${CMAKE_SOURCE_DIR}/python
             -P ${CMAKE_SOURCE_DIR}/cmake/clean_python_pycache.cmake
-    COMMENT "Removing __pycache__ directories under python/ before build"
+    COMMENT "Removing __pycache__ directories and .meta files under python/ for Release"
+    VERBATIM
 )
+add_dependencies(_Infernux clean_python_pycache)
 
 # ------------------------------------------------------------------------------
 # Post-Build Steps
@@ -207,6 +519,13 @@ configure_file(
     "${CMAKE_SOURCE_DIR}/copy_dependencies.cmake.in"
     "${CMAKE_BINARY_DIR}/copy_dependencies.cmake"
     @ONLY
+)
+
+add_custom_command(TARGET InfernuxRuntime POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:InfernuxRuntime>"
+        "${PYTHON_TARGET_DIR}/$<TARGET_FILE_NAME:InfernuxRuntime>"
+    COMMENT "Copy InfernuxRuntime shared library to python/Infernux/lib"
 )
 
 add_custom_command(TARGET _Infernux POST_BUILD
@@ -222,7 +541,7 @@ add_custom_command(TARGET _Infernux POST_BUILD
         "$<TARGET_FILE:_Infernux>"
         "${PYTHON_TARGET_DIR}/$<TARGET_FILE_NAME:_Infernux>"
 
-    COMMENT "Copy _Infernux native module to python/Infernux/lib"
+    COMMENT "Copy _Infernux binding module to python/Infernux/lib"
 )
 
 if(WIN32)
@@ -231,7 +550,11 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND}
             -DINFERNUX_BUILD_CFG=$<CONFIG>
             -P "${CMAKE_BINARY_DIR}/copy_dependencies.cmake"
-        COMMENT "Copy dependent DLLs to python/Infernux/lib"
+        COMMAND ${CMAKE_COMMAND}
+            -DINFERNUX_BUILD_CFG=$<CONFIG>
+            -DTARGET_DIR=$<TARGET_FILE_DIR:_Infernux>
+            -P "${CMAKE_BINARY_DIR}/copy_dependencies.cmake"
+        COMMENT "Copy dependent DLLs to package and native module directories"
     )
 elseif(APPLE)
     # macOS: copy shared libraries (.dylib) and fix RPATH
@@ -243,6 +566,10 @@ elseif(APPLE)
     )
     # Set RPATH so the module finds dylibs next to itself
     set_target_properties(_Infernux PROPERTIES
+        BUILD_RPATH "@loader_path"
+        INSTALL_RPATH "@loader_path"
+    )
+    set_target_properties(InfernuxRuntime PROPERTIES
         BUILD_RPATH "@loader_path"
         INSTALL_RPATH "@loader_path"
     )
@@ -258,51 +585,49 @@ else()
         BUILD_RPATH "$ORIGIN"
         INSTALL_RPATH "$ORIGIN"
     )
+    set_target_properties(InfernuxRuntime PROPERTIES
+        BUILD_RPATH "$ORIGIN"
+        INSTALL_RPATH "$ORIGIN"
+    )
 endif()
 
 # ------------------------------------------------------------------------------
-# Infernux Hub — PyInstaller packaging
+# Wheel-distributed Player Runtime Pack
 # ------------------------------------------------------------------------------
-# Build the standalone Infernux Hub launcher.
-#   cmake --build --preset release --target infernux_hub
-# Output: ${CMAKE_SOURCE_DIR}/dist/Infernux Hub/
-# ------------------------------------------------------------------------------
-add_custom_target(prepare_bundled_python_runtime
-    COMMAND ${CMAKE_COMMAND} -E echo "Ensuring bundled Python 3.12 runtime is available..."
-    COMMAND ${Python3_EXECUTABLE}
-        "${CMAKE_SOURCE_DIR}/packaging/stage_bundled_python_runtime.py"
-        --dest-root "${CMAKE_SOURCE_DIR}/packaging/runtime/python312"
+# This target belongs to the default build so `cmake --build --preset release`
+# produces the compressed Player payload and optional parallel module consumed
+# by wheel packaging. The CMake script exits immediately for non-Release
+# configurations; no separate parallel option is required.
+set(INFERNUX_PREBUILT_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/python/Infernux/_runtime_packs")
+add_custom_target(prebuild_player_runtime ALL
+    COMMAND ${CMAKE_COMMAND}
+        "-DINFERNUX_BUILD_CONFIG=$<CONFIG>"
+        "-DINFERNUX_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}"
+        "-DNATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
+        "-DOUTPUT_ROOT=${INFERNUX_PREBUILT_RUNTIME_DIR}"
+        -P "${CMAKE_SOURCE_DIR}/cmake/prebuild_player_runtime.cmake"
+    COMMAND ${CMAKE_COMMAND}
+        "-DINFERNUX_BUILD_CONFIG=$<CONFIG>"
+        "-DPYTHON_DIR=${CMAKE_SOURCE_DIR}/python"
+        -P "${CMAKE_SOURCE_DIR}/cmake/clean_python_pycache.cmake"
+    COMMAND ${CMAKE_COMMAND}
+        "-DINFERNUX_BUILD_CONFIG=$<CONFIG>"
+        "-DPYTHON_DIR=${CMAKE_SOURCE_DIR}/packaging"
+        -P "${CMAKE_SOURCE_DIR}/cmake/clean_python_pycache.cmake"
+    DEPENDS _Infernux
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Stage bundled full Python runtime assets"
+    COMMENT "Preparing wheel-distributed Release Player Runtime Pack and parallel module"
+    VERBATIM
 )
+if(TARGET InfernuxPlayerLauncher)
+    add_dependencies(prebuild_player_runtime InfernuxPlayerLauncher)
+endif()
 
-add_custom_target(infernux_hub
-    COMMAND ${CMAKE_COMMAND} -E echo "Packaging Infernux Hub with PyInstaller..."
-    COMMAND ${Python3_EXECUTABLE} -m PyInstaller
-        "${CMAKE_SOURCE_DIR}/packaging/infernux_hub.spec"
-        --distpath "${CMAKE_SOURCE_DIR}/dist"
-        --workpath "${CMAKE_BINARY_DIR}/hub_build"
-        --clean
-        --noconfirm
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/packaging"
-    DEPENDS prepare_bundled_python_runtime
-    COMMENT "Build Infernux Hub standalone application → dist/Infernux Hub/"
-)
-
-add_custom_target(infernux_hub_installer
-    COMMAND ${CMAKE_COMMAND} -E echo "Building graphical Infernux Hub installer..."
-    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_SOURCE_DIR}/dist/installer"
-    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_SOURCE_DIR}/dist/installer_helper"
-    COMMAND ${Python3_EXECUTABLE} -m PyInstaller
-        "${CMAKE_SOURCE_DIR}/packaging/infernux_hub_installer.spec"
-        --distpath "${CMAKE_SOURCE_DIR}/dist/installer"
-        --workpath "${CMAKE_BINARY_DIR}/installer_build"
-        --clean
-        --noconfirm
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/packaging"
-    DEPENDS infernux_hub
-    COMMENT "Build graphical Infernux Hub installer → dist/installer/"
-)
+# ------------------------------------------------------------------------------
+# Infernux Hub standalone packaging targets
+# ------------------------------------------------------------------------------
+include("${CMAKE_SOURCE_DIR}/cmake/InfernuxHub.cmake")
 
 # ------------------------------------------------------------------------------
 # Code Formatting Target (clang-format)
@@ -321,7 +646,9 @@ add_custom_target(clang_format
 # ------------------------------------------------------------------------------
 # Python Packaging and Installation
 # ------------------------------------------------------------------------------
-add_custom_target(package_and_install_python ALL
+set(INFERNUX_PYTHON_WHEEL_DIR "${CMAKE_BINARY_DIR}/python_wheel")
+
+add_custom_target(package_and_install_python
     COMMAND ${CMAKE_COMMAND} -E echo "Ensuring Python packaging tools are available..."
     COMMAND ${CMAKE_COMMAND}
         -DINFERNUX_SOURCE_DIR=${CMAKE_SOURCE_DIR}
@@ -329,29 +656,51 @@ add_custom_target(package_and_install_python ALL
         -P "${CMAKE_SOURCE_DIR}/cmake/ensure_python_packaging_tools.cmake"
 
     COMMAND ${CMAKE_COMMAND} -E echo "Building Python wheel via '${Python3_EXECUTABLE} -m build --wheel'..."
+    # setuptools reuses python package files from this staging directory when
+    # their timestamps look current. Native dependencies can otherwise come
+    # from a previous CMake configuration (for example Release Jolt.dll beside
+    # a RelWithDebInfo _Infernux.pyd).
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_SOURCE_DIR}/build"
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${INFERNUX_PYTHON_WHEEL_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${INFERNUX_PYTHON_WHEEL_DIR}"
     COMMAND ${CMAKE_COMMAND} -E env
         "INFERNUX_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-        "${Python3_EXECUTABLE}" -m build --wheel --no-isolation --outdir "${CMAKE_SOURCE_DIR}/dist"
+        "${Python3_EXECUTABLE}" -m build --wheel --no-isolation --outdir "${INFERNUX_PYTHON_WHEEL_DIR}"
+
+    COMMAND ${CMAKE_COMMAND} -E echo "Verifying native wheel payload against the current build..."
+    COMMAND ${CMAKE_COMMAND}
+        -DINFERNUX_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DINFERNUX_WHEEL_DIR=${INFERNUX_PYTHON_WHEEL_DIR}
+        -P "${CMAKE_SOURCE_DIR}/cmake/verify_python_wheel.cmake"
+
+    COMMAND ${CMAKE_COMMAND} -E echo "Removing build metadata before wheel installation..."
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_SOURCE_DIR}/python/Infernux.egg-info"
 
     COMMAND ${CMAKE_COMMAND} -E echo "Installing built wheel via pip..."
     COMMAND ${CMAKE_COMMAND}
         -DINFERNUX_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DINFERNUX_WHEEL_DIR=${INFERNUX_PYTHON_WHEEL_DIR}
         -DPYTHON_EXECUTABLE=${Python3_EXECUTABLE}
         -P "${CMAKE_SOURCE_DIR}/install_wheel.cmake"
 
     COMMAND ${CMAKE_COMMAND} -E echo "Cleaning up .egg-info directory..."
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_SOURCE_DIR}/python/Infernux.egg-info"
 
-    COMMAND ${CMAKE_COMMAND} -E echo "Cleaning __pycache__ directories after packaging..."
+    COMMAND ${CMAKE_COMMAND} -E echo "Cleaning Python build artifacts after packaging..."
     COMMAND ${CMAKE_COMMAND}
+            "-DINFERNUX_BUILD_CONFIG=$<CONFIG>"
             -DPYTHON_DIR=${CMAKE_SOURCE_DIR}/python
+            -P ${CMAKE_SOURCE_DIR}/cmake/clean_python_pycache.cmake
+    COMMAND ${CMAKE_COMMAND}
+            "-DINFERNUX_BUILD_CONFIG=$<CONFIG>"
+            -DPYTHON_DIR=${CMAKE_SOURCE_DIR}/packaging
             -P ${CMAKE_SOURCE_DIR}/cmake/clean_python_pycache.cmake
 
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Python packaging and installation after native module build"
 )
 
-add_dependencies(package_and_install_python _Infernux)
+add_dependencies(package_and_install_python clean_python_pycache prebuild_player_runtime)
 
 # ------------------------------------------------------------------------------
 # API Reference Generation (auto-introspect Python package → Markdown)
@@ -373,32 +722,3 @@ add_custom_target(build_wiki_html
     COMMENT "Generate wiki HTML into docs/wiki/site"
 )
 add_dependencies(build_wiki_html generate_api_docs)
-
-# Ensure cleanup runs before any local build target compiles.
-function(infernux_add_preclean_dependency _dir _dep_target)
-    get_property(_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
-    foreach(_target IN LISTS _targets)
-        if(_target STREQUAL "${_dep_target}")
-            continue()
-        endif()
-
-        get_target_property(_is_imported ${_target} IMPORTED)
-        if(_is_imported)
-            continue()
-        endif()
-
-        get_target_property(_target_type ${_target} TYPE)
-        if(_target_type STREQUAL "INTERFACE_LIBRARY")
-            continue()
-        endif()
-
-        add_dependencies(${_target} ${_dep_target})
-    endforeach()
-
-    get_property(_subdirs DIRECTORY "${_dir}" PROPERTY SUBDIRECTORIES)
-    foreach(_subdir IN LISTS _subdirs)
-        infernux_add_preclean_dependency("${_subdir}" "${_dep_target}")
-    endforeach()
-endfunction()
-
-infernux_add_preclean_dependency("${CMAKE_SOURCE_DIR}" clean_python_pycache)

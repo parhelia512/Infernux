@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, overload
 
 from Infernux.components.builtin_component import BuiltinComponent
 
@@ -52,8 +52,13 @@ class MeshRenderer(BuiltinComponent):
     def get_material(self, slot: int) -> Any:
         """Return the material at the specified slot index."""
         ...
-    def set_material(self, slot: int, guid: str) -> None:
-        """Assign a material to the specified slot by asset GUID."""
+    @overload
+    def set_material(self, material: Any) -> None:
+        """Assign a material to slot zero."""
+        ...
+    @overload
+    def set_material(self, slot: int, material: Any) -> None:
+        """Assign a material to the specified slot."""
         ...
     def get_material_guids(self) -> List[str]:
         """Return the list of material GUIDs for all slots."""

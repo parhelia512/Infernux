@@ -150,31 +150,31 @@ inline void OrthoNormalize(glm::vec3 &v1, glm::vec3 &v2, glm::vec3 &v3)
     v3 = ProjectOnPlane(v3, v2);
     v3 = Normalize(v3);
 }
-inline float SanitizeFloat(float v)
+inline float RequireFiniteFloat(float value)
 {
-    return std::isfinite(v) ? v : 0.0f;
+    if (!std::isfinite(value))
+        throw std::invalid_argument("Vector3 components must be finite");
+    return value;
 }
 
-inline glm::vec3 SanitizeVec3(const glm::vec3 &v)
+inline void RequireFiniteVec3(const glm::vec3 &value, const char *name)
 {
-    return glm::vec3(SanitizeFloat(v.x), SanitizeFloat(v.y), SanitizeFloat(v.z));
+    if (!std::isfinite(value.x) || !std::isfinite(value.y) || !std::isfinite(value.z))
+        throw std::invalid_argument(std::string(name) + " must contain finite values");
 }
 
 inline glm::vec3 SmoothDamp(glm::vec3 current, glm::vec3 target, glm::vec3 &currentVelocity, float smoothTime,
                             float maxSpeed, float deltaTime)
 {
-    current = SanitizeVec3(current);
-    target = SanitizeVec3(target);
-    currentVelocity = SanitizeVec3(currentVelocity);
-
-    if (smoothTime < 1e-4f)
-        smoothTime = 1e-4f;
+    RequireFiniteVec3(current, "current");
+    RequireFiniteVec3(target, "target");
+    RequireFiniteVec3(currentVelocity, "current_velocity");
+    if (!std::isfinite(smoothTime) || smoothTime <= 0.0f)
+        throw std::invalid_argument("smooth_time must be finite and positive");
     if (!std::isfinite(deltaTime) || deltaTime <= 0.0f)
-        return current;
-    if (!std::isfinite(maxSpeed))
-        maxSpeed = std::numeric_limits<float>::infinity();
-    else if (maxSpeed < 0.0f)
-        maxSpeed = 0.0f;
+        throw std::invalid_argument("delta_time must be finite and positive");
+    if (std::isnan(maxSpeed) || maxSpeed < 0.0f)
+        throw std::invalid_argument("max_speed must be non-negative");
 
     float omega = 2.f / smoothTime;
     float x = omega * deltaTime;
@@ -201,8 +201,7 @@ inline glm::vec3 SmoothDamp(glm::vec3 current, glm::vec3 target, glm::vec3 &curr
     }
 
     if (!std::isfinite(result.x) || !std::isfinite(result.y) || !std::isfinite(result.z)) {
-        currentVelocity = glm::vec3(0.0f);
-        return originalTarget;
+        throw std::overflow_error("Vector3.smooth_damp produced a non-finite result");
     }
     return result;
 }
@@ -215,8 +214,8 @@ void RegisterVector3Bindings(py::module_ &m)
     py::class_<Vec>(m, "Vector3")
         .def(py::init<>())
         .def(py::init([](float x, float y, float z) {
-                 return glm::vec3(vec3_util::SanitizeFloat(x), vec3_util::SanitizeFloat(y),
-                                  vec3_util::SanitizeFloat(z));
+                 return glm::vec3(vec3_util::RequireFiniteFloat(x), vec3_util::RequireFiniteFloat(y),
+                                  vec3_util::RequireFiniteFloat(z));
              }),
              "Construct vec3", py::arg("x"), py::arg("y"), py::arg("z"))
         .def("__getitem__",
@@ -229,7 +228,7 @@ void RegisterVector3Bindings(py::module_ &m)
              [](Vec &v, int i, float value) {
                  if (i < 0 || i >= 3)
                      throw std::out_of_range("index out of range");
-                 v[i] = vec3_util::SanitizeFloat(value);
+                 v[i] = vec3_util::RequireFiniteFloat(value);
              })
         .def("__add__", [](const Vec &a, const Vec &b) { return Vec(a + b); })
         .def("__add__",
@@ -322,17 +321,17 @@ void RegisterVector3Bindings(py::module_ &m)
                  return std::fabs(a.x - b.x) > 1e-6f || std::fabs(a.y - b.y) > 1e-6f || std::fabs(a.z - b.z) > 1e-6f;
              })
         .def_property(
-            "x", [](const Vec &v) { return v.x; }, [](Vec &v, float val) { v.x = vec3_util::SanitizeFloat(val); })
+            "x", [](const Vec &v) { return v.x; }, [](Vec &v, float val) { v.x = vec3_util::RequireFiniteFloat(val); })
         .def_property(
-            "y", [](const Vec &v) { return v.y; }, [](Vec &v, float val) { v.y = vec3_util::SanitizeFloat(val); })
+            "y", [](const Vec &v) { return v.y; }, [](Vec &v, float val) { v.y = vec3_util::RequireFiniteFloat(val); })
         .def_property(
-            "z", [](const Vec &v) { return v.z; }, [](Vec &v, float val) { v.z = vec3_util::SanitizeFloat(val); })
+            "z", [](const Vec &v) { return v.z; }, [](Vec &v, float val) { v.z = vec3_util::RequireFiniteFloat(val); })
         .def_property(
-            "r", [](const Vec &v) { return v.x; }, [](Vec &v, float val) { v.x = vec3_util::SanitizeFloat(val); })
+            "r", [](const Vec &v) { return v.x; }, [](Vec &v, float val) { v.x = vec3_util::RequireFiniteFloat(val); })
         .def_property(
-            "g", [](const Vec &v) { return v.y; }, [](Vec &v, float val) { v.y = vec3_util::SanitizeFloat(val); })
+            "g", [](const Vec &v) { return v.y; }, [](Vec &v, float val) { v.y = vec3_util::RequireFiniteFloat(val); })
         .def_property(
-            "b", [](const Vec &v) { return v.z; }, [](Vec &v, float val) { v.z = vec3_util::SanitizeFloat(val); })
+            "b", [](const Vec &v) { return v.z; }, [](Vec &v, float val) { v.z = vec3_util::RequireFiniteFloat(val); })
         .def("__repr__",
              [](const Vec &v) {
                  return "Vector3(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ", " + std::to_string(v.z) +

@@ -4,8 +4,10 @@
 #include "EditorTools.h"
 #include "GizmosDrawCallBuffer.h"
 #include "InxVkCoreModular.h"
+#include "ParticleDrawCallBuffer.h"
 #include "SceneRenderGraph.h"
 #include "TransientResourcePool.h"
+#include "vk/RhiVulkanTypes.h"
 #include <function/resources/AssetRegistry/AssetRegistry.h>
 #include <function/resources/InxMaterial/InxMaterial.h>
 #include <function/scene/SceneRenderer.h>
@@ -82,7 +84,7 @@ void ScriptableRenderContext::SetupCameraProperties(Camera *camera)
 // Cull
 // ============================================================================
 
-CullingResults ScriptableRenderContext::Cull(Camera *camera)
+CullingResults &ScriptableRenderContext::Cull(Camera *camera)
 {
 #if INFERNUX_FRAME_PROFILE
     using Clock = std::chrono::high_resolution_clock;
@@ -146,7 +148,7 @@ CullingResults ScriptableRenderContext::Cull(Camera *camera)
     // CollectLights() runs earlier in the frame (InxRenderer::UpdateSceneLighting),
     // so the count is already available.
     results.lightCount = m_vkCore->GetLightCollector().GetTotalLightCount();
-    m_cachedCullingResults = results;
+    m_cachedCullingResults = std::move(results);
 #if INFERNUX_FRAME_PROFILE
     const double elapsedMs = std::chrono::duration<double, std::milli>(Clock::now() - cullStart).count();
     g_srcProfileSnapshot.cullMs += elapsedMs;
@@ -160,7 +162,7 @@ CullingResults ScriptableRenderContext::Cull(Camera *camera)
     g_srcProfileSnapshot.cullCalls += 1.0;
     g_srcProfileSnapshot.baseDrawCalls += static_cast<double>(results.visibleObjectCount());
 #endif
-    return results;
+    return m_cachedCullingResults;
 }
 
 // ============================================================================
@@ -183,7 +185,7 @@ void ScriptableRenderContext::ApplyGraph(const RenderGraphDescription &desc)
 #endif
 }
 
-void ScriptableRenderContext::SubmitCulling(CullingResults culling)
+void ScriptableRenderContext::SubmitCulling(CullingResults &culling)
 {
 #if INFERNUX_FRAME_PROFILE
     using Clock = std::chrono::high_resolution_clock;
@@ -231,7 +233,7 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
             dc.indexStart = 0;
             dc.indexCount = static_cast<uint32_t>(PrimitiveMeshes::GetSkyboxCubeIndices().size());
             dc.worldMatrix = glm::mat4(1.0f);
-            dc.material = skyboxMat.get();
+            dc.material = skyboxMat;
             dc.objectId = SKYBOX_OBJECT_ID;
             dc.meshVertices = &PrimitiveMeshes::GetSkyboxCubeVertices();
             dc.meshIndices = &PrimitiveMeshes::GetSkyboxCubeIndices();
@@ -241,6 +243,19 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
         g_srcProfileSnapshot.submitEditorAppendMs +=
             std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 #endif
+    }
+
+    if (m_gizmoCtx.particles && m_gizmoCtx.particles->GetParticleCount() > 0) {
+        glm::vec3 cameraRight(1.0f, 0.0f, 0.0f);
+        glm::vec3 cameraUp(0.0f, 1.0f, 0.0f);
+        if (m_activeCamera && m_activeCamera->GetGameObject() && m_activeCamera->GetGameObject()->GetTransform()) {
+            Transform *cameraTransform = m_activeCamera->GetGameObject()->GetTransform();
+            cameraRight = cameraTransform->GetWorldRight();
+            cameraUp = cameraTransform->GetWorldUp();
+        }
+        DrawCallResult particleResult = m_gizmoCtx.particles->GetDrawCalls(cameraRight, cameraUp);
+        for (auto &drawCall : particleResult.drawCalls)
+            m_orderedDrawCalls.push_back(drawCall);
     }
 
     // Auto-append editor gizmos
@@ -324,11 +339,41 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
         shadowSource = &culling.shadowDrawCalls;
     }
 
+    // Compute a lightweight resource-identity fingerprint. World matrices and
+    // visibility intentionally do not participate: neither changes mesh GPU
+    // buffers. The fingerprint still detects a same-sized but different
+    // visible set after camera movement.
+    uint64_t bufferIdentity = 1469598103934665603ULL;
+    bool hasForcedBufferUpdate = false;
+    auto accumulateBufferIdentity = [&](const DrawCall &dc) {
+        auto mix = [&](uint64_t value) {
+            bufferIdentity ^= value;
+            bufferIdentity *= 1099511628211ULL;
+        };
+        mix(dc.objectId);
+        mix(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dc.meshVertices)));
+        mix(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(dc.meshIndices)));
+        mix(dc.meshRuntimeVersion);
+        hasForcedBufferUpdate = hasForcedBufferUpdate || dc.forceBufferUpdate;
+    };
+    if (shadowSource) {
+        for (const DrawCall &dc : *shadowSource)
+            accumulateBufferIdentity(dc);
+    }
+    for (const DrawCall &dc : m_orderedDrawCalls)
+        accumulateBufferIdentity(dc);
+
+    const size_t bufferIdentityDrawCallCount = m_orderedDrawCalls.size() + (shadowSource ? shadowSource->size() : 0);
+    const bool reuseObjectBuffers =
+        !hasForcedBufferUpdate && m_vkCore->CanReuseObjectBufferBindings(bufferIdentity, bufferIdentityDrawCallCount);
+
     // Ensure per-object GPU buffers
 #if INFERNUX_FRAME_PROFILE
     t0 = Clock::now();
 #endif
-    if (shadowSource) {
+    if (reuseObjectBuffers) {
+        m_vkCore->ReuseObjectBufferBindingsThisFrame();
+    } else if (shadowSource) {
         // Consecutive-objectId dedup: draw calls for multi-submesh objects
         // share the same objectId and are adjacent in the array.  Skip
         // redundant hash-map lookups inside EnsureObjectBuffers.
@@ -338,7 +383,8 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
                 continue;
             lastEnsuredId = dc.objectId;
             if (dc.meshVertices && dc.meshIndices) {
-                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate);
+                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate,
+                                              dc.meshAssetGuid, dc.meshRuntimeVersion);
             }
         }
 
@@ -349,7 +395,8 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
                 continue;
             lastEnsuredId = dc.objectId;
             if (dc.meshVertices && dc.meshIndices) {
-                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate);
+                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate,
+                                              dc.meshAssetGuid, dc.meshRuntimeVersion);
             }
         }
     }
@@ -362,12 +409,24 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
     std::vector<DrawCall> forwardDrawCalls = std::move(m_orderedDrawCalls);
 
     if (!shadowSource) {
-        for (const DrawCall &dc : forwardDrawCalls) {
-            if (dc.meshVertices && dc.meshIndices) {
-                m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate);
+        if (!reuseObjectBuffers) {
+            for (const DrawCall &dc : forwardDrawCalls) {
+                if (dc.meshVertices && dc.meshIndices) {
+                    m_vkCore->EnsureObjectBuffers(dc.objectId, *dc.meshVertices, *dc.meshIndices, dc.forceBufferUpdate,
+                                                  dc.meshAssetGuid, dc.meshRuntimeVersion);
+                }
             }
         }
     }
+
+    if (!reuseObjectBuffers)
+        m_vkCore->PrimeObjectBufferBindingCache(bufferIdentity, bufferIdentityDrawCallCount);
+
+    // Mesh dirtiness is a one-shot upload request. SceneRenderer caches draw
+    // calls across frames, so leaving the bit set would re-hash every mesh on
+    // every frame. The first context has now consumed the request; later
+    // cameras share the same VkCore object buffers.
+    SceneRenderBridge::Instance().GetSceneRenderer().AcknowledgeMeshBufferUpdates();
 
     DrawCallResult result;
     result.drawCalls = std::move(forwardDrawCalls);
@@ -426,9 +485,9 @@ void ScriptableRenderContext::SubmitCulling(CullingResults culling)
 void ScriptableRenderContext::RenderWithGraph(Camera *camera, const RenderGraphDescription &desc)
 {
     SetupCameraProperties(camera);
-    CullingResults culling = Cull(camera);
+    CullingResults &culling = Cull(camera);
     ApplyGraph(desc);
-    SubmitCulling(std::move(culling));
+    SubmitCulling(culling);
 }
 
 // ============================================================================
@@ -466,8 +525,6 @@ const char *RenderCommandTypeName(RenderCommandType type)
         return "SetGlobalVector";
     case RenderCommandType::SetGlobalMatrix:
         return "SetGlobalMatrix";
-    case RenderCommandType::RequestAsyncReadback:
-        return "RequestAsyncReadback";
     }
     return "Unknown";
 }
@@ -503,7 +560,8 @@ void ScriptableRenderContext::ProcessPendingCommandBuffers()
                 if (m_transientPool) {
                     const auto &params = std::get<GetTemporaryRTParams>(command.data);
                     uint32_t slotId =
-                        m_transientPool->Acquire(params.width, params.height, params.format, params.samples);
+                        m_transientPool->Acquire(params.width, params.height, rhi::ToVkFormat(params.format),
+                                                 rhi::ToVkSampleCount(params.samples));
                     m_handleToSlotMap[params.handleId] = slotId;
                 }
                 break;
@@ -546,7 +604,6 @@ void ScriptableRenderContext::ProcessPendingCommandBuffers()
             case RenderCommandType::SetRenderTarget:
             case RenderCommandType::DrawMesh:
             case RenderCommandType::SetGlobalMatrix:
-            case RenderCommandType::RequestAsyncReadback:
                 WarnUnimplementedCommand(command.type);
                 break;
             }
@@ -568,7 +625,6 @@ bool ScriptableRenderContext::IsCommandImplemented(RenderCommandType type) noexc
     case RenderCommandType::SetRenderTarget:
     case RenderCommandType::DrawMesh:
     case RenderCommandType::SetGlobalMatrix:
-    case RenderCommandType::RequestAsyncReadback:
         return false;
     }
     return false;

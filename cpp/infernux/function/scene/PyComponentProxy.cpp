@@ -4,6 +4,7 @@
 #include "physics/PhysicsContactListener.h"
 #include <core/log/InxLog.h>
 #include <nlohmann/json.hpp>
+#include <tools/pybinding/JsonPyBridge.h>
 
 using json = nlohmann::json;
 
@@ -108,11 +109,14 @@ void CallPythonLifecycleOneArg(const py::object &pyComponent, const std::string 
 PyComponentProxy::PyComponentProxy(py::object pyComponent)
     : m_pyComponent(std::move(pyComponent)), m_typeName("PyComponent")
 {
+    py::gil_scoped_acquire acquire;
     if (!m_pyComponent.is_none()) {
         try {
             // Get the Python class name for type identification
             py::object pyType = m_pyComponent.attr("__class__");
             m_typeName = pyType.attr("__name__").cast<std::string>();
+            m_moduleName = pyType.attr("__module__").cast<std::string>();
+            m_qualifiedName = pyType.attr("__qualname__").cast<std::string>();
 
             try {
                 py::object inxComponentType = py::module_::import("Infernux.components").attr("InxComponent");
@@ -166,6 +170,7 @@ PyComponentProxy::PyComponentProxy(py::object pyComponent)
 
 PyComponentProxy::~PyComponentProxy()
 {
+    py::gil_scoped_acquire acquire;
     // Note: OnDestroy is called explicitly before destruction by GameObject
     // Clear reference to allow Python GC
     m_pyComponent = py::none();
@@ -174,9 +179,11 @@ PyComponentProxy::~PyComponentProxy()
 PyComponentProxy::PyComponentProxy(PyComponentProxy &&other) noexcept
     : Component(std::move(other)), m_pyComponent(std::move(other.m_pyComponent)),
       m_typeName(std::move(other.m_typeName)), m_typeGuid(std::move(other.m_typeGuid)),
-      m_scriptGuid(std::move(other.m_scriptGuid)), m_executeInEditMode(other.m_executeInEditMode),
+      m_scriptGuid(std::move(other.m_scriptGuid)), m_moduleName(std::move(other.m_moduleName)),
+      m_qualifiedName(std::move(other.m_qualifiedName)), m_executeInEditMode(other.m_executeInEditMode),
       m_overridesUpdate(other.m_overridesUpdate), m_overridesFixedUpdate(other.m_overridesFixedUpdate),
-      m_overridesLateUpdate(other.m_overridesLateUpdate), m_hasCoroutineScheduler(other.m_hasCoroutineScheduler)
+      m_overridesLateUpdate(other.m_overridesLateUpdate), m_hasCoroutineScheduler(other.m_hasCoroutineScheduler),
+      m_updateDispatchCount(other.m_updateDispatchCount), m_updateForwardCount(other.m_updateForwardCount)
 {
     other.m_pyComponent = py::none();
 }
@@ -189,11 +196,15 @@ PyComponentProxy &PyComponentProxy::operator=(PyComponentProxy &&other) noexcept
         m_typeName = std::move(other.m_typeName);
         m_typeGuid = std::move(other.m_typeGuid);
         m_scriptGuid = std::move(other.m_scriptGuid);
+        m_moduleName = std::move(other.m_moduleName);
+        m_qualifiedName = std::move(other.m_qualifiedName);
         m_executeInEditMode = other.m_executeInEditMode;
         m_overridesUpdate = other.m_overridesUpdate;
         m_overridesFixedUpdate = other.m_overridesFixedUpdate;
         m_overridesLateUpdate = other.m_overridesLateUpdate;
         m_hasCoroutineScheduler = other.m_hasCoroutineScheduler;
+        m_updateDispatchCount = other.m_updateDispatchCount;
+        m_updateForwardCount = other.m_updateForwardCount;
         other.m_pyComponent = py::none();
     }
     return *this;
@@ -242,6 +253,7 @@ void PyComponentProxy::SyncPythonMirror() const
 
 void PyComponentProxy::Awake()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -260,6 +272,7 @@ void PyComponentProxy::Awake()
 
 void PyComponentProxy::OnEnable()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -270,6 +283,7 @@ void PyComponentProxy::OnEnable()
 
 void PyComponentProxy::Start()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -280,18 +294,23 @@ void PyComponentProxy::Start()
 
 void PyComponentProxy::Update(float deltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
+
+    ++m_updateDispatchCount;
 
     if (!m_overridesUpdate && !m_hasCoroutineScheduler)
         return;
 
+    ++m_updateForwardCount;
     CallPythonLifecycleFloatArg(m_pyComponent, m_typeName, "_call_update", "update", deltaTime);
     RefreshCoroutineSchedulerFlag();
 }
 
 void PyComponentProxy::FixedUpdate(float fixedDeltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -304,6 +323,7 @@ void PyComponentProxy::FixedUpdate(float fixedDeltaTime)
 
 void PyComponentProxy::LateUpdate(float deltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -316,6 +336,7 @@ void PyComponentProxy::LateUpdate(float deltaTime)
 
 void PyComponentProxy::TickWhileDisabledUpdate(float deltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none() || !m_hasCoroutineScheduler)
         return;
 
@@ -326,6 +347,7 @@ void PyComponentProxy::TickWhileDisabledUpdate(float deltaTime)
 
 void PyComponentProxy::TickWhileDisabledFixedUpdate(float fixedDeltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none() || !m_hasCoroutineScheduler)
         return;
 
@@ -336,6 +358,7 @@ void PyComponentProxy::TickWhileDisabledFixedUpdate(float fixedDeltaTime)
 
 void PyComponentProxy::TickWhileDisabledLateUpdate(float deltaTime)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none() || !m_hasCoroutineScheduler)
         return;
 
@@ -346,6 +369,7 @@ void PyComponentProxy::TickWhileDisabledLateUpdate(float deltaTime)
 
 void PyComponentProxy::OnDisable()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -355,6 +379,7 @@ void PyComponentProxy::OnDisable()
 
 void PyComponentProxy::OnGameObjectDeactivated()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -364,6 +389,7 @@ void PyComponentProxy::OnGameObjectDeactivated()
 
 void PyComponentProxy::OnDestroy()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -372,6 +398,7 @@ void PyComponentProxy::OnDestroy()
 
 void PyComponentProxy::OnValidate()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -380,6 +407,7 @@ void PyComponentProxy::OnValidate()
 
 void PyComponentProxy::Reset()
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
 
@@ -392,6 +420,7 @@ void PyComponentProxy::Reset()
 
 void PyComponentProxy::OnCollisionEnter(const CollisionInfo &collision)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_collision_enter", "on_collision_enter",
@@ -400,6 +429,7 @@ void PyComponentProxy::OnCollisionEnter(const CollisionInfo &collision)
 
 void PyComponentProxy::OnCollisionStay(const CollisionInfo &collision)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_collision_stay", "on_collision_stay",
@@ -408,6 +438,7 @@ void PyComponentProxy::OnCollisionStay(const CollisionInfo &collision)
 
 void PyComponentProxy::OnCollisionExit(const CollisionInfo &collision)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_collision_exit", "on_collision_exit",
@@ -416,6 +447,7 @@ void PyComponentProxy::OnCollisionExit(const CollisionInfo &collision)
 
 void PyComponentProxy::OnTriggerEnter(Collider *other)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_trigger_enter", "on_trigger_enter",
@@ -424,6 +456,7 @@ void PyComponentProxy::OnTriggerEnter(Collider *other)
 
 void PyComponentProxy::OnTriggerStay(Collider *other)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_trigger_stay", "on_trigger_stay",
@@ -432,6 +465,7 @@ void PyComponentProxy::OnTriggerStay(Collider *other)
 
 void PyComponentProxy::OnTriggerExit(Collider *other)
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
         return;
     CallPythonLifecycleOneArg(m_pyComponent, m_typeName, "_call_on_trigger_exit", "on_trigger_exit",
@@ -445,6 +479,7 @@ const char *PyComponentProxy::GetTypeName() const
 
 std::vector<std::string> PyComponentProxy::GetRequiredComponentTypes() const
 {
+    py::gil_scoped_acquire acquire;
     std::vector<std::string> result;
     if (m_pyComponent.is_none())
         return result;
@@ -468,11 +503,13 @@ std::vector<std::string> PyComponentProxy::GetRequiredComponentTypes() const
     return result;
 }
 
-std::string PyComponentProxy::Serialize() const
+nlohmann::json PyComponentProxy::SerializeDocument() const
 {
-    json j;
-    j["schema_version"] = 1;
-    j["type"] = "PyComponentProxy";
+    py::gil_scoped_acquire acquire;
+    if (m_scriptGuid.empty() || m_typeGuid.empty())
+        throw std::logic_error("Python component '" + m_typeName + "' has no stable script/type GUID");
+
+    json j = Component::SerializeDocument();
     j["py_type_name"] = m_typeName;
     j["type_guid"] = m_typeGuid; // Stable type GUID for deserialization
     j["execution_order"] = GetExecutionOrder();
@@ -486,38 +523,27 @@ std::string PyComponentProxy::Serialize() const
 
     // Serialize Python component's serializable fields
     if (!m_pyComponent.is_none()) {
-        try {
-            // Call Python side serialization if available
-            if (py::hasattr(m_pyComponent, "_serialize_fields")) {
-                py::object fieldsJson = m_pyComponent.attr("_serialize_fields")();
-                if (!fieldsJson.is_none()) {
-                    std::string fieldsStr = fieldsJson.cast<std::string>();
-                    j["py_fields"] = json::parse(fieldsStr);
-                }
-            }
-        } catch (const py::error_already_set &e) {
-            INXLOG_ERROR("[PyComponentProxy] Error serializing fields: ", e.what());
-        } catch (const std::exception &e) {
-            INXLOG_ERROR("[PyComponentProxy] Exception serializing fields for ", m_typeName, ": ", e.what());
-        }
+        j["py_fields"] = SerializePyFieldsDocument();
     }
 
-    return j.dump(2);
+    return j;
 }
 
-bool PyComponentProxy::Deserialize(const std::string &jsonStr)
+bool PyComponentProxy::DeserializeDocument(const nlohmann::json &j)
 {
+    if (!Component::DeserializeDocument(j)) {
+        return false;
+    }
+
     try {
-        json j = json::parse(jsonStr);
-
-        // Base class deserialize
-        Component::Deserialize(jsonStr);
-
         if (j.contains("py_type_name")) {
             m_typeName = j["py_type_name"].get<std::string>();
         }
         if (j.contains("script_guid")) {
             m_scriptGuid = j["script_guid"].get<std::string>();
+        }
+        if (j.contains("type_guid")) {
+            m_typeGuid = j["type_guid"].get<std::string>();
         }
 
         // Python component and fields will be restored by Python side
@@ -532,6 +558,7 @@ bool PyComponentProxy::Deserialize(const std::string &jsonStr)
 
 void PyComponentProxy::SetScriptGuid(const std::string &guid)
 {
+    py::gil_scoped_acquire acquire;
     m_scriptGuid = guid;
     if (!m_pyComponent.is_none()) {
         try {
@@ -550,23 +577,18 @@ std::unique_ptr<Component> PyComponentProxy::Clone() const
     return nullptr;
 }
 
-std::string PyComponentProxy::SerializePyFields() const
+nlohmann::json PyComponentProxy::SerializePyFieldsDocument() const
 {
+    py::gil_scoped_acquire acquire;
     if (m_pyComponent.is_none())
-        return {};
-    try {
-        if (py::hasattr(m_pyComponent, "_serialize_fields")) {
-            py::object fieldsJson = m_pyComponent.attr("_serialize_fields")();
-            if (!fieldsJson.is_none()) {
-                return fieldsJson.cast<std::string>();
-            }
-        }
-    } catch (const py::error_already_set &e) {
-        INXLOG_ERROR("[PyComponentProxy] Error serializing fields for clone: ", e.what());
-    } catch (const std::exception &e) {
-        INXLOG_ERROR("[PyComponentProxy] Exception serializing fields for clone (", m_typeName, "): ", e.what());
-    }
-    return {};
+        throw std::logic_error("cannot serialize fields from an unbound Python component proxy");
+    if (!py::hasattr(m_pyComponent, "_serialize_fields_document"))
+        throw std::logic_error("Python component '" + m_typeName + "' has no _serialize_fields_document method");
+    py::object document = m_pyComponent.attr("_serialize_fields_document")();
+    if (!py::isinstance<py::dict>(document))
+        throw std::invalid_argument("Python component '" + m_typeName +
+                                    "' _serialize_fields_document must return dict");
+    return PythonToJson(document);
 }
 
 } // namespace infernux

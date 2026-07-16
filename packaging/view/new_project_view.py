@@ -2,13 +2,14 @@
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QFileDialog, QComboBox
+    QLineEdit, QPushButton, QFileDialog, QComboBox, QFrame,
 )
 from PySide6.QtCore import Qt, QSettings
 
 from model.new_project_model import NewProjectModel
 from viewmodel.new_project_viewmodel import NewProjectViewModel
 from hub_utils import is_frozen
+from i18n import tr
 
 
 class NewProjectView(QDialog):
@@ -17,8 +18,10 @@ class NewProjectView(QDialog):
 
     def __init__(self, version_manager=None, runtime_manager=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Create New Project")
-        self.setMinimumWidth(480)
+        self.setWindowTitle(tr("Create New Project"))
+        self.setObjectName("newProjectDialog")
+        self.setMinimumWidth(560)
+        self.setModal(True)
         self._version_manager = version_manager
         self._runtime_manager = runtime_manager
         self._has_installed_versions = False
@@ -30,35 +33,59 @@ class NewProjectView(QDialog):
         self.viewmodel = NewProjectViewModel(self.model)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
+        layout.setContentsMargins(28, 26, 28, 24)
+
+        header = QVBoxLayout()
+        header.setSpacing(4)
+        title = QLabel(tr("Create New Project"))
+        title.setObjectName("dialogTitle")
+        header.addWidget(title)
+        subtitle = QLabel(tr("Set the project name, location and Infernux version."))
+        subtitle.setObjectName("dialogSubtitle")
+        header.addWidget(subtitle)
+        layout.addLayout(header)
+
+        form_card = QFrame()
+        form_card.setObjectName("newProjectForm")
+        form_layout = QVBoxLayout(form_card)
+        form_layout.setContentsMargins(20, 18, 20, 20)
+        form_layout.setSpacing(16)
 
         # Project name input
         name_layout = QVBoxLayout()
-        name_label = QLabel("Project Name:")
+        name_layout.setSpacing(7)
+        name_label = QLabel(tr("Project Name:"))
+        name_label.setObjectName("fieldLabel")
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Enter a name for your project")
+        self.name_edit.setFixedHeight(38)
+        self.name_edit.setPlaceholderText(tr("Enter a name for your project"))
         self.name_edit.textChanged.connect(self.viewmodel.set_name)
         self.name_edit.textChanged.connect(self._update_create_button_state)
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_edit)
-        layout.addLayout(name_layout)
+        form_layout.addLayout(name_layout)
 
         # Path chooser
         path_layout = QVBoxLayout()
-        path_label = QLabel("Project Location:")
+        path_layout.setSpacing(7)
+        path_label = QLabel(tr("Project Location:"))
+        path_label.setObjectName("fieldLabel")
         chooser_row = QHBoxLayout()
+        chooser_row.setSpacing(8)
         self.path_edit = QLineEdit()
+        self.path_edit.setFixedHeight(38)
         self.path_edit.setReadOnly(True)
-        self.path_edit.setPlaceholderText("No path selected")
-        path_button = QPushButton("Browse...")
+        self.path_edit.setPlaceholderText(tr("No path selected"))
+        path_button = QPushButton(tr("Browse..."))
         path_button.setObjectName("normalBtn")
+        path_button.setFixedSize(92, 38)
         path_button.clicked.connect(self._on_choose_path)
         chooser_row.addWidget(self.path_edit)
         chooser_row.addWidget(path_button)
         path_layout.addWidget(path_label)
         path_layout.addLayout(chooser_row)
-        layout.addLayout(path_layout)
+        form_layout.addLayout(path_layout)
 
         # Load last path if available
         last_path = self.settings.value(f"{self.SETTINGS_GROUP}/{self.LAST_PATH_KEY}", "")
@@ -68,38 +95,44 @@ class NewProjectView(QDialog):
 
         # Engine version selector
         ver_layout = QVBoxLayout()
-        ver_label = QLabel("Engine Version:")
+        ver_layout.setSpacing(7)
+        ver_label = QLabel(tr("Engine Version:"))
+        ver_label.setObjectName("fieldLabel")
         self.version_combo = QComboBox()
-        self.version_combo.setFixedHeight(32)
-        self._no_version_hint = QLabel(
+        self.version_combo.setFixedHeight(38)
+        self._no_version_hint = QLabel(tr(
             "No engine versions installed. Go to the Installs tab to download one first."
-        )
+        ))
         self._no_version_hint.setWordWrap(True)
         self._no_version_hint.setVisible(False)
-        self._no_version_hint.setStyleSheet("color: #f5a623; font-size: 12px; padding-top: 2px;")
-        self._runtime_hint = QLabel(
+        self._no_version_hint.setObjectName("dialogErrorHint")
+        self._runtime_hint = QLabel(tr(
             "Python 3.12 is not installed yet. Go to the Installs tab to install it first."
-        )
+        ))
         self._runtime_hint.setWordWrap(True)
         self._runtime_hint.setVisible(False)
-        self._runtime_hint.setStyleSheet("color: #f5a623; font-size: 12px; padding-top: 2px;")
+        self._runtime_hint.setObjectName("dialogErrorHint")
         ver_layout.addWidget(ver_label)
         ver_layout.addWidget(self.version_combo)
         ver_layout.addWidget(self._no_version_hint)
         ver_layout.addWidget(self._runtime_hint)
-        layout.addLayout(ver_layout)
+        form_layout.addLayout(ver_layout)
+        layout.addWidget(form_card)
         self.version_combo.currentIndexChanged.connect(self._update_create_button_state)
 
         # Button row
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
         btn_layout.addStretch()
 
-        btn_cancel = QPushButton("Cancel")
+        btn_cancel = QPushButton(tr("Cancel"))
         btn_cancel.setObjectName("normalBtn")
+        btn_cancel.setFixedSize(88, 36)
         btn_cancel.clicked.connect(self.reject)
 
-        btn_create = QPushButton("Create")
-        btn_create.setObjectName("createBtn")
+        btn_create = QPushButton(tr("Create"))
+        btn_create.setObjectName("primaryBtn")
+        btn_create.setFixedSize(88, 36)
         btn_create.clicked.connect(self.accept)
         self._create_btn = btn_create
 
@@ -125,7 +158,7 @@ class NewProjectView(QDialog):
 
         if dev_mode:
             # Dev mode: add a "dev (current env)" option at the top
-            self.version_combo.insertItem(0, "dev (current environment)", "")
+            self.version_combo.insertItem(0, tr("dev (current environment)"), "")
             self.version_combo.setCurrentIndex(0)
         else:
             missing_runtime = self._runtime_manager is not None and not self._runtime_manager.has_runtime()
@@ -143,11 +176,11 @@ class NewProjectView(QDialog):
         missing_runtime = is_frozen() and self._runtime_manager is not None and not self._runtime_manager.has_runtime()
         has_version = self._has_selected_version()
         if is_frozen():
-            self._no_version_hint.setText(
+            self._no_version_hint.setText(tr(
                 "No engine versions installed. Go to the Installs tab to download one first."
                 if not self._has_installed_versions
                 else "Select an installed engine version before creating a project."
-            )
+            ))
             self._no_version_hint.setVisible(not has_version)
         else:
             self._no_version_hint.setVisible(False)
@@ -156,7 +189,7 @@ class NewProjectView(QDialog):
 
     def _on_choose_path(self):
         current_path = self.path_edit.text() or ""
-        folder = QFileDialog.getExistingDirectory(self, "Choose Project Location", current_path)
+        folder = QFileDialog.getExistingDirectory(self, tr("Choose Project Location"), current_path)
         if folder:
             self.path_edit.setText(folder)
             self.viewmodel.set_path(folder)

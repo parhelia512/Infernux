@@ -23,6 +23,13 @@ def get_type(name: str) -> Optional[Type[InxComponent]]:
     ...
 
 
+def get_type_by_identity(
+    name: str,
+    script_guid: str,
+    type_guid: str,
+) -> Optional[Type[InxComponent]]: ...
+
+
 def get_all_types() -> Dict[str, Type[InxComponent]]:
     """Get all known InxComponent subclass types as ``{name: class}``."""
     ...

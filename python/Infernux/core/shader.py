@@ -38,6 +38,16 @@ class Shader:
     # Reference to the native engine (set during Engine initialization)
     _engine = None
 
+    @staticmethod
+    def _validate_shader_type(shader_type: str) -> str:
+        normalized = str(shader_type).strip().lower()
+        if normalized not in {"vertex", "fragment"}:
+            raise ValueError(
+                "shader_type must be 'vertex' or 'fragment'; "
+                "compute shaders are not supported (use an external parallel backend)"
+            )
+        return normalized
+
     @classmethod
     def _set_engine(cls, engine):
         """Internal: bind to the native Infernux instance."""
@@ -54,6 +64,7 @@ class Shader:
         Returns:
             True if the shader module exists in the cache.
         """
+        shader_type = cls._validate_shader_type(shader_type)
         if cls._engine is None:
             return False
         return cls._engine.has_shader(name, shader_type)
@@ -119,6 +130,7 @@ class Shader:
             spirv_code: Raw SPIR-V binary data.
             shader_type: "vertex" or "fragment".
         """
+        shader_type = cls._validate_shader_type(shader_type)
         if cls._engine is None:
             raise RuntimeError("Shader system not initialized — Engine not bound")
         cls._engine.load_shader(name, spirv_code, shader_type)

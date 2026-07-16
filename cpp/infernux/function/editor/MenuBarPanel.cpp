@@ -1,16 +1,44 @@
 #include "MenuBarPanel.h"
+#include <function/renderer/gui/InxGUISemantics.h>
 
 #include <algorithm>
 #include <cctype>
 
 namespace infernux
 {
+namespace
+{
+
+bool BeginSemanticMenu(InxGUIContext *ctx, const std::string &label, const std::string &semanticId, bool enabled = true)
+{
+    const bool open = ImGui::BeginMenu(label.c_str(), enabled);
+    if (ctx && InxGUISemantics::IsCaptureEnabled())
+        ctx->RecordSemanticItem("menu", label, enabled, semanticId, open);
+    return open;
+}
+
+bool SemanticMenuItem(InxGUIContext *ctx, const std::string &label, const std::string &shortcut, bool selected,
+                      bool enabled, const std::string &semanticId)
+{
+    const bool clicked =
+        ImGui::MenuItem(label.c_str(), shortcut.empty() ? nullptr : shortcut.c_str(), selected, enabled);
+    if (ctx && InxGUISemantics::IsCaptureEnabled())
+        ctx->RecordSemanticItem("menu_item", label, enabled, semanticId);
+    return clicked;
+}
+
+} // namespace
 
 // ════════════════════════════════════════════════════════════════════
 // Construction
 // ════════════════════════════════════════════════════════════════════
 
 MenuBarPanel::MenuBarPanel() = default;
+
+void MenuBarPanel::InvalidateWindowTypeCache()
+{
+    m_windowTypesDirty = true;
+}
 
 // ════════════════════════════════════════════════════════════════════
 // Translation helper
@@ -49,6 +77,8 @@ void MenuBarPanel::OnRender(InxGUIContext *ctx)
     ImGui::PushStyleColor(ImGuiCol_HeaderActive, EditorTheme::HEADER_ACTIVE);
 
     if (ImGui::BeginMainMenuBar()) {
+        if (InxGUISemantics::IsCaptureEnabled())
+            ctx->RecordSemanticWindow("menu_bar", "Main Menu", "menu_bar");
         RenderProjectMenu(ctx);
         RenderDynamicMenus(ctx);
         RenderWindowMenu(ctx);
@@ -68,23 +98,33 @@ void MenuBarPanel::OnRender(InxGUIContext *ctx)
 
 void MenuBarPanel::HandleShortcuts(InxGUIContext *ctx)
 {
+    const int frame = ImGui::GetFrameCount();
+    if (m_lastShortcutFrame == frame)
+        return;
+    m_lastShortcutFrame = frame;
+
     bool ctrl = ctx->IsKeyDown(KEY_LEFT_CTRL) || ctx->IsKeyDown(KEY_RIGHT_CTRL);
     if (!ctrl)
         return;
     const bool shift = ctx->IsKeyDown(KEY_LEFT_SHIFT) || ctx->IsKeyDown(KEY_RIGHT_SHIFT);
+    const auto pressedOnce = [](int key) { return ImGui::IsKeyPressed(static_cast<ImGuiKey>(key), false); };
 
-    if (ctx->IsKeyPressed(KEY_S) && onSave)
-        onSave();
+    if (pressedOnce(KEY_S)) {
+        if (shift && onSaveFocusedAs)
+            onSaveFocusedAs();
+        else if (!shift && onSaveFocused)
+            onSaveFocused();
+    }
 
-    if (!shift && ctx->IsKeyPressed(KEY_N) && onNewScene)
+    if (!shift && pressedOnce(KEY_N) && onNewScene)
         onNewScene();
 
-    if (ctx->IsKeyPressed(KEY_Z)) {
+    if (pressedOnce(KEY_Z)) {
         if (canUndo && canUndo() && onUndo)
             onUndo();
     }
 
-    if (ctx->IsKeyPressed(KEY_Y)) {
+    if (pressedOnce(KEY_Y)) {
         if (canRedo && canRedo() && onRedo)
             onRedo();
     }
@@ -96,19 +136,34 @@ void MenuBarPanel::HandleShortcuts(InxGUIContext *ctx)
 
 void MenuBarPanel::RenderProjectMenu(InxGUIContext *ctx)
 {
-    if (!ImGui::BeginMenu(T("menu.project").c_str()))
+    if (!BeginSemanticMenu(ctx, T("menu.project"), "menu.project"))
         return;
+
+    if (SemanticMenuItem(ctx, T("menu.new_scene"), "Ctrl+N", false, true, "menu.project.new_scene")) {
+        if (onNewScene)
+            onNewScene();
+    }
+    if (SemanticMenuItem(ctx, T("menu.save_scene"), "Ctrl+S", false, true, "menu.project.save_scene")) {
+        if (onSave)
+            onSave();
+    }
+    if (SemanticMenuItem(ctx, T("menu.save_scene_as"), "Ctrl+Shift+S", false, true, "menu.project.save_scene_as")) {
+        if (onSaveAs)
+            onSaveAs();
+    }
+
+    ImGui::Separator();
 
     // Build Settings toggle
     bool bsOpen = isBuildSettingsOpen ? isBuildSettingsOpen() : false;
-    if (ImGui::MenuItem(T("menu.build_settings").c_str(), "", bsOpen, true)) {
+    if (SemanticMenuItem(ctx, T("menu.build_settings"), "", bsOpen, true, "menu.project.build_settings")) {
         if (toggleBuildSettings)
             toggleBuildSettings();
     }
 
     // Physics Layer Matrix toggle
     bool plOpen = isPhysicsLayerMatrixOpen ? isPhysicsLayerMatrixOpen() : false;
-    if (ImGui::MenuItem(T("menu.physics_layer_matrix").c_str(), "", plOpen, true)) {
+    if (SemanticMenuItem(ctx, T("menu.physics_layer_matrix"), "", plOpen, true, "menu.project.physics_layer_matrix")) {
         if (togglePhysicsLayerMatrix)
             togglePhysicsLayerMatrix();
     }
@@ -117,7 +172,7 @@ void MenuBarPanel::RenderProjectMenu(InxGUIContext *ctx)
 
     // Preferences toggle
     bool prefOpen = isPreferencesOpen ? isPreferencesOpen() : false;
-    if (ImGui::MenuItem(T("menu.preferences").c_str(), "", prefOpen, true)) {
+    if (SemanticMenuItem(ctx, T("menu.preferences"), "", prefOpen, true, "menu.project.preferences")) {
         if (togglePreferences)
             togglePreferences();
     }
@@ -131,15 +186,15 @@ void MenuBarPanel::RenderProjectMenu(InxGUIContext *ctx)
 
 void MenuBarPanel::RenderWindowMenu(InxGUIContext *ctx)
 {
-    if (!ImGui::BeginMenu(T("menu.window").c_str()))
+    if (!BeginSemanticMenu(ctx, T("menu.window"), "menu.window"))
         return;
 
-    if (getRegisteredTypes && getOpenWindows) {
-        auto types = getRegisteredTypes();
+    RefreshWindowTypeCache();
+    if (!m_cachedWindowTypes.empty() && getOpenWindows) {
         auto openWins = getOpenWindows();
 
         bool hasItems = false;
-        for (const auto &info : types) {
+        for (const auto &info : m_cachedWindowTypes) {
             if (info.menuPath != "Window")
                 continue;
             hasItems = true;
@@ -149,29 +204,25 @@ void MenuBarPanel::RenderWindowMenu(InxGUIContext *ctx)
             if (it != openWins.end())
                 isOpen = it->second;
 
-            bool canCreate = !(info.singleton && isOpen);
-
-            if (ImGui::MenuItem(info.displayName.c_str(), "", isOpen, canCreate)) {
-                if (isOpen) {
-                    if (closeWindow)
-                        closeWindow(info.typeId);
-                } else {
-                    if (openWindow)
-                        openWindow(info.typeId);
-                }
+            if (SemanticMenuItem(ctx, info.displayName, "", isOpen, true, "window." + info.typeId)) {
+                // A checked entry represents an already-open tool window.
+                // Opening it again asks WindowManager to bring its dock tab
+                // to the foreground rather than unexpectedly closing it.
+                if (openWindow)
+                    openWindow(info.typeId);
             }
         }
 
         if (!hasItems) {
-            ImGui::MenuItem(T("menu.no_windows").c_str(), "", false, false);
+            SemanticMenuItem(ctx, T("menu.no_windows"), "", false, false, "menu.window.none");
         }
     } else {
-        ImGui::MenuItem(T("menu.no_wm").c_str(), "", false, false);
+        SemanticMenuItem(ctx, T("menu.no_wm"), "", false, false, "menu.window.unavailable");
     }
 
     ImGui::Separator();
 
-    if (ImGui::MenuItem(T("menu.reset_layout").c_str(), "", false, true)) {
+    if (SemanticMenuItem(ctx, T("menu.reset_layout"), "", false, true, "menu.window.reset_layout")) {
         if (resetLayout)
             resetLayout();
     }
@@ -185,35 +236,12 @@ void MenuBarPanel::RenderWindowMenu(InxGUIContext *ctx)
 
 void MenuBarPanel::RenderDynamicMenus(InxGUIContext *ctx)
 {
-    if (!getRegisteredTypes || !getOpenWindows)
+    RefreshWindowTypeCache();
+    if (m_cachedWindowTypes.empty())
         return;
 
-    auto types = getRegisteredTypes();
-    auto openWins = getOpenWindows();
-
-    // Discover unique top-level menu names (everything except "Window").
-    // Preserve insertion order so menus appear in panel registration order.
-    std::vector<std::string> topMenus;
-    for (const auto &info : types) {
-        if (info.menuPath == "Window")
-            continue;
-        std::string top = info.menuPath;
-        auto slash = top.find('/');
-        if (slash != std::string::npos)
-            top = top.substr(0, slash);
-
-        bool found = false;
-        for (const auto &t : topMenus)
-            if (t == top) {
-                found = true;
-                break;
-            }
-        if (!found)
-            topMenus.push_back(top);
-    }
-
     // Render each top-level menu.
-    for (const auto &top : topMenus) {
+    for (const auto &top : m_cachedTopMenus) {
         // Build i18n key: "Animation" -> "menu.animation"
         std::string key = "menu." + top;
         for (auto &c : key)
@@ -227,14 +255,38 @@ void MenuBarPanel::RenderDynamicMenus(InxGUIContext *ctx)
         if (label == key.substr(key.rfind('.') + 1))
             label = top;
 
-        RenderMenuGroup(top, label, types, openWins);
+        RenderMenuGroup(ctx, top, label, m_cachedWindowTypes);
     }
 }
 
-void MenuBarPanel::RenderMenuGroup(const std::string &topMenu, const std::string &translatedLabel,
-                                   const std::vector<WindowTypeInfo> &types,
-                                   const std::map<std::string, bool> &openWins)
+void MenuBarPanel::RefreshWindowTypeCache()
 {
+    if (!m_windowTypesDirty)
+        return;
+    if (!getRegisteredTypes)
+        return;
+
+    m_windowTypesDirty = false;
+    m_cachedWindowTypes = getRegisteredTypes();
+    m_cachedTopMenus.clear();
+    for (const auto &info : m_cachedWindowTypes) {
+        if (info.menuPath == "Window")
+            continue;
+        std::string top = info.menuPath;
+        const auto slash = top.find('/');
+        if (slash != std::string::npos)
+            top.resize(slash);
+        if (std::find(m_cachedTopMenus.begin(), m_cachedTopMenus.end(), top) == m_cachedTopMenus.end())
+            m_cachedTopMenus.push_back(std::move(top));
+    }
+}
+
+void MenuBarPanel::RenderMenuGroup(InxGUIContext *ctx, const std::string &topMenu, const std::string &translatedLabel,
+                                   const std::vector<WindowTypeInfo> &types)
+{
+    if (!BeginSemanticMenu(ctx, translatedLabel, "menu." + topMenu))
+        return;
+
     // Collect entries belonging to this top-level menu.
     struct Entry
     {
@@ -279,11 +331,7 @@ void MenuBarPanel::RenderMenuGroup(const std::string &topMenu, const std::string
         }
     }
 
-    if (entries.empty())
-        return;
-
-    if (!ImGui::BeginMenu(translatedLabel.c_str()))
-        return;
+    const auto openWins = getOpenWindows ? getOpenWindows() : std::map<std::string, bool>{};
 
     // Lambda: render a single menu-item toggle
     auto renderItem = [&](const Entry &e) {
@@ -291,16 +339,11 @@ void MenuBarPanel::RenderMenuGroup(const std::string &topMenu, const std::string
         auto it = openWins.find(e.typeId);
         if (it != openWins.end())
             isOpen = it->second;
-        bool canCreate = !(e.singleton && isOpen);
-
-        if (ImGui::MenuItem(e.displayName.c_str(), "", isOpen, canCreate)) {
-            if (isOpen) {
-                if (closeWindow)
-                    closeWindow(e.typeId);
-            } else {
-                if (openWindow)
-                    openWindow(e.typeId);
-            }
+        if (SemanticMenuItem(ctx, e.displayName, "", isOpen, true, "window." + e.typeId)) {
+            // WindowManager treats an already-visible window as a focus
+            // request, which makes this menu work like a normal tool picker.
+            if (openWindow)
+                openWindow(e.typeId);
         }
     };
 
@@ -324,7 +367,7 @@ void MenuBarPanel::RenderMenuGroup(const std::string &topMenu, const std::string
         if (smLabel == smKey.substr(smKey.rfind('.') + 1))
             smLabel = sm;
 
-        if (ImGui::BeginMenu(smLabel.c_str())) {
+        if (BeginSemanticMenu(ctx, smLabel, "menu." + topMenu + "." + sm)) {
             for (const auto &e : entries) {
                 if (e.subMenu == sm)
                     renderItem(e);

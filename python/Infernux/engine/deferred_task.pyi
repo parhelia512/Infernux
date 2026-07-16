@@ -20,7 +20,7 @@ from typing import Callable, Optional
 class DeferredTaskRunner:
     """Execute a sequence of steps across multiple frames.
 
-    Ticked once per frame by ``FrameSchedulerPanel``.
+    Ticked once per frame by the engine's pre-GUI callback.
     """
 
     @classmethod

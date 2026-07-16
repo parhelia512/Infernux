@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
 )
 from PySide6.QtCore import Qt
+from i18n import tr
 
 
 class ControlPane(QWidget):
@@ -14,46 +15,47 @@ class ControlPane(QWidget):
         self.viewmodel = viewmodel
 
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(0)
+        main_layout.setSpacing(16)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # ── Header row ──
         header = QHBoxLayout()
-        header.setContentsMargins(4, 0, 0, 12)
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(16)
 
-        title = QLabel("Projects")
+        title_block = QVBoxLayout()
+        title_block.setSpacing(2)
+        title = QLabel(tr("Projects"))
         title.setObjectName("pageTitle")
-        header.addWidget(title, alignment=Qt.AlignmentFlag.AlignLeft)
+        title_block.addWidget(title)
+        subtitle = QLabel(tr("Create, open and launch your Infernux projects."))
+        subtitle.setObjectName("pageSubtitle")
+        title_block.addWidget(subtitle)
+        header.addLayout(title_block)
         header.addStretch()
 
-        # ── Action buttons (right-aligned) ──
-        self.btn_delete = QPushButton("Delete")
-        self.btn_delete.setObjectName("dangerBtn")
-        self.btn_delete.setFixedHeight(36)
-        self.btn_delete.setMinimumWidth(90)
-        self.btn_delete.clicked.connect(lambda: self.viewmodel.delete_project(self))
-        header.addWidget(self.btn_delete)
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(8)
+        self.btn_open = QPushButton(tr("Open"))
+        self.btn_open.setObjectName("normalBtn")
+        self.btn_open.setFixedHeight(38)
+        self.btn_open.setMinimumWidth(88)
+        self.btn_open.clicked.connect(lambda: self.viewmodel.open_existing_project(self))
+        actions.addWidget(self.btn_open)
 
-        spacer_label = QLabel("")
-        spacer_label.setFixedWidth(8)
-        header.addWidget(spacer_label)
-
-        self.btn_new = QPushButton("+ New Project")
+        self.btn_new = QPushButton(tr("New"))
         self.btn_new.setObjectName("primaryBtn")
-        self.btn_new.setFixedHeight(36)
-        self.btn_new.setMinimumWidth(130)
+        self.btn_new.setFixedHeight(38)
+        self.btn_new.setMinimumWidth(88)
         self.btn_new.clicked.connect(lambda: self.viewmodel.create_project(self))
-        header.addWidget(self.btn_new)
+        actions.addWidget(self.btn_new)
 
-        spacer_label2 = QLabel("")
-        spacer_label2.setFixedWidth(8)
-        header.addWidget(spacer_label2)
-
-        self.btn_launch = QPushButton("▶  Launch")
+        self.btn_launch = QPushButton(tr("Launch"))
         self.btn_launch.setObjectName("normalBtn")
-        self.btn_launch.setFixedHeight(36)
-        self.btn_launch.setMinimumWidth(110)
+        self.btn_launch.setFixedHeight(38)
+        self.btn_launch.setMinimumWidth(88)
         self.btn_launch.clicked.connect(lambda: self.viewmodel.launch_project(self))
-        header.addWidget(self.btn_launch)
+        actions.addWidget(self.btn_launch)
 
+        header.addLayout(actions)
         main_layout.addLayout(header)

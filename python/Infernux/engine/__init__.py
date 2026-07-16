@@ -3,8 +3,10 @@ from Infernux.runtime_utf8 import configure_process_utf8
 configure_process_utf8()
 
 import atexit
+import importlib
 import json
 import os
+import time
 import uuid
 
 # ── Player mode detection ───────────────────────────────────────────
@@ -19,38 +21,26 @@ from .engine import Engine, LogLevel
 from .play_mode import PlayModeManager, PlayModeState
 from .scene_manager import SceneFileManager
 
-if not _PLAYER_MODE:
-    from .resources_manager import ResourcesManager
+from .headless import run_headless
 
-# ── Editor-only imports ─────────────────────────────────────────────
-# Skipped in standalone player builds (env _INFERNUX_PLAYER_MODE=1)
-# to avoid pulling in the entire editor UI and keep Nuitka compilation
-# fast and focused on player-relevant code only.
+_EDITOR_UI_EXPORTS = {
+    "MenuBarPanel", "ToolbarPanel", "HierarchyPanel",
+    "InspectorPanel", "ConsolePanel", "SceneViewPanel", "GameViewPanel",
+    "ProjectPanel", "WindowManager", "TagLayerSettingsPanel", "StatusBarPanel",
+    "BuildSettingsPanel", "UIEditorPanel", "EditorPanel", "EditorServices",
+    "EditorEventBus", "EditorEvent", "PanelRegistry", "editor_panel",
+}
 
-if not _PLAYER_MODE:
-    from .ui import (
-        MenuBarPanel,
-        FrameSchedulerPanel,
-        ToolbarPanel,
-        HierarchyPanel,
-        InspectorPanel,
-        ConsolePanel,
-        SceneViewPanel,
-        GameViewPanel,
-        ProjectPanel,
-        WindowManager,
-        TagLayerSettingsPanel,
-        StatusBarPanel,
-        BuildSettingsPanel,
-        UIEditorPanel,
-        EditorPanel,
-        EditorServices,
-        EditorEventBus,
-        EditorEvent,
-        PanelRegistry,
-        editor_panel,
-    )
-    from .ui import panel_state as _panel_state
+
+def __getattr__(name: str):
+    if name == "ResourcesManager":
+        value = importlib.import_module(".resources_manager", __name__).ResourcesManager
+    elif name in _EDITOR_UI_EXPORTS:
+        value = getattr(importlib.import_module(".ui", __name__), name)
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    globals()[name] = value
+    return value
 
 
 def _signal_engine_loaded() -> None:
@@ -117,11 +107,22 @@ def _remove_project_lock(lock_path: str, token: str) -> None:
         data = None
     if data and data.get("token") != token:
         return
-    try:
-        os.remove(lock_path)
-    except OSError as _exc:
-        Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-        pass
+    last_error = None
+    for attempt in range(20):
+        try:
+            os.remove(lock_path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError as exc:
+            last_error = exc
+            if attempt < 19:
+                time.sleep(0.05)
+        except OSError as exc:
+            last_error = exc
+            break
+    if last_error is not None:
+        Debug.log(f"[Suppressed] {type(last_error).__name__}: {last_error}")
 
 
 def _acquire_project_lock(project_path: str, mode: str) -> tuple[str, str]:
@@ -213,14 +214,17 @@ def run_player(project_path: str, engine_log_level=LogLevel.Info):
     import time
     from .player_bootstrap import PlayerBootstrap
 
-    from .library_sync import sync_resources
-    sync_resources(project_path)
-    _resources.activate_library(project_path)
-
     # Packaged/standalone games skip the project lock entirely — they
     # have their own self-contained Data folder and should never conflict
     # with an editor instance or another packaged game.
     is_packaged = os.environ.get("_INFERNUX_PLAYER_MODE") == "1"
+
+    # Packaged players already carry Infernux/resources. Only development
+    # players mirror those resources into the project's Library directory.
+    if not is_packaged:
+        from .library_sync import sync_resources
+        sync_resources(project_path)
+        _resources.activate_library(project_path)
 
     lock_path = lock_token = None
     if not is_packaged:
@@ -290,6 +294,7 @@ __all__ = [
     "TextureData",
     "release_engine",
     "run_player",
+    "run_headless",
 ]
 
 if not _PLAYER_MODE:

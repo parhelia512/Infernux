@@ -27,8 +27,10 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <cmath>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <stdexcept>
 
 namespace py = pybind11;
 
@@ -37,6 +39,54 @@ namespace infernux
 
 // Forward-declare the registry (defined in BindingScene.cpp)
 class ComponentBindingRegistry;
+
+namespace
+{
+void RequireFinite(const glm::vec3 &value, const char *name)
+{
+    if (!std::isfinite(value.x) || !std::isfinite(value.y) || !std::isfinite(value.z))
+        throw std::invalid_argument(std::string(name) + " must contain finite values");
+}
+
+void RequireDirectionAndDistance(const glm::vec3 &direction, float maxDistance)
+{
+    RequireFinite(direction, "direction");
+    if (glm::dot(direction, direction) <= 1e-12f)
+        throw std::invalid_argument("direction must be non-zero");
+    if (!std::isfinite(maxDistance) || maxDistance <= 0.0f)
+        throw std::invalid_argument("max_distance must be finite and greater than zero");
+}
+
+void RequirePositive(float value, const char *name)
+{
+    if (!std::isfinite(value) || value <= 0.0f)
+        throw std::invalid_argument(std::string(name) + " must be finite and greater than zero");
+}
+
+void RequirePositiveExtents(const glm::vec3 &value)
+{
+    RequireFinite(value, "half_extents");
+    if (value.x <= 0.0f || value.y <= 0.0f || value.z <= 0.0f)
+        throw std::invalid_argument("half_extents must be greater than zero on every axis");
+}
+
+void RequireOrientation(const glm::quat &orientation)
+{
+    if (!std::isfinite(orientation.w) || !std::isfinite(orientation.x) || !std::isfinite(orientation.y) ||
+        !std::isfinite(orientation.z) || glm::dot(orientation, orientation) <= 1e-12f)
+        throw std::invalid_argument("orientation must be a finite, non-zero quaternion");
+}
+
+py::list BorrowedColliderList(const std::vector<Collider *> &colliders)
+{
+    py::list result;
+    for (Collider *collider : colliders) {
+        if (collider)
+            result.append(py::cast(collider, py::return_value_policy::reference));
+    }
+    return result;
+}
+} // namespace
 
 void RegisterPhysicsBindings(py::module_ &m)
 {
@@ -61,8 +111,6 @@ void RegisterPhysicsBindings(py::module_ &m)
         .def_property_readonly(
             "relative_velocity", [](const CollisionInfo &c) { return c.relativeVelocity; },
             "Relative velocity between the two bodies")
-        .def_property_readonly(
-            "impulse", [](const CollisionInfo &c) { return c.impulse; }, "Total impulse magnitude of the contact")
         .def("__repr__", [](const CollisionInfo &c) {
             std::string goName = c.gameObject ? c.gameObject->GetName() : "null";
             return "<CollisionInfo other='" + goName + "'>";
@@ -106,6 +154,12 @@ void RegisterPhysicsBindings(py::module_ &m)
         .def("__repr__", [](const RaycastHit &h) { return "<RaycastHit dist=" + std::to_string(h.distance) + ">"; });
 
     // ====================================================================
+    py::enum_<PhysicsMaterialCombine>(m, "PhysicsMaterialCombine")
+        .value("Average", PhysicsMaterialCombine::Average)
+        .value("Minimum", PhysicsMaterialCombine::Minimum)
+        .value("Multiply", PhysicsMaterialCombine::Multiply)
+        .value("Maximum", PhysicsMaterialCombine::Maximum);
+
     // Collider base (abstract — not directly constructible)
     // ====================================================================
     py::class_<Collider, Component>(m, "Collider")
@@ -113,10 +167,10 @@ void RegisterPhysicsBindings(py::module_ &m)
         .def_property(
             "center", [](Collider *c) { return c->GetCenter(); },
             [](Collider *c, const glm::vec3 &v) { c->SetCenter(v); }, "Center offset in local space")
-        .def_property("friction", &Collider::GetFriction, &Collider::SetFriction,
-                      "Dynamic friction coefficient [0..1] (default 0.4)")
-        .def_property("bounciness", &Collider::GetBounciness, &Collider::SetBounciness,
-                      "Restitution / bounciness [0..1] (default 0)")
+        .def_property("physic_material", &Collider::GetPhysicMaterial, &Collider::SetPhysicMaterial,
+                      "Shared PhysicMaterial; None uses engine defaults")
+        .def_property("physic_material_guid", &Collider::GetPhysicMaterialGuid, &Collider::SetPhysicMaterialGuid,
+                      "GUID of the persistent PhysicMaterial asset")
         .def("serialize", &Collider::Serialize)
         .def("deserialize", &Collider::Deserialize, "json_str"_a);
 
@@ -160,7 +214,25 @@ void RegisterPhysicsBindings(py::module_ &m)
     py::class_<MeshCollider, Collider>(m, "MeshCollider")
         .def(py::init<>())
         .def_property("convex", &MeshCollider::IsConvex, &MeshCollider::SetConvex,
-                      "Use convex hull collision. Dynamic rigidbodies force convex mode.")
+                      "Use convex hull collision. Dynamic rigidbodies set this property to true.")
+        .def_property_readonly("shape_error", &MeshCollider::GetShapeError,
+                               "Last mesh cooking error; empty after successful shape creation")
+        .def_property_readonly("is_cooking", &MeshCollider::IsCooking,
+                               "Whether immutable collision geometry is currently cooking on a worker")
+        .def_static("clear_cooking_cache", &MeshCollider::ClearCookingCache,
+                    "Clear cached CPU mesh-cooking payloads and reset hit/miss counters")
+        .def_static(
+            "get_cooking_cache_stats",
+            []() {
+                const auto [hits, misses] = MeshCollider::GetCookingCacheStats();
+                py::dict stats;
+                stats["hits"] = hits;
+                stats["misses"] = misses;
+                stats["pending"] = MeshCollider::GetPendingCookingCount();
+                stats["async_submissions"] = MeshCollider::GetAsyncCookingSubmissionCount();
+                return stats;
+            },
+            "Return CPU mesh-cooking cache and worker counters")
         .def(
             "get_convex_hull_positions",
             [](const MeshCollider &mc) -> py::list {
@@ -216,8 +288,6 @@ void RegisterPhysicsBindings(py::module_ &m)
     py::enum_<CollisionDetectionMode>(m, "CollisionDetectionMode")
         .value("Discrete", CollisionDetectionMode::Discrete)
         .value("Continuous", CollisionDetectionMode::Continuous)
-        .value("ContinuousDynamic", CollisionDetectionMode::ContinuousDynamic)
-        .value("ContinuousSpeculative", CollisionDetectionMode::ContinuousSpeculative)
         .export_values();
 
     py::enum_<RigidbodyInterpolation>(m, "RigidbodyInterpolation")
@@ -285,10 +355,9 @@ void RegisterPhysicsBindings(py::module_ &m)
                 rb->SetConstraints(v ? (c | 64) : (c & ~64));
             },
             "Freeze rotation Z axis")
-        .def_property(
-            "collision_detection_mode", &Rigidbody::GetCollisionDetectionMode, &Rigidbody::SetCollisionDetectionMode,
-            "Collision detection mode. Dynamic Continuous uses sweep CCD, Kinematic Continuous defaults to speculative "
-            "contacts, ContinuousDynamic forces sweep CCD, and ContinuousSpeculative uses speculative contacts.")
+        .def_property("collision_detection_mode", &Rigidbody::GetCollisionDetectionMode,
+                      &Rigidbody::SetCollisionDetectionMode,
+                      "Collision detection mode. Dynamic Continuous uses Jolt LinearCast sweep CCD.")
         .def_property("interpolation", &Rigidbody::GetInterpolation, &Rigidbody::SetInterpolation,
                       "Presentation interpolation mode (0=None, 1=Interpolate)")
         .def_property("max_angular_velocity", &Rigidbody::GetMaxAngularVelocity, &Rigidbody::SetMaxAngularVelocity,
@@ -306,11 +375,10 @@ void RegisterPhysicsBindings(py::module_ &m)
         .def_property_readonly(
             "world_center_of_mass", [](Rigidbody *rb) { return rb->GetWorldCenterOfMass(); },
             "World-space center of mass (read-only)")
-        .def_property_readonly(
-            "position", [](Rigidbody *rb) { return rb->GetPosition(); },
-            "World-space position of the rigidbody (read-only)")
-        .def_property_readonly(
-            "rotation", [](Rigidbody *rb) { return rb->GetRotation(); }, "World-space rotation quaternion (read-only)")
+        .def_property("position", &Rigidbody::GetPosition, &Rigidbody::SetPosition,
+                      "World-space position. Assignment teleports while preserving velocity.")
+        .def_property("rotation", &Rigidbody::GetRotation, &Rigidbody::SetRotation,
+                      "World-space rotation. Assignment teleports while preserving velocity.")
         // ---- Force / Torque ----
         .def(
             "add_force", [](Rigidbody *rb, const glm::vec3 &f, ForceMode mode) { rb->AddForce(f, mode); }, "force"_a,
@@ -342,10 +410,13 @@ void RegisterPhysicsBindings(py::module_ &m)
     // Physics static class (Unity: Physics.Raycast)
     // ====================================================================
     py::class_<PhysicsWorld, std::unique_ptr<PhysicsWorld, py::nodelete>>(m, "Physics")
+        .def_property_readonly_static("body_count", [](py::object) { return PhysicsWorld::Instance().GetBodyCount(); })
         .def_static(
             "raycast",
             [](const glm::vec3 &origin, const glm::vec3 &direction, float maxDistance, uint32_t layerMask,
                bool queryTriggers) -> py::object {
+                RequireFinite(origin, "origin");
+                RequireDirectionAndDistance(direction, maxDistance);
                 RaycastHit hit;
                 if (PhysicsWorld::Instance().Raycast(origin, direction, maxDistance, hit, layerMask, queryTriggers)) {
                     return py::cast(hit);
@@ -359,6 +430,8 @@ void RegisterPhysicsBindings(py::module_ &m)
             "raycast_all",
             [](const glm::vec3 &origin, const glm::vec3 &direction, float maxDistance, uint32_t layerMask,
                bool queryTriggers) {
+                RequireFinite(origin, "origin");
+                RequireDirectionAndDistance(direction, maxDistance);
                 return PhysicsWorld::Instance().RaycastAll(origin, direction, maxDistance, layerMask, queryTriggers);
             },
             "origin"_a, "direction"_a, "max_distance"_a = 1000.0f,
@@ -368,22 +441,45 @@ void RegisterPhysicsBindings(py::module_ &m)
         .def_static(
             "overlap_sphere",
             [](const glm::vec3 &center, float radius, uint32_t layerMask, bool queryTriggers) {
-                return PhysicsWorld::Instance().OverlapSphere(center, radius, layerMask, queryTriggers);
+                RequireFinite(center, "center");
+                RequirePositive(radius, "radius");
+                return BorrowedColliderList(
+                    PhysicsWorld::Instance().OverlapSphere(center, radius, layerMask, queryTriggers));
             },
             "center"_a, "radius"_a, "layer_mask"_a = EngineConfig::Get().defaultQueryLayerMask,
             "query_triggers"_a = true, "Find all colliders within a sphere. Returns list of Collider.")
         .def_static(
             "overlap_box",
-            [](const glm::vec3 &center, const glm::vec3 &half_extents, uint32_t layerMask, bool queryTriggers) {
-                return PhysicsWorld::Instance().OverlapBox(center, half_extents, layerMask, queryTriggers);
+            [](const glm::vec3 &center, const glm::vec3 &halfExtents, const glm::quat &orientation, uint32_t layerMask,
+               bool queryTriggers) {
+                RequireFinite(center, "center");
+                RequirePositiveExtents(halfExtents);
+                RequireOrientation(orientation);
+                return BorrowedColliderList(
+                    PhysicsWorld::Instance().OverlapBox(center, halfExtents, orientation, layerMask, queryTriggers));
             },
-            "center"_a, "half_extents"_a, "layer_mask"_a = EngineConfig::Get().defaultQueryLayerMask,
-            "query_triggers"_a = true, "Find all colliders within an axis-aligned box. Returns list of Collider.")
+            "center"_a, "half_extents"_a, "orientation"_a = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+            "layer_mask"_a = EngineConfig::Get().defaultQueryLayerMask, "query_triggers"_a = true,
+            "Find all colliders within an oriented box. Returns list of Collider.")
+        .def_static(
+            "overlap_capsule",
+            [](const glm::vec3 &point0, const glm::vec3 &point1, float radius, uint32_t layerMask, bool queryTriggers) {
+                RequireFinite(point0, "point0");
+                RequireFinite(point1, "point1");
+                RequirePositive(radius, "radius");
+                return BorrowedColliderList(
+                    PhysicsWorld::Instance().OverlapCapsule(point0, point1, radius, layerMask, queryTriggers));
+            },
+            "point0"_a, "point1"_a, "radius"_a, "layer_mask"_a = EngineConfig::Get().defaultQueryLayerMask,
+            "query_triggers"_a = true, "Find all colliders within a capsule. Returns list of Collider.")
         // ---- Shape casts ----
         .def_static(
             "sphere_cast",
             [](const glm::vec3 &origin, float radius, const glm::vec3 &direction, float maxDistance, uint32_t layerMask,
                bool queryTriggers) -> py::object {
+                RequireFinite(origin, "origin");
+                RequirePositive(radius, "radius");
+                RequireDirectionAndDistance(direction, maxDistance);
                 RaycastHit hit;
                 if (PhysicsWorld::Instance().SphereCast(origin, radius, direction, maxDistance, hit, layerMask,
                                                         queryTriggers))
@@ -395,17 +491,38 @@ void RegisterPhysicsBindings(py::module_ &m)
             "Cast a sphere and return closest RaycastHit or None.")
         .def_static(
             "box_cast",
-            [](const glm::vec3 &center, const glm::vec3 &half_extents, const glm::vec3 &direction, float maxDistance,
-               uint32_t layerMask, bool queryTriggers) -> py::object {
+            [](const glm::vec3 &center, const glm::vec3 &halfExtents, const glm::vec3 &direction,
+               const glm::quat &orientation, float maxDistance, uint32_t layerMask, bool queryTriggers) -> py::object {
+                RequireFinite(center, "center");
+                RequirePositiveExtents(halfExtents);
+                RequireDirectionAndDistance(direction, maxDistance);
+                RequireOrientation(orientation);
                 RaycastHit hit;
-                if (PhysicsWorld::Instance().BoxCast(center, half_extents, direction, maxDistance, hit, layerMask,
-                                                     queryTriggers))
+                if (PhysicsWorld::Instance().BoxCast(center, halfExtents, direction, orientation, maxDistance, hit,
+                                                     layerMask, queryTriggers))
                     return py::cast(hit);
                 return py::none();
             },
-            "center"_a, "half_extents"_a, "direction"_a, "max_distance"_a = 1000.0f,
+            "center"_a, "half_extents"_a, "direction"_a, "orientation"_a = glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+            "max_distance"_a = 1000.0f, "layer_mask"_a = EngineConfig::Get().defaultQueryLayerMask,
+            "query_triggers"_a = true, "Cast a box and return closest RaycastHit or None.")
+        .def_static(
+            "capsule_cast",
+            [](const glm::vec3 &point0, const glm::vec3 &point1, float radius, const glm::vec3 &direction,
+               float maxDistance, uint32_t layerMask, bool queryTriggers) -> py::object {
+                RequireFinite(point0, "point0");
+                RequireFinite(point1, "point1");
+                RequirePositive(radius, "radius");
+                RequireDirectionAndDistance(direction, maxDistance);
+                RaycastHit hit;
+                if (PhysicsWorld::Instance().CapsuleCast(point0, point1, radius, direction, maxDistance, hit, layerMask,
+                                                         queryTriggers))
+                    return py::cast(hit);
+                return py::none();
+            },
+            "point0"_a, "point1"_a, "radius"_a, "direction"_a, "max_distance"_a = 1000.0f,
             "layer_mask"_a = EngineConfig::Get().defaultQueryLayerMask, "query_triggers"_a = true,
-            "Cast a box and return closest RaycastHit or None.")
+            "Cast a capsule and return closest RaycastHit or None.")
         // ---- Gravity ----
         .def_static(
             "get_gravity",
@@ -420,6 +537,9 @@ void RegisterPhysicsBindings(py::module_ &m)
         .def_static(
             "set_gravity",
             [](const glm::vec3 &g) {
+                if (!std::isfinite(g.x) || !std::isfinite(g.y) || !std::isfinite(g.z))
+                    throw std::invalid_argument("gravity components must be finite");
+                EngineConfig::Get().physicsGravity = g;
                 auto *sys = PhysicsWorld::Instance().GetJoltSystem();
                 if (sys)
                     sys->SetGravity(JPH::Vec3(g.x, g.y, g.z));
@@ -444,7 +564,10 @@ void RegisterPhysicsBindings(py::module_ &m)
             "Apply all pending Transform changes to the physics engine.\n"
             "Call before same-frame physics queries (raycast, overlap) when you have\n"
             "moved objects in Update and need up-to-date collision geometry.\n"
-            "Unity equivalent: Physics.SyncTransforms()");
+            "Unity equivalent: Physics.SyncTransforms()")
+        .def_static(
+            "get_actor_count", []() { return PhysicsECSStore::Instance().GetAliveActorCount(); },
+            "Get the number of live PhysicsActor slots.");
 
     // ====================================================================
     // Register component type casters in ComponentBindingRegistry

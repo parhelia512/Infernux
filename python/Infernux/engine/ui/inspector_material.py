@@ -10,6 +10,7 @@ State is managed by the unified ``asset_details_renderer`` module.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import time as _time
@@ -76,15 +77,8 @@ def _query_material_preview_tex(panel, native_mat, mat_data, state, cache_tag, p
     )
 
     embedded = isinstance(preview_path, str) and "::submat:" in preview_path
-    disk_ok = (
-        isinstance(preview_path, str)
-        and bool(preview_path)
-        and not embedded
-        and os.path.isfile(preview_path)
-    )
-
     json_blob = (cache_tag or "").strip()
-    if not json_blob:
+    if not json_blob and not embedded:
         try:
             json_blob = state.extra.get("cached_json") or json.dumps(
                 mat_data, sort_keys=True, ensure_ascii=False)
@@ -93,30 +87,72 @@ def _query_material_preview_tex(panel, native_mat, mat_data, state, cache_tag, p
 
     if embedded and preview_path:
         return int(get_resource_preview_texture_id(
-            panel, preview_path, material_json=json_blob) or 0)
+            panel, preview_path, material_json="") or 0)
 
     native = _resolve_native_engine(panel)
     if native is None:
         return 0
 
-    # Prefab/scene instance overrides often have no saved .mat on disk — render from JSON.
-    if json_blob and not disk_ok:
+    # The Inspector document is authoritative while it is open. This path also
+    # covers brand-new resources before their first asynchronous disk save.
+    if json_blob:
         guid = (getattr(native_mat, "guid", "") or "").strip()
         path_hint = preview_path or f"inline:{guid or id(native_mat)}"
-        tex = int(_try_get_cpp_material_preview_texture(
+        return int(_try_get_cpp_material_preview_texture(
             native, path_hint, material_json=json_blob, file_mtime_hint=0) or 0)
-        if tex:
-            return tex
 
     if not preview_path:
         return 0
 
-    tex = int(get_resource_preview_texture_id(
-        panel, preview_path, material_json=json_blob or "") or 0)
-    if tex == 0 and json_blob:
-        tex = int(get_resource_preview_texture_id(
-            panel, preview_path, material_json="") or 0)
-    return tex
+    return int(get_resource_preview_texture_id(
+        panel, preview_path, material_json="") or 0)
+
+
+def _is_material_preview_ready(panel, preview_path, cache_tag) -> bool:
+    """Return true only when the native texture is for the requested content."""
+    from .asset_resource_preview import _resolve_native_engine
+
+    native = _resolve_native_engine(panel)
+    if native is None or not hasattr(native, "is_material_preview_ready"):
+        # Older native builds have no generation status; preserve their
+        # previous non-zero-texture cache behavior.
+        return True
+
+    embedded = isinstance(preview_path, str) and "::submat:" in preview_path
+    uses_live_json = not embedded
+    norm_path = os.path.normpath(preview_path or "")
+    cache_key = f"matedit|{norm_path}" if uses_live_json else f"mat|{norm_path}"
+    try:
+        return bool(native.is_material_preview_ready(cache_key))
+    except Exception:
+        return False
+
+
+def _get_cached_material_preview_tex(panel, native_mat, mat_data, state, cache_tag, preview_path) -> int:
+    """Avoid repeating filesystem and native preview lookups for a stable material."""
+    preview_key = (preview_path or "", cache_tag or "")
+    cached_key = state.extra.get("_material_preview_query_key")
+    cached_tex = int(state.extra.get("_material_preview_tex_id", 0) or 0)
+    cached_ready = bool(state.extra.get("_material_preview_tex_ready", False))
+    if cached_key == preview_key and cached_tex and cached_ready:
+        return cached_tex
+
+    tex = _query_material_preview_tex(
+        panel, native_mat, mat_data, state, cache_tag, preview_path,
+    )
+    ready = bool(tex) and _is_material_preview_ready(panel, preview_path, cache_tag)
+    state.extra["_material_preview_query_key"] = preview_key
+    state.extra["_material_preview_tex_id"] = int(tex or 0)
+    state.extra["_material_preview_tex_ready"] = ready
+    if not ready:
+        try:
+            from .asset_resource_preview import _resolve_native_engine
+            native = _resolve_native_engine(panel)
+            if native is not None and hasattr(native, "request_full_speed_frame"):
+                native.request_full_speed_frame()
+        except Exception:
+            pass
+    return int(tex or 0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -313,6 +349,7 @@ def render_material_property(
 _native_mat = None
 _cached_data: Optional[dict] = None
 _shader_cache: dict = {".vert": None, ".frag": None}
+_surface_batch_plans: dict = {}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -391,139 +428,128 @@ def _render_shader_section(ctx, mat_data, state, is_builtin, default_open):
     return changed, requires_deserialize, requires_pipeline_refresh, change_key
 
 
-def _render_so_surface_and_cull(ctx, rs, mat_data, overrides, so_lw):
-    """Surface Type + Cull Mode options. Return *(overrides, change_key)*."""
-    change_key = ""
-    # Surface Type (Opaque / Transparent)
+def _render_surface_options_batch(ctx, rs, mat_data, overrides, so_lw):
+    """Render all steady-state surface controls through one native bridge call."""
+    entries = []
+
+    def add(key, desc):
+        entries.append((key, desc))
+
     surface_items = [t("material.opaque"), t("material.transparent")]
-    cur_surface = 1 if rs.get("blendEnable", False) else 0
-    field_label(ctx, t("material.surface_type"), so_lw)
-    new_surface = ctx.combo("##mat_surface_type", cur_surface, surface_items)
-    if new_surface != cur_surface:
-        if new_surface == 1:  # Transparent
-            rs["blendEnable"] = True
-            rs["srcColorBlendFactor"] = 6
-            rs["dstColorBlendFactor"] = 7
-            rs["colorBlendOp"] = 0
-            rs["srcAlphaBlendFactor"] = 0
-            rs["dstAlphaBlendFactor"] = 1
-            rs["alphaBlendOp"] = 0
-            rs["depthWriteEnable"] = False
-            rs["renderQueue"] = 3000
-            overrides |= 0x80 | 0x10 | 0x20 | 0x02 | 0x40
-        else:  # Opaque
-            rs["blendEnable"] = False
-            rs["depthWriteEnable"] = True
-            rs["renderQueue"] = 2000
-            overrides |= 0x80 | 0x10 | 0x02 | 0x40
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.surface_type"
-    # Cull Mode
+    add("surface", {"t": 7, "w": "##mat_surface_type", "n": t("material.surface_type"),
+                    "ei": 1 if rs.get("blendEnable", False) else 0, "en": surface_items})
+
     cull_items = [t("material.cull_none"), t("material.cull_front"), t("material.cull_back")]
-    cull_val = int(rs.get("cullMode", 2))
-    cull_idx = {0: 0, 1: 1, 2: 2}.get(cull_val, 2)
-    field_label(ctx, t("material.cull_mode"), so_lw)
-    new_cull_idx = ctx.combo("##mat_cull_mode", cull_idx, cull_items)
-    if new_cull_idx != cull_idx:
-        rs["cullMode"] = new_cull_idx
-        overrides |= 0x01
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.cull_mode"
-    return overrides, change_key
+    cull_idx = {0: 0, 1: 1, 2: 2}.get(int(rs.get("cullMode", 2)), 2)
+    add("cull", {"t": 7, "w": "##mat_cull_mode", "n": t("material.cull_mode"),
+                 "ei": cull_idx, "en": cull_items})
 
+    add("depth_write", {"t": 2, "w": "##mat_depth_write", "n": t("material.depth_write"),
+                        "b": bool(rs.get("depthWriteEnable", True)), "fl": True})
 
-def _render_so_depth_and_blend(ctx, rs, mat_data, overrides, so_lw):
-    """Depth Write + Depth Test + Blend Mode options. Return *(overrides, change_key)*."""
-    change_key = ""
-    # Depth Write
-    dw_val = rs.get("depthWriteEnable", True)
-    field_label(ctx, t("material.depth_write"), so_lw)
-    new_dw = ctx.checkbox("##mat_depth_write", dw_val)
-    if new_dw != dw_val:
-        rs["depthWriteEnable"] = new_dw
-        overrides |= 0x02
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.depth_write"
-    # Depth Test
-    compare_items = [t("material.compare_never"), t("material.compare_less"), t("material.compare_equal"), t("material.compare_less_equal"),
-                     t("material.compare_greater"), t("material.compare_not_equal"), t("material.compare_greater_equal"), t("material.compare_always")]
-    dt_enable = rs.get("depthTestEnable", True)
-    dt_op = int(rs.get("depthCompareOp", 1))
-    field_label(ctx, t("material.depth_test"), so_lw)
-    if dt_enable:
-        new_op = ctx.combo("##mat_depth_test", dt_op, compare_items)
-    else:
-        new_op = ctx.combo("##mat_depth_test", 7, ["Off"] + compare_items[1:])
-        new_op = 0 if new_op == 0 else new_op
-    if not dt_enable and new_op > 0:
-        rs["depthTestEnable"] = True
-        rs["depthCompareOp"] = new_op
-        overrides |= 0x04 | 0x08
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.depth_test"
-    elif dt_enable and new_op != dt_op:
-        rs["depthCompareOp"] = new_op
-        overrides |= 0x08
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.depth_test"
-    # Blend Mode (only visible when transparent)
+    compare_items = [t("material.compare_never"), t("material.compare_less"),
+                     t("material.compare_equal"), t("material.compare_less_equal"),
+                     t("material.compare_greater"), t("material.compare_not_equal"),
+                     t("material.compare_greater_equal"), t("material.compare_always")]
+    depth_enabled = bool(rs.get("depthTestEnable", True))
+    depth_op = int(rs.get("depthCompareOp", 1))
+    depth_names = compare_items if depth_enabled else ["Off"] + compare_items[1:]
+    add("depth_test", {"t": 7, "w": "##mat_depth_test", "n": t("material.depth_test"),
+                       "ei": depth_op if depth_enabled else 7, "en": depth_names})
+
     if rs.get("blendEnable", False):
-        blend_items = [t("material.blend_alpha"), t("material.blend_additive"), t("material.blend_premultiply")]
         src = int(rs.get("srcColorBlendFactor", 6))
         dst = int(rs.get("dstColorBlendFactor", 7))
-        if src == 1 and dst == 1:
-            cur_blend_idx = 1
-        elif src == 1 and dst == 7:
-            cur_blend_idx = 2
+        blend_idx = 1 if (src, dst) == (1, 1) else 2 if (src, dst) == (1, 7) else 0
+        add("blend", {"t": 7, "w": "##mat_blend_mode", "n": t("material.blend_mode"),
+                      "ei": blend_idx,
+                      "en": [t("material.blend_alpha"), t("material.blend_additive"),
+                             t("material.blend_premultiply")]})
+
+    alpha_clip = bool(rs.get("alphaClipEnabled", False))
+    add("alpha_clip", {"t": 2, "w": "##mat_alpha_clip", "n": t("material.alpha_clip"),
+                       "b": alpha_clip, "fl": True})
+    if alpha_clip:
+        add("alpha_threshold", {"t": 0, "w": "##mat_alpha_threshold", "n": t("material.threshold"),
+                                "f": float(rs.get("alphaClipThreshold", 0.5)),
+                                "mn": 0.0, "mx": 1.0, "sl": True})
+
+    is_transparent = bool(rs.get("blendEnable", False))
+    rq_min, rq_max = (2501, 5000) if is_transparent else (0, 2500)
+    rq = max(rq_min, min(int(rs.get("renderQueue", 2000)), rq_max))
+    add("render_queue", {"t": 1, "w": "##mat_render_queue", "n": t("material.render_queue"),
+                         "i": rq, "sp": 1.0, "mn": rq_min, "mx": rq_max})
+
+    plan_key = tuple(
+        (key, desc["t"], desc["w"], desc["n"], tuple(desc.get("en", ())),
+         desc.get("mn"), desc.get("mx"), desc.get("sp"), desc.get("sl"), desc.get("fl"))
+        for key, desc in entries
+    )
+    plan = _surface_batch_plans.get(plan_key)
+    if plan is None:
+        plan = ctx.create_property_batch_plan([desc for _, desc in entries])
+        _surface_batch_plans[plan_key] = plan
+
+    values = []
+    for _, desc in entries:
+        if desc["t"] == 0:
+            values.append(desc["f"])
+        elif desc["t"] == 1:
+            values.append(desc["i"])
+        elif desc["t"] == 2:
+            values.append(desc["b"])
         else:
-            cur_blend_idx = 0
-        field_label(ctx, t("material.blend_mode"), so_lw)
-        new_blend_idx = ctx.combo("##mat_blend_mode", cur_blend_idx, blend_items)
-        if new_blend_idx != cur_blend_idx:
-            _BLEND = {0: (6, 7), 1: (1, 1), 2: (1, 7)}
-            rs["srcColorBlendFactor"], rs["dstColorBlendFactor"] = _BLEND[new_blend_idx]
+            values.append(desc["ei"])
+    changes = ctx.render_property_batch_plan_values(plan, values, so_lw)
+    change_key = ""
+    for raw_index, value in changes.items():
+        key = entries[int(raw_index)][0]
+        if key == "surface":
+            if int(value) == 1:
+                rs.update({"blendEnable": True, "srcColorBlendFactor": 6,
+                           "dstColorBlendFactor": 7, "colorBlendOp": 0,
+                           "srcAlphaBlendFactor": 0, "dstAlphaBlendFactor": 1,
+                           "alphaBlendOp": 0, "depthWriteEnable": False,
+                           "renderQueue": 3000})
+            else:
+                rs.update({"blendEnable": False, "depthWriteEnable": True, "renderQueue": 2000})
+            overrides |= 0x80 | 0x10 | 0x20 | 0x02 | 0x40
+        elif key == "cull":
+            rs["cullMode"] = int(value)
+            overrides |= 0x01
+        elif key == "depth_write":
+            rs["depthWriteEnable"] = bool(value)
+            overrides |= 0x02
+        elif key == "depth_test":
+            new_op = int(value)
+            if not depth_enabled and new_op > 0:
+                rs["depthTestEnable"] = True
+                rs["depthCompareOp"] = new_op
+                overrides |= 0x04 | 0x08
+            elif depth_enabled and new_op != depth_op:
+                rs["depthCompareOp"] = new_op
+                overrides |= 0x08
+        elif key == "blend":
+            rs["srcColorBlendFactor"], rs["dstColorBlendFactor"] = {
+                0: (6, 7), 1: (1, 1), 2: (1, 7),
+            }[int(value)]
             rs["colorBlendOp"] = 0
             overrides |= 0x20
-            mat_data["renderStateOverrides"] = overrides
-            change_key = "render_state.blend_mode"
-    return overrides, change_key
-
-
-def _render_so_clip_and_queue(ctx, rs, mat_data, overrides, so_lw):
-    """Alpha Clip + Render Queue options. Return *(overrides, change_key)*."""
-    change_key = ""
-    # Alpha Clip
-    ac_enabled = rs.get("alphaClipEnabled", False)
-    ac_threshold = float(rs.get("alphaClipThreshold", 0.5))
-    field_label(ctx, t("material.alpha_clip"), so_lw)
-    new_ac = ctx.checkbox("##mat_alpha_clip", ac_enabled)
-    if new_ac != ac_enabled:
-        rs["alphaClipEnabled"] = new_ac
-        if new_ac and "alphaClipThreshold" not in rs:
-            rs["alphaClipThreshold"] = 0.5
-        overrides |= 0x100
-        mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.alpha_clip"
-    if rs.get("alphaClipEnabled", False):
-        field_label(ctx, t("material.threshold"), so_lw)
-        new_threshold = ctx.float_slider("##mat_alpha_threshold", ac_threshold, 0.0, 1.0)
-        if abs(new_threshold - ac_threshold) > 1e-5:
-            rs["alphaClipThreshold"] = new_threshold
+        elif key == "alpha_clip":
+            rs["alphaClipEnabled"] = bool(value)
+            if value and "alphaClipThreshold" not in rs:
+                rs["alphaClipThreshold"] = 0.5
             overrides |= 0x100
-            mat_data["renderStateOverrides"] = overrides
-            change_key = "render_state.alpha_threshold"
-    # Render Queue
-    is_transparent = rs.get("blendEnable", False)
-    rq_min, rq_max = (2501, 5000) if is_transparent else (0, 2500)
-    rq = int(rs.get("renderQueue", 2000))
-    rq = max(rq_min, min(rq, rq_max))
-    field_label(ctx, t("material.render_queue"), so_lw)
-    new_rq = int(ctx.drag_int("##mat_render_queue", rq, 1.0, rq_min, rq_max))
-    if new_rq != rq:
-        rs["renderQueue"] = new_rq
-        overrides |= 0x40
+        elif key == "alpha_threshold":
+            rs["alphaClipThreshold"] = float(value)
+            overrides |= 0x100
+        elif key == "render_queue":
+            rs["renderQueue"] = int(value)
+            overrides |= 0x40
+        change_key = f"render_state.{key}"
+
+    if change_key:
         mat_data["renderStateOverrides"] = overrides
-        change_key = "render_state.render_queue"
     return overrides, change_key
 
 
@@ -550,16 +576,11 @@ def _render_surface_options_section(ctx, mat_data, is_builtin, default_open):
                      t("material.render_queue")]
         so_lw = max_label_w(ctx, so_labels)
 
-        overrides, ck1 = _render_so_surface_and_cull(ctx, rs, mat_data, overrides, so_lw)
-        overrides, ck2 = _render_so_depth_and_blend(ctx, rs, mat_data, overrides, so_lw)
-        overrides, ck3 = _render_so_clip_and_queue(ctx, rs, mat_data, overrides, so_lw)
-
-        for ck in (ck1, ck2, ck3):
-            if ck:
-                changed = True
-                change_key = ck
-                requires_deserialize = True
-                requires_pipeline_refresh = True
+        overrides, change_key = _render_surface_options_batch(ctx, rs, mat_data, overrides, so_lw)
+        if change_key:
+            changed = True
+            requires_deserialize = True
+            requires_pipeline_refresh = True
 
     _record_profile_timing("materialSurface", section_t0)
     if is_builtin:
@@ -611,7 +632,7 @@ def _render_properties_section(ctx, mat_data, is_builtin, default_open):
 
 def _apply_material_changes(panel, state, mat_data, native_mat,
                             requires_deserialize, requires_pipeline_refresh,
-                            old_json, change_key, exec_layer):
+                            old_document, change_key, exec_layer):
     """Serialize and save material changes, record undo."""
     try:
         embedded_path = getattr(state, "file_path", "") or ""
@@ -621,7 +642,8 @@ def _apply_material_changes(panel, state, mat_data, native_mat,
         # native setters in render_material_property. Full JSON deserialize is
         # only needed when material structure changed (shader sync/texture slots).
         if requires_deserialize:
-            native_mat.deserialize(json.dumps(mat_data))
+            if not native_mat.deserialize_document(mat_data):
+                raise RuntimeError("material document was rejected by the native v3 schema")
         if requires_pipeline_refresh:
             _refresh_pipeline(panel)
 
@@ -659,11 +681,12 @@ def _apply_material_changes(panel, state, mat_data, native_mat,
             if file_path:
                 from Infernux.core.assets import AssetManager
                 AssetManager.set_material_save_snapshot(file_path, new_json)
-            from Infernux.engine.undo import UndoManager, MaterialJsonCommand
+            from Infernux.engine.undo import UndoManager, MaterialDocumentCommand
             mgr = UndoManager.instance()
-            if mgr and not mgr.is_executing and mgr.enabled and old_json and new_json != old_json:
-                mgr.record(MaterialJsonCommand(
-                    native_mat, old_json, new_json, "Edit Material",
+            new_document = copy.deepcopy(mat_data)
+            if mgr and not mgr.is_executing and mgr.enabled and new_document != old_document:
+                mgr.record(MaterialDocumentCommand(
+                    native_mat, old_document, new_document, "Edit Material",
                     refresh_callback=lambda _mat: _refresh_pipeline(panel),
                     edit_key=change_key,
                 ))
@@ -671,12 +694,25 @@ def _apply_material_changes(panel, state, mat_data, native_mat,
             # Lightweight path: just remember that an undo commit is needed.
             if not state.extra.get("_undo_pending"):
                 # First frame of this drag — save the starting snapshot.
-                state.extra["_undo_old_json"] = old_json
+                state.extra["_undo_old_document"] = copy.deepcopy(old_document)
                 state.extra["_undo_edit_key"] = change_key
             state.extra["_undo_pending"] = True
     except (RuntimeError, ValueError) as _exc:
         Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
         pass
+
+
+def _document_before_material_edit(state, mat_data) -> dict:
+    """Recover the pre-edit document only on frames that actually changed it."""
+    cached_json = state.extra.get("cached_json", "")
+    if cached_json:
+        try:
+            cached_document = json.loads(cached_json)
+            if isinstance(cached_document, dict):
+                return cached_document
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return copy.deepcopy(mat_data)
 
 
 def _flush_deferred_undo(panel, state, mat_data, native_mat):
@@ -685,16 +721,14 @@ def _flush_deferred_undo(panel, state, mat_data, native_mat):
         return
     state.extra["_undo_pending"] = False
 
-    old_json = state.extra.pop("_undo_old_json", "")
+    old_document = state.extra.pop("_undo_old_document", None)
     edit_key = state.extra.pop("_undo_edit_key", "")
-    if not old_json:
+    if old_document is None:
         return
 
     try:
-        from Infernux.engine.undo import UndoManager, MaterialJsonCommand
+        from Infernux.engine.undo import UndoManager, MaterialDocumentCommand
         mgr = UndoManager.instance()
-        if not (mgr and not mgr.is_executing and mgr.enabled):
-            return
         new_json = json.dumps(mat_data)
         state.extra["cached_json"] = new_json
 
@@ -705,9 +739,13 @@ def _flush_deferred_undo(panel, state, mat_data, native_mat):
         if file_path:
             AssetManager.set_material_save_snapshot(file_path, new_json)
 
-        if new_json != old_json:
-            mgr.record(MaterialJsonCommand(
-                native_mat, old_json, new_json, "Edit Material",
+        if not (mgr and not mgr.is_executing and mgr.enabled):
+            return
+
+        new_document = copy.deepcopy(mat_data)
+        if new_document != old_document:
+            mgr.record(MaterialDocumentCommand(
+                native_mat, old_document, new_document, "Edit Material",
                 refresh_callback=lambda _mat: _refresh_pipeline(panel),
                 edit_key=edit_key,
             ))
@@ -778,8 +816,6 @@ def render_material_body(ctx: InxGUIContext, panel, state):
     _cached_data = state.extra["cached_data"]
     _shader_cache = state.extra["shader_cache"]
     exec_layer = state.exec_layer
-    old_json = state.extra.get("cached_json", "")
-
     mat_data = _cached_data
     is_builtin = bool(getattr(_native_mat, "is_builtin", False) or mat_data.get("builtin", False))
     if is_builtin:
@@ -840,16 +876,16 @@ def render_material_body(ctx: InxGUIContext, panel, state):
     if so_ck:
         change_key = so_ck
 
-    # Keep preview cache tag stable while user is actively editing; only refresh
-    # after edits settle for a short time, so material controls never stall.
+    # Publish edits on the following frame. Native generation coalescing keeps
+    # slider drags responsive without displaying the previous edit as current.
     now = _time.time()
     cache_tag = state.extra.get("_material_cache_tag", "")
-    if not cache_tag:
-        # Embedded model materials are immutable and have no .mat JSON the C++
-        # RenderFromJson path can deserialize; leave the tag empty so the preview
-        # uses the embedded-slot render path (the same one the Project panel uses,
-        # which renders correctly). Regular materials also start empty so the first
-        # inspector draw matches the bootstrap prewarm key.
+    if not cache_tag and not is_embedded_slot:
+        try:
+            cache_tag = state.extra.get("cached_json") or json.dumps(
+                mat_data, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            cache_tag = ""
         state.extra["_material_cache_tag"] = cache_tag
 
     pending_preview_refresh = bool(state.extra.get("_material_preview_pending", False))
@@ -878,7 +914,7 @@ def render_material_body(ctx: InxGUIContext, panel, state):
 
         preview_tex_id = 0
         if preview_path or _native_mat is not None:
-            preview_tex_id = _query_material_preview_tex(
+            preview_tex_id = _get_cached_material_preview_tex(
                 panel, _native_mat, mat_data, state, cache_tag, preview_path)
 
         if not _draw_centered_texture(ctx, preview_tex_id, avail_w, preview_size, 256, 256):
@@ -900,13 +936,13 @@ def render_material_body(ctx: InxGUIContext, panel, state):
 
     # ── Auto-save on change ─────────────────────────────────────────────
     if changed:
-        # Defer preview cache-tag update until edits settle; this keeps slider
-        # dragging responsive and avoids preview-triggered hitches.
+        # Publish the latest document on the following frame.
         state.extra["_material_preview_pending"] = True
-        state.extra["_material_preview_ready_at"] = _time.time() + 0.30
+        state.extra["_material_preview_ready_at"] = _time.time()
+        old_document = _document_before_material_edit(state, mat_data)
         _apply_material_changes(panel, state, mat_data, _native_mat,
                                 requires_deserialize, requires_pipeline_refresh,
-                                old_json, change_key, exec_layer)
+                                old_document, change_key, exec_layer)
         # Mark the native version as "ours" so _refresh_material (called once
         # per frame by asset_details_renderer) can skip the expensive
         # serialize -> json.loads -> merge -> json.dumps round-trip.
@@ -1021,11 +1057,17 @@ class _InlineMaterialExecLayer:
 def _build_inline_state(panel, native_mat):
     extra = _get_inline_material_extra(panel, native_mat)
     mat_path = getattr(native_mat, "file_path", "") or ""
-    return SimpleNamespace(
-        extra=extra,
-        exec_layer=_InlineMaterialExecLayer(panel),
-        file_path=mat_path,
-    )
+    state = extra.get("_inline_state")
+    if state is None:
+        state = SimpleNamespace(
+            extra=extra,
+            exec_layer=_InlineMaterialExecLayer(panel),
+            file_path=mat_path,
+        )
+        extra["_inline_state"] = state
+    else:
+        state.file_path = mat_path
+    return state
 
 
 def _get_inline_material_extra(panel, native_mat) -> dict:
@@ -1050,30 +1092,9 @@ def _get_inline_material_extra(panel, native_mat) -> dict:
         return extra
 
     try:
-        current_json = native_mat.serialize()
-    except RuntimeError:
-        current_json = ""
-    try:
-        fresh = json.loads(current_json) if current_json else {}
-    except (ValueError, json.JSONDecodeError):
+        fresh = native_mat.serialize_document()
+    except (RuntimeError, ValueError, TypeError):
         fresh = {}
-
-    old_data = extra.get("cached_data", {}) if isinstance(extra, dict) else {}
-    if isinstance(old_data, dict) and fresh:
-        if "_shader_property_order" in old_data and "_shader_property_order" not in fresh:
-            fresh["_shader_property_order"] = old_data["_shader_property_order"]
-        old_props = old_data.get("properties") if isinstance(old_data.get("properties"), dict) else {}
-        new_props = fresh.get("properties") if isinstance(fresh.get("properties"), dict) else {}
-        for prop_name, fresh_prop in new_props.items():
-            if isinstance(fresh_prop, dict) and prop_name in old_props and isinstance(old_props[prop_name], dict):
-                for meta_key, meta_value in old_props[prop_name].items():
-                    if meta_key not in ("value", "guid"):
-                        fresh_prop[meta_key] = meta_value
-        shader_order = old_data.get("_shader_property_order", [])
-        for prop_name in set(shader_order) if shader_order else set():
-            if prop_name not in new_props and prop_name in old_props:
-                new_props[prop_name] = old_props[prop_name]
-        fresh["properties"] = new_props
 
     shader_cache = extra.get("shader_cache") if isinstance(extra, dict) else None
     if not isinstance(shader_cache, dict):
@@ -1082,7 +1103,7 @@ def _get_inline_material_extra(panel, native_mat) -> dict:
     extra = {
         "native_mat": native_mat,
         "cached_data": fresh,
-        "cached_json": current_json or json.dumps(fresh),
+        "cached_json": json.dumps(fresh),
         "shader_cache": shader_cache,
         "shader_sync_key": extra.get("shader_sync_key", "") if isinstance(extra, dict) else "",
         "mat_version": mat_version,

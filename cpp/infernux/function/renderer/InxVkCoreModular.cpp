@@ -95,6 +95,11 @@ InxVkCoreModular::~InxVkCoreModular()
         m_deviceContext.WaitIdle();
     }
 
+    // Async preview submissions retain transient buffers and cloned materials.
+    // Release those leases while every renderer subsystem and the device are
+    // still alive, then destroy both previewers in the controlled order below.
+    m_resourceManager.DrainAsyncGraphicsSubmissions();
+
     // Flush all deferred deletions before tearing down subsystems
     m_deletionQueue.FlushAll();
 
@@ -134,6 +139,9 @@ InxVkCoreModular::~InxVkCoreModular()
     // RAII reverse-declaration order when handles are shared across systems).
     m_perObjectBuffers.clear();
     m_sharedMeshBuffers.clear();
+    m_pendingSharedMeshBuffers.clear();
+    m_pendingTextureCpuLoads.clear();
+    m_pendingTextureGpuUploads.clear();
     m_textureCache.Clear();
     m_shaderCache.Clear();
 
@@ -143,14 +151,16 @@ InxVkCoreModular::~InxVkCoreModular()
     m_materialUboMapped = nullptr;
     m_sceneUbo.reset();
     m_globalsBuffers.clear();
+    m_gpuMeshPreview.reset();
     m_gpuMaterialPreview.reset();
 
     m_commandBuffers.clear();
     m_depthImage.reset();
 
     m_renderGraph.Destroy();
-    m_asyncTransferContext.Destroy();
     m_resourceManager.Destroy();
+    m_asyncReadbackContext.Destroy();
+    m_asyncTransferContext.Destroy();
 
     // RenderGraph::Destroy() and MaterialPipelineManager::Shutdown()
     // already destroyed render passes, layouts, and descriptor set
@@ -176,7 +186,7 @@ InxVkCoreModular::~InxVkCoreModular()
 // Initialization
 // ============================================================================
 
-void InxVkCoreModular::Init(InxAppMetadata appMetaData, InxAppMetadata rendererMetaData, uint32_t vkWindowExtCount,
+bool InxVkCoreModular::Init(InxAppMetadata appMetaData, InxAppMetadata rendererMetaData, uint32_t vkWindowExtCount,
                             const char **vkWindowExts)
 {
     INXLOG_INFO("Initializing InxVkCoreModular...");
@@ -192,33 +202,34 @@ void InxVkCoreModular::Init(InxAppMetadata appMetaData, InxAppMetadata rendererM
     // Initialize instance only (device will be created in PrepareSurface after surface is available)
     if (!m_deviceContext.InitializeInstance(m_deviceConfig)) {
         INXLOG_ERROR("Failed to initialize Vulkan instance");
-        return;
+        return false;
     }
 
     // Store instance for InxRenderer access
     m_instance = m_deviceContext.GetInstance();
 
     INXLOG_INFO("InxVkCoreModular instance initialized successfully");
+    return true;
 }
 
-void InxVkCoreModular::PrepareSurface()
+bool InxVkCoreModular::PrepareSurface()
 {
     // Surface should be set by InxRenderer before calling this
     if (m_surface == VK_NULL_HANDLE) {
         INXLOG_ERROR("Surface not set. Call CreateSurface first.");
-        return;
+        return false;
     }
 
     // Complete device initialization with the surface
     if (!m_deviceContext.InitializeDevice(m_surface, m_deviceConfig)) {
         INXLOG_ERROR("Failed to initialize Vulkan device");
-        return;
+        return false;
     }
 
     // Now that device is ready, initialize resource manager
     if (!m_resourceManager.Initialize(m_deviceContext)) {
         INXLOG_ERROR("Failed to initialize resource manager");
-        return;
+        return false;
     }
 
     // Initialize the async-transfer context. On GPUs without a dedicated
@@ -229,9 +240,9 @@ void InxVkCoreModular::PrepareSurface()
     const auto &queueIndices = m_deviceContext.GetQueueIndices();
     const uint32_t graphicsFamily = queueIndices.graphicsFamily.value_or(0);
     const uint32_t transferFamily = queueIndices.transferFamily.value_or(graphicsFamily);
-    if (m_asyncTransferContext.Initialize(m_deviceContext.GetDevice(), transferFamily,
-                                          m_deviceContext.GetTransferQueue(),
-                                          m_deviceContext.HasDedicatedTransferQueue())) {
+    if (m_asyncTransferContext.Initialize(
+            m_deviceContext.GetDevice(), transferFamily, m_deviceContext.GetTransferQueue(),
+            m_deviceContext.HasDedicatedTransferQueue(), m_deviceContext.IsTimelineSemaphoreEnabled())) {
         // Plug the async context into the resource manager so non-mipmap
         // texture uploads route through the dedicated DMA queue. Mipmap
         // generation still falls back to the graphics queue because
@@ -239,6 +250,13 @@ void InxVkCoreModular::PrepareSurface()
         m_resourceManager.SetAsyncTransferContext(&m_asyncTransferContext, graphicsFamily);
     } else {
         INXLOG_WARN("Async transfer context unavailable; uploads will use the graphics queue.");
+    }
+
+    if (m_asyncReadbackContext.Initialize(m_deviceContext.GetDevice(), graphicsFamily,
+                                          m_deviceContext.GetGraphicsQueue(), false)) {
+        m_resourceManager.SetAsyncReadbackContext(&m_asyncReadbackContext);
+    } else {
+        INXLOG_WARN("Async graphics readback context unavailable.");
     }
 
     // Initialize pipeline manager
@@ -266,7 +284,7 @@ void InxVkCoreModular::PrepareSurface()
     // Create swapchain
     if (!m_swapchain.Create(m_deviceContext, width, height)) {
         INXLOG_ERROR("Failed to create swapchain");
-        return;
+        return false;
     }
 
     // Create depth resources
@@ -283,6 +301,7 @@ void InxVkCoreModular::PrepareSurface()
     }
 
     INXLOG_INFO("Surface prepared successfully");
+    return true;
 }
 
 void InxVkCoreModular::PreparePipeline()
@@ -359,34 +378,48 @@ bool InxVkCoreModular::HasShader(const std::string &name, const std::string &typ
 
 void InxVkCoreModular::InvalidateShaderCache(const std::string &shaderId)
 {
+    if (shaderId.empty())
+        throw std::invalid_argument("Shader cache invalidation requires a non-empty shader identifier");
     INXLOG_INFO("Invalidating shader cache for: ", shaderId);
 
-    // Wait for GPU to finish any pending work using this shader
-    m_deviceContext.WaitIdle();
-
-    // Remove shader programs from cache that contain this shader
-    m_shaderCache.GetProgramCache().RemoveProgramsContainingShader(shaderId);
-
-    // Invalidate all materials using this shader in MaterialPipelineManager
+    // Clear every CPU-visible raw ShaderProgram/pipeline handle before moving
+    // the owning Vulkan objects into the frame-safe retirement queue.
     if (m_materialPipelineManagerInitialized) {
         m_materialPipelineManager.InvalidateMaterialsUsingShader(shaderId);
     }
 
-    // Invalidate cached shadow pipelines that reference this shader
-    {
-        VkDevice dev = GetDevice();
-        for (auto it = m_shadowPipelineCache.begin(); it != m_shadowPipelineCache.end();) {
-            if (it->first.find(shaderId) != std::string::npos) {
-                if (it->second != VK_NULL_HANDLE)
-                    vkDestroyPipeline(dev, it->second, nullptr);
-                it = m_shadowPipelineCache.erase(it);
-            } else {
-                ++it;
-            }
-        }
+    auto retiredPrograms = m_shaderCache.GetProgramCache().TakeProgramsContainingShader(shaderId);
+    for (auto &program : retiredPrograms) {
+        auto retired = std::shared_ptr<ShaderProgram>(std::move(program));
+        m_deletionQueue.Push([retired = std::move(retired)]() mutable { retired.reset(); });
+        ++m_shaderHotReloadRetirementCount;
     }
 
-    // Also unload the shader module so it gets recreated
+    const VkDevice device = GetDevice();
+    auto matchesShadowStage = [&](const std::string &stage) {
+        return stage == shaderId || stage.rfind(shaderId + "/", 0) == 0;
+    };
+    for (auto it = m_shadowPipelineCache.begin(); it != m_shadowPipelineCache.end();) {
+        const size_t firstPipe = it->first.find('|');
+        const size_t secondPipe =
+            firstPipe == std::string::npos ? std::string::npos : it->first.find('|', firstPipe + 1);
+        const std::string vertStage = firstPipe == std::string::npos ? it->first : it->first.substr(0, firstPipe);
+        const std::string fragStage = firstPipe == std::string::npos
+                                          ? std::string{}
+                                          : it->first.substr(firstPipe + 1, secondPipe - firstPipe - 1);
+        if (!matchesShadowStage(vertStage) && !matchesShadowStage(fragStage)) {
+            ++it;
+            continue;
+        }
+        const VkPipeline pipeline = it->second;
+        if (pipeline != VK_NULL_HANDLE)
+            m_deletionQueue.Push([device, pipeline] { vkDestroyPipeline(device, pipeline, nullptr); });
+        ++m_shaderHotReloadRetirementCount;
+        it = m_shadowPipelineCache.erase(it);
+    }
+
+    // Shader modules are only consumed during pipeline creation, so their
+    // standalone cache entry can be destroyed immediately on the owner thread.
     m_shaderCache.UnloadShader(shaderId.c_str(), GetDevice());
 
     INXLOG_INFO("Shader cache invalidated for: ", shaderId);
@@ -412,13 +445,24 @@ void InxVkCoreModular::InvalidateTextureCache(const std::string &textureGuid)
 
     INXLOG_INFO("Invalidating texture cache for GUID: ", textureGuid);
 
-    // Wait for GPU to finish using the texture
-    m_deviceContext.WaitIdle();
+    m_pendingTextureCpuLoads.erase(textureGuid);
+    for (auto pending = m_pendingTextureGpuUploads.begin(); pending != m_pendingTextureGpuUploads.end();) {
+        if (pending->second.guid != textureGuid) {
+            ++pending;
+            continue;
+        }
+        try {
+            (void)m_resourceManager.TryPublishTextureUpload(pending->second.ticket);
+        } catch (const std::exception &exception) {
+            INXLOG_ERROR("Failed to retire invalidated texture upload for GUID '", textureGuid,
+                         "': ", exception.what());
+        }
+        pending = m_pendingTextureGpuUploads.erase(pending);
+    }
 
     // Runtime materials such as SpriteRenderer instances are not represented
-    // in the asset dependency graph, but their descriptor sets can still hold
-    // raw VkImageView/VkSampler handles for this texture. Remove those render
-    // data entries before destroying the cached VkTexture objects.
+    // in the asset dependency graph. Retiring their descriptor sets first keeps
+    // the texture lease alive until the frame deletion queue releases it.
     if (m_materialPipelineManagerInitialized) {
         m_materialPipelineManager.InvalidateMaterialsUsingTexture(textureGuid);
     }
@@ -433,7 +477,6 @@ void InxVkCoreModular::InvalidateTextureCache(const std::string &textureGuid)
 void InxVkCoreModular::RemoveMaterialPipeline(const std::string &materialName)
 {
     if (m_materialPipelineManagerInitialized) {
-        m_deviceContext.WaitIdle();
         m_materialPipelineManager.RemoveRenderData(materialName);
         INXLOG_INFO("Removed material pipeline render data for: ", materialName);
     }
@@ -728,7 +771,14 @@ void InxVkCoreModular::WaitForCurrentFrame()
 
 void InxVkCoreModular::TickDeletionQueue()
 {
+    m_resourceManager.PollGpuUploads();
+    m_resourceManager.PollAsyncGraphicsSubmissions();
+    m_resourceManager.PollImageReadbacks();
     m_deletionQueue.Tick();
+    if (m_materialPipelineManagerInitialized)
+        (void)m_materialPipelineManager.CollectUnusedRenderData();
+    (void)m_textureCache.TrimToBudget();
+    (void)TrimMeshGpuBudget();
 }
 
 void InxVkCoreModular::FlushDeletionQueue()

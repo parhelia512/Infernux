@@ -29,7 +29,15 @@ class _FakeClip:
         self.take_name = take_name
         self.duration_hint = duration_hint
         self.source_model_guid = ""
-        self.source_model_path = ""
+
+
+def test_skeletal_mismatch_check_is_inconclusive_when_renderer_has_no_guid():
+    from Infernux.components.skeletal_animator import _skinned_mismatch_message
+
+    clip = _FakeClip()
+    clip.source_model_path = "Assets/Models/Driver.fbx"
+
+    assert _skinned_mismatch_message(None, clip, "") == ""
 
 
 class TestTriggerConsumption:

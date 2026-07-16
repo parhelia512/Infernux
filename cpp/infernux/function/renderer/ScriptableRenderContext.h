@@ -23,6 +23,7 @@ class SceneRenderGraph;
 class EditorGizmos;
 class EditorTools;
 class GizmosDrawCallBuffer;
+class ParticleDrawCallBuffer;
 class InxMaterial;
 class CommandBuffer;
 class TransientResourcePool;
@@ -74,6 +75,7 @@ struct EditorGizmosContext
     EditorGizmos *gizmos = nullptr;
     EditorTools *editorTools = nullptr;
     GizmosDrawCallBuffer *componentGizmos = nullptr; ///< Component gizmos supplied by the scripting layer
+    ParticleDrawCallBuffer *particles = nullptr;     ///< Runtime particle billboard batches
     std::shared_ptr<InxMaterial> gizmoMaterial;
     std::shared_ptr<InxMaterial> gridMaterial;
     std::shared_ptr<InxMaterial> editorToolsMaterial;
@@ -81,6 +83,7 @@ struct EditorGizmosContext
     std::shared_ptr<InxMaterial> componentGizmoIconMaterial; ///< Fallback material for icon billboards
     std::shared_ptr<InxMaterial> cameraGizmoIconMaterial;    ///< Textured camera icon material
     std::shared_ptr<InxMaterial> lightGizmoIconMaterial;     ///< Textured light icon material
+    std::shared_ptr<InxMaterial> particleMaterial;           ///< Default particle billboard material
     uint64_t selectedObjectId = 0;
     Scene *activeScene = nullptr;
     glm::vec3 cameraPos{0.0f};
@@ -136,7 +139,7 @@ class ScriptableRenderContext
     void SetupCameraProperties(Camera *camera);
 
     /// @brief Cull scene objects visible to the given camera. Returns culling results.
-    CullingResults Cull(Camera *camera);
+    CullingResults &Cull(Camera *camera);
 
     // ====================================================================
     // RenderGraph-driven API (replaces DrawRenderers + Submit combo)
@@ -150,8 +153,9 @@ class ScriptableRenderContext
     /// @brief Submit all culling results as full draw calls + execute graph.
     /// Replaces the DrawRenderers() + DrawSkybox() + Submit() combo.
     /// DrawCall filtering is done by RenderGraph pass callbacks.
-    /// Accepts by value to enable move semantics from callers.
-    void SubmitCulling(CullingResults culling);
+    /// Consumes the result's owned draw-call arrays. A CullingResults object is
+    /// single-submit, matching the context's single-submit lifetime.
+    void SubmitCulling(CullingResults &culling);
 
     /// @brief Single-call render path: setup + cull + apply_graph + submit.
     /// Avoids 3 extra Python→C++ round-trips compared to calling each step separately.

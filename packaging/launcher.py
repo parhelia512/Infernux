@@ -21,8 +21,9 @@ sys.dont_write_bytecode = True
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QMessageBox, QDialog,
     QHBoxLayout, QVBoxLayout, QSizePolicy, QStackedWidget,
+    QGraphicsOpacityEffect,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QIcon, QFontDatabase
 
 from ui_project_list import ProjectListPane
@@ -39,6 +40,8 @@ from view.control_pane_view import ControlPane
 from view.sidebar_view import SidebarView
 from view.installs_view import InstallsView, PythonRuntimeInstallDialog
 from installer_safety import can_remove_install_dir
+from i18n import configure_language, tr
+from view.hover_widgets import ensure_hover_animation_filter
 import logging
 
 
@@ -53,21 +56,25 @@ class GameEngineLauncher(QMainWindow):
 
         super().__init__()
 
+        # Configure localization before constructing any visible widget.
+        self.db = ProjectDatabase()
+        configure_language(self.db.get_setting("language", "system"))
+
         # Load custom engine font
         font_id = QFontDatabase.addApplicationFont(FONT_PATH)
         if font_id >= 0:
             QFontDatabase.applicationFontFamilies(font_id)
 
-        # Apply global dark theme
-        self.app.is_dark_theme = True
+        # Apply the persisted Hub theme before constructing visible pages.
+        self.app.is_dark_theme = self.db.get_setting("theme", "dark") != "light"
         self.app.setStyleSheet(StyleManager.get_stylesheet(self.app.is_dark_theme))
+        ensure_hover_animation_filter(self.app)
 
         self.setWindowTitle("Infernux Hub")
         self.setWindowIcon(QIcon(ICON_PATH))
         self.resize(1080, 720)
 
-        # Database & version manager
-        self.db = ProjectDatabase()
+        # Version and runtime managers
         self.version_manager = VersionManager()
         self.runtime_manager = PythonRuntimeManager()
 
@@ -93,7 +100,9 @@ class GameEngineLauncher(QMainWindow):
         projects_layout.setContentsMargins(28, 24, 28, 24)
         projects_layout.setSpacing(16)
 
-        self.project_list = ProjectListPane(self.db, parent=projects_page)
+        self.project_list = ProjectListPane(
+            self.db, self.version_manager, parent=projects_page,
+        )
         model = ProjectModel(self.db, self.version_manager, self.runtime_manager)
         viewmodel = ControlPaneViewModel(
             model,
@@ -101,6 +110,8 @@ class GameEngineLauncher(QMainWindow):
             self.version_manager,
             self.runtime_manager,
         )
+        self.viewmodel = viewmodel
+        self.project_list.remove_requested.connect(self._remove_project_from_card)
         self.controls = ControlPane(viewmodel, parent=projects_page)
 
         self.controls.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -122,6 +133,29 @@ class GameEngineLauncher(QMainWindow):
 
         self.pages.addWidget(installs_page)
 
+        # ── Page 2: Settings ─────────────────────────────────────────
+        from view.settings_view import SettingsView
+
+        settings_page = QWidget()
+        settings_layout = QVBoxLayout(settings_page)
+        settings_layout.setContentsMargins(32, 30, 32, 30)
+        self.settings_view = SettingsView(self.db, parent=settings_page)
+        settings_layout.addWidget(self.settings_view)
+        self.pages.addWidget(settings_page)
+
+        from view.update_dialog import UpdateController
+        self.update_controller = UpdateController(self)
+        self.settings_view.update_check_requested.connect(
+            lambda: self.update_controller.check(silent=False)
+        )
+        self.settings_view.language_changed.connect(self._on_language_changed)
+
+        # ── Page 3: Discussion ──────────────────────────────────────
+        from view.discussion_view import DiscussionView
+
+        self.discussion_view = DiscussionView(parent=self.pages)
+        self.pages.addWidget(self.discussion_view)
+
         # ── Sidebar → page switching ─────────────────────────────────
         self.sidebar.page_changed.connect(self._on_page_changed)
 
@@ -130,9 +164,34 @@ class GameEngineLauncher(QMainWindow):
 
     def _on_page_changed(self, index: int):
         self.pages.setCurrentIndex(index)
+        effect = self.pages.graphicsEffect()
+        if effect is None:
+            effect = QGraphicsOpacityEffect(self.pages)
+            self.pages.setGraphicsEffect(effect)
+        effect.setOpacity(0.0)
+        self._page_transition = QPropertyAnimation(effect, b"opacity", self)
+        self._page_transition.setDuration(180)
+        self._page_transition.setStartValue(0.0)
+        self._page_transition.setEndValue(1.0)
+        self._page_transition.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._page_transition.start()
         # Refresh installs when switching to that page
         if index == 1:
             self.installs_view.refresh()
+
+    def _remove_project_from_card(self, project_id: str):
+        self.project_list.select_project(project_id)
+        self.viewmodel.remove_project(self)
+
+    def _on_language_changed(self, _mode: str):
+        """Rebuild visible widgets in the new language without restarting the process."""
+        replacement = GameEngineLauncher()
+        replacement.setGeometry(self.geometry())
+        replacement.show()
+        # Keep the replacement alive while the old window finishes its event turn.
+        self._language_replacement = replacement
+        self.hide()
+        self.db.close()
 
     def run(self):
         self.show()
@@ -144,25 +203,27 @@ class GameEngineLauncher(QMainWindow):
     def _bootstrap_python_runtime(self):
         if self.runtime_manager.has_runtime():
             self.installs_view.refresh()
+            QTimer.singleShot(1200, lambda: self.update_controller.check(silent=True))
             return
 
         QMessageBox.information(
             self,
-            "Python 3.12 Setup",
-            "Infernux Hub needs Python 3.12 to create and launch projects.\n\n"
+            tr("Python 3.12 Setup"),
+            tr("Infernux Hub needs Python 3.12 to create and launch projects.\n\n"
             "The recommended path is to install Infernux Hub through the installer. The installer or standalone Hub will\n"
             "download the matching full Python 3.12 installer for this machine when needed and install it under\n"
-            "C:\\Users\\Public\\InfernuxHub.  Each project then receives its own full copy of the runtime.",
+            "C:\\Users\\Public\\InfernuxHub. Each project then receives its own full copy of the runtime."),
         )
 
         dlg = PythonRuntimeInstallDialog(self.runtime_manager, self)
         if dlg.exec() != QDialog.Accepted and dlg.error_text:
             QMessageBox.warning(
                 self,
-                "Python 3.12 Not Ready",
+                tr("Python 3.12 Not Ready"),
                 dlg.error_text,
             )
         self.installs_view.refresh()
+        QTimer.singleShot(1200, lambda: self.update_controller.check(silent=True))
 
     def _on_close(self):
         self.db.close()
@@ -211,9 +272,8 @@ def _handle_uninstall() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     answer = QMessageBox.question(
         None,
-        "Uninstall Infernux Hub",
-        "Registry entries and shortcuts have been removed.\n\n"
-        f"Do you also want to delete the installation folder?\n{install_dir}",
+        tr("Uninstall Infernux Hub"),
+        tr("Registry entries and shortcuts have been removed.\n\nDo you also want to delete the installation folder?\n{path}", path=install_dir),
     )
     if answer == QMessageBox.Yes and install_dir and os.path.isdir(install_dir):
         import shutil as _shutil
@@ -222,13 +282,13 @@ def _handle_uninstall() -> int:
         else:
             QMessageBox.warning(
                 None,
-                "Install Folder Preserved",
-                "The installation folder was not deleted because it is not marked as a safe Infernux Hub install directory.\n\n"
+                tr("Install Folder Preserved"),
+                tr("The installation folder was not deleted because it is not marked as a safe Infernux Hub install directory.\n\n"
                 "Your projects and downloaded engine versions are preserved. Remove application files manually only if "
-                "you are sure this folder does not contain user data.",
+                "you are sure this folder does not contain user data."),
             )
 
-    QMessageBox.information(None, "Uninstall Complete", "Infernux Hub has been uninstalled.")
+    QMessageBox.information(None, tr("Uninstall Complete"), tr("Infernux Hub has been uninstalled."))
     return 0
 
 

@@ -24,6 +24,24 @@
       }
     },
     {
+      "name": "debug-profile",
+      "displayName": "Debug Profile Preset (Windows, terminal frame profiling)",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/out/build-profile",
+      "cacheVariables": {
+        "INFERNUX_FRAME_PROFILE_TERMINAL": "ON"
+      }
+    },
+    {
+      "name": "native-dev",
+      "displayName": "Native Development Preset (Windows, engine module only)",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/out/build-native-dev",
+      "cacheVariables": {
+        "INFERNUX_BUILD_TESTS": "OFF"
+      }
+    },
+    {
       "name": "release-macos",
       "displayName": "Release Preset (macOS / Ninja)",
       "generator": "Ninja",
@@ -62,7 +80,10 @@
     {
       "name": "release",
       "configurePreset": "release",
-      "configuration": "Release"
+      "configuration": "Release",
+      "targets": [
+        "package_and_install_python"
+      ]
     },
     {
       "name": "debug",
@@ -70,8 +91,24 @@
       "configuration": "RelWithDebInfo"
     },
     {
+      "name": "debug-profile",
+      "configurePreset": "debug-profile",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "native-dev",
+      "configurePreset": "native-dev",
+      "configuration": "RelWithDebInfo",
+      "targets": [
+        "_Infernux"
+      ]
+    },
+    {
       "name": "release-macos",
-      "configurePreset": "release-macos"
+      "configurePreset": "release-macos",
+      "targets": [
+        "package_and_install_python"
+      ]
     },
     {
       "name": "debug-macos",
@@ -79,7 +116,10 @@
     },
     {
       "name": "release-linux",
-      "configurePreset": "release-linux"
+      "configurePreset": "release-linux",
+      "targets": [
+        "package_and_install_python"
+      ]
     },
     {
       "name": "debug-linux",
@@ -116,6 +156,52 @@
       "targets": [
         "infernux_hub_installer"
       ]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "RelWithDebInfo",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release-macos",
+      "configurePreset": "release-macos",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-macos",
+      "configurePreset": "debug-macos",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release-linux",
+      "configurePreset": "release-linux",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-linux",
+      "configurePreset": "debug-linux",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

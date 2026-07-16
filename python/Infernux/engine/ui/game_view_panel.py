@@ -17,9 +17,13 @@ from Infernux.timing import Time
 from Infernux.engine.play_mode import PlayModeManager
 from Infernux.engine.project_context import get_project_root
 from Infernux.ui.ui_texture_cache import get_shared_cache as _get_tex_cache
-from Infernux.ui.ui_render_dispatch import dispatch as _ui_dispatch
+from Infernux.ui.ui_render_dispatch import (
+    dispatch as _ui_dispatch,
+    runtime_ui_revision as _runtime_ui_revision,
+)
 from Infernux.ui.ui_event_system import UIEventProcessor
 from Infernux.ui.ui_canvas_utils import collect_sorted_canvases
+from Infernux.ui.ui_button import UIButton
 from Infernux.ui.inx_ui_screen_component import clear_rect_cache
 from .game_input_policy import should_process_game_ui_events, should_route_game_input
 from .editor_panel import EditorPanel
@@ -30,6 +34,8 @@ from .viewport_utils import capture_viewport_info
 from Infernux.debug import Debug
 
 _sort_by_sort_order = attrgetter('sort_order')
+_GAME_VIEWPORT_SEMANTIC_ID = "game_view.viewport"
+_GAME_UI_BUTTON_SEMANTIC_PREFIX = "game_view.ui_button."
 
 
 @editor_panel("Game", type_id="game_view", title_key="panel.game")
@@ -223,8 +229,11 @@ class GameViewPanel(EditorPanel):
             "display_scale": f"{self._display_scale:.3f}",
             "fit_mode": str(self._fit_mode),
         }
-        with open(path, "w", encoding="utf-8") as f:
-            cp.write(f)
+        from io import StringIO
+        from Infernux.core.document_store import write_document_text
+        output = StringIO()
+        cp.write(output)
+        write_document_text(path, output.getvalue())
 
     def _current_target_resolution(self):
         _, w, h = self._RESOLUTION_PRESETS[self._selected_resolution_idx]
@@ -262,9 +271,6 @@ class GameViewPanel(EditorPanel):
         # Intentionally ignore persisted data for Game View.
         return
 
-    def _pre_render(self, ctx):
-        self._load_resolution_settings()
-
     def on_enable(self):
         # Runtime caches must always start from a cold state after open.
         self._last_game_width = 0
@@ -286,7 +292,8 @@ class GameViewPanel(EditorPanel):
         self._set_game_render_active(False)
 
     def _on_visible_pre(self, ctx):
-        focused = (ClosablePanel.get_active_panel_id() == self.window_id) or ctx.is_window_focused(0)
+        self._load_resolution_settings()
+        focused = (ClosablePanel.get_active_panel_id() == self.window_id) or self._is_window_or_child_focused(ctx)
         if focused and not self._was_focused:
             if self._on_focus_gained:
                 self._on_focus_gained()
@@ -410,7 +417,7 @@ class GameViewPanel(EditorPanel):
             self._activate_panel(ctx, focus_window=True)
 
         is_playing = self._is_playing()
-        panel_focused = (ClosablePanel.get_active_panel_id() == self.window_id) or ctx.is_window_focused(0)
+        panel_focused = (ClosablePanel.get_active_panel_id() == self.window_id) or self._is_window_or_child_focused(ctx)
 
         cursor_locked = Input.is_cursor_locked()
         if cursor_locked:
@@ -418,20 +425,22 @@ class GameViewPanel(EditorPanel):
                 Input.set_cursor_locked(False)
                 cursor_locked = False
 
-        Input.set_game_focused(
-            should_route_game_input(
-                is_playing=is_playing,
-                panel_focused=panel_focused,
-                cursor_locked=cursor_locked,
-            )
+        game_input_active = should_route_game_input(
+            is_playing=is_playing,
+            panel_focused=panel_focused,
+            cursor_locked=cursor_locked,
         )
+        # Focus must be visible to Input before querying the screen UI mouse
+        # state below. Otherwise a Game View's first pointer down/up can be
+        # gated away while the invisible viewport overlay owns the ImGui item.
+        Input.set_game_focused(game_input_active)
 
         if not is_playing and cursor_locked:
             Input.set_cursor_locked(False)
 
         if should_process_game_ui_events(
             is_playing=is_playing,
-            viewport_hovered=viewport_hovered,
+            panel_focused=panel_focused,
             cursor_locked=cursor_locked,
         ):
             self._process_ui_events(target_w, target_h, canvases=canvases)
@@ -462,7 +471,7 @@ class GameViewPanel(EditorPanel):
 
         _canvases = collect_sorted_canvases(_scene, allow_stale_empty=True) if _scene is not None else []
         if _canvases:
-            clear_rect_cache(_pc())
+            clear_rect_cache((id(_scene), int(_scene.structure_version)))
 
         viewport_hovered = False
         viewport_clicked = False
@@ -488,11 +497,29 @@ class GameViewPanel(EditorPanel):
                 ctx.set_cursor_pos_y(cursor_start_y + pad_y)
                 ctx.image(game_texture_id, float(draw_w), float(draw_h), 0.0, 0.0, 1.0, 1.0)
 
-                vp = capture_viewport_info(ctx)
-                viewport_hovered = vp.is_hovered
-                viewport_clicked = vp.is_hovered and any(
-                    ctx.is_mouse_button_clicked(button) for button in (0, 1, 2)
+                # Images are visual-only ImGui items. Overlay an invisible
+                # button on the same rectangle so real clicks, including MCP
+                # synthetic input, activate the Game View's interaction item.
+                ctx.set_cursor_pos_x(cursor_start_x + pad_x)
+                ctx.set_cursor_pos_y(cursor_start_y + pad_y)
+                viewport_clicked = ctx.invisible_button(
+                    "##GameViewportInput", float(draw_w), float(draw_h)
                 )
+                vp = capture_viewport_info(ctx)
+                # Expose the interactive overlay, so MCP focuses the same
+                # surface a player clicks before sending game input.
+                ctx.record_semantic_item(
+                    "viewport", "Game Viewport", True, _GAME_VIEWPORT_SEMANTIC_ID
+                )
+                # The overlay has a stable item id. The child-window check
+                # still prevents input from reaching this panel through a
+                # floating Editor window.
+                viewport_hovered = ctx.is_item_hovered() and ctx.is_window_hovered()
+                # ImGui buttons normally report activation on release. Screen
+                # UI needs the matching press frame too, so focus the Game View
+                # as soon as the pointer is pressed over its real viewport.
+                viewport_pressed = bool(ctx.is_mouse_button_clicked(0))
+                viewport_clicked = viewport_hovered and (viewport_clicked or viewport_pressed)
                 Input.set_game_viewport_origin(vp.image_min_x, vp.image_min_y)
 
                 self._render_screen_ui(ctx, vp.image_min_x, vp.image_min_y,
@@ -552,29 +579,35 @@ class GameViewPanel(EditorPanel):
 
         use_overlay = not renderer.is_enabled()
 
-        # Always call begin_frame to clear old GPU commands, even when
-        # using the overlay path (prevents stale commands from rendering
-        # if the renderer is re-enabled later).
-        renderer.begin_frame(game_w, game_h)
-
         if canvases is None:
             canvases = collect_sorted_canvases(scene)
 
-        if not canvases:
+        texture_cache = _get_tex_cache()
+        semantic_capture_enabled = bool(getattr(ctx, "semantic_capture_enabled", False))
+        reused_commands = False
+        if use_overlay or texture_cache.has_pending:
+            renderer.begin_frame(game_w, game_h)
+        else:
+            revision = _runtime_ui_revision(
+                scene, canvases, game_w, game_h, texture_cache.generation,
+            )
+            reused_commands = bool(renderer.begin_frame_cached(game_w, game_h, revision))
+
+        if not canvases or (reused_commands and not semantic_capture_enabled):
             return
 
-        _get_tid = _get_tex_cache().get_bound(self._engine)
+        _get_tid = texture_cache.get_bound(self._engine)
 
         for canvas in canvases:
             self._render_canvas_screen_ui(
                 ctx, canvas, renderer, use_overlay, _get_tid,
                 game_w, game_h, vp_x, vp_y, vp_w, vp_h,
-                ScreenUIList, RenderMode)
+                ScreenUIList, RenderMode, reused_commands)
 
     def _render_canvas_screen_ui(self, ctx, canvas, renderer, use_overlay,
                                  _get_tid, game_w, game_h,
-                                 vp_x, vp_y, vp_w, vp_h,
-                                 ScreenUIList, RenderMode):
+                                  vp_x, vp_y, vp_w, vp_h,
+                                  ScreenUIList, RenderMode, reused_commands=False):
         """Render all elements of one canvas to the screen UI renderer."""
         canvas_go = canvas.game_object
         if canvas_go is not None and not canvas_go.active_in_hierarchy:
@@ -597,6 +630,7 @@ class GameViewPanel(EditorPanel):
         scale_x, scale_y, text_scale = canvas.compute_scale(float(game_w), float(game_h))
         offset_x = (float(game_w) - ref_w * scale_x) * 0.5
         offset_y = (float(game_h) - ref_h * scale_y) * 0.5
+        semantic_capture_enabled = bool(getattr(ctx, "semantic_capture_enabled", False))
 
         for elem in canvas._get_elements():
             elem_go = elem.game_object
@@ -606,6 +640,16 @@ class GameViewPanel(EditorPanel):
                 continue
 
             ex, ey, ew, eh = elem.get_rect(ref_w, ref_h)
+            if semantic_capture_enabled:
+                vx, vy, vw, vh = elem.get_visual_rect(ref_w, ref_h)
+                self._record_game_ui_button_semantic(
+                    ctx,
+                    elem,
+                    vp_x + (offset_x + vx * scale_x) * (vp_w / float(game_w)),
+                    vp_y + (offset_y + vy * scale_y) * (vp_h / float(game_h)),
+                    vw * scale_x * (vp_w / float(game_w)),
+                    vh * scale_y * (vp_h / float(game_h)),
+                )
 
             if use_overlay:
                 ovl_scale_x = vp_w / ref_w
@@ -621,6 +665,8 @@ class GameViewPanel(EditorPanel):
                     get_tex_id=_get_tid,
                 )
             else:
+                if reused_commands:
+                    continue
                 _ui_dispatch(
                     elem, "runtime",
                     renderer=renderer,
@@ -634,6 +680,30 @@ class GameViewPanel(EditorPanel):
                     text_scale=text_scale,
                     get_tex_id=_get_tid,
                 )
+
+    def _record_game_ui_button_semantic(self, ctx, elem, x, y, width, height):
+        if not isinstance(elem, UIButton):
+            return
+        recorder = getattr(ctx, "record_semantic_rect", None)
+        if not callable(recorder):
+            return
+        go = getattr(elem, "game_object", None)
+        object_id = int(getattr(go, "id", 0) or 0)
+        if object_id <= 0:
+            return
+        label = str(getattr(elem, "label", "") or getattr(go, "name", "Button")).strip() or "Button"
+        enabled = self._is_playing() and bool(getattr(elem, "interactable", True))
+        enabled = enabled and bool(getattr(elem, "raycast_target", True))
+        recorder(
+            "game_ui_button",
+            label,
+            float(x),
+            float(y),
+            max(float(width), 0.0),
+            max(float(height), 0.0),
+            enabled,
+            f"{_GAME_UI_BUTTON_SEMANTIC_PREFIX}{object_id}",
+        )
 
     # ------------------------------------------------------------------
     # UI event processing

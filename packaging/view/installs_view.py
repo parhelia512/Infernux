@@ -12,18 +12,19 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QObject
 
 from version_manager import VersionManager, EngineVersion, DownloadCancelled
+from i18n import tr
+from view.hover_widgets import AnimatedSurfaceFrame
 
 
 # ─── Version card (one per installed version) ────────────────────────
 
-class _VersionCard(QFrame):
+class _VersionCard(AnimatedSurfaceFrame):
     """Card showing a single installed engine version."""
 
     remove_clicked = Signal(str)  # version string
 
     def __init__(self, version: str, wheel_path: str, parent=None):
-        super().__init__(parent)
-        self.setObjectName("versionCard")
+        super().__init__("versionCard", parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedHeight(64)
         self._version = version
@@ -59,7 +60,7 @@ class _VersionCard(QFrame):
         layout.addLayout(info_col, 1)
 
         # Remove button
-        remove_btn = QPushButton("Remove")
+        remove_btn = QPushButton(tr("Remove"))
         remove_btn.setObjectName("dangerBtn")
         remove_btn.setFixedHeight(30)
         remove_btn.setFixedWidth(80)
@@ -134,7 +135,7 @@ class _RuntimeInstallWorker(QObject):
 class PythonRuntimeInstallDialog(QDialog):
     def __init__(self, runtime_manager, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Installing Python 3.12")
+        self.setWindowTitle(tr("Installing Python 3.12"))
         self.setModal(True)
         self.setFixedSize(420, 140)
         self.result_path = ""
@@ -144,15 +145,15 @@ class PythonRuntimeInstallDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
-        title = QLabel("Installing Python 3.12 for Infernux Hub")
+        title = QLabel(tr("Installing Python 3.12 for Infernux Hub"))
         title.setObjectName("cardName")
         layout.addWidget(title)
 
-        detail = QLabel(
+        detail = QLabel(tr(
             "A background setup process is preparing a managed full Python 3.12 runtime "
             "under C:\\Users\\Public\\InfernuxHub. Each new project will receive its own copy of this runtime. "
             "This window will close automatically when installation finishes."
-        )
+        ))
         detail.setWordWrap(True)
         detail.setObjectName("cardPath")
         layout.addWidget(detail)
@@ -190,13 +191,12 @@ class PythonRuntimeInstallDialog(QDialog):
         super().reject()
 
 
-class _VersionRow(QFrame):
+class _VersionRow(AnimatedSurfaceFrame):
     """A selectable row inside the Install Editor dialog."""
 
     def __init__(self, ev: EngineVersion, parent=None):
-        super().__init__(parent)
+        super().__init__("versionRow", parent)
         self.ev = ev
-        self.setObjectName("versionRow")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedHeight(48)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -218,14 +218,13 @@ class _VersionRow(QFrame):
         layout.addStretch()
 
         if ev.installed:
-            installed_label = QLabel("Installed")
+            installed_label = QLabel(tr("Installed"))
             installed_label.setObjectName("installedBadge")
             layout.addWidget(installed_label)
 
     def set_selected(self, selected: bool):
         self.setProperty("selected", selected)
-        self.style().unpolish(self)
-        self.style().polish(self)
+        self.set_selected_animated(selected)
 
 
 class InstallEditorDialog(QDialog):
@@ -233,7 +232,7 @@ class InstallEditorDialog(QDialog):
 
     def __init__(self, version_manager: VersionManager, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Install Engine Version")
+        self.setWindowTitle(tr("Install Engine Version"))
         self.setMinimumSize(520, 420)
         self._vm = version_manager
         self._selected: EngineVersion | None = None
@@ -245,7 +244,7 @@ class InstallEditorDialog(QDialog):
         layout.setSpacing(12)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        self._status = QLabel("Fetching available versions...")
+        self._status = QLabel(tr("Fetching available versions..."))
         self._status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._status)
 
@@ -272,13 +271,13 @@ class InstallEditorDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
 
-        btn_cancel = QPushButton("Cancel")
+        btn_cancel = QPushButton(tr("Cancel"))
         btn_cancel.setObjectName("normalBtn")
         btn_cancel.setFixedHeight(34)
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
 
-        self._btn_install = QPushButton("Install")
+        self._btn_install = QPushButton(tr("Install"))
         self._btn_install.setObjectName("primaryBtn")
         self._btn_install.setFixedHeight(34)
         self._btn_install.setMinimumWidth(100)
@@ -304,7 +303,7 @@ class InstallEditorDialog(QDialog):
         self._scroll.show()
 
         if not versions:
-            self._status.setText("No versions found.")
+            self._status.setText(tr("No versions found."))
             self._status.show()
             return
 
@@ -381,7 +380,7 @@ class InstallEditorDialog(QDialog):
 
     def _on_dl_error(self, msg: str):
         self._progress_bar.hide()
-        QMessageBox.critical(self, "Download Failed", msg)
+        QMessageBox.critical(self, tr("Download Failed"), msg)
         self._btn_install.setEnabled(True)
 
 
@@ -399,8 +398,7 @@ class InstallsView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
-        self._runtime_card = QFrame()
-        self._runtime_card.setObjectName("versionCard")
+        self._runtime_card = AnimatedSurfaceFrame("versionCard")
         self._runtime_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         runtime_layout = QHBoxLayout(self._runtime_card)
         runtime_layout.setContentsMargins(16, 12, 16, 12)
@@ -418,24 +416,28 @@ class InstallsView(QWidget):
         runtime_info.addWidget(self._runtime_path)
         runtime_layout.addLayout(runtime_info, 1)
 
-        self._runtime_button = QPushButton("Install Python 3.12")
+        self._runtime_button = QPushButton(tr("Install Python 3.12"))
         self._runtime_button.setObjectName("primaryBtn")
         self._runtime_button.setFixedHeight(34)
         self._runtime_button.clicked.connect(self._on_install_python)
         runtime_layout.addWidget(self._runtime_button)
 
-        layout.addWidget(self._runtime_card)
-
         # ── Header ───────────────────────────────────────────────────
         header = QHBoxLayout()
         header.setContentsMargins(4, 0, 0, 12)
 
-        title = QLabel("Installs")
+        title_block = QVBoxLayout()
+        title_block.setSpacing(2)
+        title = QLabel(tr("Installs"))
         title.setObjectName("pageTitle")
-        header.addWidget(title, alignment=Qt.AlignmentFlag.AlignLeft)
+        title_block.addWidget(title)
+        subtitle = QLabel(tr("Installs and managed runtime"))
+        subtitle.setObjectName("pageSubtitle")
+        title_block.addWidget(subtitle)
+        header.addLayout(title_block)
         header.addStretch()
 
-        self.btn_locate = QPushButton("Locate")
+        self.btn_locate = QPushButton(tr("Locate"))
         self.btn_locate.setObjectName("normalBtn")
         self.btn_locate.setFixedHeight(36)
         self.btn_locate.setMinimumWidth(90)
@@ -446,7 +448,7 @@ class InstallsView(QWidget):
         spacer.setFixedWidth(8)
         header.addWidget(spacer)
 
-        self.btn_install = QPushButton("Install Editor")
+        self.btn_install = QPushButton(tr("Install Editor"))
         self.btn_install.setObjectName("primaryBtn")
         self.btn_install.setFixedHeight(36)
         self.btn_install.setMinimumWidth(130)
@@ -454,14 +456,17 @@ class InstallsView(QWidget):
         header.addWidget(self.btn_install)
 
         layout.addLayout(header)
+        layout.addWidget(self._runtime_card)
 
         # ── Version list (scrollable) ────────────────────────────────
         scroll = QScrollArea()
+        scroll.setObjectName("installScrollArea")
+        scroll.viewport().setObjectName("installViewport")
         scroll.setWidgetResizable(True)
         layout.addWidget(scroll, 1)
 
         self._container = QWidget()
-        self._container.setStyleSheet("background: transparent;")
+        self._container.setObjectName("installListContainer")
         self._card_layout = QVBoxLayout(self._container)
         self._card_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._card_layout.setSpacing(6)
@@ -484,7 +489,7 @@ class InstallsView(QWidget):
 
         versions = self._vm.installed_versions()
         if not versions:
-            empty = QLabel("No engine versions installed.\nClick 'Install Editor' or 'Locate' to add one.")
+            empty = QLabel(tr("No engine versions installed.\nClick 'Install Editor' or 'Locate' to add one."))
             empty.setObjectName("emptyHint")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._card_layout.addWidget(empty)
@@ -505,15 +510,15 @@ class InstallsView(QWidget):
         self._runtime_card.show()
         runtime_path = self._runtime_manager.get_runtime_path()
         if runtime_path:
-            self._runtime_status.setText("Python 3.12 runtime is ready")
+            self._runtime_status.setText(tr("Python 3.12 runtime is ready"))
             self._runtime_path.setText(runtime_path)
-            self._runtime_button.setText("Reinstall Python 3.12")
+            self._runtime_button.setText(tr("Reinstall Python 3.12"))
         else:
-            self._runtime_status.setText("Python 3.12 runtime is missing")
+            self._runtime_status.setText(tr("Python 3.12 runtime is missing"))
             self._runtime_path.setText(
-                "The installed Hub is expected to prepare a managed full Python 3.12 runtime under C:\\Users\\Public\\InfernuxHub during setup. If it is still missing, Hub will download the matching Python 3.12 installer for this machine."
+                tr("The managed Python runtime is not installed. Hub will download the matching Python 3.12 installer when you choose Install.")
             )
-            self._runtime_button.setText("Install Python 3.12")
+            self._runtime_button.setText(tr("Install Python 3.12"))
 
     # ── Actions ──────────────────────────────────────────────────────
 
@@ -530,17 +535,17 @@ class InstallsView(QWidget):
         if dlg.exec() == QDialog.Accepted:
             QMessageBox.information(
                 self,
-                "Python Installed",
-                f"Python 3.12 is ready at:\n{dlg.result_path}",
+                tr("Python Installed"),
+                tr("Python 3.12 is ready at:\n{path}", path=dlg.result_path),
             )
         elif dlg.error_text:
-            QMessageBox.critical(self, "Python Installation Failed", dlg.error_text)
+            QMessageBox.critical(self, tr("Python Installation Failed"), dlg.error_text)
         self.refresh()
 
     def _on_locate(self):
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Infernux Wheel",
+            tr("Select Infernux Wheel"),
             "",
             "Wheel files (*.whl)",
         )
@@ -550,20 +555,19 @@ class InstallsView(QWidget):
         try:
             version = self._vm.install_local_wheel(path)
             QMessageBox.information(
-                self, "Version Installed",
-                f"Infernux {version} has been installed from the selected wheel.",
+                self, tr("Version Installed"),
+                tr("Infernux {version} has been installed from the selected wheel.", version=version),
             )
             self.refresh()
         except ValueError as exc:
-            QMessageBox.critical(self, "Invalid Wheel", str(exc))
+            QMessageBox.critical(self, tr("Invalid Wheel"), str(exc))
 
     def _on_remove_version(self, version: str):
         confirm = QMessageBox.question(
             self,
-            "Remove Version",
+            tr("Remove Version"),
             f"Remove Infernux {version}?\n\n"
-            "This deletes the cached wheel. Projects using this version "
-            "will need to reinstall it.",
+            + tr("This deletes the cached wheel. Projects using this version will need to reinstall it."),
         )
         if confirm != QMessageBox.Yes:
             return

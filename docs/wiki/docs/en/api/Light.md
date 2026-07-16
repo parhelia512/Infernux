@@ -11,7 +11,9 @@ class in <b>Infernux.components.builtin</b>
 A Light component that illuminates the scene.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+Choose light type, range, intensity, color, and shadow settings for the scene scale. Confirm unshadowed lighting first, then enable shadows and tune bias.
 <!-- USER CONTENT END -->
 
 ## Properties
@@ -58,12 +60,23 @@ A Light component that illuminates the scene.
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for Light
+from Infernux import GameObject, Light, LightType
+
+light_object = GameObject.find("Key Light")
+if light_object is not None:
+    light = light_object.get_component(Light)
+    if light is not None:
+        light.light_type = LightType.Point
+        light.intensity = 2.0
+        light.range = 12.0
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [3D Foundations](../learn/3d-foundations.md)
+- [LightType](LightType.md)
+- [MeshRenderer](MeshRenderer.md)
+- [Rendering and RenderStack](../manual/rendering-and-renderstack.md)
 <!-- USER CONTENT END -->

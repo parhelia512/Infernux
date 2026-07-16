@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="Create an InxComponent Python script, expose a serialized speed field, attach it to a GameObject, and verify lifecycle behavior in Play mode.">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>Your First Component - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/en/learn/first-component.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="Your First Component - Infernux Documentation">
+    <meta property="og:description" content="Create an InxComponent Python script, expose a serialized speed field, attach it to a GameObject, and verify lifecycle behavior in Play mode.">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/en/learn/first-component.html">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status.">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="Learn">
+    <meta property="article:tag" content="beginner"><meta property="article:tag" content="python"><meta property="article:tag" content="component"><meta property="article:tag" content="inspector">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Your First Component - Infernux Documentation">
+    <meta name="twitter:description" content="Create an InxComponent Python script, expose a serialized speed field, attach it to a GameObject, and verify lifecycle behavior in Play mode.">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status.">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "LearningResource",
+          "@id": "https://infernux-engine.com/wiki/site/en/learn/first-component.html#document",
+          "headline": "Your First Component",
+          "name": "Your First Component",
+          "description": "Create an InxComponent Python script, expose a serialized speed field, attach it to a GameObject, and verify lifecycle behavior in Play mode.",
+          "url": "https://infernux-engine.com/wiki/site/en/learn/first-component.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/en/learn/first-component.html"
+          },
+          "inLanguage": "en",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Tutorial",
+          "articleSection": "Learn",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": "Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status."
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["beginner", "python", "component", "inspector"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/en/learn/first-component.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Documentation",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Learn",
+              "item": "https://infernux-engine.com/wiki.html#start-here"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "Your First Component",
+              "item": "https://infernux-engine.com/wiki/site/en/learn/first-component.html"
+            }
+            
+          ]
+        }
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/learn/first-component.html">
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/learn/first-component.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/learn/first-component.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
+    <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
+</head>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <!-- Top Navigation -->
+    <nav class="navbar" aria-label="Primary navigation">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/en/learn/getting-started.html" class="nav-priority">Start</a>
+                <a href="/wiki.html#start-here" class="active" aria-current="page">Learn</a>
+                <a href="/wiki.html?layer=manual#written-guides">Manual</a>
+                <a href="/wiki/site/en/api/index.html">API</a>
+                <a href="/roadmap.html">Roadmap</a>
+                <a href="/community.html" class="nav-priority">Community</a>
+                <a href="/download.html">Download</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="Copy version, sources, and canonical link" aria-label="Copy page context for an Agent">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>Copy for Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>Search docs</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell article-page-shell" id="main-content">
+        <div class="container article-page-container">
+            <div class="api-main article-page-content">
+                
+    <nav class="doc-breadcrumb" aria-label="Breadcrumb">
+        <a href="/wiki.html">Docs</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html#start-here">Learn</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">Your First Component</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="Document version and sources" data-status="preview" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">preview</strong>
+                        <span class="doc-provenance-item"><span>Since</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>Verified</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>Audience</span> new-user, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">Docs manifest</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/zh/learn/first-component.html" lang="zh">阅读中文</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>Source evidence · 2</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/tree/master/python/Infernux/components" target="_blank" rel="noopener">python/Infernux/components</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/__init__.pyi" target="_blank" rel="noopener">python/Infernux/__init__.pyi</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>On this page</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>Hide sections</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="Sections on this page"></nav>
+    </aside>
+    
+                <h1 id="your-first-component">Your First Component<a class="headerlink" href="#your-first-component" title="Permanent link">&para;</a></h1>
+<p>Infernux gameplay scripts are Python classes derived from <code>InxComponent</code>. This tutorial creates a component that rotates its owning object and exposes its speed in the Inspector.</p>
+<p><strong>Estimated time:</strong> 10 minutes.</p>
+<h2 id="before-you-start">Before you start<a class="headerlink" href="#before-you-start" title="Permanent link">&para;</a></h2>
+<p>Complete <a href="getting-started.html">Getting Started</a> and open a saved scene containing a visible GameObject. Keep the Console visible while testing.</p>
+<h2 id="1-create-the-script">1. Create the script<a class="headerlink" href="#1-create-the-script" title="Permanent link">&para;</a></h2>
+<p>Create a Python script inside your project's script or asset area and name it <code>SpinComponent.py</code>.</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux</span><span class="w"> </span><span class="kn">import</span> <span class="n">Debug</span><span class="p">,</span> <span class="n">InxComponent</span><span class="p">,</span> <span class="n">Vector3</span><span class="p">,</span> <span class="n">serialized_field</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">class</span><span class="w"> </span><span class="nc">SpinComponent</span><span class="p">(</span><span class="n">InxComponent</span><span class="p">):</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">speed</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">serialized_field</span><span class="p">(</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        <span class="n">default</span><span class="o">=</span><span class="mf">45.0</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">360.0</span><span class="p">),</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="n">tooltip</span><span class="o">=</span><span class="s2">&quot;Rotation speed in degrees per second&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="p">)</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        <span class="n">Debug</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="s2">&quot;SpinComponent started&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">game_object</span><span class="p">)</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">delta_time</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">rotate</span><span class="p">(</span><span class="n">Vector3</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">speed</span> <span class="o">*</span> <span class="n">delta_time</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
+</code></pre></div>
+<p>What each part does:</p>
+<ul>
+<li><code>InxComponent</code> connects the Python class to the engine component lifecycle.</li>
+<li><code>serialized_field</code> makes <code>speed</code> editable and serializable in the Inspector.</li>
+<li><code>start()</code> runs before the first frame update after the component becomes active.</li>
+<li><code>update(delta_time)</code> runs every frame; multiplying by <code>delta_time</code> keeps movement frame-rate independent.</li>
+<li><code>self.transform</code> is a shortcut to the owning GameObject's Transform.</li>
+</ul>
+<h2 id="2-attach-it-to-an-object">2. Attach it to an object<a class="headerlink" href="#2-attach-it-to-an-object" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Save the script and wait for the editor to discover or reload it.</li>
+<li>Select the visible GameObject in the Hierarchy.</li>
+<li>In the Inspector, add the <code>SpinComponent</code> script component.</li>
+<li>Set <strong>Speed</strong> to a noticeable value such as <code>90</code>.</li>
+<li>Save the scene.</li>
+</ol>
+<p>If the component does not appear, inspect the first Console error. A syntax error, an invalid import, or a class that does not inherit <code>InxComponent</code> prevents discovery.</p>
+<h2 id="3-verify-the-behavior">3. Verify the behavior<a class="headerlink" href="#3-verify-the-behavior" title="Permanent link">&para;</a></h2>
+<p>Enter Play mode.</p>
+<h3 id="expected-result">Expected result<a class="headerlink" href="#expected-result" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The object rotates around its Y axis.</li>
+<li>The Console logs <code>SpinComponent started</code> once.</li>
+<li>Changing <strong>Speed</strong> before Play changes the rotation rate.</li>
+<li>Stopping Play ends the update loop without repeated errors.</li>
+</ul>
+<h2 id="lifecycle-choices">Lifecycle choices<a class="headerlink" href="#lifecycle-choices" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Use it for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>awake()</code></td>
+<td>One-time internal initialization when the component is created</td>
+</tr>
+<tr>
+<td><code>start()</code></td>
+<td>Setup that depends on the active scene and other initialized components</td>
+</tr>
+<tr>
+<td><code>update(delta_time)</code></td>
+<td>Frame-rate-dependent gameplay and input</td>
+</tr>
+<tr>
+<td><code>fixed_update(fixed_delta_time)</code></td>
+<td>Fixed-step physics decisions</td>
+</tr>
+<tr>
+<td><code>late_update(delta_time)</code></td>
+<td>Follow-up work after normal updates, such as camera following</td>
+</tr>
+<tr>
+<td><code>on_destroy()</code></td>
+<td>Releasing resources or unregistering callbacks</td>
+</tr>
+</tbody>
+</table>
+<p>See the <a href="../api/InxComponent.html">InxComponent API</a> for the complete lifecycle and component helpers.</p>
+<h2 id="common-mistakes">Common mistakes<a class="headerlink" href="#common-mistakes" title="Permanent link">&para;</a></h2>
+<h3 id="update-never-runs"><code>update</code> never runs<a class="headerlink" href="#update-never-runs" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Confirm the method includes <code>self</code> and <code>delta_time</code>.</li>
+<li>Confirm the component and its GameObject are enabled.</li>
+<li>Confirm the editor attached the class from the file you edited.</li>
+</ul>
+<h3 id="the-inspector-does-not-show-speed">The Inspector does not show <code>speed</code><a class="headerlink" href="#the-inspector-does-not-show-speed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Keep the type annotation: <code>speed: float</code>.</li>
+<li>Assign <code>serialized_field(...)</code> at class scope, not inside <code>start()</code>.</li>
+<li>Resolve script reload errors before re-adding the component.</li>
+</ul>
+<h3 id="the-object-rotates-at-different-speeds-on-different-machines">The object rotates at different speeds on different machines<a class="headerlink" href="#the-object-rotates-at-different-speeds-on-different-machines" title="Permanent link">&para;</a></h3>
+<p>Use <code>speed * delta_time</code>; do not add a fixed number of degrees per frame.</p>
+<h2 id="completion-standard">Completion standard<a class="headerlink" href="#completion-standard" title="Permanent link">&para;</a></h2>
+<p>You are done when <code>SpinComponent</code> appears in the Inspector, exposes <strong>Speed</strong>, rotates its GameObject in Play mode, logs its start exactly once, and stops without repeating Console errors.</p>
+<h2 id="next-step">Next step<a class="headerlink" href="#next-step" title="Permanent link">&para;</a></h2>
+<p>Use the <a href="../manual/engine-map.html">Engine Map</a> to choose the next system—input, physics, scenes, UI, coroutines, or rendering—and then open its exact API page.</p>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="Document navigation and feedback">
+        <a class="doc-trail-fallback" href="/wiki.html">Back to documentation</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="Documentation build evidence">
+        <span class="doc-build-label">Build evidence</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">Reading release and source provenance…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">Machine manifest JSON</a>
+    </section>
+    
+    
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">Search Infernux documentation</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="Close documentation search"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API symbol, system, workflow…">
+            </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="Documentation search filters"></div>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </dialog>
+
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
+</body>
+</html>

@@ -99,6 +99,54 @@ def pretty_field_name(name: str) -> str:
     return format_display_name(name, title_case=True)
 
 
+def semantic_capture_enabled(ctx: InxGUIContext) -> bool:
+    """Return whether this frame is collecting an MCP semantic snapshot.
+
+    Test doubles created before request-only capture do not expose the native
+    property, so they retain the historical capture-on behavior.
+    """
+    return bool(getattr(ctx, "semantic_capture_enabled", True))
+
+
+def inspector_component_semantic_id(component, field_name: str) -> str:
+    """Return the stable semantic identity for an Inspector field.
+
+    ImGui widget IDs are intentionally local and often hidden (``##...``).
+    MCP needs an identity that survives relayouts and remains unambiguous when
+    different components expose fields with the same display name.
+    """
+    try:
+        game_object = getattr(component, "game_object", None)
+        object_id = int(getattr(game_object, "id", 0) or 0)
+        component_id = int(getattr(component, "component_id", 0) or 0)
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return ""
+    if object_id <= 0 or component_id <= 0:
+        return ""
+    suffix = str(field_name or "").strip(".")
+    base = f"inspector.object.{object_id}.component.{component_id}"
+    return f"{base}.{suffix}" if suffix else base
+
+
+def record_inspector_component_item(
+    ctx: InxGUIContext,
+    component,
+    field_name: str,
+    kind: str,
+    label: str,
+    *,
+    enabled: bool = True,
+) -> str:
+    """Record the previously rendered widget under the Inspector contract."""
+    if not semantic_capture_enabled(ctx):
+        return ""
+    semantic_id = inspector_component_semantic_id(component, field_name)
+    recorder = getattr(ctx, "record_semantic_item", None)
+    if semantic_id and callable(recorder):
+        recorder(kind, label, bool(enabled), semantic_id)
+    return semantic_id
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Label / layout primitives
 # ═══════════════════════════════════════════════════════════════════════════
@@ -727,20 +775,29 @@ def render_apply_revert(
     is_dirty: bool,
     on_apply,
     on_revert,
+    semantic_prefix: str = "",
 ) -> None:
     """Render a unified Apply / Revert button bar for import-settings editors."""
     ctx.separator()
     if is_dirty:
         ctx.push_style_color(_COL_BUTTON, *Theme.APPLY_BUTTON)
         ctx.button("Apply", on_apply)
+        if semantic_prefix and semantic_capture_enabled(ctx):
+            ctx.record_semantic_item("button", "Apply", True, f"{semantic_prefix}.apply")
         ctx.pop_style_color(1)
         ctx.same_line()
         ctx.button("Revert", on_revert)
+        if semantic_prefix and semantic_capture_enabled(ctx):
+            ctx.record_semantic_item("button", "Revert", True, f"{semantic_prefix}.revert")
     else:
         ctx.begin_disabled(True)
         ctx.button("Apply", None)
+        if semantic_prefix and semantic_capture_enabled(ctx):
+            ctx.record_semantic_item("button", "Apply", False, f"{semantic_prefix}.apply")
         ctx.same_line()
         ctx.button("Revert", None)
+        if semantic_prefix and semantic_capture_enabled(ctx):
+            ctx.record_semantic_item("button", "Revert", False, f"{semantic_prefix}.revert")
         ctx.end_disabled()
     return None
 
@@ -815,6 +872,7 @@ def build_scalar_desc(
     header_text: str = "",
     space_before: float = 0,
     mixed: bool = False,
+    semantic_id: str = "",
 ) -> dict | None:
     """Build a single property descriptor dict for the C++ batch renderer.
 
@@ -826,6 +884,8 @@ def build_scalar_desc(
         return None
 
     desc = {"t": prop_type, "w": wid, "n": display_name}
+    if semantic_id:
+        desc["sid"] = semantic_id
     if mixed:
         desc["mix"] = True
 

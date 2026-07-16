@@ -9,7 +9,9 @@
 用户脚本组件的基类，类似于 Unity 的 MonoBehaviour。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+项目玩法组件应继承此基类。不要只阅读生命周期表；请先完成[第一个组件](../learn/first-component.md)。
 <!-- USER CONTENT END -->
 
 ## 构造函数
@@ -60,6 +62,16 @@
 
 <!-- USER CONTENT END -->
 
+## 静态方法
+
+| 方法 | 描述 |
+|------|------|
+| `InxComponent.reserve_instances(count: int) → None` | Preallocate numeric-field storage for bulk component creation. |
+
+<!-- USER CONTENT START --> static_methods
+
+<!-- USER CONTENT END -->
+
 ## 生命周期方法
 
 | 方法 | 描述 |
@@ -97,12 +109,23 @@
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for InxComponent
+from Infernux import InxComponent, Vector3, serialized_field
+
+
+class Patrol(InxComponent):
+    speed: float = serialized_field(default=2.0, range=(0.0, 10.0))
+
+    def update(self, delta_time: float) -> None:
+        self.transform.translate(Vector3(self.speed * delta_time, 0.0, 0.0))
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [第一个组件](../learn/first-component.md)
+- [场景与对象](../manual/scenes-and-objects.md)
+- [GameObject](GameObject.md)
+- [serialized_field](serialized_field.md)
+- [Time](Time.md)
 <!-- USER CONTENT END -->

@@ -27,6 +27,8 @@ from .inspector_utils import (
     find_enum_index as _find_enum_index,
     DRAG_SPEED_DEFAULT, DRAG_SPEED_FINE, DRAG_SPEED_INT,
     build_scalar_desc, is_batch_renderable,
+    semantic_capture_enabled, inspector_component_semantic_id,
+    record_inspector_component_item,
 )
 from .theme import Theme, ImGuiCol
 
@@ -34,7 +36,8 @@ from .theme import Theme, ImGuiCol
 from ._inspector_undo import (  # noqa: F401
     _notify_scene_modified, _is_python_component_entry,
     _record_property, _record_material_slot, _record_generic_component,
-    _record_add_component, _get_component_ids, _record_add_component_compound,
+    _record_add_component, _get_component_ids, _get_native_component_documents,
+    _record_add_component_compound,
     _record_builtin_property, _TrackVolumeCommand, _record_track_volume,
 )
 from ._inspector_references import (  # noqa: F401
@@ -167,6 +170,7 @@ def _build_builtin_cached_plan(ctx: InxGUIContext, comp, props, lw, skip_fields,
     ops = []
     batch_descs = []
     batch_info = []
+    capture_semantics = semantic_capture_enabled(ctx)
 
     def _flush_batch():
         nonlocal batch_descs, batch_info
@@ -228,11 +232,24 @@ def _build_builtin_cached_plan(ctx: InxGUIContext, comp, props, lw, skip_fields,
             })
             continue
 
+        if meta.field_type == FieldType.ASSET:
+            _flush_batch()
+            ops.append({
+                "kind": "asset_reference",
+                "py_name": py_name,
+                "cpp_attr": cpp_attr,
+                "meta": meta,
+                "current": current,
+            })
+            continue
+
         hdr = meta.header or ""
         spc = meta.space if meta.space and meta.space > 0 else 0.0
         desc = build_scalar_desc(
             f"##{py_name}", pretty_field_name(py_name), meta, current,
             header_text=hdr, space_before=spc,
+            semantic_id=(inspector_component_semantic_id(comp, py_name)
+                         if capture_semantics else ""),
         )
         if desc is not None:
             enum_members = None
@@ -262,6 +279,7 @@ def _build_builtin_cached_plan(ctx: InxGUIContext, comp, props, lw, skip_fields,
     return {
         "lw": lw,
         "skip_fields": tuple(sorted(skip_fields)) if skip_fields else (),
+        "semantic_capture": capture_semantics,
         "ops": ops,
     }
 
@@ -297,6 +315,15 @@ def _replay_builtin_cached_plan(ctx: InxGUIContext, comp, plan: dict, cache_entr
             )
             continue
 
+        if kind == "asset_reference":
+            from Infernux.components.serialized_field import FieldType
+
+            _render_asset_reference_field(
+                ctx, comp, op["py_name"], op["meta"], op["current"],
+                FieldType.ASSET, lw, builtin_attr=op["cpp_attr"],
+            )
+            continue
+
         if kind == "fallback_scalar":
             if op["header"]:
                 ctx.separator()
@@ -306,6 +333,9 @@ def _replay_builtin_cached_plan(ctx: InxGUIContext, comp, plan: dict, cache_entr
             new_value = render_serialized_field(
                 ctx, f"##{op['py_name']}", pretty_field_name(op["py_name"]),
                 op["meta"], op["current"], lw,
+            )
+            record_inspector_component_item(
+                ctx, comp, op["py_name"], "inspector_field", pretty_field_name(op["py_name"]),
             )
             if has_field_changed(op["meta"].field_type, op["current"], new_value):
                 _record_builtin_property(comp, op["cpp_attr"], op["current"], new_value,
@@ -588,15 +618,15 @@ def _apply_multi_json_change(comps, key, metadata, new_value):
     json_value = _json_value_from_batch(metadata, new_value)
     for comp in comps:
         try:
-            original_json = comp.serialize()
-            data = json.loads(original_json)
+            original_document = comp.serialize_document()
+            data = dict(original_document)
         except Exception:
             continue
         old_value = data.get(key)
         if _multi_value_equal(old_value, json_value):
             continue
         data[key] = json_value
-        _record_generic_component(comp, original_json, json.dumps(data))
+        _record_generic_component(comp, original_document, data)
 
 
 def render_multi_component(ctx: InxGUIContext, comps, *, is_native: bool):
@@ -714,7 +744,7 @@ def render_multi_component(ctx: InxGUIContext, comps, *, is_native: bool):
     serialized = []
     for comp in comps:
         try:
-            serialized.append(json.loads(comp.serialize()))
+            serialized.append(comp.serialize_document())
         except Exception:
             serialized.append({})
     common_keys = [k for k in serialized[0].keys() if k not in ignore_keys]
@@ -847,8 +877,10 @@ def render_builtin_via_setters(ctx: InxGUIContext, comp, wrapper_cls, *, skip_fi
     lw = max_label_w(ctx, labels)
     cache_entry, refresh_values = _begin_component_value_cache("builtin", comp)
     skip_key = tuple(sorted(skip_fields)) if skip_fields else ()
+    capture_semantics = semantic_capture_enabled(ctx)
     plan = None if refresh_values else cache_entry.get("builtin_plan")
-    if plan is None or plan.get("skip_fields") != skip_key:
+    if (plan is None or plan.get("skip_fields") != skip_key
+            or plan.get("semantic_capture", False) != capture_semantics):
         if plan is None:
             _record_profile_count("bodyBuiltinPlanMiss_count")
         else:
@@ -921,9 +953,9 @@ def _apply_batch_changes_py(py_comp, changes: dict, batch_info: list):
 
 
 def render_cpp_component_generic(ctx: InxGUIContext, comp):
-    """Render generic fields for a C++ component based on its serialized JSON."""
-    original_json = comp.serialize()
-    data = json.loads(original_json)
+    """Render generic fields for a native component document."""
+    original_document = comp.serialize_document()
+    data = dict(original_document)
 
     ignore_keys = {"schema_version", "type", "enabled", "component_id"}
     changed = False
@@ -979,8 +1011,7 @@ def render_cpp_component_generic(ctx: InxGUIContext, comp):
             changed = True
 
     if changed:
-        new_json = json.dumps(data)
-        _record_generic_component(comp, original_json, new_json)
+        _record_generic_component(comp, original_document, data)
 
 
 # ── Asset-type reference field configuration ──
@@ -1070,6 +1101,7 @@ def render_py_component(ctx: InxGUIContext, py_comp):
     fields = get_serialized_fields(py_comp.__class__)
     lw = max_label_w(ctx, [pretty_field_name(k) for k in fields]) if fields else 0.0
     cache_entry, refresh_values = _begin_component_value_cache("py", py_comp)
+    capture_semantics = semantic_capture_enabled(ctx)
     _record_profile_count("bodyPyGenericTotal_count")
     _py_generic_t0 = _time.perf_counter()
 
@@ -1140,6 +1172,8 @@ def render_py_component(ctx: InxGUIContext, py_comp):
         desc = build_scalar_desc(
             f"##{field_name}", pretty_field_name(field_name), metadata, current_value,
             header_text=hdr, space_before=spc,
+            semantic_id=(inspector_component_semantic_id(py_comp, field_name)
+                         if capture_semantics else ""),
         )
         if desc is not None:
             enum_members = None
@@ -1161,6 +1195,9 @@ def render_py_component(ctx: InxGUIContext, py_comp):
                 ctx.dummy(0, spc)
             new_value = render_serialized_field(
                 ctx, f"##{field_name}", pretty_field_name(field_name), metadata, current_value, lw,
+            )
+            record_inspector_component_item(
+                ctx, py_comp, field_name, "inspector_field", pretty_field_name(field_name),
             )
             if has_field_changed(metadata.field_type, current_value, new_value) and not metadata.readonly:
                 _record_property(py_comp, field_name, current_value, new_value, f"Set {field_name}")

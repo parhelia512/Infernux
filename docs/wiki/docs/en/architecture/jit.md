@@ -1,6 +1,15 @@
 ---
+title: "Deep Dive: JIT-Accelerated Scripting in Infernux"
+description: "Explains how batch reads, ComponentDataStore, NumPy buffers, and Numba JIT reduce Python/native boundary overhead for data-parallel gameplay workloads."
 category: Architecture
 tags: ["jit", "performance", "python", "numba", "parallel"]
+status: experimental
+since: "0.2.1"
+last_verified: "2026-07-15"
+audience: ["advanced-user", "contributor", "agent"]
+related_api: []
+agent_summary: "Explains how batch reads, ComponentDataStore, NumPy buffers, and Numba JIT reduce Python/native boundary overhead for data-parallel gameplay workloads."
+source_paths: ["python/Infernux/jit.py", "python/Infernux/batch.py", "cpp/infernux/tools/pybinding/BindingBatch.cpp", "cpp/infernux/function/scene/ComponentDataStore.cpp", "cpp/infernux/function/scene/TransformECSStore.cpp"]
 date: "2026-04-16"
 ---
 

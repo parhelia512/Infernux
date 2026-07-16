@@ -10,6 +10,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace infernux
@@ -295,9 +296,17 @@ class MeshRenderer : public Component
     // Serialization
     // ========================================================================
 
-    [[nodiscard]] std::string Serialize() const override;
-    bool Deserialize(const std::string &jsonStr) override;
+    [[nodiscard]] nlohmann::json SerializeDocument() const override;
+    static void ValidateSerializedDocument(const nlohmann::json &document);
+    bool DeserializeDocument(const nlohmann::json &document) override;
+    [[nodiscard]] int GetSerializationSchemaVersion() const override
+    {
+        return 5;
+    }
     [[nodiscard]] std::unique_ptr<Component> Clone() const override;
+
+  protected:
+    static void ValidateSerializedDocumentForType(const nlohmann::json &document, std::string_view expectedType);
 
   private:
     MeshRef m_mesh;

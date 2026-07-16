@@ -18,6 +18,7 @@
 |------|------|------|
 | type_name | `str` |  *(只读)* |
 | component_id | `int` |  *(只读)* |
+| handle | `ObjectHandle` |  *(只读)* |
 | enabled | `bool` | 此组件是否已启用。 |
 | execution_order | `int` |  |
 | game_object | `GameObject` | 此组件附加到的 GameObject。 *(只读)* |
@@ -33,7 +34,7 @@
 |------|------|
 | `is_component_type(type_name: str) → bool` |  |
 | `serialize() → str` |  |
-| `deserialize(json_str: str) → None` |  |
+| `serialize_document() → Dict[str, Any]` |  |
 
 <!-- USER CONTENT START --> public_methods
 
@@ -42,9 +43,7 @@
 ## 示例
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for Component
-```
+> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。
 <!-- USER CONTENT END -->
 
 ## 另请参阅

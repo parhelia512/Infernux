@@ -39,7 +39,9 @@ Example::
         speed: float = serialized_field(default=5.0, range=(0, 100))
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+每个序列化字段都应保留明确类型标注。元数据用于 Inspector 展示与校验，不能替代对缺失对象或资源引用的运行时检查。
 <!-- USER CONTENT END -->
 
 ## 参数
@@ -70,6 +72,16 @@ Example::
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for serialized_field
+from Infernux import InxComponent, serialized_field
+
+
+class ProjectileSettings(InxComponent):
+    speed: float = serialized_field(
+        default=20.0,
+        range=(0.0, 100.0),
+        tooltip="World units per second",
+        slider=True,
+    )
+    notes: str = serialized_field(default="", multiline=True)
 ```
 <!-- USER CONTENT END -->

@@ -18,10 +18,14 @@ from Infernux.lib import InxGUIRenderable, InxGUIContext
 from Infernux.input import Input, KeyCode
 from Infernux.engine.ui.viewport_utils import capture_viewport_info
 from Infernux.ui.ui_texture_cache import get_shared_cache as _get_tex_cache
-from Infernux.ui.ui_render_dispatch import dispatch as _ui_dispatch
+from Infernux.ui.ui_render_dispatch import (
+    dispatch as _ui_dispatch,
+    runtime_ui_revision as _runtime_ui_revision,
+)
 from Infernux.ui.ui_event_system import UIEventProcessor
 from Infernux.ui.ui_canvas_utils import collect_sorted_canvases
 from Infernux.ui.inx_ui_screen_component import clear_rect_cache
+from Infernux.engine.player_control import PlayerControlChannel
 
 
 class PlayerGUI(InxGUIRenderable):
@@ -36,6 +40,7 @@ class PlayerGUI(InxGUIRenderable):
         self._last_h = 0
         self._ui_event_processor = UIEventProcessor()
         self._last_frame_time = time.time()
+        self._control = PlayerControlChannel.from_environment()
 
         # Splash
         self._splash = None
@@ -100,14 +105,22 @@ class PlayerGUI(InxGUIRenderable):
         # DeferredTaskRunner is now ticked by InxRenderer's pre-GUI callback
         # (before BuildFrame) so scene mutations complete before panels render.
 
+        # Standalone Players have no competing Editor viewport.  Establish the
+        # gameplay-input contract before any early return caused by splash,
+        # camera startup, a missing GUI texture, or background rendering.
+        Input.set_game_focused(True)
+
         if self._engine:
+            if self._control.poll(self._engine) == "shutdown":
+                self._engine.request_exit()
+                return
+
             # In player mode there's no MenuBarPanel, so we must handle
             # close requests (Alt+F4 / window X) directly.
             native = self._engine.get_native_engine()
             if native and native.is_close_requested():
                 native.confirm_close()
                 return
-            self._engine.tick_play_mode()
 
     def _render_game(self, ctx: InxGUIContext, vp_w: float, vp_h: float):
         target_w = max(1, int(vp_w))
@@ -142,10 +155,6 @@ class PlayerGUI(InxGUIRenderable):
                 Input.set_cursor_locked(False)
                 cursor_locked = False
 
-        Input.set_game_focused(
-            game_hovered or cursor_locked
-        )
-
         # Process UI events
         if game_hovered:
             self._process_ui_events(target_w, target_h)
@@ -179,12 +188,20 @@ class PlayerGUI(InxGUIRenderable):
 
         canvases = collect_sorted_canvases(scene, allow_stale_empty=True)
         if canvases:
-            clear_rect_cache(time.perf_counter())
+            clear_rect_cache((id(scene), int(scene.structure_version)))
 
-        renderer.begin_frame(game_w, game_h)
+        use_overlay = not renderer.is_enabled()
+        texture_cache = _get_tex_cache()
+        if use_overlay or texture_cache.has_pending:
+            renderer.begin_frame(game_w, game_h)
+        else:
+            revision = _runtime_ui_revision(
+                scene, canvases, game_w, game_h, texture_cache.generation,
+            )
+            if renderer.begin_frame_cached(game_w, game_h, revision):
+                return
         if not canvases:
             return
-        use_overlay = not renderer.is_enabled()
 
         for canvas in canvases:
             if canvas.render_mode == RenderMode.CameraOverlay:
@@ -202,8 +219,7 @@ class PlayerGUI(InxGUIRenderable):
             scale_x = float(game_w) / ref_w
             scale_y = float(game_h) / ref_h
 
-            _tex_cache = _get_tex_cache()
-            _get_tid = lambda tp: _tex_cache.get(self._engine, tp)
+            _get_tid = texture_cache.get_bound(self._engine)
 
             for elem in canvas._get_elements():
                 ex, ey, ew, eh = elem.get_rect(ref_w, ref_h)

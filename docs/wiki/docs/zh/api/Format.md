@@ -6,7 +6,7 @@
 
 ## 描述
 
-纹理格式枚举。
+渲染目标使用的纹理格式。这个公共别名映射到原生 `PixelFormat` 枚举。
 
 <!-- USER CONTENT START --> description
 
@@ -38,7 +38,7 @@
 
 | 名称 | 类型 | 描述 |
 |------|------|------|
-| is_depth | `bool` | Returns True if this format is a depth format. *(只读)* |
+| is_depth | `bool` | 如果该格式为深度格式则返回 True。*（只读）* |
 
 <!-- USER CONTENT START --> properties
 
@@ -47,13 +47,12 @@
 ## 示例
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for Format
-```
+> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [RenderGraph](RenderGraph.md)
+- [渲染与 RenderStack](../manual/rendering-and-renderstack.md)
 <!-- USER CONTENT END -->

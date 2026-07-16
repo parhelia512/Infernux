@@ -28,12 +28,12 @@ from Infernux.core.animation_timeline import (
     APPLY_MODES,
 )
 from .editor_panel import EditorPanel
+from .asset_save_dialog import AssetSaveAsDialog
 from .panel_registry import editor_panel
-from .imgui_keys import KEY_S, KEY_N, KEY_SPACE
+from .imgui_keys import KEY_N, KEY_SPACE
 from .theme import ImGuiCol, Theme
 
 _MOD_CTRL = 1 << 12
-_MOD_SHIFT = 1 << 13
 
 # Combo label i18n keys (order matches INTERP_MODES / APPLY_MODES).
 _INTERP_LABEL_KEYS = ("interp_constant", "interp_linear", "interp_ease_in", "interp_ease_out", "interp_ease_inout")
@@ -74,6 +74,10 @@ def _apply_labels():
     return [t(f"animtimeline_editor.{k}") for k in _APPLY_LABEL_KEYS]
 
 
+def _semantic_capture_enabled(ctx: InxGUIContext) -> bool:
+    return bool(getattr(ctx, "semantic_capture_enabled", True))
+
+
 @editor_panel(
     "Timeline Editor",
     type_id="animtimeline_editor",
@@ -89,7 +93,7 @@ class AnimTimelineEditorPanel(EditorPanel):
         super().__init__(title="Timeline Editor", window_id="animtimeline_editor")
         self._timeline: AnimationTimeline = AnimationTimeline(name="Timeline")
         self._file_path: str = ""
-        self._dirty: bool = False
+        self._dirty: bool = True
         self._playhead: float = 0.0
         self._playing: bool = False
         self._last_tick: float = 0.0
@@ -108,6 +112,8 @@ class AnimTimelineEditorPanel(EditorPanel):
         self._cam_dist: float = 6.0
         self._orbiting: bool = False
         self._preview_tex_cache: int = 0
+        self._preview_request_signature = None
+        self._save_as_dialog = AssetSaveAsDialog("animtimeline.save_as", "timeline")
         # Panel persistence: ``load_state`` may run from bootstrap or first render.
         self._panel_state_restored_once: bool = False
         self._panel_restore_data: Optional[dict] = None
@@ -144,7 +150,7 @@ class AnimTimelineEditorPanel(EditorPanel):
         self._playing = False
         self._sel_key = None
         self._drag_key = None
-        self._set_dirty(False)
+        self._set_dirty(True)
 
     def _set_dirty(self, value: bool):
         # ClosablePanel._sync_dirty_registry() reads self._dirty every frame and
@@ -215,6 +221,9 @@ class AnimTimelineEditorPanel(EditorPanel):
         data["cam_yaw"] = float(self._cam_yaw)
         data["cam_pitch"] = float(self._cam_pitch)
         data["cam_dist"] = float(self._cam_dist)
+        data["dirty"] = bool(self._dirty)
+        if self._dirty:
+            data["draft"] = self._timeline.to_dict()
         return data
 
     def _resolve_saved_timeline_path(self, data: dict) -> str:
@@ -246,6 +255,14 @@ class AnimTimelineEditorPanel(EditorPanel):
         self._cam_yaw = float(data.get("cam_yaw", self._cam_yaw))
         self._cam_pitch = float(data.get("cam_pitch", self._cam_pitch))
         self._cam_dist = float(data.get("cam_dist", self._cam_dist))
+        draft = data.get("draft")
+        if bool(data.get("dirty")) and isinstance(draft, dict):
+            self._timeline = AnimationTimeline.from_dict(draft)
+            self._file_path = self._normalize_timeline_path(data.get("file_path") or "")
+            self._timeline.file_path = self._file_path
+            self._set_dirty(True)
+            self._panel_state_restored_once = True
+            return
         self._panel_state_restored_once = False
 
     def _apply_pending_panel_restore(self) -> None:
@@ -284,7 +301,14 @@ class AnimTimelineEditorPanel(EditorPanel):
         else:
             self._show_save_as_dialog()
 
-    def _save_to(self, path: str):
+    def handle_save_command(self, save_as: bool = False) -> bool:
+        if save_as:
+            self._show_save_as_dialog()
+        else:
+            self._do_save()
+        return True
+
+    def _save_to(self, path: str) -> bool:
         self._timeline.name = os.path.splitext(os.path.basename(path))[0]
         if self._timeline.save(path):
             self._file_path = path
@@ -295,31 +319,28 @@ class AnimTimelineEditorPanel(EditorPanel):
             except Exception:
                 pass
             self._set_dirty(False)
+            return True
         else:
             Debug.log_warning(f"[TimelineEditor] Failed to save: {path}")
+            return False
 
     def _show_save_as_dialog(self):
-        try:
-            from Infernux.engine.project_context import get_project_root
-            initial_dir = os.path.join(get_project_root() or ".", "Assets")
-        except Exception:
-            initial_dir = "."
         safe = (self._timeline.name or "Timeline").replace(" ", "_")
-        try:
-            from ._dialogs import save_file_dialog
-            result = save_file_dialog(
-                title="Save Timeline",
-                win32_filter="Timeline files (*.animtimeline)\0*.animtimeline\0All files (*.*)\0*.*\0\0",
-                initial_dir=initial_dir,
-                default_filename=f"{safe}.animtimeline",
-                default_ext="animtimeline",
-                tk_filetypes=[("Timeline", "*.animtimeline"), ("All Files", "*.*")],
-            )
-        except Exception as exc:
-            Debug.log_warning(f"[TimelineEditor] Save dialog error: {exc}")
-            result = None
-        if result:
-            self._save_to(result)
+        if not self._save_as_dialog.request(
+            title="Save Timeline",
+            extension="animtimeline",
+            default_name=safe,
+            current_path=self._file_path,
+        ):
+            Debug.log_warning("[TimelineEditor] No project root set - cannot save timeline.")
+
+    def _discard_unsaved_changes(self) -> bool:
+        if self._file_path:
+            self._open_timeline(self._file_path)
+            return not self._dirty
+        self._new_timeline()
+        self._set_dirty(False)
+        return True
 
     # ── Selection helpers ──────────────────────────────────────────────
     def _current_sel_key(self) -> Optional[TimelineKeyframe]:
@@ -384,6 +405,10 @@ class AnimTimelineEditorPanel(EditorPanel):
         except Exception:
             pass
 
+    def _needs_full_speed_frames(self) -> bool:
+        """Return whether timeline playback or interaction needs continuous frames."""
+        return bool(self._playing or self._orbiting or self._bar_was_active)
+
     # ── Render ─────────────────────────────────────────────────────────
     def on_render_content(self, ctx: InxGUIContext):
         if not self._panel_state_restored_once:
@@ -429,8 +454,11 @@ class AnimTimelineEditorPanel(EditorPanel):
                                           max(120.0, ctx.get_content_region_avail_height()))
         ctx.end_child()
 
-        # Full-speed frames while scrubbing the bar or orbiting the preview.
-        self._set_engine_active(self._orbiting or self._bar_was_active)
+        self._save_as_dialog.render(ctx, self._save_to)
+
+        # Playback also needs continuous frames; wall-clock timing alone cannot
+        # make an idle-throttled preview look smooth.
+        self._set_engine_active(self._needs_full_speed_frames())
 
         # GPU work is scheduled above; pump after all timeline UI is drawn so scrubbing
         # feels instant while the preview catches up once per frame.
@@ -454,12 +482,6 @@ class AnimTimelineEditorPanel(EditorPanel):
         if not self._is_focused(ctx):
             return
         ctrl = ctx.is_key_down(_MOD_CTRL)
-        shift = ctx.is_key_down(_MOD_SHIFT)
-        if ctrl and ctx.is_key_pressed(KEY_S):
-            if shift:
-                self._show_save_as_dialog()
-            else:
-                self._do_save()
         if ctrl and ctx.is_key_pressed(KEY_N):
             self._new_timeline()
         # Space toggles playback only when no widget (e.g. a text field) is focused.
@@ -477,19 +499,34 @@ class AnimTimelineEditorPanel(EditorPanel):
         self._last_tick = time.perf_counter()
 
     def _render_toolbar(self, ctx: InxGUIContext):
-        if ctx.button(t("animtimeline_editor.new")):
+        capture_semantics = _semantic_capture_enabled(ctx)
+        new_label = t("animtimeline_editor.new")
+        if ctx.button(new_label):
             self._new_timeline()
+        if capture_semantics:
+            ctx.record_semantic_item("button", new_label, True, "animtimeline.toolbar.new")
         ctx.same_line()
-        if ctx.button(t("animtimeline_editor.save")):
+        save_label = t("animtimeline_editor.save")
+        if ctx.button(save_label):
             self._do_save()
+        if capture_semantics:
+            ctx.record_semantic_item("button", save_label, True, "animtimeline.toolbar.save")
         ctx.same_line()
-        if ctx.button(t("animtimeline_editor.save_as")):
+        save_as_label = t("animtimeline_editor.save_as")
+        if ctx.button(save_as_label):
             self._show_save_as_dialog()
+        if capture_semantics:
+            ctx.record_semantic_item("button", save_as_label, True, "animtimeline.toolbar.save_as")
         ctx.same_line()
         ctx.label(f"{t('animtimeline_editor.name')}:")
         ctx.same_line()
         ctx.set_next_item_width(150.0)
         new_name = ctx.text_input("##tl_name", self._timeline.name, 128)
+        if capture_semantics:
+            ctx.record_semantic_item(
+                "text_input", t("animtimeline_editor.name"), True,
+                "animtimeline.toolbar.name", string_value=new_name,
+            )
         if new_name != self._timeline.name:
             self._timeline.name = new_name
             self._set_dirty(True)
@@ -498,6 +535,11 @@ class AnimTimelineEditorPanel(EditorPanel):
         ctx.same_line()
         ctx.set_next_item_width(70.0)
         new_dur = ctx.drag_float("##tl_dur", float(self._timeline.duration), 0.05, 0.05, 3600.0)
+        if capture_semantics:
+            ctx.record_semantic_item(
+                "drag_float", t("animtimeline_editor.duration"), True,
+                "animtimeline.toolbar.duration", numeric_value=new_dur,
+            )
         if new_dur != self._timeline.duration:
             self._timeline.duration = max(0.05, float(new_dur))
             self._set_dirty(True)
@@ -509,30 +551,60 @@ class AnimTimelineEditorPanel(EditorPanel):
         cur_mode = self._timeline.apply_mode if self._timeline.apply_mode in APPLY_MODES else APPLY_MODES[0]
         mode_idx = APPLY_MODES.index(cur_mode)
         new_mode = ctx.combo("##tl_apply_mode", mode_idx, apply_labels, len(apply_labels))
+        if capture_semantics:
+            ctx.record_semantic_item(
+                "combo", t("animtimeline_editor.apply_mode"), True,
+                "animtimeline.toolbar.apply_mode", string_value=APPLY_MODES[new_mode],
+            )
         if new_mode != mode_idx:
             self._timeline.apply_mode = APPLY_MODES[new_mode]
             self._set_dirty(True)
 
     def _render_transport(self, ctx: InxGUIContext):
-        if ctx.button(t("animtimeline_editor.pause") if self._playing else t("animtimeline_editor.play")):
+        capture_semantics = _semantic_capture_enabled(ctx)
+        play_label = t("animtimeline_editor.pause") if self._playing else t("animtimeline_editor.play")
+        if ctx.button(play_label):
             self._toggle_play()
+        if capture_semantics:
+            ctx.record_semantic_item(
+                "button", play_label, True, "animtimeline.transport.play_pause"
+            )
         ctx.same_line()
-        if ctx.button(t("animtimeline_editor.stop")):
+        stop_label = t("animtimeline_editor.stop")
+        if ctx.button(stop_label):
             self._playing = False
             self._playhead = 0.0
+        if capture_semantics:
+            ctx.record_semantic_item("button", stop_label, True, "animtimeline.transport.stop")
         ctx.same_line()
-        if ctx.button(t("animtimeline_editor.add_key")):
+        add_key_label = t("animtimeline_editor.add_key")
+        if ctx.button(add_key_label):
             self._add_keyframe_at_playhead()
+        if capture_semantics:
+            ctx.record_semantic_item(
+                "button", add_key_label, True, "animtimeline.transport.add_key"
+            )
         ctx.same_line()
-        if ctx.button(t("animtimeline_editor.delete_key")):
+        delete_key_label = t("animtimeline_editor.delete_key")
+        if ctx.button(delete_key_label):
             self._delete_selected_key()
+        if capture_semantics:
+            ctx.record_semantic_item(
+                "button", delete_key_label, True, "animtimeline.transport.delete_key"
+            )
         ctx.same_line()
         ctx.label(f"{self._playhead:.2f} / {self._timeline.duration:.2f}s")
 
     def _render_timeline_bar(self, ctx: InxGUIContext):
         dur = max(1e-6, float(self._timeline.duration))
-        bar_w = max(80.0, ctx.get_content_region_avail_width())
+        # Leave the same small horizontal breathing room used by the child
+        # content so the ruler does not protrude past the toolbar above it.
+        bar_w = max(80.0, ctx.get_content_region_avail_width() - 2.0)
         ctx.invisible_button("##tl_bar", bar_w, _BAR_H)
+        if _semantic_capture_enabled(ctx):
+            ctx.record_semantic_item(
+                "button", "Timeline scrubber", True, "animtimeline.scrubber"
+            )
         x0 = ctx.get_item_rect_min_x()
         y0 = ctx.get_item_rect_min_y()
         x1 = ctx.get_item_rect_max_x()
@@ -683,8 +755,6 @@ class AnimTimelineEditorPanel(EditorPanel):
             cy = (y0 + y1) * 0.5
             ctx.draw_image_rect(tex, cx - side * 0.5, cy - side * 0.5, cx + side * 0.5, cy + side * 0.5,
                                 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, False, False, 3.0)
-        else:
-            ctx.draw_text(x0 + 10.0, y0 + 10.0, "renderer offline", *c["text"])
         ctx.draw_text(x0 + 8.0, y1 - 18.0, t("animtimeline_editor.preview"), *c["text"])
 
     def _cube_preview_texture(self, pos, rot, scl) -> int:
@@ -694,6 +764,14 @@ class AnimTimelineEditorPanel(EditorPanel):
             native = _resolve_native_engine(self)
             if native is None or not hasattr(native, "render_timeline_cube_preview"):
                 return self._preview_tex_cache
+            signature = tuple(round(float(value), 4) for value in (
+                *pos, *rot, *scl, self._cam_yaw, self._cam_pitch, self._cam_dist
+            ))
+            # Native owns latest-wins backpressure: while one GPU submission is
+            # active, newer states overwrite one pending slot and are rendered
+            # as soon as it completes. Re-querying an identical state is cheap
+            # and lets Python observe the texture once the native pump finishes.
+            self._preview_request_signature = signature
             tex = int(native.render_timeline_cube_preview(
                 float(pos[0]), float(pos[1]), float(pos[2]),
                 float(rot[0]), float(rot[1]), float(rot[2]),
@@ -701,8 +779,6 @@ class AnimTimelineEditorPanel(EditorPanel):
                 float(self._cam_yaw), float(self._cam_pitch), float(self._cam_dist),
                 _PREVIEW_RENDER_PX,
             ) or 0)
-            if tex == 0 and hasattr(native, "get_imgui_texture_id"):
-                tex = int(native.get_imgui_texture_id("__cpp_timeline_cube_preview__") or 0)
             if tex:
                 self._preview_tex_cache = tex
             return tex or self._preview_tex_cache
@@ -722,11 +798,18 @@ class AnimTimelineEditorPanel(EditorPanel):
             ctx.pop_style_color(1)
             return
 
+        capture_semantics = _semantic_capture_enabled(ctx)
+
         # Time — inline label + field.
         ctx.label(t("animtimeline_editor.key_time"))
         ctx.same_line(_KF_LABEL_W)
         ctx.set_next_item_width(-1)
         nt = ctx.drag_float("##k_time", float(k.time), 0.01, 0.0, float(self._timeline.duration))
+        if capture_semantics:
+            ctx.record_semantic_item(
+                "drag_float", t("animtimeline_editor.key_time"), True,
+                "animtimeline.keyframe.time", numeric_value=nt,
+            )
         if nt != k.time:
             k.time = max(0.0, min(float(self._timeline.duration), float(nt)))
             self._playhead = k.time
@@ -739,6 +822,11 @@ class AnimTimelineEditorPanel(EditorPanel):
         interp_labels = _interp_labels()
         idx = INTERP_MODES.index(k.interp) if k.interp in INTERP_MODES else 1
         nidx = ctx.combo("##k_interp", idx, interp_labels, len(interp_labels))
+        if capture_semantics:
+            ctx.record_semantic_item(
+                "combo", t("animtimeline_editor.transition"), True,
+                "animtimeline.keyframe.interpolation", string_value=INTERP_MODES[nidx],
+            )
         if nidx != idx:
             k.interp = INTERP_MODES[nidx]
             self._set_dirty(True)
@@ -749,15 +837,31 @@ class AnimTimelineEditorPanel(EditorPanel):
         ctx.pop_style_color(1)
         ctx.separator()
 
-        if self._vec3_row(ctx, "pos", t("animtimeline_editor.position"), k.position, 0.01):
+        if self._vec3_row(
+            ctx, "pos", t("animtimeline_editor.position"), k.position, 0.01,
+            capture_semantics,
+        ):
             self._set_dirty(True)
-        if self._vec3_row(ctx, "rot", t("animtimeline_editor.rotation"), k.rotation, 0.25):
+        if self._vec3_row(
+            ctx, "rot", t("animtimeline_editor.rotation"), k.rotation, 0.25,
+            capture_semantics,
+        ):
             self._set_dirty(True)
-        if self._vec3_row(ctx, "scl", t("animtimeline_editor.scale"), k.scale, 0.01):
+        if self._vec3_row(
+            ctx, "scl", t("animtimeline_editor.scale"), k.scale, 0.01,
+            capture_semantics,
+        ):
             self._set_dirty(True)
 
     @staticmethod
-    def _vec3_row(ctx: InxGUIContext, vid: str, label: str, values, speed: float) -> bool:
+    def _vec3_row(
+        ctx: InxGUIContext,
+        vid: str,
+        label: str,
+        values,
+        speed: float,
+        capture_semantics: bool = True,
+    ) -> bool:
         """Render a single-line ``label  [X][Y][Z]`` drag row. Mutates *values* in place."""
         ctx.label(label)
         ctx.same_line(_KF_LABEL_W)  # fixed column so all rows' fields align
@@ -767,6 +871,11 @@ class AnimTimelineEditorPanel(EditorPanel):
         for i, axis in enumerate(("X", "Y", "Z")):
             ctx.set_next_item_width(field_w)
             nv = ctx.drag_float(f"##{vid}_{axis}", float(values[i]), speed, -1.0e9, 1.0e9)
+            if capture_semantics:
+                ctx.record_semantic_item(
+                    "drag_float", f"{label} {axis}", True,
+                    f"animtimeline.keyframe.{vid}.{axis.lower()}", numeric_value=nv,
+                )
             if nv != values[i]:
                 values[i] = float(nv)
                 changed = True

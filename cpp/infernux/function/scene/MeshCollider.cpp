@@ -6,25 +6,211 @@
 // Jolt/Jolt.h MUST be the very first Jolt include in this TU
 #include <Jolt/Jolt.h>
 #include <Jolt/Geometry/ConvexHullBuilder.h>
-#include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 
+#include "ComponentDocumentValidation.h"
 #include "MeshCollider.h"
 
 #include "ComponentFactory.h"
 #include "GameObject.h"
 #include "MeshRenderer.h"
 #include "Rigidbody.h"
+#include "core/threading/JobSystem.h"
+#include "physics/PhysicsECSStore.h"
 
+#include <atomic>
 #include <cfloat>
+#include <cmath>
 #include <core/log/InxLog.h>
+#include <cstring>
+#include <deque>
+#include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
+#include <vector>
 
 namespace infernux
 {
+
+namespace
+{
+struct CookedGeometry
+{
+    std::vector<glm::vec3> vertices;
+    std::vector<uint32_t> indices;
+    std::vector<glm::vec3> hullPositions;
+    std::vector<uint32_t> hullEdges;
+};
+
+struct CookingCacheKey
+{
+    uint64_t hashA = 0;
+    uint64_t hashB = 0;
+    size_t vertexCount = 0;
+    size_t indexCount = 0;
+    bool convex = false;
+
+    bool operator==(const CookingCacheKey &other) const
+    {
+        return hashA == other.hashA && hashB == other.hashB && vertexCount == other.vertexCount &&
+               indexCount == other.indexCount && convex == other.convex;
+    }
+};
+
+struct CookingCacheKeyHash
+{
+    size_t operator()(const CookingCacheKey &key) const
+    {
+        return static_cast<size_t>(key.hashA ^
+                                   (key.hashB + 0x9e3779b97f4a7c15ULL + (key.hashA << 6) + (key.hashA >> 2)));
+    }
+};
+
+constexpr size_t kMaxCookingCacheEntries = 128;
+std::mutex g_cookingCacheMutex;
+std::unordered_map<CookingCacheKey, std::shared_ptr<const CookedGeometry>, CookingCacheKeyHash> g_cookingCache;
+std::deque<CookingCacheKey> g_cookingCacheOrder;
+std::atomic<size_t> g_cookingCacheHits{0};
+std::atomic<size_t> g_cookingCacheMisses{0};
+std::atomic<size_t> g_asyncCookingSubmissions{0};
+
+struct CookingWaiter
+{
+    PhysicsECSStore::ColliderHandle handle;
+    uint64_t revision = 0;
+};
+
+struct InflightCooking
+{
+    JobHandle job;
+    std::vector<CookingWaiter> waiters;
+};
+
+struct CookingCompletion
+{
+    CookingCacheKey key;
+    std::shared_ptr<const CookedGeometry> geometry;
+    std::string error;
+};
+
+// In-flight ownership is main-thread only. Workers publish immutable payloads
+// through the completion queue and never retain Collider/GameObject pointers.
+std::unordered_map<CookingCacheKey, InflightCooking, CookingCacheKeyHash> g_inflightCooking;
+std::mutex g_cookingCompletionMutex;
+std::deque<CookingCompletion> g_cookingCompletions;
+
+CookingCacheKey HashGeometry(const std::vector<glm::vec3> &vertices, const std::vector<uint32_t> &indices, bool convex)
+{
+    CookingCacheKey key{14695981039346656037ULL, 1099511628211ULL, vertices.size(), indices.size(), convex};
+    const auto append = [&key](const void *data, size_t size) {
+        const auto *bytes = static_cast<const unsigned char *>(data);
+        for (size_t index = 0; index < size; ++index) {
+            key.hashA ^= bytes[index];
+            key.hashA *= 1099511628211ULL;
+            key.hashB ^= static_cast<uint64_t>(bytes[index]) + 0x9e3779b97f4a7c15ULL;
+            key.hashB *= 14029467366897019727ULL;
+        }
+    };
+    append(&convex, sizeof(convex));
+    for (const auto &vertex : vertices) {
+        append(&vertex.x, sizeof(vertex.x));
+        append(&vertex.y, sizeof(vertex.y));
+        append(&vertex.z, sizeof(vertex.z));
+    }
+    if (!indices.empty())
+        append(indices.data(), indices.size() * sizeof(uint32_t));
+    return key;
+}
+
+std::shared_ptr<const CookedGeometry> FindCookedGeometry(const CookingCacheKey &key)
+{
+    std::lock_guard<std::mutex> lock(g_cookingCacheMutex);
+    const auto it = g_cookingCache.find(key);
+    if (it == g_cookingCache.end())
+        return nullptr;
+    ++g_cookingCacheHits;
+    return it->second;
+}
+
+void StoreCookedGeometry(const CookingCacheKey &key, std::shared_ptr<const CookedGeometry> geometry)
+{
+    std::lock_guard<std::mutex> lock(g_cookingCacheMutex);
+    if (g_cookingCache.find(key) != g_cookingCache.end())
+        return;
+    while (g_cookingCache.size() >= kMaxCookingCacheEntries) {
+        g_cookingCache.erase(g_cookingCacheOrder.front());
+        g_cookingCacheOrder.pop_front();
+    }
+    g_cookingCache.emplace(key, std::move(geometry));
+    g_cookingCacheOrder.push_back(key);
+}
+
+JPH::Shape *CreateShapeFromCookedGeometry(const CookedGeometry &geometry, bool convex, std::string &error)
+{
+    const auto finish = [&error, convex](const JPH::ShapeSettings::ShapeResult &result) -> JPH::Shape * {
+        if (result.HasError()) {
+            error =
+                std::string(convex ? "cached convex shape creation failed: " : "cached mesh shape creation failed: ") +
+                result.GetError().c_str();
+            return nullptr;
+        }
+        auto *shape = const_cast<JPH::Shape *>(result.Get().GetPtr());
+        shape->AddRef();
+        return shape;
+    };
+    if (convex) {
+        JPH::Array<JPH::Vec3> points;
+        points.reserve(static_cast<int>(geometry.vertices.size()));
+        for (const auto &vertex : geometry.vertices)
+            points.emplace_back(vertex.x, vertex.y, vertex.z);
+        JPH::ConvexHullShapeSettings settings(points);
+        const auto result = settings.Create();
+        return finish(result);
+    } else {
+        JPH::MeshShapeSettings settings;
+        settings.mTriangleVertices.reserve(static_cast<int>(geometry.vertices.size()));
+        for (const auto &vertex : geometry.vertices)
+            settings.mTriangleVertices.emplace_back(vertex.x, vertex.y, vertex.z);
+        settings.mIndexedTriangles.reserve(static_cast<int>(geometry.indices.size() / 3));
+        for (size_t index = 0; index + 2 < geometry.indices.size(); index += 3) {
+            settings.mIndexedTriangles.emplace_back(geometry.indices[index], geometry.indices[index + 1],
+                                                    geometry.indices[index + 2]);
+        }
+        settings.SetEmbedded();
+        const auto result = settings.Create();
+        return finish(result);
+    }
+}
+} // namespace
+
+void MeshCollider::ClearCookingCache()
+{
+    FlushCompletedCooking(true);
+    std::lock_guard<std::mutex> lock(g_cookingCacheMutex);
+    g_cookingCache.clear();
+    g_cookingCacheOrder.clear();
+    g_cookingCacheHits.store(0);
+    g_cookingCacheMisses.store(0);
+    g_asyncCookingSubmissions.store(0);
+}
+
+std::pair<size_t, size_t> MeshCollider::GetCookingCacheStats()
+{
+    return {g_cookingCacheHits.load(), g_cookingCacheMisses.load()};
+}
+
+size_t MeshCollider::GetPendingCookingCount()
+{
+    return g_inflightCooking.size();
+}
+
+size_t MeshCollider::GetAsyncCookingSubmissionCount()
+{
+    return g_asyncCookingSubmissions.load();
+}
 
 // ---------------------------------------------------------------------------
 // Mesh cooking — mirrors Unity's MeshCollider cooking options:
@@ -155,15 +341,122 @@ static void EnsureOutwardWinding(std::vector<glm::vec3> &vertices, std::vector<u
     }
 }
 
-INFERNUX_REGISTER_COMPONENT("MeshCollider", MeshCollider)
+static std::shared_ptr<const CookedGeometry> CookGeometry(std::vector<glm::vec3> vertices,
+                                                          std::vector<uint32_t> indices, bool convex,
+                                                          const glm::vec3 &worldScale, std::string &error)
+{
+    auto cooked = std::make_shared<CookedGeometry>();
+    if (convex) {
+        constexpr int kMaxConvexVerts = 100;
+        JPH::Array<JPH::Vec3> allPoints;
+        allPoints.reserve(static_cast<int>(vertices.size()));
+        for (const auto &vertex : vertices)
+            allPoints.emplace_back(vertex.x, vertex.y, vertex.z);
+
+        JPH::ConvexHullBuilder builder(allPoints);
+        const char *buildError = nullptr;
+        const auto buildResult = builder.Initialize(kMaxConvexVerts, 1.0e-3f, buildError);
+        JPH::Array<JPH::Vec3> hullPoints;
+        std::unordered_map<int, uint32_t> originalToCompact;
+
+        if (buildResult == JPH::ConvexHullBuilder::EResult::Success ||
+            buildResult == JPH::ConvexHullBuilder::EResult::MaxVerticesReached) {
+            std::vector<bool> used(allPoints.size(), false);
+            for (const auto *face : builder.GetFaces()) {
+                const auto *edge = face->mFirstEdge;
+                do {
+                    used[static_cast<size_t>(edge->mStartIdx)] = true;
+                    edge = edge->mNextEdge;
+                } while (edge != face->mFirstEdge);
+            }
+            for (size_t index = 0; index < allPoints.size(); ++index) {
+                if (!used[index])
+                    continue;
+                originalToCompact[static_cast<int>(index)] = static_cast<uint32_t>(hullPoints.size());
+                hullPoints.push_back(allPoints[index]);
+            }
+
+            const float inverseX = worldScale.x != 0.0f ? 1.0f / worldScale.x : 1.0f;
+            const float inverseY = worldScale.y != 0.0f ? 1.0f / worldScale.y : 1.0f;
+            const float inverseZ = worldScale.z != 0.0f ? 1.0f / worldScale.z : 1.0f;
+            cooked->hullPositions.reserve(hullPoints.size());
+            for (const auto &point : hullPoints) {
+                cooked->hullPositions.emplace_back(point.GetX() * inverseX, point.GetY() * inverseY,
+                                                   point.GetZ() * inverseZ);
+            }
+            for (const auto *face : builder.GetFaces()) {
+                const auto *edge = face->mFirstEdge;
+                do {
+                    cooked->hullEdges.push_back(originalToCompact.at(edge->mStartIdx));
+                    cooked->hullEdges.push_back(originalToCompact.at(edge->mNextEdge->mStartIdx));
+                    edge = edge->mNextEdge;
+                } while (edge != face->mFirstEdge);
+            }
+        }
+
+        if (hullPoints.empty())
+            hullPoints = std::move(allPoints);
+        cooked->vertices.reserve(hullPoints.size());
+        for (const auto &point : hullPoints)
+            cooked->vertices.emplace_back(point.GetX(), point.GetY(), point.GetZ());
+        if (cooked->vertices.empty())
+            error = buildError ? std::string("convex mesh cooking failed: ") + buildError
+                               : "convex mesh cooking produced no vertices";
+        return error.empty() ? cooked : nullptr;
+    }
+
+    CookMeshGeometry(vertices, indices);
+    EnsureOutwardWinding(vertices, indices, worldScale);
+    if (indices.size() < 3) {
+        error = "mesh cooking removed every triangle";
+        return nullptr;
+    }
+    cooked->vertices = std::move(vertices);
+    cooked->indices = std::move(indices);
+    return cooked;
+}
+
+INFERNUX_REGISTER_VALIDATED_COMPONENT("MeshCollider", MeshCollider)
+
+void MeshCollider::Awake()
+{
+    if (auto *go = GetGameObject()) {
+        if (auto *rigidbody = go->GetComponent<Rigidbody>();
+            rigidbody && rigidbody->IsEnabled() && !rigidbody->IsKinematic()) {
+            m_convex = true;
+        }
+    }
+    Collider::Awake();
+}
 
 void MeshCollider::SetConvex(bool convex)
 {
+    if (!convex) {
+        if (auto *go = GetGameObject()) {
+            if (auto *rigidbody = go->GetComponent<Rigidbody>();
+                rigidbody && rigidbody->IsEnabled() && !rigidbody->IsKinematic()) {
+                throw std::invalid_argument("dynamic Rigidbody requires MeshCollider.convex = true");
+            }
+        }
+    }
     if (m_convex == convex) {
         return;
     }
     m_convex = convex;
+    InvalidatePendingCooking();
     RebuildShape();
+}
+
+void MeshCollider::OnMeshGeometryChanged()
+{
+    InvalidatePendingCooking();
+    RebuildShape();
+}
+
+void MeshCollider::InvalidatePendingCooking() const
+{
+    ++m_cookingRevision;
+    m_cookingPending = false;
 }
 
 void MeshCollider::AutoFitToMesh()
@@ -211,173 +504,112 @@ bool MeshCollider::CollectMeshGeometry(std::vector<glm::vec3> &outVertices, std:
         }
     }
 
-    // PATH 3: Fallback — AABB box from MeshRenderer bounds
-    glm::vec3 boundsMin(-0.5f, -0.5f, -0.5f);
-    glm::vec3 boundsMax(0.5f, 0.5f, 0.5f);
-    if (mr) {
-        boundsMin = mr->GetLocalBoundsMin();
-        boundsMax = mr->GetLocalBoundsMax();
-    }
-
-    glm::vec3 minScaled(boundsMin.x * scale.x, boundsMin.y * scale.y, boundsMin.z * scale.z);
-    glm::vec3 maxScaled(boundsMax.x * scale.x, boundsMax.y * scale.y, boundsMax.z * scale.z);
-
-    outVertices = {
-        {minScaled.x, minScaled.y, minScaled.z}, {maxScaled.x, minScaled.y, minScaled.z},
-        {maxScaled.x, maxScaled.y, minScaled.z}, {minScaled.x, maxScaled.y, minScaled.z},
-        {minScaled.x, minScaled.y, maxScaled.z}, {maxScaled.x, minScaled.y, maxScaled.z},
-        {maxScaled.x, maxScaled.y, maxScaled.z}, {minScaled.x, maxScaled.y, maxScaled.z},
-    };
-
-    outIndices = {
-        0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 4, 5, 0, 5, 1, 3, 2, 6, 3, 6, 7, 1, 5, 6, 1, 6, 2, 0, 3, 7, 0, 7, 4,
-    };
-    return true;
+    return false;
 }
 
 void *MeshCollider::CreateJoltShapeRaw() const
 {
+    m_shapeError.clear();
     std::vector<glm::vec3> vertices;
     std::vector<uint32_t> indices;
     if (!CollectMeshGeometry(vertices, indices) || vertices.empty()) {
-        JPH::Shape *fallback = new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
-        glm::vec3 center = GetCenter();
-        if (center != glm::vec3(0.0f)) {
-            fallback = new JPH::RotatedTranslatedShape(JPH::Vec3(center.x, center.y, center.z), JPH::Quat::sIdentity(),
-                                                       fallback);
+        InvalidatePendingCooking();
+        m_shapeError = "MeshCollider requires a MeshRenderer with valid mesh geometry";
+        return nullptr;
+    }
+    if (indices.size() < 3 || indices.size() % 3 != 0) {
+        InvalidatePendingCooking();
+        m_shapeError = "MeshCollider index data must contain complete triangles";
+        return nullptr;
+    }
+    for (const auto &vertex : vertices) {
+        if (!std::isfinite(vertex.x) || !std::isfinite(vertex.y) || !std::isfinite(vertex.z)) {
+            InvalidatePendingCooking();
+            m_shapeError = "MeshCollider vertices must contain only finite coordinates";
+            return nullptr;
         }
-        return fallback;
+    }
+    for (const uint32_t index : indices) {
+        if (index >= vertices.size()) {
+            InvalidatePendingCooking();
+            m_shapeError = "MeshCollider index data references a missing vertex";
+            return nullptr;
+        }
     }
 
-    bool useConvex = m_convex;
+    const bool useConvex = m_convex;
     if (auto *rb = GetCachedRigidbody(); rb && !rb->IsKinematic()) {
-        useConvex = true;
+        if (!m_convex) {
+            InvalidatePendingCooking();
+            m_shapeError = "dynamic Rigidbody requires MeshCollider.convex = true";
+            return nullptr;
+        }
+    }
+    const CookingCacheKey cookingKey = HashGeometry(vertices, indices, useConvex);
+    auto cookedGeometry = FindCookedGeometry(cookingKey);
+    glm::vec3 worldScale(1.0f);
+    if (auto *go = GetGameObject()) {
+        if (auto *transform = go->GetTransform())
+            worldScale = transform->GetWorldScale();
     }
 
-    // INXLOG_INFO("MeshCollider: creating shape — verts=", vertices.size(), ", tris=", indices.size() / 3,
-    //             ", convex=", (useConvex ? "true" : "false"), " (requested=", (m_convex ? "true" : "false"), ")");
+    if (!cookedGeometry && !JobSystem::IsAvailable()) {
+        ++g_cookingCacheMisses;
+        cookedGeometry = CookGeometry(std::move(vertices), std::move(indices), useConvex, worldScale, m_shapeError);
+        if (!cookedGeometry)
+            return nullptr;
+        StoreCookedGeometry(cookingKey, cookedGeometry);
+    } else if (!cookedGeometry) {
+        const bool sameRequest = m_cookingPending && m_pendingHashA == cookingKey.hashA &&
+                                 m_pendingHashB == cookingKey.hashB && m_pendingVertexCount == cookingKey.vertexCount &&
+                                 m_pendingIndexCount == cookingKey.indexCount && m_pendingConvex == cookingKey.convex;
+        if (!sameRequest) {
+            const uint64_t revision = ++m_cookingRevision;
+            m_pendingHashA = cookingKey.hashA;
+            m_pendingHashB = cookingKey.hashB;
+            m_pendingVertexCount = cookingKey.vertexCount;
+            m_pendingIndexCount = cookingKey.indexCount;
+            m_pendingConvex = cookingKey.convex;
+            m_cookingPending = true;
 
-    JPH::Shape *shape = nullptr;
-    if (useConvex) {
-        // Build a convex hull with at most 100 output vertices using all input points.
-        // ConvexHullBuilder iteratively selects the best vertices, giving a much
-        // better approximation than naively sub-sampling the input.
-        constexpr int kMaxConvexVerts = 100;
-
-        JPH::Array<JPH::Vec3> allPoints;
-        allPoints.reserve(static_cast<int>(vertices.size()));
-        for (const auto &v : vertices) {
-            allPoints.push_back(JPH::Vec3(v.x, v.y, v.z));
-        }
-
-        JPH::ConvexHullBuilder builder(allPoints);
-        const char *buildError = nullptr;
-        auto buildResult = builder.Initialize(kMaxConvexVerts, 1.0e-3f, buildError);
-
-        JPH::Array<JPH::Vec3> hullPoints;
-        // Build a mapping from original index → compact hull index for gizmo edges
-        std::unordered_map<int, uint32_t> origToCompact;
-
-        if (buildResult == JPH::ConvexHullBuilder::EResult::Success ||
-            buildResult == JPH::ConvexHullBuilder::EResult::MaxVerticesReached) {
-            // Collect unique vertex indices from hull faces
-            std::vector<bool> used(allPoints.size(), false);
-            for (const auto *face : builder.GetFaces()) {
-                const auto *edge = face->mFirstEdge;
-                do {
-                    used[static_cast<size_t>(edge->mStartIdx)] = true;
-                    edge = edge->mNextEdge;
-                } while (edge != face->mFirstEdge);
-            }
-            for (size_t i = 0; i < allPoints.size(); ++i) {
-                if (used[i]) {
-                    origToCompact[static_cast<int>(i)] = static_cast<uint32_t>(hullPoints.size());
-                    hullPoints.push_back(allPoints[i]);
-                }
-            }
-
-            // Store hull for gizmo display (un-scale to local space)
-            glm::vec3 scale(1.0f);
-            if (auto *go = GetGameObject()) {
-                if (auto *tf = go->GetTransform()) {
-                    scale = tf->GetWorldScale();
-                }
-            }
-            const float invSx = (scale.x != 0.0f) ? (1.0f / scale.x) : 1.0f;
-            const float invSy = (scale.y != 0.0f) ? (1.0f / scale.y) : 1.0f;
-            const float invSz = (scale.z != 0.0f) ? (1.0f / scale.z) : 1.0f;
-
-            m_convexHullPositions.clear();
-            m_convexHullPositions.reserve(hullPoints.size());
-            for (const auto &p : hullPoints) {
-                m_convexHullPositions.emplace_back(p.GetX() * invSx, p.GetY() * invSy, p.GetZ() * invSz);
-            }
-
-            m_convexHullEdges.clear();
-            for (const auto *face : builder.GetFaces()) {
-                const auto *edge = face->mFirstEdge;
-                do {
-                    uint32_t a = origToCompact[edge->mStartIdx];
-                    uint32_t b = origToCompact[edge->mNextEdge->mStartIdx];
-                    m_convexHullEdges.push_back(a);
-                    m_convexHullEdges.push_back(b);
-                    edge = edge->mNextEdge;
-                } while (edge != face->mFirstEdge);
-            }
-        }
-        if (hullPoints.empty()) {
-            hullPoints = std::move(allPoints);
-            m_convexHullPositions.clear();
-            m_convexHullEdges.clear();
-        }
-
-        JPH::ConvexHullShapeSettings settings(hullPoints);
-        JPH::ShapeSettings::ShapeResult result = settings.Create();
-        if (result.HasError()) {
-            shape = new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
-        } else {
-            shape = const_cast<JPH::Shape *>(result.Get().GetPtr());
-            shape->AddRef();
-        }
-    } else {
-        // Cook the mesh (Unity: WeldColocatedVertices + EnableMeshCleaning)
-        size_t origVerts = vertices.size();
-        size_t origTris = indices.size() / 3;
-        CookMeshGeometry(vertices, indices);
-        // INXLOG_INFO("MeshCollider: mesh cooking — verts ", origVerts, "→", vertices.size(), ", tris ", origTris, "→",
-        //             indices.size() / 3);
-        // Ensure outward-facing winding for correct collision normals.
-        glm::vec3 meshScale(1.0f);
-        if (auto *go = GetGameObject()) {
-            if (auto *tf = go->GetTransform()) {
-                meshScale = tf->GetWorldScale();
-            }
-        }
-        EnsureOutwardWinding(vertices, indices, meshScale);
-
-        if (indices.size() < 3) {
-            shape = new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
-        } else {
-            JPH::MeshShapeSettings settings;
-            settings.mTriangleVertices.reserve(static_cast<int>(vertices.size()));
-            for (const auto &v : vertices) {
-                settings.mTriangleVertices.emplace_back(v.x, v.y, v.z);
-            }
-            settings.mIndexedTriangles.reserve(static_cast<int>(indices.size() / 3));
-            for (size_t i = 0; i + 2 < indices.size(); i += 3) {
-                settings.mIndexedTriangles.emplace_back(indices[i], indices[i + 1], indices[i + 2]);
-            }
-            settings.SetEmbedded();
-
-            JPH::ShapeSettings::ShapeResult result = settings.Create();
-            if (result.HasError()) {
-                shape = new JPH::BoxShape(JPH::Vec3(0.5f, 0.5f, 0.5f));
+            CookingWaiter waiter{m_ecsHandle, revision};
+            auto inflight = g_inflightCooking.find(cookingKey);
+            if (inflight != g_inflightCooking.end()) {
+                inflight->second.waiters.push_back(waiter);
             } else {
-                shape = const_cast<JPH::Shape *>(result.Get().GetPtr());
-                shape->AddRef();
+                ++g_cookingCacheMisses;
+                ++g_asyncCookingSubmissions;
+                InflightCooking request;
+                request.waiters.push_back(waiter);
+                request.job =
+                    JobSystem::Get().Schedule([key = cookingKey, vertices = std::move(vertices),
+                                               indices = std::move(indices), useConvex, worldScale]() mutable {
+                        CookingCompletion completion;
+                        completion.key = key;
+                        try {
+                            completion.geometry = CookGeometry(std::move(vertices), std::move(indices), useConvex,
+                                                               worldScale, completion.error);
+                        } catch (const std::exception &exception) {
+                            completion.error = std::string("mesh cooking worker failed: ") + exception.what();
+                        } catch (...) {
+                            completion.error = "mesh cooking worker failed with an unknown exception";
+                        }
+                        std::lock_guard<std::mutex> lock(g_cookingCompletionMutex);
+                        g_cookingCompletions.push_back(std::move(completion));
+                    });
+                g_inflightCooking.emplace(cookingKey, std::move(request));
             }
         }
+        return nullptr;
     }
+
+    if (m_cookingPending)
+        InvalidatePendingCooking();
+    JPH::Shape *shape = CreateShapeFromCookedGeometry(*cookedGeometry, useConvex, m_shapeError);
+    if (!shape)
+        return nullptr;
+    m_convexHullPositions = cookedGeometry->hullPositions;
+    m_convexHullEdges = cookedGeometry->hullEdges;
 
     glm::vec3 center = GetCenter();
     if (auto *go = GetGameObject()) {
@@ -392,22 +624,95 @@ void *MeshCollider::CreateJoltShapeRaw() const
     return shape;
 }
 
-std::string MeshCollider::Serialize() const
+void MeshCollider::CompleteCooking(uint64_t hashA, uint64_t hashB, size_t vertexCount, size_t indexCount, bool convex,
+                                   uint64_t revision, const std::string &error)
 {
-    auto baseJson = nlohmann::json::parse(Collider::Serialize());
-    baseJson["convex"] = m_convex;
-    return baseJson.dump();
-}
-
-bool MeshCollider::Deserialize(const std::string &jsonStr)
-{
-    if (!Collider::Deserialize(jsonStr)) {
-        return false;
+    if (!m_cookingPending || m_cookingRevision != revision || m_pendingHashA != hashA || m_pendingHashB != hashB ||
+        m_pendingVertexCount != vertexCount || m_pendingIndexCount != indexCount || m_pendingConvex != convex) {
+        return;
     }
 
+    m_cookingPending = false;
+    if (!error.empty()) {
+        m_shapeError = error;
+        return;
+    }
+
+    m_shapeError.clear();
+    if (GetBodyId() == 0xFFFFFFFF) {
+        PhysicsECSStore::Instance().QueueBodyCreation(m_ecsHandle);
+    } else {
+        RebuildShape();
+    }
+}
+
+void MeshCollider::FlushCompletedCooking(bool waitForAll)
+{
+    if (waitForAll && !g_inflightCooking.empty()) {
+        if (!JobSystem::IsAvailable())
+            throw std::logic_error("cannot wait for mesh cooking after JobSystem shutdown");
+        std::vector<JobHandle> jobs;
+        jobs.reserve(g_inflightCooking.size());
+        for (const auto &entry : g_inflightCooking)
+            jobs.push_back(entry.second.job);
+        for (const auto &job : jobs)
+            JobSystem::Get().Wait(job);
+    }
+
+    std::deque<CookingCompletion> completions;
+    {
+        std::lock_guard<std::mutex> lock(g_cookingCompletionMutex);
+        completions.swap(g_cookingCompletions);
+    }
+
+    auto &store = PhysicsECSStore::Instance();
+    for (auto &completion : completions) {
+        auto inflight = g_inflightCooking.find(completion.key);
+        if (inflight == g_inflightCooking.end())
+            continue;
+        auto waiters = std::move(inflight->second.waiters);
+        g_inflightCooking.erase(inflight);
+        if (completion.geometry)
+            StoreCookedGeometry(completion.key, completion.geometry);
+
+        for (const auto &waiter : waiters) {
+            if (!store.IsValid(waiter.handle))
+                continue;
+            auto *collider = dynamic_cast<MeshCollider *>(store.GetCollider(waiter.handle).owner);
+            if (!collider)
+                continue;
+            collider->CompleteCooking(completion.key.hashA, completion.key.hashB, completion.key.vertexCount,
+                                      completion.key.indexCount, completion.key.convex, waiter.revision,
+                                      completion.error);
+        }
+    }
+}
+
+nlohmann::json MeshCollider::SerializeDocument() const
+{
+    auto baseJson = Collider::SerializeDocument();
+    baseJson["convex"] = m_convex;
+    return baseJson;
+}
+
+void MeshCollider::ValidateSerializedDocument(const nlohmann::json &j)
+{
+    using namespace component_document_validation;
+    ValidateComponentDocument(j, "MeshCollider", 1, {"is_trigger", "center", "physic_material_guid", "convex"});
+    RequireBoolean(j, "is_trigger", "MeshCollider");
+    RequireFiniteVector(j, "center", 3, "MeshCollider");
+    RequireString(j, "physic_material_guid", "MeshCollider");
+    RequireBoolean(j, "convex", "MeshCollider");
+}
+
+bool MeshCollider::DeserializeDocument(const nlohmann::json &j)
+{
     try {
-        auto j = nlohmann::json::parse(jsonStr);
-        m_convex = j.value("convex", false);
+        ValidateSerializedDocument(j);
+        const bool stagedConvex = j["convex"].get<bool>();
+        if (!Collider::DeserializeDocument(j))
+            return false;
+        m_convex = stagedConvex;
         RebuildShape();
         return true;
     } catch (const std::exception &e) {
@@ -423,6 +728,7 @@ std::unique_ptr<Component> MeshCollider::Clone() const
     clone->m_convex = m_convex;
     clone->m_convexHullPositions = m_convexHullPositions;
     clone->m_convexHullEdges = m_convexHullEdges;
+    clone->m_shapeError = m_shapeError;
     return clone;
 }
 

@@ -41,6 +41,26 @@ def pretty_field_name(name: str) -> str:
     """Shortcut for ``format_display_name(name, title_case=True)``."""
     ...
 
+def semantic_capture_enabled(ctx: InxGUIContext) -> bool:
+    """Return whether this frame is collecting a semantic UI snapshot."""
+    ...
+
+def inspector_component_semantic_id(component: object, field_name: str) -> str:
+    """Return the stable MCP semantic identity for an Inspector field."""
+    ...
+
+def record_inspector_component_item(
+    ctx: InxGUIContext,
+    component: object,
+    field_name: str,
+    kind: str,
+    label: str,
+    *,
+    enabled: bool = True,
+) -> str:
+    """Record the previously rendered Inspector widget under its stable identity."""
+    ...
+
 def max_label_w(
     ctx: InxGUIContext, labels: object, *, min_width: float = 0.0,
 ) -> float:
@@ -144,6 +164,7 @@ def render_apply_revert(
     is_dirty: bool,
     on_apply: Callable,
     on_revert: Callable,
+    semantic_prefix: str = "",
 ) -> None:
     """Render Apply / Revert buttons (greyed out when not dirty)."""
     ...

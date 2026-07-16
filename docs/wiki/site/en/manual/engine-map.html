@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="A routing map from common Infernux development tasks to the responsible engine systems and canonical API pages.">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>Engine Map - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/en/manual/engine-map.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="Engine Map - Infernux Documentation">
+    <meta property="og:description" content="A routing map from common Infernux development tasks to the responsible engine systems and canonical API pages.">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/en/manual/engine-map.html">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status.">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="Manual">
+    <meta property="article:tag" content="overview"><meta property="article:tag" content="systems"><meta property="article:tag" content="reference">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Engine Map - Infernux Documentation">
+    <meta name="twitter:description" content="A routing map from common Infernux development tasks to the responsible engine systems and canonical API pages.">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status.">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://infernux-engine.com/wiki/site/en/manual/engine-map.html#document",
+          "headline": "Engine Map",
+          "name": "Engine Map",
+          "description": "A routing map from common Infernux development tasks to the responsible engine systems and canonical API pages.",
+          "url": "https://infernux-engine.com/wiki/site/en/manual/engine-map.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/en/manual/engine-map.html"
+          },
+          "inLanguage": "en",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Manual",
+          "articleSection": "Manual",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": "Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status."
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["overview", "systems", "reference"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/en/manual/engine-map.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Documentation",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Manual",
+              "item": "https://infernux-engine.com/wiki.html?layer=manual#written-guides"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "Engine Map",
+              "item": "https://infernux-engine.com/wiki/site/en/manual/engine-map.html"
+            }
+            
+          ]
+        }
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/manual/engine-map.html">
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/manual/engine-map.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/manual/engine-map.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
+    <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
+</head>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <!-- Top Navigation -->
+    <nav class="navbar" aria-label="Primary navigation">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/en/learn/getting-started.html" class="nav-priority">Start</a>
+                <a href="/wiki.html#start-here">Learn</a>
+                <a href="/wiki.html?layer=manual#written-guides" class="active" aria-current="page">Manual</a>
+                <a href="/wiki/site/en/api/index.html">API</a>
+                <a href="/roadmap.html">Roadmap</a>
+                <a href="/community.html" class="nav-priority">Community</a>
+                <a href="/download.html">Download</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="Copy version, sources, and canonical link" aria-label="Copy page context for an Agent">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>Copy for Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>Search docs</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell article-page-shell" id="main-content">
+        <div class="container article-page-container">
+            <div class="api-main article-page-content">
+                
+    <nav class="doc-breadcrumb" aria-label="Breadcrumb">
+        <a href="/wiki.html">Docs</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html?layer=manual#written-guides">Manual</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">Engine Map</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="Document version and sources" data-status="preview" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">preview</strong>
+                        <span class="doc-provenance-item"><span>Since</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>Verified</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>Audience</span> user, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">Docs manifest</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/zh/manual/engine-map.html" lang="zh">阅读中文</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>Source evidence · 2</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/tree/master/python/Infernux" target="_blank" rel="noopener">python/Infernux</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/tree/master/docs/wiki/docs/en/api" target="_blank" rel="noopener">docs/wiki/docs/en/api</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>On this page</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>Hide sections</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="Sections on this page"></nav>
+    </aside>
+    
+                <h1 id="engine-map">Engine Map<a class="headerlink" href="#engine-map" title="Permanent link">&para;</a></h1>
+<p>Use this page when you know <strong>what you want to build</strong> but not which Infernux type or module owns it. It is a routing map, not a replacement for task tutorials or exact API signatures.</p>
+<h2 id="core-authoring-model">Core authoring model<a class="headerlink" href="#core-authoring-model" title="Permanent link">&para;</a></h2>
+<figure class="doc-diagram doc-diagram--hierarchy" role="group" aria-label="Project ownership from Scene to behavior"><figcaption><span>INX / SYSTEM MAP</span>Project ownership from Scene to behavior</figcaption><pre><code><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>Project
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>└─ Scene
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>   └─ GameObject
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>      ├─ Transform
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>      ├─ built-in Components
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>      └─ Python InxComponent scripts
+</code></pre></figure>
+<p>A Scene contains GameObjects. Each GameObject always has spatial state through its Transform and gains behavior through components. Python gameplay behavior derives from <code>InxComponent</code> and participates in the engine lifecycle.</p>
+<h2 id="find-a-system-by-task">Find a system by task<a class="headerlink" href="#find-a-system-by-task" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>I want to…</th>
+<th>Start with</th>
+<th>Canonical reference</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Move, rotate, scale, or parent an object</td>
+<td>Transform</td>
+<td><a href="../api/Transform.html">Transform</a></td>
+</tr>
+<tr>
+<td>Write Python gameplay behavior</td>
+<td>Component lifecycle</td>
+<td><a href="../api/InxComponent.html">InxComponent</a></td>
+</tr>
+<tr>
+<td>Expose a value in the Inspector</td>
+<td>Serialized fields</td>
+<td><a href="../api/serialized_field.html">serialized_field</a></td>
+</tr>
+<tr>
+<td>Create, find, enable, or destroy objects</td>
+<td>Object model</td>
+<td><a href="../api/GameObject.html">GameObject</a></td>
+</tr>
+<tr>
+<td>Load or switch levels</td>
+<td>Scene management</td>
+<td><a href="../api/SceneManager.html">SceneManager</a></td>
+</tr>
+<tr>
+<td>Read keyboard, mouse, or touch input</td>
+<td>Input</td>
+<td><a href="../api/Input.html">Input</a> · <a href="../api/KeyCode.html">KeyCode</a></td>
+</tr>
+<tr>
+<td>Run fixed-step physical behavior</td>
+<td>Physics components and queries</td>
+<td><a href="../api/Physics.html">Physics</a> · <a href="../api/Rigidbody.html">Rigidbody</a></td>
+</tr>
+<tr>
+<td>Wait across frames without blocking</td>
+<td>Coroutines</td>
+<td><a href="../api/Coroutine.html">Coroutine</a> · <a href="../api/WaitForSeconds.html">WaitForSeconds</a></td>
+</tr>
+<tr>
+<td>Read frame and fixed timing</td>
+<td>Timing</td>
+<td><a href="../api/Time.html">Time</a></td>
+</tr>
+<tr>
+<td>Log diagnostics</td>
+<td>Debug</td>
+<td><a href="../api/Debug.html">Debug</a></td>
+</tr>
+<tr>
+<td>Build runtime user interfaces</td>
+<td>UI</td>
+<td><a href="../api/UICanvas.html">UICanvas</a> · <a href="../api/UIButton.html">UIButton</a></td>
+</tr>
+<tr>
+<td>Configure cameras and lights</td>
+<td>Rendering components</td>
+<td><a href="../api/Camera.html">Camera</a> · <a href="../api/Light.html">Light</a></td>
+</tr>
+<tr>
+<td>Add post-processing</td>
+<td>Render stack</td>
+<td><a href="../api/RenderStack.html">RenderStack</a></td>
+</tr>
+<tr>
+<td>Build custom render passes</td>
+<td>Render graph</td>
+<td><a href="../api/RenderGraph.html">RenderGraph</a></td>
+</tr>
+<tr>
+<td>Optimize array-heavy Python loops</td>
+<td>JIT subsystem</td>
+<td><a href="../architecture/jit.html">JIT guide</a> · <a href="../api/njit.html">njit</a></td>
+</tr>
+</tbody>
+</table>
+<h2 id="component-lifecycle-at-a-glance">Component lifecycle at a glance<a class="headerlink" href="#component-lifecycle-at-a-glance" title="Permanent link">&para;</a></h2>
+<figure class="doc-diagram doc-diagram--timeline" role="group" aria-label="Component lifecycle and per-frame update phases"><figcaption><span>INX / SYSTEM MAP</span>Component lifecycle and per-frame update phases</figcaption><pre><code><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>created → awake → enabled → start → update / fixed_update / late_update → disabled → destroyed
+</code></pre></figure>
+<ul>
+<li>Use <code>awake()</code> for the component's own invariant setup.</li>
+<li>Use <code>start()</code> when setup depends on the active scene.</li>
+<li>Use <code>update(delta_time)</code> for regular frame work.</li>
+<li>Use <code>fixed_update(fixed_delta_time)</code> for fixed-step physics decisions.</li>
+<li>Use <code>late_update(delta_time)</code> for work that must follow normal updates.</li>
+<li>Use <code>on_enable()</code>, <code>on_disable()</code>, and <code>on_destroy()</code> to manage external registrations and resources.</li>
+</ul>
+<p>Lifecycle details live in the <a href="../api/InxComponent.html">InxComponent API</a>.</p>
+<h2 id="documentation-layers">Documentation layers<a class="headerlink" href="#documentation-layers" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Best for</th>
+<th>Stability</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Learn</td>
+<td>Completing a small end-to-end task</td>
+<td>Curated and version-checked</td>
+</tr>
+<tr>
+<td>Manual</td>
+<td>Understanding concepts and system ownership</td>
+<td>Curated and version-checked</td>
+</tr>
+<tr>
+<td>API</td>
+<td>Exact classes, properties, methods, and signatures</td>
+<td>Generated from current bindings and stubs</td>
+</tr>
+<tr>
+<td>Architecture</td>
+<td>Design rationale and research context</td>
+<td>Explanatory; may describe experimental work</td>
+</tr>
+</tbody>
+</table>
+<p>When a guide and generated signature disagree, treat the current generated API as the signature authority and report the guide mismatch.</p>
+<h2 id="preview-status-rule">Preview-status rule<a class="headerlink" href="#preview-status-rule" title="Permanent link">&para;</a></h2>
+<p>Infernux is in preview. Before relying on a behavior:</p>
+<ol>
+<li>check the page's <code>since</code> and <code>last_verified</code> metadata;</li>
+<li>compare it with the engine version you are running;</li>
+<li>verify the exact API signature;</li>
+<li>inspect the Console for the first relevant error.</li>
+</ol>
+<p>For your first practical workflow, continue to <a href="../learn/first-component.html">Your First Component</a>.</p>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="Document navigation and feedback">
+        <a class="doc-trail-fallback" href="/wiki.html">Back to documentation</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="Documentation build evidence">
+        <span class="doc-build-label">Build evidence</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">Reading release and source provenance…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">Machine manifest JSON</a>
+    </section>
+    
+    
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">Search Infernux documentation</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="Close documentation search"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API symbol, system, workflow…">
+            </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="Documentation search filters"></div>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </dialog>
+
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
+</body>
+</html>

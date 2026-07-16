@@ -88,6 +88,14 @@ class InxScreenUIRenderer
     void BeginFrame(uint32_t width, uint32_t height);
 
     /**
+     * @brief Reuse the previous draw lists when UI content is unchanged.
+     * @return true when cached
+     * commands were retained; false when callers
+     *         must submit the frame's Add* commands again.
+     */
+    bool BeginFrameCached(uint32_t width, uint32_t height, uint64_t contentRevision);
+
+    /**
      * @brief Add a filled rectangle
      */
     void AddFilledRect(ScreenUIList list, float minX, float minY, float maxX, float maxY, float r, float g, float b,
@@ -242,6 +250,11 @@ class InxScreenUIRenderer
 
     bool m_initialized = false;
     bool m_enabled = true;
+    bool m_commandCacheValid = false;
+    uint32_t m_cachedWidth = 0;
+    uint32_t m_cachedHeight = 0;
+    uint64_t m_cachedContentRevision = 0;
+    ImTextureID m_cachedFontTextureId = 0;
     FrameDeletionQueue *m_deletionQueue = nullptr;
 };
 

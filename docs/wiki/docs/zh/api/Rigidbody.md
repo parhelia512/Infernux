@@ -11,7 +11,9 @@
 刚体组件。让物体受物理引擎控制——牛顿看了都点头。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+动态刚体应使用力或速度，不要每帧写 Transform。运动学刚体使用移动操作，仿真命令从固定更新发出。
 <!-- USER CONTENT END -->
 
 ## 属性
@@ -39,8 +41,8 @@
 | velocity | `Any` | 线速度。 |
 | angular_velocity | `Any` | 角速度。 |
 | world_center_of_mass | `Any` | The center of mass in world space. *(只读)* |
-| position | `Any` | 刚体位置。 *(只读)* |
-| rotation | `Tuple[float, float, float, float]` | 刚体旋转。 *(只读)* |
+| position | `Any` | 刚体位置。 |
+| rotation | `Tuple[float, float, float, float]` | 刚体旋转。 |
 
 <!-- USER CONTENT START --> properties
 
@@ -70,12 +72,24 @@
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for Rigidbody
+from Infernux import InxComponent, Rigidbody, Vector3
+
+
+class Thruster(InxComponent):
+    def start(self) -> None:
+        self.body = self.game_object.get_component(Rigidbody)
+
+    def fixed_update(self, fixed_delta_time: float) -> None:
+        if self.body is not None:
+            self.body.add_force(Vector3(0.0, 12.0, 0.0))
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [物理手册](../manual/physics.md)
+- [Physics](Physics.md)
+- [Collider](Collider.md)
+- [InxComponent](InxComponent.md)
 <!-- USER CONTENT END -->

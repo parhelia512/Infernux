@@ -102,6 +102,10 @@ class VkDeviceContext
      * Skipped when shutting down (caller already drained the GPU).
      */
     void WaitIdle() const;
+    [[nodiscard]] uint64_t GetWaitIdleCount() const noexcept
+    {
+        return m_waitIdleCount;
+    }
 
     /// @brief Shutdown coordination — when true, WaitIdle() is a no-op.
     void SetShuttingDown(bool v)
@@ -345,6 +349,7 @@ class VkDeviceContext
 
     bool m_validationEnabled = false;
     mutable bool m_shuttingDown = false;
+    mutable uint64_t m_waitIdleCount = 0;
 
     static constexpr std::array<const char *, 1> VALIDATION_LAYERS = {"VK_LAYER_KHRONOS_validation"};
 

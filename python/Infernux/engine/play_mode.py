@@ -88,8 +88,8 @@ class PlayModeManager(PlayModeSerializationMixin):
         self._time_scale: float = 1.0
         self._total_play_time: float = 0.0
         
-        # Scene state backup (JSON string from C++ Scene::Serialize)
-        self._scene_backup: Optional[str] = None
+        # Typed scene document captured before entering play mode.
+        self._scene_backup: Optional[Any] = None
         # Original scene file path (to restore correct scene on Stop)
         self._scene_path_backup: Optional[str] = None
         self._scene_dirty_backup: bool = False
@@ -103,9 +103,14 @@ class PlayModeManager(PlayModeSerializationMixin):
         # Asset database for GUID-based script lookup
         self._asset_database = None
         self._runtime_hidden_object_ids: set[int] = set()
+        self._runtime_hidden_listeners: list[Callable[[], None]] = []
+        self._last_rebuild_timings_ms: dict[str, float] = {}
 
         # C++ engine handle for renderer-level play mode signalling
         self._native_engine = None
+        # Debug automation installs this gate only while a bounded frame task
+        # is active. Normal editor frames pay only the inactive None check.
+        self._debug_frame_pause_gate: Optional[dict] = None
     
     @classmethod
     def instance(cls) -> Optional['PlayModeManager']:
@@ -121,7 +126,10 @@ class PlayModeManager(PlayModeSerializationMixin):
         self._asset_database = asset_database
 
     def clear_runtime_hidden_object_ids(self):
+        if not self._runtime_hidden_object_ids:
+            return
         self._runtime_hidden_object_ids.clear()
+        self._notify_runtime_hidden_changed()
 
     def register_runtime_hidden_object(self, game_object) -> None:
         if game_object is None:
@@ -132,7 +140,27 @@ class PlayModeManager(PlayModeSerializationMixin):
             Debug.log_suppressed("PlayModeManager.register_runtime_hidden_object", exc)
             return
         if object_id > 0:
+            previous_count = len(self._runtime_hidden_object_ids)
             self._runtime_hidden_object_ids.add(object_id)
+            if len(self._runtime_hidden_object_ids) != previous_count:
+                self._notify_runtime_hidden_changed()
+
+    def add_runtime_hidden_listener(self, callback: Callable[[], None]) -> None:
+        if callback not in self._runtime_hidden_listeners:
+            self._runtime_hidden_listeners.append(callback)
+
+    def remove_runtime_hidden_listener(self, callback: Callable[[], None]) -> None:
+        try:
+            self._runtime_hidden_listeners.remove(callback)
+        except ValueError:
+            pass
+
+    def _notify_runtime_hidden_changed(self) -> None:
+        for callback in tuple(self._runtime_hidden_listeners):
+            try:
+                callback()
+            except Exception as exc:
+                Debug.log_suppressed("PlayModeManager.runtime_hidden_listener", exc)
 
     def get_runtime_hidden_object_ids(self) -> set[int]:
         return set(self._runtime_hidden_object_ids)
@@ -180,17 +208,10 @@ class PlayModeManager(PlayModeSerializationMixin):
     
     @time_scale.setter
     def time_scale(self, value: float):
-        """Set time scale (clamped to >= 0)."""
-        self._time_scale = max(0.0, value)
-        # Keep static Time class in sync
-        try:
-            from Infernux.timing import Time
-            Time._time_scale = self._time_scale
-        except ImportError:
-            # Benign during early bootstrap before Infernux.timing is reachable.
-            pass
-        except Exception as exc:
-            Debug.log_warning(f"Failed to sync time_scale to Time class: {exc}")
+        """Set the native gameplay time scale."""
+        from Infernux.timing import Time
+        Time.time_scale = value
+        self._time_scale = Time.time_scale
     
     @property
     def total_play_time(self) -> float:
@@ -236,38 +257,6 @@ class PlayModeManager(PlayModeSerializationMixin):
             )
             return False
 
-        # Pre-flight check: block play if any BrokenComponent placeholders exist
-        from Infernux.components.component import BrokenComponent, InxComponent
-        broken = [
-            c for comps in InxComponent._active_instances.values()
-            for c in comps if isinstance(c, BrokenComponent)
-        ]
-        if broken:
-            names = sorted({c.type_name for c in broken})
-            if len(broken) == 1:
-                comp = broken[0]
-                owner = comp.game_object
-                owner_name = getattr(owner, "name", "<Missing GameObject>")
-                Debug.log_error(
-                    f"Play Mode blocked by broken component '{comp.type_name}' on '{owner_name}'. "
-                    "Fix or remove it before playing.",
-                    context=owner if owner is not None else comp,
-                )
-            else:
-                for comp in broken:
-                    owner = comp.game_object
-                    owner_name = getattr(owner, "name", "<Missing GameObject>")
-                    Debug.log_error(
-                        f"Play Mode blocked by broken component '{comp.type_name}' on '{owner_name}'. "
-                        "Fix or remove it before playing.",
-                        context=owner if owner is not None else comp,
-                    )
-                Debug.log_error(
-                    f"Play Mode blocked: {len(broken)} broken component(s) "
-                    f"({', '.join(names)}). Fix or remove them before playing."
-                )
-            return False
-        
         Debug.log_internal("▶ Entering Play Mode...")
 
         from Infernux.engine.deferred_task import DeferredTaskRunner
@@ -279,13 +268,18 @@ class PlayModeManager(PlayModeSerializationMixin):
         # ── Step functions (closures capture self) ───────────────────
         def step_enter():
             """Save scene, rebuild from snapshot, and activate play — all in one frame."""
+            transition_started = time.perf_counter()
+            sprite_init_started = transition_started
             try:
                 from Infernux.components.builtin.sprite_renderer import SpriteRenderer
                 SpriteRenderer.init_all_in_scene()
             except Exception as exc:
                 Debug.log_suppressed("PlayModeManager.step_enter.SpriteRenderer.init_all_in_scene", exc)
+            sprite_init_ms = (time.perf_counter() - sprite_init_started) * 1000.0
             # 1. Serialize scene + init timing (do not clear undo — asset editors keep history)
+            snapshot_started = time.perf_counter()
             self._save_scene_state()
+            snapshot_ms = (time.perf_counter() - snapshot_started) * 1000.0
             self._last_frame_time = time.time()
             self._total_play_time = 0.0
             self._delta_time = 0.0
@@ -311,11 +305,14 @@ class PlayModeManager(PlayModeSerializationMixin):
             except ImportError:
                 # Material module not yet importable — benign during bootstrap.
                 pass
+            notify_started = time.perf_counter()
             self._notify_state_change(old_state, self._state)
+            notify_ms = (time.perf_counter() - notify_started) * 1000.0
 
-            # 3. Rebuild scene from snapshot (Python component restore will
-            #    trigger Awake/OnEnable — their logs now survive the clear).
-            if not self._rebuild_active_scene(self._scene_backup, for_play=True):
+            # 3. Recreate the scripting domain while retaining the unchanged
+            #    native graph. Stop Mode still restores the full snapshot.
+            rebuild_started = time.perf_counter()
+            if not self._prepare_active_scene_for_play(self._scene_backup):
                 Debug.log_error("Failed to rebuild runtime scene for Play Mode")
                 self._state = PlayModeState.EDIT
                 try:
@@ -329,11 +326,21 @@ class PlayModeManager(PlayModeSerializationMixin):
                     Debug.log_error(f"Failed to restore scene after play-mode build failure: {exc}")
                 self._notify_state_change(PlayModeState.PLAYING, PlayModeState.EDIT)
                 return False
+            rebuild_ms = (time.perf_counter() - rebuild_started) * 1000.0
 
             # 4. Enter C++ play mode (Scene::Start drives remaining lifecycle)
             scene_manager = self._get_scene_manager()
+            native_start_started = time.perf_counter()
             if scene_manager:
                 scene_manager.play()
+            native_start_ms = (time.perf_counter() - native_start_started) * 1000.0
+            total_ms = (time.perf_counter() - transition_started) * 1000.0
+            Debug.log_internal(
+                "[Perf] PlayMode enter: "
+                f"total={total_ms:.1f}ms snapshot={snapshot_ms:.1f}ms "
+                f"rebuild={rebuild_ms:.1f}ms nativeStart={native_start_ms:.1f}ms "
+                f"spriteInit={sprite_init_ms:.1f}ms notify={notify_ms:.1f}ms"
+            )
             Debug.log_internal("[OK] Play Mode started (C++ lifecycle update path)")
 
         def on_done(ok):
@@ -385,6 +392,7 @@ class PlayModeManager(PlayModeSerializationMixin):
         #    - Toolbar shows "Play" right away
         #    - No deferred scene loads from user scripts are processed
         self._state = PlayModeState.EDIT
+        self._cancel_debug_frame_pause_gate()
 
         # Re-enable material auto-save now that play mode is over.
         try:
@@ -399,6 +407,12 @@ class PlayModeManager(PlayModeSerializationMixin):
         try:
             from Infernux.scene import SceneManager as _SceneMgr
             _SceneMgr._pending_scene_load = None
+            transaction = _SceneMgr._active_scene_transaction
+            if transaction is not None and not transaction.is_complete:
+                transaction.cancel()
+            _SceneMgr._active_scene_transaction = None
+            _SceneMgr._active_scene_load_path = None
+            _SceneMgr._active_scene_file_manager = None
         except Exception as exc:
             Debug.log_suppressed("PlayModeManager.exit_play_mode.discard_pending_load", exc)
 
@@ -409,10 +423,13 @@ class PlayModeManager(PlayModeSerializationMixin):
 
         def step_exit():
             """Restore scene from backup and finalize — all in one frame."""
+            transition_started = time.perf_counter()
             # 1. Deserialize backup snapshot and recreate Python components
+            rebuild_started = time.perf_counter()
             restore_ok = self._rebuild_active_scene(
                 self._scene_backup, for_play=False, restore_scene_path=True
             )
+            rebuild_ms = (time.perf_counter() - rebuild_started) * 1000.0
             if not restore_ok:
                 Debug.log_error(
                     "Failed to restore scene after exiting Play Mode "
@@ -432,7 +449,19 @@ class PlayModeManager(PlayModeSerializationMixin):
                         sfm.mark_dirty()
                     else:
                         sfm.clear_dirty()
+            notify_started = time.perf_counter()
             self._notify_state_change(old_state, PlayModeState.EDIT)
+            notify_ms = (time.perf_counter() - notify_started) * 1000.0
+            total_ms = (time.perf_counter() - transition_started) * 1000.0
+            phase_text = " ".join(
+                f"{name}={duration:.1f}ms"
+                for name, duration in self._last_rebuild_timings_ms.items()
+            )
+            Debug.log_internal(
+                "[Perf] PlayMode exit: "
+                f"total={total_ms:.1f}ms rebuild={rebuild_ms:.1f}ms "
+                f"notify={notify_ms:.1f}ms {phase_text}"
+            )
 
         def on_done(ok):
             from Infernux.engine.ui.engine_status import EngineStatus
@@ -520,6 +549,98 @@ class PlayModeManager(PlayModeSerializationMixin):
             dt = self._delta_time if self._delta_time > 0 else (1.0 / 60.0)
             scene_manager.step(dt)
             Debug.log_internal(f"[Step] Stepped one frame (dt={dt:.4f}s)")
+
+    def _arm_debug_frame_pause_gate(
+        self,
+        frame_count: int,
+        completion_event,
+        *,
+        pause_on_complete: bool,
+        hold_frame_count: int = 0,
+        hold_complete_event=None,
+        hold_complete_callback=None,
+    ) -> None:
+        frames = int(frame_count)
+        if frames < 1:
+            raise ValueError("frame_count must be positive")
+        hold_frames = int(hold_frame_count)
+        if hold_frames < 0 or hold_frames > frames:
+            raise ValueError("hold_frame_count must be between 0 and frame_count")
+        self._cancel_debug_frame_pause_gate()
+        self._debug_frame_pause_gate = {
+            "remaining": frames,
+            "target": frames,
+            "completion_event": completion_event,
+            "pause_on_complete": bool(pause_on_complete),
+            "hold_frame_count": hold_frames,
+            "hold_complete_event": hold_complete_event,
+            "hold_complete_callback": hold_complete_callback,
+            "hold_complete": False,
+        }
+
+    def _cancel_debug_frame_pause_gate(self) -> None:
+        gate = self._debug_frame_pause_gate
+        self._debug_frame_pause_gate = None
+        if gate is not None:
+            event = gate.get("completion_event")
+            if event is not None:
+                event.set()
+
+    def _advance_debug_frame_pause_gate(self) -> bool:
+        gate = self._debug_frame_pause_gate
+        if gate is None or self._state != PlayModeState.PLAYING:
+            return False
+        remaining = int(gate.get("remaining", 0))
+        if remaining > 0:
+            remaining -= 1
+            gate["remaining"] = remaining
+            completed = int(gate.get("target", 0)) - remaining
+            hold_frames = int(gate.get("hold_frame_count", 0))
+            if hold_frames and completed >= hold_frames and not bool(gate.get("hold_complete")):
+                gate["hold_complete"] = True
+                callback = gate.get("hold_complete_callback")
+                if callback is not None:
+                    callback()
+                event = gate.get("hold_complete_event")
+                if event is not None:
+                    event.set()
+            return False
+
+        self._debug_frame_pause_gate = None
+        if bool(gate.get("pause_on_complete")):
+            self.pause()
+        event = gate.get("completion_event")
+        if event is not None:
+            event.set()
+        return True
+
+    def _prepare_active_scene_for_play(self, snapshot: Optional[Any]) -> bool:
+        """Refresh Python component instances while preserving native objects."""
+        if not snapshot:
+            Debug.log_warning("Cannot prepare scene for Play Mode: empty snapshot")
+            return False
+        scene_manager = self._get_scene_manager()
+        scene = scene_manager.get_active_scene() if scene_manager else None
+        if scene is None:
+            Debug.log_warning("Cannot prepare scene for Play Mode: no active scene")
+            return False
+
+        try:
+            from Infernux.engine.component_restore import replace_scene_python_components_for_play
+            from Infernux.renderstack.render_stack import RenderStack
+
+            replace_scene_python_components_for_play(
+                scene,
+                snapshot,
+                asset_database=self._asset_database,
+            )
+            self.clear_runtime_hidden_object_ids()
+            RenderStack._active_instance = None
+            scene.set_playing(True)
+            return True
+        except Exception as exc:
+            Debug.log_internal(f"Fast Play Mode preparation failed; rebuilding scene: {exc}")
+            return self._rebuild_active_scene(snapshot, for_play=True)
     
     # ========================================================================
     # Game Loop Integration
@@ -536,6 +657,10 @@ class PlayModeManager(PlayModeSerializationMixin):
         """
         if self._state == PlayModeState.EDIT:
             return
+
+        if self._debug_frame_pause_gate is not None:
+            if self._advance_debug_frame_pause_gate() and self._state == PlayModeState.PAUSED:
+                return
 
         # --- Process deferred scene loads (must run outside C++ iteration) ---
         from Infernux.scene import SceneManager as _SceneMgr
@@ -557,7 +682,7 @@ class PlayModeManager(PlayModeSerializationMixin):
         # Sync time_scale from the static Time class (user may set Time.time_scale)
         try:
             from Infernux.timing import Time
-            self._time_scale = Time._time_scale
+            self._time_scale = Time.time_scale
             Time._tick(raw_dt)
             # Read back computed values so PlayModeManager stays in sync
             self._delta_time = Time.delta_time
@@ -580,20 +705,18 @@ class PlayModeManager(PlayModeSerializationMixin):
 
     def _rebuild_active_scene(
         self,
-        snapshot: Optional[str],
+        snapshot: Optional[Any],
         *,
         for_play: bool,
         restore_scene_path: bool = False,
     ) -> bool:
-        """Deserialize *snapshot* into the active scene and recreate Python components.
+        """Restore *snapshot* into the active scene and recreate Python components.
 
         This is the core of the unified component mode: play/edit transitions no
         longer try to reset lifecycle flags on existing objects. Instead, the
         active scene is rebuilt from serialized data, producing a fresh native
         component graph and fresh Python component instances.
         """
-        self.clear_runtime_hidden_object_ids()
-
         if not snapshot:
             Debug.log_warning("Cannot rebuild scene: empty snapshot")
             return False
@@ -608,49 +731,33 @@ class PlayModeManager(PlayModeSerializationMixin):
             Debug.log_warning("Cannot rebuild scene: no active scene")
             return False
 
-        from Infernux.components.component import InxComponent
-        from Infernux.components.builtin_component import BuiltinComponent
         from Infernux.renderstack.render_stack import RenderStack
 
-        # Only nil out the RenderStack singleton before deserialize (safe).
-        # Registry/cache clearing must wait until AFTER deserialize() because
-        # C++ destroys old GameObjects and their PyComponentProxy::OnDestroy
-        # callbacks still need live Python objects.
-        RenderStack._active_instance = None
+        def after_publish():
+            self.clear_runtime_hidden_object_ids()
+            RenderStack._active_instance = None
+            if for_play:
+                scene.set_playing(True)
+            try:
+                from Infernux.components.builtin.sprite_renderer import SpriteRenderer
+                SpriteRenderer.init_all_in_scene()
+            except Exception as exc:
+                Debug.log_internal(f"SpriteRenderer init after rebuild: {exc}")
 
-        if not scene.deserialize(snapshot):
+        from Infernux.engine.scene_document_transaction import SceneDocumentTransaction
+        transaction = SceneDocumentTransaction(
+            scene,
+            document=snapshot,
+            asset_database=self._asset_database,
+            clear_registries=True,
+            borrow_document=True,
+            after_publish=after_publish,
+        )
+        if not transaction.run_to_completion(raise_on_failure=False):
+            self._last_rebuild_timings_ms = transaction.phase_timings_ms
+            Debug.log_error(f"Cannot rebuild scene: document transaction failed: {transaction.error}")
             return False
-
-        # Old GameObjects are gone — now safe to clear Python registries.
-        InxComponent._clear_all_instances()
-        BuiltinComponent._clear_cache()
-
-        # When entering play mode, mark the scene as playing BEFORE restoring
-        # Python components so newly attached PyComponentProxy instances use the
-        # runtime lifecycle path instead of edit-mode lifecycle.
-        if for_play and hasattr(scene, "set_playing"):
-            scene.set_playing(True)
-
-        # Force-init SpriteRenderer wrappers so their materials (texture,
-        # color, uvRect) are created before the first render frame.
-        # This must run BEFORE _restore_pending_py_components() because
-        # Python component Awake/OnEnable callbacks may trigger rendering
-        # or inspect SpriteRenderer state, and the C++ render pass at the
-        # end of this frame needs fully-bound materials to avoid a
-        # white-quad flash.
-        try:
-            from Infernux.components.builtin.sprite_renderer import SpriteRenderer
-            SpriteRenderer.init_all_in_scene()
-        except Exception as exc:
-            Debug.log_internal(f"SpriteRenderer init after rebuild: {exc}")
-
-        self._restore_pending_py_components()
-
-        try:
-            from Infernux.components.builtin.sprite_renderer import SpriteRenderer
-            SpriteRenderer.init_all_in_scene()
-        except Exception as exc:
-            Debug.log_internal(f"SpriteRenderer init after py restore: {exc}")
+        self._last_rebuild_timings_ms = transaction.phase_timings_ms
 
         if restore_scene_path:
             self._restore_scene_file_path()
@@ -737,9 +844,8 @@ class PlayModeManager(PlayModeSerializationMixin):
 
             target_type_name = state.get("type_name") or getattr(old_comp, "type_name", type(old_comp).__name__)
             component_class = reloaded_by_name.get(target_type_name)
-
-            # Class was likely renamed — if exactly one subclass exists, use it.
             if component_class is None and len(reloaded_classes) == 1:
+                # Class rename inside a one-component script file.
                 component_class = reloaded_classes[0]
 
             if component_class is None:
@@ -748,6 +854,11 @@ class PlayModeManager(PlayModeSerializationMixin):
                     f"type not found after reload"
                 )
                 continue
+
+            # Rebind to the AssetDatabase GUID so renames that preserve the GUID
+            # do not look like a type identity change.
+            from Infernux.components.component_identity import bind_asset_script_guid
+            bind_asset_script_guid(component_class, target_guid)
 
             try:
                 new_comp = create_component_instance(component_class)
@@ -797,7 +908,7 @@ class PlayModeManager(PlayModeSerializationMixin):
     def _save_scene_state(self):
         """
         Save scene state before entering play mode.
-        Uses C++ Scene::Serialize() which includes:
+        Uses the typed C++ Scene document which includes:
         - All GameObjects with their hierarchy
         - Transform data
         - C++ components (MeshRenderer, etc.)
@@ -812,7 +923,10 @@ class PlayModeManager(PlayModeSerializationMixin):
         
         scene = scene_manager.get_active_scene()
         if scene:
-            self._scene_backup = scene.serialize()
+            capture_native = getattr(scene, "_capture_play_mode_snapshot", None)
+            self._scene_backup = (
+                capture_native() if callable(capture_native) else scene.serialize_document()
+            )
             # Remember which scene file was open
             from Infernux.engine.scene_manager import SceneFileManager
             sfm = SceneFileManager.instance()
@@ -821,7 +935,7 @@ class PlayModeManager(PlayModeSerializationMixin):
                 self._scene_dirty_backup = sfm.is_dirty
             else:
                 self._scene_dirty_backup = False
-            Debug.log_internal("Scene state saved (C++ serialization)")
+            Debug.log_internal("Scene state saved (typed C++ document)")
         else:
             Debug.log_warning("No active scene to save")
 
@@ -831,17 +945,24 @@ class PlayModeManager(PlayModeSerializationMixin):
             return
         from Infernux.engine.scene_manager import SceneFileManager
         sfm = SceneFileManager.instance()
-        if sfm and sfm.current_scene_path != self._scene_path_backup:
+        if sfm is None:
+            return
+        path_changed = sfm.current_scene_path != self._scene_path_backup
+        if path_changed:
             Debug.log_internal(
                 f"Restoring editor scene path: "
                 f"{os.path.basename(self._scene_path_backup)}"
             )
-            sfm._current_scene_path = self._scene_path_backup
-            sfm._dirty = self._scene_dirty_backup
-            # Restore the editor camera to the position saved for this scene
+        sfm._current_scene_path = self._scene_path_backup
+        sfm._dirty = self._scene_dirty_backup
+        if path_changed:
             sfm._restore_camera_state(self._scene_path_backup)
             if sfm._on_scene_changed:
                 sfm._on_scene_changed()
+        # A runtime transition from an older engine may already have persisted
+        # its destination. Always reassert the authored scene at the Stop
+        # boundary so the next Editor launch returns to the pre-play document.
+        sfm._remember_last_scene(self._scene_path_backup)
     
     # ========================================================================
     # Event System

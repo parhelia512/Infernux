@@ -9,7 +9,9 @@ class in <b>Infernux</b>
 Game object in the scene hierarchy.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+A GameObject owns a Transform and a set of components. Distinguish `active_self` from the derived `active_in_hierarchy`, and prefer component lookup by type.
 <!-- USER CONTENT END -->
 
 ## Properties
@@ -26,6 +28,7 @@ Game object in the scene hierarchy.
 | active_self | `bool` |  *(read-only)* |
 | active_in_hierarchy | `bool` |  *(read-only)* |
 | id | `int` |  *(read-only)* |
+| handle | `ObjectHandle` |  *(read-only)* |
 | is_prefab_instance | `bool` |  *(read-only)* |
 | game_object | `Optional[GameObject]` |  *(read-only)* |
 | transform | `Transform` |  *(read-only)* |
@@ -64,7 +67,9 @@ Game object in the scene hierarchy.
 | `get_component_in_children(component_type: Any, include_inactive: bool = False) → Any` |  |
 | `get_component_in_parent(component_type: Any, include_inactive: bool = False) → Any` |  |
 | `serialize() → str` |  |
-| `deserialize(json_str: str) → None` |  |
+| `deserialize(json_str: str) → bool` |  |
+| `serialize_document() → Dict[str, Any]` |  |
+| `deserialize_document(document: Dict[str, Any]) → bool` |  |
 
 <!-- USER CONTENT START --> public_methods
 
@@ -88,12 +93,21 @@ Game object in the scene hierarchy.
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for GameObject
+from Infernux import GameObject, Rigidbody
+
+player = GameObject.find("Player")
+if player is not None and player.active_in_hierarchy:
+    body = player.get_component(Rigidbody)
+    if body is not None:
+        body.use_gravity = True
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [Scenes and Objects](../manual/scenes-and-objects.md)
+- [Your First Component](../learn/first-component.md)
+- [Transform](Transform.md)
+- [InxComponent](InxComponent.md)
 <!-- USER CONTENT END -->

@@ -9,22 +9,52 @@ from typing import Any, Callable, Optional
 
 
 class CommandFuture:
-    def __init__(self, name: str):
+    def __init__(self, name: str, *, timeout_ms: int = 30000):
         self.name = name
         self._event = threading.Event()
         self._result: Any = None
         self._error: Optional[BaseException] = None
+        self._lock = threading.Lock()
+        self._cancelled = False
+        self._deadline = time.monotonic() + max(int(timeout_ms), 1) / 1000.0
 
     def set_result(self, value: Any) -> None:
-        self._result = value
-        self._event.set()
+        with self._lock:
+            if self._cancelled or self._event.is_set():
+                return
+            self._result = value
+            self._event.set()
 
     def set_error(self, error: BaseException) -> None:
-        self._error = error
-        self._event.set()
+        with self._lock:
+            if self._cancelled or self._event.is_set():
+                return
+            self._error = error
+            self._event.set()
+
+    def cancel(self, reason: str = "MCP command timed out before execution.") -> bool:
+        with self._lock:
+            if self._event.is_set():
+                return False
+            self._cancelled = True
+            self._error = TimeoutError(f"{reason} ({self.name})")
+            self._event.set()
+            return True
+
+    def can_execute(self) -> bool:
+        with self._lock:
+            if self._cancelled or self._event.is_set():
+                return False
+            if time.monotonic() >= self._deadline:
+                self._cancelled = True
+                self._error = TimeoutError(f"MCP command expired before execution: {self.name}")
+                self._event.set()
+                return False
+            return True
 
     def result(self, timeout: Optional[float] = None) -> Any:
         if not self._event.wait(timeout):
+            self.cancel()
             raise TimeoutError(f"MCP command timed out: {self.name}")
         if self._error is not None:
             raise self._error
@@ -45,7 +75,7 @@ class MainThreadCommandQueue:
         return cls._instance
 
     def submit(self, name: str, fn: Callable[[], Any], *, timeout_ms: int = 30000) -> CommandFuture:
-        future = CommandFuture(name)
+        future = CommandFuture(name, timeout_ms=timeout_ms)
         if self._main_thread_id == threading.get_ident():
             try:
                 future.set_result(fn())
@@ -67,6 +97,9 @@ class MainThreadCommandQueue:
                 _name, fn, future = self._queue.get_nowait()
             except queue.Empty:
                 break
+            if not future.can_execute():
+                processed += 1
+                continue
             try:
                 future.set_result(fn())
             except BaseException as exc:

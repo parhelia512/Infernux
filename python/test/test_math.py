@@ -7,6 +7,31 @@ import math
 import pytest
 
 from Infernux.mathf import Mathf
+from Infernux.lib import Vector2, Vector3, vec4f
+
+
+class TestVector3Validation:
+    def test_constructor_and_component_writes_reject_non_finite_values(self):
+        with pytest.raises(ValueError, match="finite"):
+            Vector3(float("nan"), 0, 0)
+        value = Vector3(1, 2, 3)
+        with pytest.raises(ValueError, match="finite"):
+            value.x = float("inf")
+
+    def test_smooth_damp_rejects_invalid_timing(self):
+        with pytest.raises(ValueError, match="smooth_time"):
+            Vector3.smooth_damp(Vector3(), Vector3(1, 0, 0), Vector3(), 0.0, float("inf"), 0.02)
+
+    @pytest.mark.parametrize(
+        "factory",
+        [
+            lambda: Vector2(float("nan"), 0),
+            lambda: vec4f(0, 0, float("inf"), 0),
+        ],
+    )
+    def test_other_vector_dimensions_share_finite_contract(self, factory):
+        with pytest.raises(ValueError, match="finite"):
+            factory()
 
 
 # ═══════════════════════════════════════════════════════════════════════════

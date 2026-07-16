@@ -138,14 +138,17 @@ def register_scene_tools(mcp) -> None:
 
     @mcp.tool(name="scene_serialize")
     def scene_serialize() -> dict:
-        """Return the active scene JSON."""
+        """Return the active scene document."""
 
         def _serialize():
             from Infernux.lib import SceneManager
             scene = SceneManager.instance().get_active_scene()
             if not scene:
                 raise RuntimeError("No active scene.")
-            return {"scene": getattr(scene, "name", ""), "json": scene_serialize()}
+            return {
+                "scene": getattr(scene, "name", ""),
+                "document": scene.serialize_document(),
+            }
 
         return main_thread("scene_serialize", _serialize)
 
@@ -591,7 +594,7 @@ def register_scene_tools(mcp) -> None:
 
     @mcp.tool(name="gameobject_duplicate")
     def gameobject_duplicate(object_id: int, parent_id: int = 0, name: str = "", select: bool = True) -> dict:
-        """Duplicate a GameObject using Scene.instantiate_game_object."""
+        """Duplicate a GameObject transactionally."""
 
         def _duplicate():
             from Infernux.lib import SceneManager
@@ -600,7 +603,8 @@ def register_scene_tools(mcp) -> None:
                 raise RuntimeError("No active scene.")
             source = find_game_object(object_id)
             parent = scene.find_by_id(int(parent_id)) if parent_id else None
-            obj = scene.instantiate_game_object(source, parent)
+            from Infernux.engine.component_restore import clone_game_object_transactionally
+            obj = clone_game_object_transactionally(scene, source, parent)
             if obj is None:
                 raise RuntimeError("Failed to duplicate GameObject.")
             if name:
@@ -783,8 +787,16 @@ def register_scene_tools(mcp) -> None:
                 before_ids = _component_ids(obj)
                 if script_path:
                     from Infernux.components import load_and_create_component
-                    from Infernux.mcp.tools.common import get_asset_database
-                    comp = load_and_create_component(script_path, asset_database=get_asset_database(), type_name=component_type)
+                    from Infernux.mcp import capabilities
+                    from Infernux.mcp.tools.common import get_asset_database, resolve_asset_path
+                    resolved_script_path = resolve_asset_path(
+                        capabilities.project_path(), script_path
+                    )
+                    comp = load_and_create_component(
+                        resolved_script_path,
+                        asset_database=get_asset_database(),
+                        type_name=component_type,
+                    )
                     if comp is None:
                         raise RuntimeError(f"Script did not create component '{component_type}'.")
                     comp = obj.add_py_component(comp)
@@ -922,35 +934,39 @@ def register_scene_tools(mcp) -> None:
 
     @mcp.tool(name="component_get_snapshot")
     def component_get_snapshot(object_id: int, component_type: str, ordinal: int = 0) -> dict:
-        """Serialize a component snapshot for restore_snapshot."""
+        """Capture a native component document for restore_snapshot."""
 
         def _snapshot():
             obj = find_game_object(object_id)
             comp = _find_component(obj, component_type, int(ordinal))
             if comp is None:
                 raise FileNotFoundError(f"Component '{component_type}' was not found on GameObject {object_id}.")
-            payload = ""
-            if hasattr(comp, "serialize"):
-                try:
-                    payload = comp.serialize()
-                except Exception:
-                    payload = ""
-            return {**_component_snapshot(obj, comp), "serialized": payload}
+            if not hasattr(comp, "serialize_document"):
+                raise ValueError(
+                    f"Component '{component_type}' does not support document snapshots."
+                )
+            return {
+                **_component_snapshot(obj, comp),
+                "document": comp.serialize_document(),
+            }
 
         return main_thread("component_get_snapshot", _snapshot)
 
     @mcp.tool(name="component_restore_snapshot")
-    def component_restore_snapshot(object_id: int, component_type: str, serialized: str, ordinal: int = 0) -> dict:
-        """Restore a component from a serialized component JSON snapshot."""
+    def component_restore_snapshot(object_id: int, component_type: str, document: dict, ordinal: int = 0) -> dict:
+        """Restore a native component from a typed document snapshot."""
 
         def _restore():
             obj = find_game_object(object_id)
             comp = _find_component(obj, component_type, int(ordinal))
             if comp is None:
                 raise FileNotFoundError(f"Component '{component_type}' was not found on GameObject {object_id}.")
-            if not hasattr(comp, "deserialize"):
-                raise ValueError(f"Component '{component_type}' does not support deserialize().")
-            comp.deserialize(serialized)
+            if not hasattr(comp, "deserialize_document"):
+                raise ValueError(
+                    f"Component '{component_type}' does not support document snapshots."
+                )
+            if not comp.deserialize_document(document):
+                raise ValueError(f"Component '{component_type}' rejected the document.")
             from Infernux.engine.scene_manager import SceneFileManager
             sfm = SceneFileManager.instance()
             if sfm:

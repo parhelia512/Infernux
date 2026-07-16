@@ -17,9 +17,11 @@ class InxSkinnedMesh;
 /**
  * @brief Renderer component for animated skeletal model instances.
  *
- * Runtime FBX skeleton/animation data lives in SkinnedModelCache/InxSkinnedMesh.
- * This component owns playback-facing state and exposes bind-pose vertices plus
- * a per-frame GPU bone palette to the renderer.
+ * Runtime skeleton/animation data is the immutable skinned payload of the
+ * referenced InxMesh asset.
+ * This
+ * component owns playback-facing state and exposes bind-pose vertices plus a per-frame GPU bone palette to the
+ * renderer.
  */
 class SkinnedMeshRenderer : public MeshRenderer
 {
@@ -34,19 +36,9 @@ class SkinnedMeshRenderer : public MeshRenderer
     void SetSourceModelGuid(const std::string &guid);
     [[nodiscard]] const std::string &GetSourceModelGuid() const
     {
-        return m_sourceModelGuid;
+        return GetMeshAssetGuid();
     }
 
-    void SetSourceModelPath(const std::string &path);
-    [[nodiscard]] const std::string &GetSourceModelPath() const
-    {
-        return m_sourceModelPath;
-    }
-
-    void SetAnimationTakeNames(std::vector<std::string> names)
-    {
-        m_animationTakeNames = std::move(names);
-    }
     [[nodiscard]] const std::vector<std::string> &GetAnimationTakeNames() const
     {
         return m_animationTakeNames;
@@ -117,35 +109,25 @@ class SkinnedMeshRenderer : public MeshRenderer
     void ReloadSourceModel();
 
     [[nodiscard]] bool HasRuntimeSkinnedMesh() const;
-    [[nodiscard]] const std::vector<Vertex> &GetRuntimeSkinnedVertices() const
-    {
-        return m_runtimeSkinnedVertices;
-    }
-    [[nodiscard]] const std::vector<uint32_t> &GetRuntimeSkinnedIndices() const
-    {
-        return m_runtimeSkinnedIndices;
-    }
-    [[nodiscard]] const std::vector<SubMesh> &GetRuntimeSkinnedSubMeshes() const
-    {
-        return m_runtimeSkinnedSubMeshes;
-    }
+    [[nodiscard]] const std::vector<Vertex> &GetRuntimeSkinnedVertices() const;
+    [[nodiscard]] const std::vector<uint32_t> &GetRuntimeSkinnedIndices() const;
+    [[nodiscard]] const std::vector<SubMesh> &GetRuntimeSkinnedSubMeshes() const;
     [[nodiscard]] const std::vector<glm::mat4> &GetRuntimeSkinBoneMatrices() const;
     [[nodiscard]] std::shared_ptr<const std::vector<glm::mat4>> GetRuntimeSkinBonePalette() const
     {
         return m_runtimeSkinBonePalette;
     }
 
-    [[nodiscard]] std::string Serialize() const override;
-    bool Deserialize(const std::string &jsonStr) override;
+    [[nodiscard]] nlohmann::json SerializeDocument() const override;
+    static void ValidateSerializedDocument(const nlohmann::json &document);
+    bool DeserializeDocument(const nlohmann::json &document) override;
     [[nodiscard]] std::unique_ptr<Component> Clone() const override;
 
   private:
     void RefreshRuntimeSkinnedMesh();
     void ClearRuntimeSkinnedMesh();
-    [[nodiscard]] std::shared_ptr<InxSkinnedMesh> GetOrLoadRuntimeModel() const;
+    [[nodiscard]] std::shared_ptr<const InxSkinnedMesh> GetOrLoadRuntimeModel() const;
 
-    std::string m_sourceModelGuid;
-    std::string m_sourceModelPath;
     std::vector<std::string> m_animationTakeNames;
     std::string m_activeTakeName;
     float m_runtimeAnimationTime = 0.0f;
@@ -156,11 +138,8 @@ class SkinnedMeshRenderer : public MeshRenderer
     bool m_runtimeAnimationLoop = true;
     std::vector<PoseStackLayer> m_poseStack;
     bool m_usePoseStack = false;
-    std::vector<Vertex> m_runtimeSkinnedVertices;
-    std::vector<uint32_t> m_runtimeSkinnedIndices;
-    std::vector<SubMesh> m_runtimeSkinnedSubMeshes;
     std::shared_ptr<const std::vector<glm::mat4>> m_runtimeSkinBonePalette;
-    mutable std::shared_ptr<InxSkinnedMesh> m_runtimeModel;
+    mutable std::shared_ptr<const InxSkinnedMesh> m_runtimeModel;
 };
 
 } // namespace infernux

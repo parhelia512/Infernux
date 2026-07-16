@@ -1012,8 +1012,8 @@ void OutlineRenderer::RenderOutlineMask(VkCommandBuffer cmdBuf, const std::vecto
         if (dc.material) {
             ShaderProgram *fwdProgram = dc.material->GetPassShaderProgram(ShaderCompileTarget::Forward);
             if (fwdProgram && (fwdProgram->HasVertexMaterialUBO() || dc.skinBoneMatrices)) {
-                VkPipeline mtlPipeline = GetOrCreateMtlOutlinePipeline(dc.material);
-                VkDescriptorSet mtlDescSet = GetOrCreateMtlOutlineDescSet(dc.material);
+                VkPipeline mtlPipeline = GetOrCreateMtlOutlinePipeline(dc.material.get());
+                VkDescriptorSet mtlDescSet = GetOrCreateMtlOutlineDescSet(dc.material.get());
 
                 if (mtlPipeline != VK_NULL_HANDLE && mtlDescSet != VK_NULL_HANDLE) {
                     const uint64_t descRaw = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(mtlDescSet));

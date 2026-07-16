@@ -72,6 +72,8 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
         file_ops.create_shader, cur, name, typ, adb)
     pp.create_material = lambda cur, name: _safe_project_create(
         file_ops.create_material, cur, name, adb)
+    pp.create_physic_material = lambda cur, name: _safe_project_create(
+        file_ops.create_physic_material, cur, name, adb)
     pp.create_scene = lambda cur, name: _safe_project_create(
         file_ops.create_scene, cur, name, adb)
     pp.create_animclip = lambda cur, name: _safe_project_create(
@@ -80,6 +82,8 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
         file_ops.create_animclip3d, cur, name, adb)
     pp.create_animfsm = lambda cur, name: _safe_project_create(
         file_ops.create_animfsm, cur, name, adb)
+    pp.create_vfxsystem = lambda cur, name: _safe_project_create(
+        file_ops.create_vfxsystem, cur, name, adb)
     pp.create_animtimeline = lambda cur, name: _safe_project_create(
         file_ops.create_animtimeline, cur, name, adb)
     pp.create_timelinefsm = lambda cur, name: _safe_project_create(
@@ -92,9 +96,8 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
     pp.move_item_to_directory = lambda item, dest: _safe_project_path(
         file_ops.move_item_to_directory, item, dest, adb)
 
-    # -- Delete (with Win32 confirmation dialog) --
+    # -- Delete (through an Editor-owned semantic modal) --
     def _delete_items(paths):
-        import ctypes, os
         valid = []
         seen = set()
         for p in paths or []:
@@ -105,24 +108,23 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
         if not valid:
             return
 
-        title = _t("project.delete_confirm_title")
-        if len(valid) == 1:
-            msg = _t("project.delete_confirm_msg").replace(
-                "{name}", os.path.basename(valid[0]))
-        else:
-            msg = _t("project.delete_confirm_multi_msg").replace(
-                "{count}", str(len(valid)))
-        # MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2
-        result = ctypes.windll.user32.MessageBoxW(
-            0, msg, title, 0x1 | 0x30 | 0x100)
-        if result != 1:  # IDOK
-            return
+        from Infernux.engine.ui.project_delete_confirmation import (
+            ProjectDeleteConfirmationCoordinator,
+        )
 
-        for item_path in sorted(
-            valid, key=lambda p: (p.count(os.sep), len(p)), reverse=True
-        ):
-            if os.path.exists(item_path):
-                file_ops.delete_item(item_path, adb)
+        def _delete_confirmed(confirmed_paths: list[str]) -> bool:
+            for item_path in sorted(
+                confirmed_paths,
+                key=lambda p: (p.count(os.sep), len(p)),
+                reverse=True,
+            ):
+                if os.path.exists(item_path) and not file_ops.delete_item(item_path, adb):
+                    return False
+            pp.clear_selection()
+            pp.invalidate_dir_cache()
+            return not any(os.path.exists(path) for path in confirmed_paths)
+
+        ProjectDeleteConfirmationCoordinator.instance().request(valid, _delete_confirmed)
 
     pp.delete_items = _delete_items
 
@@ -268,6 +270,23 @@ def wire_project_callbacks(bs: EditorBootstrap) -> None:
                 pass
 
     pp.open_anim_fsm = _open_anim_fsm
+
+    def _open_vfx_system(file_path):
+        from Infernux.engine.ui.window_manager import WindowManager
+        from Infernux.engine.ui.closable_panel import ClosablePanel
+        wm = WindowManager.instance()
+        if wm is None:
+            return
+        panel = wm.open_window("vfx_graph_editor")
+        if panel is not None and hasattr(panel, "_open_vfxsystem"):
+            panel._open_vfxsystem(file_path)
+            ClosablePanel.focus_panel_by_id("vfx_graph_editor")
+            try:
+                wm._engine.select_docked_window("vfx_graph_editor")
+            except Exception:
+                pass
+
+    pp.open_vfx_system = _open_vfx_system
 
     def _open_anim_timeline(file_path):
         from Infernux.engine.ui.window_manager import WindowManager

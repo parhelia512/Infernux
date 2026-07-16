@@ -9,13 +9,16 @@ class in <b>Infernux.physics</b>
 Global physics system for raycasting and spatial queries.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+Spatial queries accept layer masks and explicit trigger handling. Keep query volumes and distances bounded, and use the simplest query that answers the gameplay question.
 <!-- USER CONTENT END -->
 
 ## Properties
 
 | Name | Type | Description |
 |------|------|------|
+| body_count | `int` | Number of native physics bodies currently owned by the world. *(read-only)* |
 | gravity | `Any` | The global gravity vector applied to all rigidbodies. |
 
 <!-- USER CONTENT START --> properties
@@ -31,9 +34,11 @@ Global physics system for raycasting and spatial queries.
 | `static Physics.raycast(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]` | Cast a ray and return the first hit, or None. |
 | `static Physics.raycast_all(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → List[Any]` | Cast a ray and return all hits. |
 | `static Physics.overlap_sphere(center: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]` | Find all colliders within a sphere. |
-| `static Physics.overlap_box(center: Any, half_extents: Any, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]` | Find all colliders within an axis-aligned box. |
+| `static Physics.overlap_box(center: Any, half_extents: Any, orientation: Any = ..., layer_mask: int = ..., query_triggers: bool = ...) → List[Any]` | Find all colliders within an oriented box. |
+| `static Physics.overlap_capsule(point0: Any, point1: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]` |  |
 | `static Physics.sphere_cast(origin: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]` | Cast a sphere along a direction and return the first hit, or None. |
-| `static Physics.box_cast(center: Any, half_extents: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]` | Cast a box along a direction and return the first hit, or None. |
+| `static Physics.box_cast(center: Any, half_extents: Any, direction: Any, orientation: Any = ..., max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]` | Cast a box along a direction and return the first hit, or None. |
+| `static Physics.capsule_cast(point0: Any, point1: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]` |  |
 | `static Physics.ignore_layer_collision(layer1: int, layer2: int, ignore: bool = ...) → None` | Set whether collisions between two layers are ignored. |
 | `static Physics.get_ignore_layer_collision(layer1: int, layer2: int) → bool` | Check if collisions between two layers are ignored. |
 
@@ -45,12 +50,26 @@ Global physics system for raycasting and spatial queries.
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for Physics
+from Infernux import InxComponent, Vector3
+from Infernux.physics import Physics
+
+
+class GroundProbe(InxComponent):
+    def is_grounded(self) -> bool:
+        hit = Physics.raycast(
+            self.transform.position,
+            Vector3(0.0, -1.0, 0.0),
+            max_distance=1.1,
+        )
+        return hit is not None
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [Physics Manual](../manual/physics.md)
+- [Rigidbody](Rigidbody.md)
+- [Collider](Collider.md)
+- [BoxCollider](BoxCollider.md)
 <!-- USER CONTENT END -->

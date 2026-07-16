@@ -166,6 +166,14 @@ class AudioClipRef(AssetRefBase):
         return AssetManager.load_by_guid(self._guid, asset_type=AudioClip)
 
 
+class PhysicMaterialRef(AssetRefBase):
+    """Reference to a native PhysicMaterial asset."""
+
+    def _do_resolve(self):
+        from Infernux.core.physic_material import PhysicMaterial
+        return PhysicMaterial.load_by_guid(self._guid)
+
+
 class AnimStateMachineRef(AssetRefBase):
     """Reference to an AnimStateMachine (.animfsm) asset."""
 
@@ -184,6 +192,24 @@ class AnimStateMachineRef(AssetRefBase):
             except Exception:
                 pass
         return None
+
+
+class VfxSystemRef(AssetRefBase):
+    """Reference to a strict VFX system authoring asset."""
+
+    def _do_resolve(self):
+        path = self._path_hint if not self._guid else ""
+        db = _get_asset_database()
+        if db and self._guid:
+            path = db.get_path_from_guid(self._guid) or ""
+        if not path:
+            return None
+        try:
+            from Infernux.core.vfx_system import VfxSystem
+
+            return VfxSystem.load(path)
+        except (OSError, ValueError):
+            return None
 
 
 class TimelineFSMRef(AssetRefBase):
@@ -272,7 +298,6 @@ class AnimationTimelineRef(AssetRefBase):
 #
 # Each entry maps an *asset_type* name (used in ``serialized_field()``) to:
 #   ref_class   — AssetRefBase subclass for wrapping/resolving the GUID
-#   dict_key    — unique JSON key used during serialization
 #   drag_type   — ImGui drag-drop payload type emitted by the Project panel
 #   extensions  — file globs for the asset picker
 #   display     — human-readable type label for the inspector object field
@@ -289,23 +314,34 @@ def _ensure_registry():
     _ASSET_TYPE_REGISTRY.update({
         "AudioClip": {
             "ref_class":  AudioClipRef,
-            "dict_key":   "__audio_clip_ref__",
             "drag_type":  "AUDIO_FILE",
             "extensions": ("*.wav", "*.mp3", "*.ogg"),
             "display":    "AudioClip",
             "prefix":     "aud",
         },
+        "PhysicMaterial": {
+            "ref_class":  PhysicMaterialRef,
+            "drag_type":  "PHYSIC_MATERIAL_FILE",
+            "extensions": ("*.physicMaterial",),
+            "display":    "PhysicMaterial",
+            "prefix":     "pmat",
+        },
         "AnimStateMachine": {
             "ref_class":  AnimStateMachineRef,
-            "dict_key":   "__animfsm_ref__",
             "drag_type":  "ANIMFSM_FILE",
             "extensions": ("*.animfsm",),
             "display":    "AnimFSM",
             "prefix":     "fsm",
         },
+        "VfxSystem": {
+            "ref_class":  VfxSystemRef,
+            "drag_type":  "VFXSYSTEM_FILE",
+            "extensions": ("*.vfxsystem",),
+            "display":    "VFX System",
+            "prefix":     "vfx",
+        },
         "AnimationClip": {
             "ref_class":  AnimationClipRef,
-            "dict_key":   "__animclip_ref__",
             "drag_type":  "ANIMCLIP_FILE",
             "extensions": ("*.animclip2d",),
             "display":    "AnimClip2D",
@@ -313,7 +349,6 @@ def _ensure_registry():
         },
         "AnimationClip3D": {
             "ref_class":  AnimationClip3DRef,
-            "dict_key":   "__animclip3d_ref__",
             "drag_type":  "ANIMCLIP3D_FILE",
             "extensions": ("*.animclip3d",),
             "display":    "AnimClip3D",
@@ -321,7 +356,6 @@ def _ensure_registry():
         },
         "AnimationTimeline": {
             "ref_class":  AnimationTimelineRef,
-            "dict_key":   "__animtimeline_ref__",
             "drag_type":  "ANIMTIMELINE_FILE",
             "extensions": ("*.animtimeline",),
             "display":    "Timeline",
@@ -329,7 +363,6 @@ def _ensure_registry():
         },
         "TimelineFSM": {
             "ref_class":  TimelineFSMRef,
-            "dict_key":   "__timelinefsm_ref__",
             "drag_type":  "TIMELINEFSM_FILE",
             "extensions": ("*.timelinefsm",),
             "display":    "TimelineFSM",
@@ -338,8 +371,7 @@ def _ensure_registry():
     })
 
 
-def register_asset_type(asset_type: str, *, ref_class, dict_key: str,
-                        drag_type: str, extensions: tuple,
+def register_asset_type(asset_type: str, *, ref_class, drag_type: str, extensions: tuple,
                         display: str, prefix: str):
     """Register a new asset type for use with ``FieldType.ASSET``.
 
@@ -349,7 +381,6 @@ def register_asset_type(asset_type: str, *, ref_class, dict_key: str,
     _ensure_registry()
     _ASSET_TYPE_REGISTRY[asset_type] = {
         "ref_class":  ref_class,
-        "dict_key":   dict_key,
         "drag_type":  drag_type,
         "extensions": extensions,
         "display":    display,
@@ -375,15 +406,6 @@ def get_asset_type_for_ref(ref) -> Optional[str]:
     ref_cls = type(ref)
     for name, cfg in _ASSET_TYPE_REGISTRY.items():
         if cfg["ref_class"] is ref_cls:
-            return name
-    return None
-
-
-def get_asset_type_for_dict_key(key: str) -> Optional[str]:
-    """Given a serialization dict key, return the asset_type name."""
-    _ensure_registry()
-    for name, cfg in _ASSET_TYPE_REGISTRY.items():
-        if cfg["dict_key"] == key:
             return name
     return None
 

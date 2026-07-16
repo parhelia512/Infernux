@@ -1,6 +1,7 @@
 """Main wiring function for the C++ HierarchyPanel."""
 from __future__ import annotations
 
+import weakref
 from typing import TYPE_CHECKING
 
 from Infernux.debug import Debug
@@ -319,6 +320,18 @@ def wire_hierarchy_callbacks(bs: EditorBootstrap) -> None:
     hp.is_selection_empty = lambda: sel.is_empty()
     hp.set_ordered_ids = lambda ids: sel.set_ordered_ids(ids)
 
+    hp_ref = weakref.ref(hp)
+
+    def _push_selection_snapshot():
+        target = hp_ref()
+        if target is None:
+            sel.remove_listener(_push_selection_snapshot)
+            return
+        target.set_selection_snapshot(sel.get_ids(), sel.get_primary())
+
+    sel.add_listener(_push_selection_snapshot)
+    _push_selection_snapshot()
+
     # -- Panel focus sync --
     def _on_hierarchy_focus_changed(focused: bool):
         from Infernux.engine.ui.closable_panel import ClosablePanel
@@ -372,6 +385,18 @@ def wire_hierarchy_callbacks(bs: EditorBootstrap) -> None:
         return set()
 
     hp.get_runtime_hidden_ids = _get_runtime_hidden_ids
+
+    runtime_manager = PlayModeManager.instance()
+    if runtime_manager is not None:
+        def _push_runtime_hidden_snapshot():
+            target = hp_ref()
+            if target is None:
+                runtime_manager.remove_runtime_hidden_listener(_push_runtime_hidden_snapshot)
+                return
+            target.set_runtime_hidden_ids(runtime_manager.get_runtime_hidden_object_ids())
+
+        runtime_manager.add_runtime_hidden_listener(_push_runtime_hidden_snapshot)
+        _push_runtime_hidden_snapshot()
 
     # -- Delegate to sub-wirers --
     _wire_canvas_queries(ctx)

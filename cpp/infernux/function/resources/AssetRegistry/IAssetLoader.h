@@ -3,14 +3,66 @@
 #include <core/types/InxFwdType.h>
 #include <function/resources/InxResource/InxResourceMeta.h>
 
+#include <cstddef>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
+#include <typeindex>
+#include <utility>
 
 namespace infernux
 {
 
 class AssetDatabase;
+
+class RuntimeAssetPayload final
+{
+  public:
+    RuntimeAssetPayload() = default;
+    RuntimeAssetPayload(std::nullptr_t) noexcept
+    {
+    }
+
+    template <typename T>
+    RuntimeAssetPayload(std::shared_ptr<T> instance) : m_instance(std::move(instance)), m_type(typeid(T))
+    {
+    }
+
+    [[nodiscard]] explicit operator bool() const noexcept
+    {
+        return static_cast<bool>(m_instance);
+    }
+
+    [[nodiscard]] std::type_index GetType() const noexcept
+    {
+        return m_type;
+    }
+
+    [[nodiscard]] const char *GetTypeName() const noexcept
+    {
+        return m_type.name();
+    }
+
+    [[nodiscard]] long GetUseCount() const noexcept
+    {
+        return m_instance.use_count();
+    }
+
+    template <typename T> [[nodiscard]] std::shared_ptr<T> Get() const
+    {
+        if (!m_instance)
+            return {};
+        if (m_type != std::type_index(typeid(T)))
+            throw std::invalid_argument(std::string("Runtime asset type mismatch: stored '") + m_type.name() +
+                                        "', requested '" + typeid(T).name() + "'");
+        return std::static_pointer_cast<T>(m_instance);
+    }
+
+  private:
+    std::shared_ptr<void> m_instance;
+    std::type_index m_type{typeid(void)};
+};
 
 /// @brief Interface for type-specific asset loading/reloading in AssetRegistry.
 ///
@@ -32,30 +84,30 @@ class IAssetLoader
     virtual ~IAssetLoader() = default;
 
     /// @brief Load an asset from disk.
-    /// @return shared_ptr<void> wrapping the concrete asset type.
-    virtual std::shared_ptr<void> Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb) = 0;
+    /// @return Type-tagged runtime object. Empty means this asset has no C++ runtime payload.
+    virtual RuntimeAssetPayload Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb) = 0;
 
-    /// @brief Reload an already-loaded asset in-place.
-    /// @return true on success.
-    virtual bool Reload(std::shared_ptr<void> existing, const std::string &filePath, const std::string &guid,
-                        AssetDatabase *adb) = 0;
-
-    /// @brief Return GUIDs of assets this asset depends on.
-    virtual std::set<std::string> ScanDependencies(const std::string &filePath, AssetDatabase *adb) = 0;
-
-    /// @brief Try to load/reconstruct metadata from file content.
-    /// Called by AssetDatabase when no .meta file exists on disk.
-    /// Default returns false (caller will fall through to CreateMeta).
-    virtual bool LoadMeta(const char * /*content*/, const std::string & /*filePath*/, InxResourceMeta & /*metaData*/)
+    /// Worker loading is opt-in. Implementations may only read immutable state.
+    [[nodiscard]] virtual bool SupportsWorkerLoad() const noexcept
     {
         return false;
     }
 
-    /// @brief Optional: create .meta content for the asset.
-    /// Default implementation does nothing. Override in loaders that
-    /// need to populate meta beyond what AssetDatabase already provides.
+    /// @brief Reload an already-loaded asset in-place.
+    /// @return true on success.
+    virtual bool Reload(const RuntimeAssetPayload &existing, const std::string &filePath, const std::string &guid,
+                        AssetDatabase *adb) = 0;
+
+    /// @brief Estimate bytes exclusively owned by this live CPU payload.
+    /// A non-empty payload must never report zero.
+    [[nodiscard]] virtual size_t EstimateRuntimeBytes(const RuntimeAssetPayload &payload) const = 0;
+
+    /// @brief Return GUIDs of assets this asset depends on.
+    virtual std::set<std::string> ScanDependencies(const std::string &filePath, AssetDatabase *adb) = 0;
+
+    /// @brief Create metadata from the source bytes already read by AssetDatabase.
     virtual void CreateMeta(const char * /*content*/, size_t /*contentSize*/, const std::string & /*filePath*/,
-                            InxResourceMeta & /*metaData*/)
+                            InxResourceMeta & /*metaData*/) const
     {
     }
 };

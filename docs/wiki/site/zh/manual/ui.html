@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="解释屏幕空间 UI 层级、Canvas 缩放、锚点、文本和图片布局、按钮事件、命中测试与当前过渡效果限制。">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>屏幕空间 UI - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/zh/manual/ui.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="屏幕空间 UI - Infernux Documentation">
+    <meta property="og:description" content="解释屏幕空间 UI 层级、Canvas 缩放、锚点、文本和图片布局、按钮事件、命中测试与当前过渡效果限制。">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/zh/manual/ui.html">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="手册">
+    <meta property="article:tag" content="UI"><meta property="article:tag" content="Canvas"><meta property="article:tag" content="布局"><meta property="article:tag" content="事件"><meta property="article:tag" content="响应式">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="屏幕空间 UI - Infernux Documentation">
+    <meta name="twitter:description" content="解释屏幕空间 UI 层级、Canvas 缩放、锚点、文本和图片布局、按钮事件、命中测试与当前过渡效果限制。">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://infernux-engine.com/wiki/site/zh/manual/ui.html#document",
+          "headline": "\u5c4f\u5e55\u7a7a\u95f4 UI",
+          "name": "\u5c4f\u5e55\u7a7a\u95f4 UI",
+          "description": "\u89e3\u91ca\u5c4f\u5e55\u7a7a\u95f4 UI \u5c42\u7ea7\u3001Canvas \u7f29\u653e\u3001\u951a\u70b9\u3001\u6587\u672c\u548c\u56fe\u7247\u5e03\u5c40\u3001\u6309\u94ae\u4e8b\u4ef6\u3001\u547d\u4e2d\u6d4b\u8bd5\u4e0e\u5f53\u524d\u8fc7\u6e21\u6548\u679c\u9650\u5236\u3002",
+          "url": "https://infernux-engine.com/wiki/site/zh/manual/ui.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/zh/manual/ui.html"
+          },
+          "inLanguage": "zh-CN",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Manual",
+          "articleSection": "\u624b\u518c",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": "Infernux NASA Punk \u4efb\u52a1\u5361\uff0c\u5305\u542b\u7f16\u8f91\u5668\u3001\u7194\u7089\u6807\u5fd7\u548c\u6280\u672f\u9884\u89c8\u72b6\u6001\u3002"
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["UI", "Canvas", "\u5e03\u5c40", "\u4e8b\u4ef6", "\u54cd\u5e94\u5f0f"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/zh/manual/ui.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "\u6587\u6863",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "\u624b\u518c",
+              "item": "https://infernux-engine.com/wiki.html?layer=manual#written-guides"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "\u5c4f\u5e55\u7a7a\u95f4 UI",
+              "item": "https://infernux-engine.com/wiki/site/zh/manual/ui.html"
+            }
+            
+          ]
+        }
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/manual/ui.html">
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/manual/ui.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/manual/ui.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
+    <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
+</head>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <!-- Top Navigation -->
+    <nav class="navbar" aria-label="主导航">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/zh/learn/getting-started.html" class="nav-priority">开始使用</a>
+                <a href="/wiki.html#start-here">学习</a>
+                <a href="/wiki.html?layer=manual#written-guides" class="active" aria-current="page">手册</a>
+                <a href="/wiki/site/zh/api/index.html">API</a>
+                <a href="/roadmap.html">路线图</a>
+                <a href="/community.html" class="nav-priority">社区</a>
+                <a href="/download.html">下载</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="复制版本、来源和权威链接" aria-label="复制供 Agent 使用的页面上下文">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>复制给 Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>搜索文档</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell article-page-shell" id="main-content">
+        <div class="container article-page-container">
+            <div class="api-main article-page-content">
+                
+    <nav class="doc-breadcrumb" aria-label="面包屑">
+        <a href="/wiki.html">文档</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html?layer=manual#written-guides">手册</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">屏幕空间 UI</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="文档版本与来源" data-status="preview" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">preview</strong>
+                        <span class="doc-provenance-item"><span>始于</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>已验证</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>读者</span> user, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">文档清单</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/en/manual/ui.html" lang="en">Read in English</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>源码证据 · 3</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/tree/master/python/Infernux/ui" target="_blank" rel="noopener">python/Infernux/ui</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/renderstack/default_forward_pipeline.pyi" target="_blank" rel="noopener">python/Infernux/renderstack/default_forward_pipeline.pyi</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/renderstack/default_deferred_pipeline.pyi" target="_blank" rel="noopener">python/Infernux/renderstack/default_deferred_pipeline.pyi</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>本页目录</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>收起章节</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="本页章节"></nav>
+    </aside>
+    
+                <h1 id="ui">屏幕空间 UI<a class="headerlink" href="#ui" title="Permanent link">&para;</a></h1>
+<p>Infernux UI 是以 <code>UICanvas</code> 为根的组件层级。其子 GameObject 挂载 <code>UIText</code>、<code>UIImage</code>、<code>UIButton</code> 等屏幕组件。布局使用 Canvas 设计像素，渲染与输入时再转换到当前 Game 视口。</p>
+<h2 id="canvas">先确定 Canvas<a class="headerlink" href="#canvas" title="Permanent link">&para;</a></h2>
+<p>把 Canvas 参考分辨率视为界面的设计坐标系，默认值是 1920 × 1080。</p>
+<table>
+<thead>
+<tr>
+<th>设置</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>render_mode</code></td>
+<td>使用 <code>ScreenOverlay</code>，或为特定相机使用 <code>CameraOverlay</code></td>
+</tr>
+<tr>
+<td><code>sort_order</code></td>
+<td>Canvas 间的顺序；数值较小者先绘制</td>
+</tr>
+<tr>
+<td><code>ui_scale_mode</code></td>
+<td>保持像素大小，或从参考分辨率缩放</td>
+</tr>
+<tr>
+<td><code>screen_match_mode</code></td>
+<td>决定如何处理宽高比例差异</td>
+</tr>
+<tr>
+<td><code>match_width_or_height</code></td>
+<td>从匹配宽度（<code>0</code>）过渡到匹配高度（<code>1</code>）</td>
+</tr>
+<tr>
+<td><code>pixel_perfect</code></td>
+<td>条件允许时优先整数倍缩放</td>
+</tr>
+</tbody>
+</table>
+<p>游戏 HUD 可先采用 <code>ScaleWithScreenSize</code>，然后同时验证最窄和最宽的目标比例。<code>ConstantPhysicalSize</code> 目前是面向未来的选项，现阶段行为等同固定像素。</p>
+<p>屏幕 UI 还依赖当前渲染管线的 <code>enable_screen_ui</code> 设置。</p>
+<h2 id="_1">锚点与矩形<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>每个 <code>InxUIScreenComponent</code> 都具有水平/垂直对齐锚点和 <code>x</code>、<code>y</code>、<code>width</code>、<code>height</code>。这些值相对于父 UI 元素；没有父元素时相对于 Canvas。</p>
+<ul>
+<li>根据用途选择边缘：生命值贴角，弹窗居中。</li>
+<li>把相关元素放在同一父节点下，使其作为一个布局单元移动。</li>
+<li><code>rotation</code> 负责视觉旋转，命中测试也会使用旋转后的矩形。</li>
+<li><code>opacity</code> 控制透明度，<code>raycast_target</code> 决定是否参与指针命中。</li>
+<li>装饰图片不要开启 raycast，否则可能挡住后方按钮。</li>
+</ul>
+<p><code>UICanvas.raycast()</code> 返回最前方的可命中元素，<code>raycast_all()</code> 返回从前到后的完整列表。</p>
+<figure class="doc-diagram doc-diagram--pipeline" role="group" aria-label="指针事件在屏幕空间 UI 中的传播"><figcaption><span>INX / SYSTEM MAP</span>指针事件在屏幕空间 UI 中的传播</figcaption><pre><code><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>Game 视口中的指针
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>          ▼
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>转换到 Canvas 设计坐标
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>          ▼
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>Canvas 排序 → 父子矩形 → 从前向后 raycast
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>          ▼
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>第一个启用的 raycast_target
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>          ▼
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>UISelectable 状态 → UIButton on_click 监听器
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>raycast_target = false 的装饰 UIImage ──▶ 跳过
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>模态 UI 获得焦点 ──▶ 抑制玩法输入
+</code></pre></figure>
+<h2 id="_2">文本、图片与按钮<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p><code>UIText</code> 支持水平/垂直对齐、行高、字距、溢出行为及三种尺寸模式。短标签使用 <code>AutoWidth</code>，自动换行段落使用 <code>AutoHeight</code>，布局不可移动时使用 <code>FixedSize</code>。</p>
+<p><code>UIImage.texture_path</code> 指向纹理资源；其颜色是乘法色调，使用 <code>[1, 1, 1, 1]</code> 可保留原图颜色。</p>
+<p><code>UIButton</code> 组合了背景、标签、选择状态颜色和 <code>on_click</code> 事件：</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux</span><span class="w"> </span><span class="kn">import</span> <span class="n">GameObject</span><span class="p">,</span> <span class="n">InxComponent</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux.ui</span><span class="w"> </span><span class="kn">import</span> <span class="n">UIButton</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="k">class</span><span class="w"> </span><span class="nc">MainMenu</span><span class="p">(</span><span class="n">InxComponent</span><span class="p">):</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="n">button_object</span> <span class="o">=</span> <span class="n">GameObject</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;StartButton&quot;</span><span class="p">)</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>        <span class="k">if</span> <span class="n">button_object</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>            <span class="k">return</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>        <span class="n">button</span> <span class="o">=</span> <span class="n">button_object</span><span class="o">.</span><span class="n">get_component</span><span class="p">(</span><span class="n">UIButton</span><span class="p">)</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>        <span class="k">if</span> <span class="n">button</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>            <span class="n">button</span><span class="o">.</span><span class="n">on_click</span><span class="o">.</span><span class="n">add_listener</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">start_game</span><span class="p">)</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">start_game</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Start requested&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>如果之后需要 <code>remove_listener</code>，应保留稳定的方法回调。<code>ColorTint</code> 是当前已实现的选择过渡；Sprite Swap 与 Animation 标记为未来能力。</p>
+<h2 id="ui_1">何时使用屏幕空间 UI<a class="headerlink" href="#ui_1" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>适合</th>
+<th>不适合</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HUD、菜单、弹窗、叠层和贴附视口的提示</td>
+<td>必须存在于 3D 场景中的世界空间标签</td>
+</tr>
+<tr>
+<td>相对 Canvas 的指针交互</td>
+<td>对世界几何做物理拾取或 Camera 射线</td>
+</tr>
+<tr>
+<td>拥有明确焦点归属的可选择控件</td>
+<td>会拦截 raycast 的装饰层</td>
+</tr>
+<tr>
+<td>在目标宽高比上验证过的响应式布局</td>
+<td>假设 1920 × 1080 设计尺寸就是物理视口</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_3">响应式检查清单<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<ol>
+<li>在参考分辨率、16:9、16:10、超宽屏和窄竖屏中测试 Canvas。</li>
+<li>使用最长的目标语言文本检查布局，不要只验证较短的英文。</li>
+<li>确保缩放后交互目标仍足够大。</li>
+<li>确认渲染顺序、命中顺序和视觉顺序一致。</li>
+<li>模态 UI 获得焦点时禁用游戏输入。</li>
+<li>确认当前渲染管线已启用屏幕 UI。</li>
+</ol>
+<h2 id="_4">相关参考<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../api/UICanvas.html">UICanvas</a></li>
+<li><a href="../api/UIText.html">UIText</a></li>
+<li><a href="../api/UIImage.html">UIImage</a></li>
+<li><a href="../api/UIButton.html">UIButton</a></li>
+<li><a href="../api/UISelectable.html">UISelectable</a></li>
+<li><a href="input-and-time.html">输入与时间</a></li>
+</ul>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="文档连续阅读与反馈">
+        <a class="doc-trail-fallback" href="/wiki.html">返回文档中心</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="文档发布证据">
+        <span class="doc-build-label">发布证据</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">正在读取发布版本与来源…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">机器清单 JSON</a>
+    </section>
+    
+    
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">搜索 Infernux 文档</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="关闭文档搜索"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API 符号、系统、工作流…">
+            </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="文档搜索筛选器"></div>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </dialog>
+
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
+</body>
+</html>

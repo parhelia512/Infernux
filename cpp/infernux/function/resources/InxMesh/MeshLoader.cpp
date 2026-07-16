@@ -9,11 +9,15 @@
 
 #include "MeshLoader.h"
 #include "InxMesh.h"
+#include "MeshArtifact.h"
 
 #include <core/config/MathConstants.h>
 #include <core/log/InxLog.h>
 #include <function/resources/AssetDatabase/AssetDatabase.h>
 #include <function/resources/InxResource/InxResourceMeta.h>
+#include <function/resources/InxSkinnedMesh/InxSkinnedMesh.h>
+#include <function/resources/InxSkinnedMesh/SkinnedMeshArtifact.h>
+#include <function/resources/InxSkinnedMesh/SkinnedModelImporter.h>
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
@@ -23,9 +27,28 @@
 #include <fstream>
 #include <platform/filesystem/InxPath.h>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace infernux
 {
+
+namespace
+{
+std::string ReadArtifactBytes(const std::string &path, std::string_view label)
+{
+    std::ifstream file(ToFsPath(path), std::ios::binary | std::ios::ate);
+    if (!file.is_open())
+        throw std::runtime_error("failed to open " + std::string(label));
+    const auto size = file.tellg();
+    if (size <= 0)
+        throw std::runtime_error(std::string(label) + " is empty");
+    std::string bytes(static_cast<size_t>(size), '\0');
+    file.seekg(0);
+    if (!file.read(bytes.data(), size))
+        throw std::runtime_error("failed to read " + std::string(label));
+    return bytes;
+}
+} // namespace
 
 // ============================================================================
 // Import-setting helpers
@@ -41,33 +64,21 @@ struct MeshImportSettings
     bool optimizeMesh = true;
 };
 
-static MeshImportSettings ReadImportSettings(const std::string &filePath, const std::string &guid, AssetDatabase *adb)
+static MeshImportSettings ReadImportSettings(const InxResourceMeta &meta)
 {
     MeshImportSettings settings;
-    if (!adb)
-        return settings;
-
-    // Prefer GUID-based lookup (O(1), no path-normalization issues)
-    const InxResourceMeta *meta = nullptr;
-    if (!guid.empty())
-        meta = adb->GetMetaByGuid(guid);
-    if (!meta)
-        meta = adb->GetMetaByPath(filePath);
-    if (!meta)
-        return settings;
-
-    if (meta->HasKey("scale_factor"))
-        settings.scaleFactor = meta->GetDataAs<float>("scale_factor");
-    if (meta->HasKey("generate_normals"))
-        settings.generateNormals = meta->GetDataAs<bool>("generate_normals");
-    if (meta->HasKey("generate_tangents"))
-        settings.generateTangents = meta->GetDataAs<bool>("generate_tangents");
-    if (meta->HasKey("flip_uvs"))
-        settings.flipUVs = meta->GetDataAs<bool>("flip_uvs");
-    if (meta->HasKey("swap_uv_channels"))
-        settings.swapUVChannels = meta->GetDataAs<bool>("swap_uv_channels");
-    if (meta->HasKey("optimize_mesh"))
-        settings.optimizeMesh = meta->GetDataAs<bool>("optimize_mesh");
+    if (meta.HasKey("scale_factor"))
+        settings.scaleFactor = meta.GetDataAs<float>("scale_factor");
+    if (meta.HasKey("generate_normals"))
+        settings.generateNormals = meta.GetDataAs<bool>("generate_normals");
+    if (meta.HasKey("generate_tangents"))
+        settings.generateTangents = meta.GetDataAs<bool>("generate_tangents");
+    if (meta.HasKey("flip_uvs"))
+        settings.flipUVs = meta.GetDataAs<bool>("flip_uvs");
+    if (meta.HasKey("swap_uv_channels"))
+        settings.swapUVChannels = meta.GetDataAs<bool>("swap_uv_channels");
+    if (meta.HasKey("optimize_mesh"))
+        settings.optimizeMesh = meta.GetDataAs<bool>("optimize_mesh");
 
     return settings;
 }
@@ -377,31 +388,26 @@ static std::shared_ptr<InxMesh> ConvertScene(const aiScene *scene, const MeshImp
 // IAssetLoader interface
 // ============================================================================
 
-std::shared_ptr<void> MeshLoader::Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb)
+MeshSourceImportResult MeshLoader::ImportSourceDetailed(const std::string &filePath, const std::string &guid,
+                                                        const InxResourceMeta &metadata)
 {
     auto fsPath = ToFsPath(filePath);
-    if (!std::filesystem::exists(fsPath)) {
-        INXLOG_ERROR("MeshLoader::Load: file not found: ", filePath);
-        return nullptr;
-    }
+    if (!std::filesystem::is_regular_file(fsPath))
+        throw std::runtime_error("MeshLoader source file not found: " + filePath);
 
     // Read file into memory to avoid Assimp's narrow-string path issues on Windows
     std::ifstream file(fsPath, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) {
-        INXLOG_ERROR("MeshLoader::Load: cannot open file: ", filePath);
-        return nullptr;
-    }
+    if (!file.is_open())
+        throw std::runtime_error("MeshLoader cannot open source file: " + filePath);
     auto fileSize = file.tellg();
-    if (fileSize <= 0) {
-        INXLOG_ERROR("MeshLoader::Load: empty or unreadable: ", filePath);
-        return nullptr;
-    }
+    if (fileSize <= 0)
+        throw std::runtime_error("MeshLoader source file is empty or unreadable: " + filePath);
     std::vector<char> fileData(static_cast<size_t>(fileSize));
     file.seekg(0);
-    file.read(fileData.data(), fileSize);
-    file.close();
+    if (!file.read(fileData.data(), fileSize))
+        throw std::runtime_error("MeshLoader failed to read source file: " + filePath);
 
-    MeshImportSettings settings = ReadImportSettings(filePath, guid, adb);
+    MeshImportSettings settings = ReadImportSettings(metadata);
     unsigned int flags = BuildAssimpFlags(settings);
 
     // Derive extension hint for Assimp (e.g. "fbx")
@@ -412,23 +418,113 @@ std::shared_ptr<void> MeshLoader::Load(const std::string &filePath, const std::s
     Assimp::Importer importer;
     const aiScene *scene = importer.ReadFileFromMemory(fileData.data(), fileData.size(), flags, ext.c_str());
 
-    if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode) {
-        INXLOG_ERROR("MeshLoader::Load: Assimp failed for '", filePath, "': ", importer.GetErrorString());
-        return nullptr;
-    }
+    if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode)
+        throw std::runtime_error("MeshLoader Assimp import failed for '" + filePath +
+                                 "': " + importer.GetErrorString());
 
     std::string name = FromFsPath(fsPath.stem());
     auto mesh = ConvertScene(scene, settings, name);
-    if (!mesh)
-        return nullptr;
-
     mesh->SetGuid(guid);
     mesh->SetFilePath(filePath);
 
-    return mesh;
+    MeshSourceImportResult result;
+    result.mesh = std::move(mesh);
+    result.meshCount = scene->mNumMeshes;
+    for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex) {
+        const aiMesh *sourceMesh = scene->mMeshes[meshIndex];
+        if (!sourceMesh)
+            throw std::runtime_error("MeshLoader Assimp scene contains a null mesh");
+        if (sourceMesh->mPrimitiveTypes & aiPrimitiveType_TRIANGLE) {
+            result.vertexCount += sourceMesh->mNumVertices;
+            for (unsigned int faceIndex = 0; faceIndex < sourceMesh->mNumFaces; ++faceIndex)
+                result.indexCount += sourceMesh->mFaces[faceIndex].mNumIndices;
+        }
+    }
+
+    result.materialSlots.reserve(scene->mNumMaterials);
+    for (unsigned int materialIndex = 0; materialIndex < scene->mNumMaterials; ++materialIndex) {
+        if (!scene->mMaterials[materialIndex])
+            throw std::runtime_error("MeshLoader Assimp scene contains a null material");
+        aiString sourceName;
+        scene->mMaterials[materialIndex]->Get(AI_MATKEY_NAME, sourceName);
+        std::string materialName = sourceName.C_Str();
+        if (materialName.empty())
+            materialName = "Material_" + std::to_string(materialIndex);
+        result.materialSlots.push_back(std::move(materialName));
+    }
+
+    std::unordered_set<std::string> seenBones;
+    for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex) {
+        const aiMesh *sourceMesh = scene->mMeshes[meshIndex];
+        for (unsigned int boneIndex = 0; boneIndex < sourceMesh->mNumBones; ++boneIndex) {
+            const aiBone *bone = sourceMesh->mBones[boneIndex];
+            if (!bone)
+                throw std::runtime_error("MeshLoader Assimp scene contains a null bone");
+            std::string boneName = bone->mName.C_Str();
+            if (!boneName.empty() && seenBones.insert(boneName).second)
+                result.boneNames.push_back(std::move(boneName));
+        }
+    }
+
+    result.animationNames.reserve(scene->mNumAnimations);
+    for (unsigned int animationIndex = 0; animationIndex < scene->mNumAnimations; ++animationIndex) {
+        const aiAnimation *animation = scene->mAnimations[animationIndex];
+        if (!animation)
+            throw std::runtime_error("MeshLoader Assimp scene contains a null animation");
+        std::string animationName = animation->mName.C_Str();
+        if (animationName.empty())
+            animationName = "Anim_" + std::to_string(animationIndex);
+        result.animationNames.push_back(std::move(animationName));
+    }
+    if (SkinnedModelImporter::HasSkinningData(*scene))
+        result.skinnedMesh = SkinnedModelImporter::ConvertScene(*scene, guid, filePath, settings.scaleFactor);
+    return result;
 }
 
-bool MeshLoader::Reload(std::shared_ptr<void> existing, const std::string &filePath, const std::string &guid,
+std::shared_ptr<InxMesh> MeshLoader::ImportSource(const std::string &filePath, const std::string &guid,
+                                                  const InxResourceMeta &metadata)
+{
+    auto imported = ImportSourceDetailed(filePath, guid, metadata);
+    imported.mesh->SetSkinnedData(std::move(imported.skinnedMesh));
+    return imported.mesh;
+}
+
+RuntimeAssetPayload MeshLoader::Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb)
+{
+    if (!adb)
+        throw std::invalid_argument("MeshLoader requires an AssetDatabase");
+    auto metadata = adb->GetMetaByGuid(guid);
+    if (!metadata)
+        throw std::invalid_argument("MeshLoader could not resolve metadata for GUID: " + guid);
+    if (!metadata->HasKey("content_hash"))
+        throw std::invalid_argument("MeshLoader metadata has no source content hash");
+
+    const std::string sourceHash = metadata->GetDataAs<std::string>("content_hash");
+    const std::string artifactPath = adb->GetRuntimeArtifactPath(guid, ResourceType::Mesh);
+    const std::string skinnedArtifactPath = adb->GetSkinnedMeshArtifactPath(guid);
+    if (!artifactPath.empty() && std::filesystem::is_regular_file(ToFsPath(artifactPath))) {
+        try {
+            auto mesh = MeshArtifact::Deserialize(ReadArtifactBytes(artifactPath, "Mesh artifact"), sourceHash);
+            auto skinned = SkinnedMeshArtifact::Deserialize(
+                ReadArtifactBytes(skinnedArtifactPath, "skinned Mesh companion artifact"), sourceHash);
+            if (skinned) {
+                skinned->guid = guid;
+                skinned->sourcePath = filePath;
+            }
+            mesh->SetSkinnedData(std::move(skinned));
+            mesh->SetGuid(guid);
+            mesh->SetFilePath(filePath);
+            return mesh;
+        } catch (const std::exception &exception) {
+            INXLOG_WARN("MeshLoader: rejected derived artifact for '", filePath, "': ", exception.what(),
+                        "; falling back to source import");
+        }
+    }
+
+    return ImportSource(filePath, guid, *metadata);
+}
+
+bool MeshLoader::Reload(const RuntimeAssetPayload &existing, const std::string &filePath, const std::string &guid,
                         AssetDatabase *adb)
 {
     INXLOG_INFO("MeshLoader::Reload: '", filePath, "'");
@@ -437,10 +533,10 @@ bool MeshLoader::Reload(std::shared_ptr<void> existing, const std::string &fileP
     if (!freshData)
         return false;
 
-    auto loaded = std::static_pointer_cast<InxMesh>(freshData);
+    auto loaded = freshData.Get<InxMesh>();
 
     // Replace contents of the existing instance in-place to preserve pointer identity.
-    auto target = std::static_pointer_cast<InxMesh>(existing);
+    auto target = existing.Get<InxMesh>();
     if (!target)
         return false;
 
@@ -450,9 +546,19 @@ bool MeshLoader::Reload(std::shared_ptr<void> existing, const std::string &fileP
                     std::vector<SubMesh>(loaded->GetSubMeshes()));
     target->SetMaterialSlotNames(std::vector<std::string>(loaded->GetMaterialSlotNames()));
     target->SetMaterialSlotData(std::vector<MaterialSlotData>(loaded->GetMaterialSlotData()));
+    target->SetNodeNames(std::vector<std::string>(loaded->GetNodeNames()));
+    target->SetSkinnedData(loaded->GetSkinnedData());
 
     INXLOG_INFO("MeshLoader::Reload: updated '", target->GetName(), "' in-place");
     return true;
+}
+
+size_t MeshLoader::EstimateRuntimeBytes(const RuntimeAssetPayload &payload) const
+{
+    const auto mesh = payload.Get<InxMesh>();
+    if (!mesh)
+        throw std::invalid_argument("MeshLoader cannot estimate an empty runtime payload");
+    return mesh->GetRuntimeMemoryBytes();
 }
 
 std::set<std::string> MeshLoader::ScanDependencies(const std::string & /*filePath*/, AssetDatabase * /*adb*/)
@@ -467,7 +573,7 @@ std::set<std::string> MeshLoader::ScanDependencies(const std::string & /*filePat
 // =============================================================================
 
 void MeshLoader::CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
-                            InxResourceMeta &metaData)
+                            InxResourceMeta &metaData) const
 {
     metaData.Init(content, contentSize, filePath, ResourceType::Mesh);
 
@@ -478,12 +584,7 @@ void MeshLoader::CreateMeta(const char *content, size_t contentSize, const std::
     metaData.AddMetadata("file_extension", extension);
     metaData.AddMetadata("is_readable", false);
 
-    try {
-        if (std::filesystem::exists(path)) {
-            metaData.AddMetadata("file_size", static_cast<size_t>(std::filesystem::file_size(path)));
-        }
-    } catch (const std::filesystem::filesystem_error &) {
-    }
+    metaData.AddMetadata("file_size", contentSize);
 }
 
 } // namespace infernux

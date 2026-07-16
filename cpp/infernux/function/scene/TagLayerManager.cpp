@@ -4,11 +4,14 @@
  */
 
 #include "TagLayerManager.h"
+#include "platform/filesystem/DocumentStore.h"
 #include <algorithm>
+#include <array>
 #include <core/log/InxLog.h>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <platform/filesystem/InxPath.h>
+#include <unordered_set>
 
 using json = nlohmann::json;
 
@@ -287,47 +290,67 @@ bool TagLayerManager::Deserialize(const std::string &jsonStr)
 {
     try {
         json j = json::parse(jsonStr);
+        if (!j.is_object() || j.size() != 4 || j.value("schema_version", 0) != 1 || !j.contains("custom_tags") ||
+            !j["custom_tags"].is_array() || !j.contains("layers") || !j["layers"].is_array() ||
+            !j.contains("layer_collision_masks") || !j["layer_collision_masks"].is_array()) {
+            throw std::invalid_argument("expected the complete TagLayerSettings schema_version 1 document");
+        }
 
-        // Re-initialize defaults first
+        static const std::unordered_set<std::string> builtinTags = {
+            "Untagged", "Respawn", "Finish", "EditorOnly", "MainCamera", "Player", "GameController"};
+        std::vector<std::string> customTags;
+        std::unordered_set<std::string> seenTags = builtinTags;
+        for (const auto &tag : j["custom_tags"]) {
+            if (!tag.is_string())
+                throw std::invalid_argument("custom_tags must contain strings");
+            std::string value = tag.get<std::string>();
+            if (value.empty() || !seenTags.insert(value).second)
+                throw std::invalid_argument("custom_tags must be non-empty and unique");
+            customTags.push_back(std::move(value));
+        }
+
+        if (j["layers"].size() != kMaxLayers)
+            throw std::invalid_argument("layers must contain exactly 32 strings");
+        std::vector<std::string> layers;
+        layers.reserve(kMaxLayers);
+        for (const auto &layer : j["layers"]) {
+            if (!layer.is_string())
+                throw std::invalid_argument("layers must contain exactly 32 strings");
+            layers.push_back(layer.get<std::string>());
+        }
+        static const std::array<std::pair<int, const char *>, 5> builtinLayers = {
+            std::pair{0, "Default"}, std::pair{1, "TransparentFX"}, std::pair{2, "IgnoreRaycast"},
+            std::pair{4, "Water"}, std::pair{5, "UI"}};
+        for (const auto &[index, expectedName] : builtinLayers) {
+            if (layers[index] != expectedName)
+                throw std::invalid_argument("built-in layer names cannot be changed");
+        }
+
+        if (j["layer_collision_masks"].size() != kMaxLayers)
+            throw std::invalid_argument("layer_collision_masks must contain exactly 32 unsigned integers");
+        std::vector<uint32_t> collisionMasks;
+        collisionMasks.reserve(kMaxLayers);
+        for (const auto &mask : j["layer_collision_masks"]) {
+            if (!mask.is_number_unsigned())
+                throw std::invalid_argument("layer_collision_masks must contain exactly 32 unsigned integers");
+            collisionMasks.push_back(mask.get<uint32_t>());
+        }
+        for (int a = 0; a < kMaxLayers; ++a) {
+            for (int b = a + 1; b < kMaxLayers; ++b) {
+                const bool ab = (collisionMasks[a] & LayerToMask(b)) != 0;
+                const bool ba = (collisionMasks[b] & LayerToMask(a)) != 0;
+                if (ab != ba)
+                    throw std::invalid_argument("layer collision matrix must be symmetric");
+            }
+        }
+
         InitDefaults();
-
-        // Restore custom tags
-        if (j.contains("custom_tags") && j["custom_tags"].is_array()) {
-            for (const auto &tag : j["custom_tags"]) {
-                std::string tagStr = tag.get<std::string>();
-                if (!tagStr.empty() && GetTagIndex(tagStr) < 0) {
-                    m_tags.push_back(tagStr);
-                }
-            }
+        m_tags.insert(m_tags.end(), customTags.begin(), customTags.end());
+        for (int i = 0; i < kMaxLayers; ++i) {
+            if (!IsBuiltinLayer(i))
+                m_layers[i] = std::move(layers[i]);
         }
-
-        // Restore layer names (only user-customizable layers)
-        if (j.contains("layers") && j["layers"].is_array()) {
-            const auto &layersArr = j["layers"];
-            for (int i = 0; i < kMaxLayers && i < static_cast<int>(layersArr.size()); ++i) {
-                std::string name = layersArr[i].get<std::string>();
-                if (!IsBuiltinLayer(i)) {
-                    m_layers[i] = name;
-                }
-                // Built-in layers keep their default names
-            }
-        }
-
-        if (j.contains("layer_collision_masks") && j["layer_collision_masks"].is_array()) {
-            const auto &maskArr = j["layer_collision_masks"];
-            for (int i = 0; i < kMaxLayers && i < static_cast<int>(maskArr.size()); ++i) {
-                m_layerCollisionMasks[i] = maskArr[i].get<uint32_t>();
-            }
-
-            // Re-symmetrize defensively in case the file was edited manually.
-            for (int a = 0; a < kMaxLayers; ++a) {
-                for (int b = a + 1; b < kMaxLayers; ++b) {
-                    bool collides = ((m_layerCollisionMasks[a] & LayerToMask(b)) != 0) ||
-                                    ((m_layerCollisionMasks[b] & LayerToMask(a)) != 0);
-                    SetLayersCollide(a, b, collides);
-                }
-            }
-        }
+        m_layerCollisionMasks = std::move(collisionMasks);
 
         INXLOG_DEBUG("TagLayerManager: deserialized ", m_tags.size() - kBuiltinTagCount, " custom tags");
         return true;
@@ -341,13 +364,7 @@ bool TagLayerManager::SaveToFile(const std::string &path) const
 {
     try {
         std::string jsonStr = Serialize();
-        std::ofstream file = OpenOutputFile(path, std::ios::out | std::ios::trunc);
-        if (!file.is_open()) {
-            INXLOG_ERROR("TagLayerManager::SaveToFile: cannot open '", path, "'");
-            return false;
-        }
-        file << jsonStr;
-        file.close();
+        DocumentStore::Instance().WriteAndWait(path, std::move(jsonStr));
         INXLOG_INFO("TagLayerManager: saved to '", path, "'");
         return true;
     } catch (const std::exception &e) {

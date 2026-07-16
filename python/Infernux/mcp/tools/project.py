@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
-from Infernux.mcp.tools.common import main_thread
+import os
+import time
+
+from Infernux.mcp.threading import MainThreadCommandQueue
+from Infernux.mcp.tools.common import (
+    get_asset_database,
+    main_thread,
+    ok,
+    register_tool_metadata,
+    resolve_asset_path,
+)
 
 
 def register_project_tools(mcp, project_path: str) -> None:
@@ -33,3 +43,151 @@ def register_project_tools(mcp, project_path: str) -> None:
             }
 
         return main_thread("project_info", _read)
+
+    @mcp.tool(name="project_asset_state")
+    def project_asset_state(path: str = "", guid: str = "") -> dict:
+        """Read one project asset's disk/meta and AssetDatabase identity state."""
+        requested_path = _requested_asset_path(project_path, path)
+        requested_guid = str(guid or "").strip()
+        if not requested_path and not requested_guid:
+            raise ValueError("Provide path or guid.")
+        return main_thread(
+            "project_asset_state",
+            lambda: _read_asset_state(project_path, requested_path, requested_guid),
+            arguments={"path": path, "guid": requested_guid},
+        )
+
+    @mcp.tool(name="project_wait_for_asset")
+    def project_wait_for_asset(
+        path: str = "",
+        guid: str = "",
+        exists: bool = True,
+        timeout_seconds: float = 5.0,
+        poll_interval: float = 0.05,
+    ) -> dict:
+        """Wait until disk/meta and AssetDatabase agree on an asset identity."""
+        requested_path = _requested_asset_path(project_path, path)
+        requested_guid = str(guid or "").strip()
+        if not requested_path and not requested_guid:
+            raise ValueError("Provide path or guid.")
+        timeout = max(0.05, min(float(timeout_seconds), 30.0))
+        interval = max(0.01, min(float(poll_interval), 1.0))
+        deadline = time.monotonic() + timeout
+        polls = 0
+        state: dict = {}
+        while True:
+            polls += 1
+            state = MainThreadCommandQueue.instance().run_sync(
+                "project_wait_for_asset.poll",
+                lambda: _read_asset_state(project_path, requested_path, requested_guid),
+                timeout_ms=30000,
+            )
+            if _asset_expectation_met(state, bool(exists)):
+                return ok({**state, "settled": True, "expected_exists": bool(exists), "polls": polls})
+            if time.monotonic() >= deadline:
+                return ok({**state, "settled": False, "expected_exists": bool(exists), "polls": polls})
+            time.sleep(min(interval, max(0.0, deadline - time.monotonic())))
+
+    register_tool_metadata(
+        "project_asset_state",
+        summary="Read project asset existence and AssetDatabase GUID/path identity without reading asset contents.",
+        category="project/observation",
+        side_effects=[],
+        next_suggested_tools=["project_wait_for_asset", "runtime_read_errors"],
+        risk_level="low",
+    )
+    register_tool_metadata(
+        "project_wait_for_asset",
+        summary="Wait for a Project rename/delete/import to settle across disk, meta, and AssetDatabase.",
+        category="project/observation",
+        preconditions=["The asset mutation was initiated through normal Editor UI."],
+        side_effects=[],
+        recovery=["If settled=false, report the exact disk/database mismatch instead of retrying the mutation blindly."],
+        next_suggested_tools=["project_asset_state", "runtime_read_errors"],
+        risk_level="low",
+    )
+
+
+def _requested_asset_path(project_path: str, path: str) -> str:
+    value = str(path or "").strip()
+    return resolve_asset_path(project_path, value) if value else ""
+
+
+def _read_asset_state(project_path: str, requested_path: str, requested_guid: str) -> dict:
+    database = get_asset_database()
+    if database is None:
+        raise RuntimeError("AssetDatabase is not available.")
+
+    database_path = str(database.get_path_from_guid(requested_guid) or "") if requested_guid else ""
+    effective_path = requested_path or database_path
+    database_guid = str(database.get_guid_from_path(effective_path) or "") if effective_path else ""
+    mapping_consistent = bool(effective_path and database_guid)
+    if requested_guid:
+        mapping_consistent = mapping_consistent and database_guid == requested_guid
+    if requested_path and requested_guid:
+        mapping_consistent = mapping_consistent and _same_path(requested_path, database_path)
+
+    database_relative_path = _relative_project_path(project_path, database_path)
+    if requested_path and _same_path(requested_path, database_path):
+        database_relative_path = _relative_project_path(project_path, requested_path)
+
+    path_is_file = bool(effective_path and os.path.isfile(effective_path))
+    path_is_directory = bool(effective_path and os.path.isdir(effective_path))
+    return {
+        "requested_path": _relative_project_path(project_path, requested_path),
+        "requested_guid": requested_guid,
+        "path_exists": path_is_file or path_is_directory,
+        "path_kind": "file" if path_is_file else "directory" if path_is_directory else "missing",
+        "meta_exists": bool(effective_path and os.path.isfile(effective_path + ".meta")),
+        "database_contains_path": bool(effective_path and database.contains_path(effective_path)),
+        "database_contains_guid": bool(requested_guid and database.contains_guid(requested_guid)),
+        "database_guid": database_guid,
+        "database_path": database_relative_path,
+        "mapping_consistent": mapping_consistent,
+        "refresh_pending": bool(database.refresh_pending),
+        "query_generation": int(database.query_generation),
+    }
+
+
+def _asset_expectation_met(state: dict, expected_exists: bool) -> bool:
+    if bool(state.get("refresh_pending")):
+        return False
+    if expected_exists:
+        if state.get("path_kind") == "directory":
+            return bool(state.get("path_exists") and not state.get("requested_guid"))
+        return bool(
+            state.get("path_exists")
+            and state.get("meta_exists")
+            and state.get("database_contains_path")
+            and state.get("mapping_consistent")
+        )
+    return not bool(
+        state.get("path_exists")
+        or state.get("meta_exists")
+        or state.get("database_contains_path")
+        or state.get("database_contains_guid")
+    )
+
+
+def _relative_project_path(project_path: str, path: str) -> str:
+    if not path:
+        return ""
+    try:
+        return os.path.relpath(path, project_path).replace("\\", "/")
+    except ValueError:
+        return ""
+
+
+def _normalize(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path)) if path else ""
+
+
+def _same_path(first: str, second: str) -> bool:
+    if not first or not second:
+        return False
+    try:
+        if os.path.exists(first) and os.path.exists(second):
+            return os.path.samefile(first, second)
+    except OSError:
+        pass
+    return _normalize(first) == _normalize(second)

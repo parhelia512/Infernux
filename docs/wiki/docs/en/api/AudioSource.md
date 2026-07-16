@@ -20,7 +20,9 @@ creating temporary AudioSource objects. Sources are spatialized; for "2D"
 audio, place the AudioSource on/near the AudioListener's GameObject.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+AudioSource owns 1–16 tracks; `play_on_awake` starts only track 0. Use pooled one-shots for transient effects and keep assigned AudioClip objects loaded while playback may use them.
 <!-- USER CONTENT END -->
 
 ## Properties
@@ -75,12 +77,25 @@ audio, place the AudioSource on/near the AudioListener's GameObject.
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for AudioSource
+from Infernux import AudioSource, GameObject
+from Infernux.core.audio_clip import AudioClip
+
+audio_object = GameObject.find("Ambience")
+clip = AudioClip.load("Assets/Audio/ambience.wav")
+if audio_object is not None and clip is not None:
+    source = audio_object.get_component(AudioSource)
+    if source is not None:
+        source.set_track_clip(0, clip)
+        source.loop = True
+        source.play(0)
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [Audio Workflow](../learn/audio-workflow.md)
+- [AudioClip](AudioClip.md)
+- [AudioListener](AudioListener.md)
+- [Input and Time](../manual/input-and-time.md)
 <!-- USER CONTENT END -->

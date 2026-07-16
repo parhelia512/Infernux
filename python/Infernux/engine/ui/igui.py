@@ -193,6 +193,7 @@ class IGUI:
         picker_asset_items: Optional[Callable[[str], Sequence[tuple]]] = None,
         on_pick: Optional[Callable[[Any], None]] = None,
         on_clear: Optional[Callable[[], None]] = None,
+        semantic_id: str = "",
     ) -> bool:
         """Render a Unity-style object-reference field with optional drop target
         and picker popup.
@@ -205,61 +206,21 @@ class IGUI:
         """
         has_picker = (picker_scene_items is not None
                       or picker_asset_items is not None)
-        clicked = False
-        ctx.push_id_str(field_id)
-
-        # Leading spaces so label text lines up with scalar fields (Selectable clips tightly).
-        full_text = f"   {display_text} ({type_hint})"
-        if len(full_text) > 38:
-            full_text = full_text[:35] + "..."
-
-        avail_width = ctx.get_content_region_avail_width()
-        btn_w = _MINI_ICON_BTN_SIDE if has_picker else 0.0
-        field_w = max(avail_width - btn_w, 10.0)
-
-        # Match scalar field text inset; suppress ImGui's own frame border so hover
-        # highlight aligns with our custom outline (avoids a sliver past the left edge).
-        _fpx = Theme.INSPECTOR_FRAME_PAD[0] + Theme.OBJECT_FIELD_TEXT_INSET_X
-        _fpy = Theme.INSPECTOR_FRAME_PAD[1]
-        ctx.push_style_var_vec2(ImGuiStyleVar.FramePadding, _fpx, _fpy)
-        ctx.push_style_var_float(ImGuiStyleVar.FrameBorderSize, 0.0)
-        # Selectable uses Header* colors; match list-body fill so hover stays inside the outline.
-        ctx.push_style_color(ImGuiCol.Header, *Theme.INSPECTOR_LIST_BODY_BG)
-        ctx.push_style_color(ImGuiCol.HeaderHovered, *Theme.INSPECTOR_LIST_BODY_BG)
-        ctx.push_style_color(ImGuiCol.HeaderActive, *Theme.INSPECTOR_LIST_BODY_BG)
-
-        ctx.begin_group()
-
-        if clickable:
-            ctx.set_next_item_allow_overlap()
-            if ctx.selectable(full_text, selected, 0, field_w, 0.0):
-                clicked = True
-        else:
-            ctx.selectable(full_text, False, 0, field_w, 0.0)
-
-        # ── Picker dot button ──
-        if has_picker:
-            ctx.same_line(0, 0)
-            ctx.set_cursor_pos_x(ctx.get_cursor_pos_x() + (avail_width - btn_w - field_w))
-            if IGUI._mini_icon_button(ctx, "##picker", Theme.ICON_IMG_PICKER, Theme.ICON_PICKER):
-                ctx.open_popup("##obj_picker")
-                _popup_needs_focus.add(field_id)
-                _picker_filters.pop(f"_igui_filter_{field_id}", None)
-
-            # ── Picker popup ──
-            IGUI._render_object_picker_popup(
-                ctx, field_id,
-                picker_scene_items, picker_asset_items,
-                on_pick, on_clear,
-            )
-
-        ctx.end_group()
-        ctx.pop_style_color(3)
-        ctx.pop_style_var(2)
-
-        # Outline the whole object field — match list-body / frame chrome used
-        # alongside scalar inspector fields (see Theme.INSPECTOR_LIST_BODY_BORDER).
-        IGUI._draw_item_outline(ctx, *Theme.INSPECTOR_LIST_BODY_BORDER, 1.0)
+        picker_texture = EditorIcons.get_cached(Theme.ICON_IMG_PICKER) if has_picker else 0
+        interaction = int(ctx.render_object_field_chrome(
+            field_id,
+            display_text,
+            type_hint,
+            selected,
+            clickable,
+            has_picker,
+            int(picker_texture or 0),
+            semantic_id,
+        ))
+        clicked = bool(interaction & 1)
+        if interaction and has_picker:
+            _popup_needs_focus.add(field_id)
+            _picker_filters.pop(f"_igui_filter_{field_id}", None)
 
         if accept and on_drop:
             if isinstance(accept, str):
@@ -268,7 +229,17 @@ class IGUI:
                 IGUI.multi_drop_target(ctx, list(accept),
                                        lambda _dt, payload: on_drop(payload))
 
-        ctx.pop_id()
+        if has_picker:
+            ctx.push_id_str(field_id)
+            try:
+                IGUI._render_object_picker_popup(
+                    ctx, field_id,
+                    picker_scene_items, picker_asset_items,
+                    on_pick, on_clear,
+                )
+            finally:
+                ctx.pop_id()
+
         return clicked
 
     # ------------------------------------------------------------------
@@ -547,44 +518,20 @@ class IGUI:
 
         Returns the new selected index (unchanged if nothing was picked).
         """
-        display = labels[current_idx] if 0 <= current_idx < len(labels) else ""
-        popup_tag = f"##combo_pop_{combo_id}"
-        filter_key = f"_igui_combo_{combo_id}"
-
         btn_w = width if width > 0.0 else ctx.get_content_region_avail_width()
         color_count = Theme.push_inline_button_style(ctx)
-        if ctx.button(f"{display}##combo_{combo_id}", None, width=btn_w,
-                      height=Theme.INSPECTOR_INLINE_BTN_H):
-            ctx.open_popup(popup_tag)
-            _popup_needs_focus.add(filter_key)
-            _picker_filters.pop(filter_key, None)
-        ctx.pop_style_color(color_count)
-
-        new_idx = current_idx
-        if ctx.begin_popup(popup_tag):
-            # Auto-focus on first frame
-            if filter_key in _popup_needs_focus:
-                ctx.set_keyboard_focus_here()
-                _popup_needs_focus.discard(filter_key)
-
-            prev_filter = _picker_filters.get(filter_key, "")
-            filt = ctx.input_text_with_hint("##filter", t("igui.search_hint"), prev_filter, 256)
-            _picker_filters[filter_key] = filt
-            ctx.separator()
-
-            filt_lower = filt.lower()
-            for idx, lbl in enumerate(labels):
-                if filt_lower and filt_lower not in lbl.lower():
-                    continue
-                ctx.push_id(idx)
-                if ctx.selectable(lbl, idx == current_idx):
-                    new_idx = idx
-                    ctx.close_current_popup()
-                ctx.pop_id()
-
-            ctx.end_popup()
-
-        return new_idx
+        try:
+            return ctx.searchable_combo(
+                combo_id,
+                current_idx,
+                list(labels),
+                btn_w,
+                8,
+                t("igui.search_hint"),
+                t("igui.no_results"),
+            )
+        finally:
+            ctx.pop_style_color(color_count)
 
     # ------------------------------------------------------------------
     #  Internal drawing helpers

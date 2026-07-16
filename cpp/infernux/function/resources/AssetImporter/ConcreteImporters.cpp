@@ -1,17 +1,16 @@
 #include "ConcreteImporters.h"
 
-#include <function/resources/AssetDatabase/AssetDatabase.h>
-#include <function/resources/AssetDependencyGraph.h>
-
 #include <core/log/InxLog.h>
+#include <function/resources/InxMesh/MeshArtifact.h>
+#include <function/resources/InxMesh/MeshLoader.h>
+#include <function/resources/InxSkinnedMesh/SkinnedMeshArtifact.h>
+#include <function/resources/InxTexture/TextureArtifact.h>
+#include <function/resources/InxTexture/TextureDecoder.h>
 #include <platform/filesystem/InxPath.h>
 
-#include <assimp/Importer.hpp>
-#include <assimp/postprocess.h>
-#include <assimp/scene.h>
-
-#include <filesystem>
+#include <algorithm>
 #include <fstream>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <unordered_set>
 #include <vector>
@@ -19,27 +18,51 @@
 namespace infernux
 {
 
-void MaterialImporter::ScanDependencies(const ImportContext &ctx)
+ImportArtifact TextureImporter::Import(const ImportRequest &request) const
 {
-    if (ctx.guid.empty())
-        return;
+    ImportArtifact artifact(request.metadata);
+    EnsureDefaultSettings(artifact.metadata);
+    if (!artifact.metadata.HasKey("content_hash"))
+        throw std::logic_error("TextureImporter metadata has no source content hash");
+    const auto cpuData = TextureDecoder::Decode(request.sourcePath, artifact.metadata);
+    if (!cpuData || !cpuData->IsValid())
+        throw std::runtime_error("TextureImporter failed to build the runtime texture artifact");
+    artifact.metadata.AddMetadata("artifact_width", static_cast<int>(cpuData->mipLevels.front().width));
+    artifact.metadata.AddMetadata("artifact_height", static_cast<int>(cpuData->mipLevels.front().height));
+    artifact.metadata.AddMetadata("artifact_mip_count", static_cast<int>(cpuData->mipLevels.size()));
+    artifact.metadata.AddMetadata(
+        "artifact_pixel_storage",
+        std::string(cpuData->storage == TexturePixelStorage::Rgba8 ? "rgba8" : "rgba32_float"));
+    artifact.runtimeCpuArtifacts.push_back(ImportArtifact::RuntimeCpuArtifact{
+        ImportArtifact::RuntimeArtifactKind::Primary, ResourceType::Texture, TextureArtifact::FormatVersion,
+        TextureArtifact::Serialize(*cpuData, artifact.metadata.GetDataAs<std::string>("content_hash"))});
+    return artifact;
+}
 
-    auto &graph = AssetDependencyGraph::Instance();
+ImportArtifact MaterialImporter::Import(const ImportRequest &request) const
+{
+    ImportArtifact artifact(request.metadata);
+    artifact.dependencies = ScanDependencies(request);
+    artifact.dependenciesAuthoritative = true;
+    return artifact;
+}
+
+std::vector<std::string> MaterialImporter::ScanDependencies(const ImportRequest &request) const
+{
+    if (!request.resolveAssetGuid)
+        throw std::logic_error("MaterialImporter request has no dependency resolver");
     std::unordered_set<std::string> deps;
 
-    // Parse .mat JSON
     nlohmann::json root;
     try {
-        std::ifstream file(ToFsPath(ctx.sourcePath));
+        std::ifstream file(ToFsPath(request.sourcePath));
         if (!file.is_open())
-            return;
+            throw std::runtime_error("failed to open material document");
         file >> root;
     } catch (const std::exception &e) {
-        INXLOG_WARN("MaterialImporter: failed to parse '", ctx.sourcePath, "': ", e.what());
-        return;
+        throw std::runtime_error("MaterialImporter failed to parse '" + request.sourcePath + "': " + e.what());
     } catch (...) {
-        INXLOG_WARN("MaterialImporter: unknown error parsing '", ctx.sourcePath, "'");
-        return;
+        throw std::runtime_error("MaterialImporter failed to parse '" + request.sourcePath + "'");
     }
 
     // Shader dependencies (vertex + fragment paths)
@@ -53,9 +76,7 @@ void MaterialImporter::ScanDependencies(const ImportContext &ctx)
             if (shaderPath.empty())
                 continue;
             // Resolve path → GUID via AssetDatabase
-            std::string depGuid;
-            if (m_assetDb)
-                depGuid = m_assetDb->GetGuidFromPath(shaderPath);
+            const std::string depGuid = request.resolveAssetGuid(shaderPath);
             if (!depGuid.empty())
                 deps.insert(depGuid);
         }
@@ -82,172 +103,74 @@ void MaterialImporter::ScanDependencies(const ImportContext &ctx)
         }
     }
 
-    // Bulk-set (clears old deps, registers new)
-    graph.SetDependencies(ctx.guid, deps);
-
-    if (!deps.empty()) {
-        INXLOG_DEBUG("MaterialImporter: material '", ctx.sourcePath, "' (", ctx.guid, ") depends on ", deps.size(),
-                     " asset(s)");
-    }
+    std::vector<std::string> ordered(deps.begin(), deps.end());
+    std::sort(ordered.begin(), ordered.end());
+    return ordered;
 }
 
 // ============================================================================
 // ModelImporter — scan model file with Assimp and extract metadata into .meta
 // ============================================================================
 
-bool ModelImporter::Import(const ImportContext &ctx)
+ImportArtifact ModelImporter::Import(const ImportRequest &request) const
 {
-    if (!ctx.meta)
-        return false;
+    ImportArtifact artifact(request.metadata);
+    EnsureDefaultSettings(artifact.metadata);
+    auto imported = MeshLoader::ImportSourceDetailed(request.sourcePath, request.guid, artifact.metadata);
+    if (!imported.mesh)
+        throw std::logic_error("ModelImporter detailed source import returned no runtime mesh");
 
-    EnsureDefaultSettings(*ctx.meta);
-
-    // Quick-validate the source file with a lightweight Assimp parse.
-    // We only need the scene structure, not full post-processing.
-    std::filesystem::path sourcePath = ToFsPath(ctx.sourcePath);
-    if (!std::filesystem::exists(sourcePath)) {
-        INXLOG_ERROR("ModelImporter: source file not found: ", ctx.sourcePath);
-        return false;
-    }
-
-    Assimp::Importer importer;
-
-    std::ifstream file(sourcePath, std::ios::binary | std::ios::ate);
-    if (!file.is_open()) {
-        INXLOG_ERROR("ModelImporter: failed to open source file: ", ctx.sourcePath);
-        return false;
-    }
-
-    std::streamsize fileSize = file.tellg();
-    if (fileSize <= 0) {
-        INXLOG_ERROR("ModelImporter: source file is empty or unreadable: ", ctx.sourcePath);
-        return false;
-    }
-
-    std::vector<char> fileData(static_cast<size_t>(fileSize));
-    file.seekg(0, std::ios::beg);
-    if (!file.read(fileData.data(), fileSize)) {
-        INXLOG_ERROR("ModelImporter: failed to read source file: ", ctx.sourcePath);
-        return false;
-    }
-
-    // Minimal flags: triangulate so we can count real triangle-indices,
-    // but skip heavy post-processing (that happens at load time in MeshLoader).
-    std::string ext = FromFsPath(sourcePath.extension());
-    if (!ext.empty() && ext[0] == '.')
-        ext.erase(0, 1);
-    const aiScene *scene = importer.ReadFileFromMemory(fileData.data(), static_cast<size_t>(fileData.size()),
-                                                       aiProcess_Triangulate | aiProcess_SortByPType, ext.c_str());
-
-    if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->mRootNode) {
-        INXLOG_ERROR("ModelImporter: Assimp validation failed for '", ctx.sourcePath, "': ", importer.GetErrorString());
-        return false;
-    }
-
-    // ── Collect metadata ────────────────────────────────────────────────
-
-    uint32_t totalVertices = 0;
-    uint32_t totalIndices = 0;
-    uint32_t meshCount = scene->mNumMeshes;
-
-    for (unsigned int i = 0; i < scene->mNumMeshes; ++i) {
-        const aiMesh *aiM = scene->mMeshes[i];
-        if (!(aiM->mPrimitiveTypes & aiPrimitiveType_TRIANGLE))
-            continue;
-        totalVertices += aiM->mNumVertices;
-        for (unsigned int f = 0; f < aiM->mNumFaces; ++f)
-            totalIndices += aiM->mFaces[f].mNumIndices;
-    }
-
-    // Extract unique material names
-    std::vector<std::string> materialSlots;
-    materialSlots.reserve(scene->mNumMaterials);
-    for (unsigned int i = 0; i < scene->mNumMaterials; ++i) {
-        aiString aiName;
-        scene->mMaterials[i]->Get(AI_MATKEY_NAME, aiName);
-        std::string name = aiName.C_Str();
-        if (name.empty())
-            name = "Material_" + std::to_string(i);
-        materialSlots.push_back(std::move(name));
-    }
-
-    // ── Skeleton / skinning bones (unique, stable order) ───────────────
-
-    std::vector<std::string> boneNames;
-    boneNames.reserve(128);
-    std::unordered_set<std::string> seenBones;
-    for (unsigned int mi = 0; mi < scene->mNumMeshes; ++mi) {
-        const aiMesh *mesh = scene->mMeshes[mi];
-        if (!mesh)
-            continue;
-        for (unsigned int bi = 0; bi < mesh->mNumBones; ++bi) {
-            const aiBone *bone = mesh->mBones[bi];
-            if (!bone)
-                continue;
-            std::string bname = bone->mName.C_Str();
-            if (bname.empty())
-                continue;
-            if (seenBones.insert(bname).second)
-                boneNames.push_back(std::move(bname));
+    const auto checkedMetadataInt = [](uint64_t value, std::string_view field) {
+        if (value > static_cast<uint64_t>(std::numeric_limits<int>::max()))
+            throw std::overflow_error("ModelImporter metadata count exceeds int range: " + std::string(field));
+        return static_cast<int>(value);
+    };
+    const auto joinCsv = [](const std::vector<std::string> &values) {
+        std::string joined;
+        for (size_t index = 0; index < values.size(); ++index) {
+            if (index > 0)
+                joined += ',';
+            joined += values[index];
         }
-    }
-
-    std::string bonesStr;
-    for (size_t i = 0; i < boneNames.size(); ++i) {
-        if (i > 0)
-            bonesStr += ',';
-        bonesStr += boneNames[i];
-    }
-
-    // ── Embedded animation clips (names only for authoring) ───────────
-
-    std::vector<std::string> animNames;
-    animNames.reserve(scene->mNumAnimations);
-    for (unsigned int ai = 0; ai < scene->mNumAnimations; ++ai) {
-        const aiAnimation *anim = scene->mAnimations[ai];
-        if (!anim)
-            continue;
-        std::string aname = anim->mName.C_Str();
-        if (aname.empty())
-            aname = "Anim_" + std::to_string(ai);
-        animNames.push_back(std::move(aname));
-    }
-
-    std::string animsStr;
-    for (size_t i = 0; i < animNames.size(); ++i) {
-        if (i > 0)
-            animsStr += ',';
-        animsStr += animNames[i];
-    }
+        return joined;
+    };
 
     // ── Write metadata to .meta ─────────────────────────────────────────
 
-    ctx.meta->AddMetadata("mesh_count", static_cast<int>(meshCount));
-    ctx.meta->AddMetadata("vertex_count", static_cast<int>(totalVertices));
-    ctx.meta->AddMetadata("index_count", static_cast<int>(totalIndices));
-    ctx.meta->AddMetadata("material_slot_count", static_cast<int>(materialSlots.size()));
+    artifact.metadata.AddMetadata("mesh_count", checkedMetadataInt(imported.meshCount, "mesh_count"));
+    artifact.metadata.AddMetadata("vertex_count", checkedMetadataInt(imported.vertexCount, "vertex_count"));
+    artifact.metadata.AddMetadata("index_count", checkedMetadataInt(imported.indexCount, "index_count"));
+    artifact.metadata.AddMetadata("material_slot_count",
+                                  checkedMetadataInt(imported.materialSlots.size(), "material_slot_count"));
 
     // Store material slot names as a comma-separated string for .meta
     // (InxResourceMeta uses std::any; a string is the simplest portable choice)
-    std::string slotsStr;
-    for (size_t i = 0; i < materialSlots.size(); ++i) {
-        if (i > 0)
-            slotsStr += ',';
-        slotsStr += materialSlots[i];
-    }
-    ctx.meta->AddMetadata("material_slots", slotsStr);
+    artifact.metadata.AddMetadata("material_slots", joinCsv(imported.materialSlots));
 
-    ctx.meta->AddMetadata("bone_count", static_cast<int>(boneNames.size()));
-    ctx.meta->AddMetadata("bone_names_csv", bonesStr);
+    artifact.metadata.AddMetadata("bone_count", checkedMetadataInt(imported.boneNames.size(), "bone_count"));
+    artifact.metadata.AddMetadata("bone_names_csv", joinCsv(imported.boneNames));
 
-    ctx.meta->AddMetadata("animation_count", static_cast<int>(animNames.size()));
-    ctx.meta->AddMetadata("animation_names_csv", animsStr);
+    artifact.metadata.AddMetadata("animation_count",
+                                  checkedMetadataInt(imported.animationNames.size(), "animation_count"));
+    artifact.metadata.AddMetadata("animation_names_csv", joinCsv(imported.animationNames));
 
-    INXLOG_INFO("ModelImporter: imported '", FromFsPath(sourcePath.filename()), "' — ", meshCount, " mesh(es), ",
-                totalVertices, " verts, ", totalIndices, " indices, ", materialSlots.size(), " material slot(s), ",
-                boneNames.size(), " bone(s), ", animNames.size(), " anim(s)");
+    if (!artifact.metadata.HasKey("content_hash"))
+        throw std::logic_error("ModelImporter metadata has no source content hash");
+    artifact.runtimeCpuArtifacts.push_back(ImportArtifact::RuntimeCpuArtifact{
+        ImportArtifact::RuntimeArtifactKind::Primary, ResourceType::Mesh, MeshArtifact::FormatVersion,
+        MeshArtifact::Serialize(*imported.mesh, artifact.metadata.GetDataAs<std::string>("content_hash"))});
+    const std::string sourceHash = artifact.metadata.GetDataAs<std::string>("content_hash");
+    artifact.runtimeCpuArtifacts.push_back(ImportArtifact::RuntimeCpuArtifact{
+        ImportArtifact::RuntimeArtifactKind::SkinnedMesh, ResourceType::Mesh, SkinnedMeshArtifact::FormatVersion,
+        imported.skinnedMesh ? SkinnedMeshArtifact::Serialize(*imported.skinnedMesh, sourceHash)
+                             : SkinnedMeshArtifact::SerializeEmpty(sourceHash)});
 
-    return true;
+    INXLOG_INFO("ModelImporter: imported '", FromFsPath(ToFsPath(request.sourcePath).filename()), "' — ",
+                imported.meshCount, " mesh(es), ", imported.vertexCount, " verts, ", imported.indexCount, " indices, ",
+                imported.materialSlots.size(), " material slot(s), ", imported.boneNames.size(), " bone(s), ",
+                imported.animationNames.size(), " anim(s)");
+
+    return artifact;
 }
 
 } // namespace infernux

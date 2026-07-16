@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Component.h"
+#include <cstdint>
 #include <pybind11/pybind11.h>
 #include <string>
 
@@ -97,12 +98,14 @@ class PyComponentProxy : public Component
     /// @brief Get the underlying Python component object
     [[nodiscard]] py::object GetPyComponent() const
     {
+        py::gil_scoped_acquire acquire;
         return m_pyComponent;
     }
 
     /// @brief Check if this proxy holds a valid Python component
     [[nodiscard]] bool IsValid() const
     {
+        py::gil_scoped_acquire acquire;
         return !m_pyComponent.is_none();
     }
 
@@ -118,20 +121,49 @@ class PyComponentProxy : public Component
         return m_typeGuid;
     }
 
+    [[nodiscard]] const std::string &GetModuleName() const
+    {
+        return m_moduleName;
+    }
+
+    [[nodiscard]] const std::string &GetQualifiedName() const
+    {
+        return m_qualifiedName;
+    }
+
+    [[nodiscard]] bool OverridesUpdate() const
+    {
+        return m_overridesUpdate;
+    }
+
+    [[nodiscard]] bool HasCoroutineScheduler() const
+    {
+        return m_hasCoroutineScheduler;
+    }
+
+    [[nodiscard]] uint64_t GetUpdateDispatchCount() const
+    {
+        return m_updateDispatchCount;
+    }
+
+    [[nodiscard]] uint64_t GetUpdateForwardCount() const
+    {
+        return m_updateForwardCount;
+    }
+
     // ========================================================================
     // Serialization
     // ========================================================================
 
-    [[nodiscard]] std::string Serialize() const override;
-    bool Deserialize(const std::string &jsonStr) override;
+    [[nodiscard]] nlohmann::json SerializeDocument() const override;
+    bool DeserializeDocument(const nlohmann::json &document) override;
 
     /// @brief PyComponentProxy does not support native Clone (Python objects need
     /// Python-side reconstruction). Returns nullptr.
     [[nodiscard]] std::unique_ptr<Component> Clone() const override;
 
-    /// @brief Serialize only the py_fields portion (for native clone pending info).
-    /// Avoids the full Serialize→parse round-trip. Returns empty string on failure.
-    [[nodiscard]] std::string SerializePyFields() const;
+    /// @brief Serialize only the py_fields portion for native clone pending info.
+    [[nodiscard]] nlohmann::json SerializePyFieldsDocument() const;
 
     /// @brief Get the script GUID associated with this component
     [[nodiscard]] const std::string &GetScriptGuid() const
@@ -151,11 +183,15 @@ class PyComponentProxy : public Component
     std::string m_typeName;
     std::string m_typeGuid;   // Stable type GUID (hash of module.classname)
     std::string m_scriptGuid; // Stable GUID for the script asset
+    std::string m_moduleName;
+    std::string m_qualifiedName;
     bool m_executeInEditMode = false;
     bool m_overridesUpdate = true;
     bool m_overridesFixedUpdate = true;
     bool m_overridesLateUpdate = true;
     bool m_hasCoroutineScheduler = false;
+    uint64_t m_updateDispatchCount = 0;
+    uint64_t m_updateForwardCount = 0;
 };
 
 } // namespace infernux

@@ -2,8 +2,28 @@
 
 #include <function/resources/AssetRegistry/AssetRegistry.h>
 
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
 namespace infernux
 {
+
+class InxMesh;
+class InxSkinnedMesh;
+
+struct MeshSourceImportResult
+{
+    std::shared_ptr<InxMesh> mesh;
+    std::shared_ptr<InxSkinnedMesh> skinnedMesh;
+    uint64_t meshCount = 0;
+    uint64_t vertexCount = 0;
+    uint64_t indexCount = 0;
+    std::vector<std::string> materialSlots;
+    std::vector<std::string> boneNames;
+    std::vector<std::string> animationNames;
+};
 
 /**
  * @brief IAssetLoader implementation for 3D model assets (.fbx, .obj, .gltf, …).
@@ -26,15 +46,25 @@ namespace infernux
 class MeshLoader final : public IAssetLoader
 {
   public:
-    std::shared_ptr<void> Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb) override;
+    [[nodiscard]] static MeshSourceImportResult
+    ImportSourceDetailed(const std::string &filePath, const std::string &guid, const InxResourceMeta &metadata);
+    [[nodiscard]] static std::shared_ptr<InxMesh> ImportSource(const std::string &filePath, const std::string &guid,
+                                                               const InxResourceMeta &metadata);
 
-    bool Reload(std::shared_ptr<void> existing, const std::string &filePath, const std::string &guid,
+    RuntimeAssetPayload Load(const std::string &filePath, const std::string &guid, AssetDatabase *adb) override;
+    [[nodiscard]] bool SupportsWorkerLoad() const noexcept override
+    {
+        return true;
+    }
+
+    bool Reload(const RuntimeAssetPayload &existing, const std::string &filePath, const std::string &guid,
                 AssetDatabase *adb) override;
+    [[nodiscard]] size_t EstimateRuntimeBytes(const RuntimeAssetPayload &payload) const override;
 
     std::set<std::string> ScanDependencies(const std::string &filePath, AssetDatabase *adb) override;
 
     void CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
-                    InxResourceMeta &metaData) override;
+                    InxResourceMeta &metaData) const override;
 };
 
 } // namespace infernux

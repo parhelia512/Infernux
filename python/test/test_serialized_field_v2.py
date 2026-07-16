@@ -21,6 +21,7 @@ from Infernux.components import (
     InxComponent, serialized_field, FieldType, get_serialized_fields,
     Range, Tooltip, Header, Space, Group, InfoText, DragSpeed,
     Multiline, ReadOnly, HideInInspector, NonSerialized, HDR, Color,
+    VALUE_CODECS,
 )
 from Infernux.components.serialized_field import (
     build_field_from_annotation, _unwrap_annotation, _UNSET,
@@ -254,6 +255,108 @@ class TestAnnotationOnlyDeclarations:
                                                element_type=FieldType.STRING)
         fields = get_serialized_fields(WithList)
         assert fields['tags'].field_type == FieldType.LIST
+
+
+class TestStrictSerializationFailures:
+    def test_unsupported_field_value_raises_with_field_path(self):
+        class UnsupportedField(InxComponent):
+            payload = serialized_field(default=None, field_type=FieldType.UNKNOWN)
+
+        component = UnsupportedField()
+        component.payload = object()
+
+        with pytest.raises(TypeError, match=r"UnsupportedField\.payload"):
+            component._serialize_fields()
+
+    @pytest.mark.parametrize(
+        "mutate, error",
+        [
+            (lambda data: data.__setitem__("__schema_version__", 0), "requires schema"),
+            (lambda data: data.__setitem__("__type_name__", "Other"), "type mismatch"),
+            (lambda data: data.__setitem__("unknown", 1), "unknown"),
+            (lambda data: data.__setitem__("health", "bad"), "requires an integer"),
+        ],
+    )
+    def test_invalid_field_document_is_rejected_without_partial_assignment(self, mutate, error):
+        import json
+
+        class StrictFields(InxComponent):
+            health: int = 10
+            title: str = "ready"
+
+        source = StrictFields()
+        document = json.loads(source._serialize_fields())
+        mutate(document)
+
+        target = StrictFields()
+        target.health = 77
+        target.title = "unchanged"
+        with pytest.raises((TypeError, ValueError), match=error):
+            target._deserialize_fields(json.dumps(document))
+        assert target.health == 77
+        assert target.title == "unchanged"
+
+    def test_missing_additive_field_uses_an_independent_declared_default(self):
+        import json
+
+        class AdditiveFields(InxComponent):
+            health: int = 10
+            tags: list = serialized_field(
+                default=[],
+                field_type=FieldType.LIST,
+                element_type=FieldType.STRING,
+            )
+
+        source = AdditiveFields()
+        source.health = 42
+        document = json.loads(source._serialize_fields())
+        document.pop("tags")
+
+        target = AdditiveFields()
+        target.tags = ["stale"]
+        target._deserialize_fields(json.dumps(document))
+
+        assert target.health == 42
+        assert target.tags == []
+        target.tags.append("local")
+        assert AdditiveFields().tags == []
+
+    def test_runtime_schema_migration_hook_is_not_used(self):
+        import json
+
+        class NoRuntimeMigration(InxComponent):
+            __schema_version__ = 2
+            value: int = 3
+
+            @classmethod
+            def __migrate__(cls, data, from_version):
+                raise AssertionError("runtime migration must not run")
+
+        document = json.loads(NoRuntimeMigration()._serialize_fields())
+        document["__schema_version__"] = 1
+        with pytest.raises(ValueError, match="requires schema 2"):
+            NoRuntimeMigration()._deserialize_fields(json.dumps(document))
+
+    def test_all_fields_validate_before_any_decode(self, monkeypatch):
+        class ValidateFirst(InxComponent):
+            count: int = 1
+            label: str = "ready"
+
+        document = ValidateFirst()._serialize_fields_document()
+        document["label"] = 42
+        decode_calls = []
+        original_decode = VALUE_CODECS.decode
+
+        def track_decode(value, field_meta_or_type, path="value"):
+            decode_calls.append(path)
+            return original_decode(value, field_meta_or_type, path)
+
+        monkeypatch.setattr(VALUE_CODECS, "decode", track_decode)
+
+        with pytest.raises(TypeError, match="STRING field requires a string"):
+            ValidateFirst()._deserialize_fields_document(document)
+
+        assert decode_calls == []
 
 
 class TestColorInference:

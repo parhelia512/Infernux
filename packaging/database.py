@@ -1,11 +1,26 @@
+from __future__ import annotations
+
+import os
 import sqlite3
+import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
-import logging
+from typing import List
+
+from project_paths import canonical_project_path, normalize_project_path
+
+
+@dataclass(frozen=True)
+class ProjectRecord:
+    project_id: str
+    name: str
+    created_at: str
+    path: str
 
 
 class ProjectDatabase:
+    """Persistent Hub project registry keyed by stable id and canonical path."""
 
     def __init__(self, db_path: Path | None = None) -> None:
         if db_path is None:
@@ -14,65 +29,140 @@ class ProjectDatabase:
             db_path = home_dir / "projects.db"
 
         self._conn = sqlite3.connect(db_path)
-        self._create_table()
+        self._conn.row_factory = sqlite3.Row
+        self._create_or_migrate_schema()
 
-    def all_projects(self) -> List[Tuple[str, str, str]]:
-        cur = self._conn.execute(
-            "SELECT name, created_at, path FROM projects ORDER BY created_at DESC;"
-        )
-        return cur.fetchall()
-    
-    def get_project_path(self, name: str) -> str:
-        cur = self._conn.execute("SELECT path FROM projects WHERE name = ?;", (name,))
-        row = cur.fetchone()
-        return row[0] if row else ""
+    @staticmethod
+    def _record(row: sqlite3.Row | None) -> ProjectRecord | None:
+        if row is None:
+            return None
+        return ProjectRecord(row["project_id"], row["name"], row["created_at"], row["path"])
 
-    def add_project(self, name: str, path: str) -> bool:
+    def all_projects(self) -> List[ProjectRecord]:
+        rows = self._conn.execute(
+            "SELECT project_id, name, created_at, path FROM projects ORDER BY created_at DESC;"
+        ).fetchall()
+        return [self._record(row) for row in rows if row is not None]
+
+    def get_project(self, project_id: str) -> ProjectRecord | None:
+        row = self._conn.execute(
+            "SELECT project_id, name, created_at, path FROM projects WHERE project_id = ?;",
+            (project_id,),
+        ).fetchone()
+        return self._record(row)
+
+    def find_project_by_path(self, path: str) -> ProjectRecord | None:
+        normalized = normalize_project_path(path)
+        row = self._conn.execute(
+            "SELECT project_id, name, created_at, path FROM projects WHERE normalized_path = ?;",
+            (normalized,),
+        ).fetchone()
+        return self._record(row)
+
+    def add_project(self, name: str, path: str) -> ProjectRecord | None:
+        project_path = canonical_project_path(path)
+        normalized_path = normalize_project_path(project_path)
+        project_id = uuid.uuid4().hex
+        created_at = datetime.now().isoformat(timespec="seconds")
         try:
             with self._conn:
                 self._conn.execute(
-                    "INSERT INTO projects (name, created_at, path) VALUES (?, ?, ?);",
-                    (name, datetime.now().isoformat(timespec="seconds"), path),
+                    "INSERT INTO projects "
+                    "(project_id, name, created_at, path, normalized_path) VALUES (?, ?, ?, ?, ?);",
+                    (project_id, name, created_at, project_path, normalized_path),
                 )
-            return True
-        except Exception as _exc:
-            logging.getLogger(__name__).debug("[Suppressed] %s: %s", type(_exc).__name__, _exc)
-            return False
+        except sqlite3.IntegrityError:
+            return None
+        return ProjectRecord(project_id, name, created_at, project_path)
 
-    def _create_table(self) -> None:
+    def remove_project(self, project_id: str) -> bool:
         with self._conn:
-            # Include the path column when creating the table.
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS projects (
-                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name       TEXT UNIQUE NOT NULL,
-                    created_at TEXT NOT NULL,
-                    path       TEXT NOT NULL
-                );
-                """
-            )
-            # Backfill the path column for legacy databases.
-            cur = self._conn.execute("PRAGMA table_info(projects);")
-            columns = {row[1] for row in cur.fetchall()}
-            if "path" not in columns:
-                self._conn.execute("ALTER TABLE projects ADD COLUMN path TEXT NOT NULL DEFAULT '';")
+            cursor = self._conn.execute("DELETE FROM projects WHERE project_id = ?;", (project_id,))
+        return cursor.rowcount > 0
 
-            # Key-value settings table
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS settings (
-                    key   TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                );
-                """
-            )
+    def relocate_project(self, project_id: str, name: str, path: str) -> ProjectRecord | None:
+        """Update a registry entry after the project folder has moved."""
+        project_path = canonical_project_path(path)
+        normalized_path = normalize_project_path(project_path)
+        try:
+            with self._conn:
+                cursor = self._conn.execute(
+                    "UPDATE projects SET name = ?, path = ?, normalized_path = ? "
+                    "WHERE project_id = ?;",
+                    (name, project_path, normalized_path, project_id),
+                )
+        except sqlite3.IntegrityError:
+            return None
+        if cursor.rowcount == 0:
+            return None
+        return self.get_project(project_id)
 
-    # ── Settings helpers ─────────────────────────────────────────────
+    def _create_or_migrate_schema(self) -> None:
+        exists = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'projects';"
+        ).fetchone()
+        if not exists:
+            with self._conn:
+                self._create_projects_table("projects")
+                self._create_settings_table()
+            return
+
+        columns = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(projects);").fetchall()
+        }
+        if {"project_id", "normalized_path"}.issubset(columns):
+            with self._conn:
+                self._create_settings_table()
+            return
+
+        legacy_rows = self._conn.execute(
+            "SELECT name, created_at, path FROM projects ORDER BY id;"
+        ).fetchall()
+        with self._conn:
+            self._create_projects_table("projects_v2")
+            for row in legacy_rows:
+                name = row["name"]
+                legacy_path = row["path"] or ""
+                # The legacy schema stored the selected parent directory.
+                full_path = os.path.join(legacy_path, name)
+                project_path = canonical_project_path(full_path)
+                normalized = normalize_project_path(project_path)
+                project_id = uuid.uuid5(uuid.NAMESPACE_URL, normalized).hex
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO projects_v2 "
+                    "(project_id, name, created_at, path, normalized_path) VALUES (?, ?, ?, ?, ?);",
+                    (project_id, name, row["created_at"], project_path, normalized),
+                )
+            self._conn.execute("DROP TABLE projects;")
+            self._conn.execute("ALTER TABLE projects_v2 RENAME TO projects;")
+            self._create_settings_table()
+
+    def _create_projects_table(self, table_name: str) -> None:
+        self._conn.execute(
+            f"""
+            CREATE TABLE {table_name} (
+                project_id      TEXT PRIMARY KEY,
+                name            TEXT NOT NULL,
+                created_at      TEXT NOT NULL,
+                path            TEXT NOT NULL,
+                normalized_path TEXT NOT NULL UNIQUE
+            );
+            """
+        )
+
+    def _create_settings_table(self) -> None:
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            """
+        )
 
     def get_setting(self, key: str, default: str = "") -> str:
-        cur = self._conn.execute("SELECT value FROM settings WHERE key = ?;", (key,))
-        row = cur.fetchone()
+        row = self._conn.execute("SELECT value FROM settings WHERE key = ?;", (key,)).fetchone()
         return row[0] if row else default
 
     def set_setting(self, key: str, value: str) -> None:
@@ -81,11 +171,6 @@ class ProjectDatabase:
                 "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);",
                 (key, value),
             )
-
-    def delete_project(self, name: str) -> None:
-        with self._conn:
-            self._conn.execute("DELETE FROM projects WHERE name = ?;", (name,))
-            return self._conn.total_changes > 0
 
     def close(self) -> None:
         self._conn.close()

@@ -22,7 +22,7 @@ from .light import Light
 from .mesh_renderer import MeshRenderer
 from .skinned_mesh_renderer import SkinnedMeshRenderer
 from .camera import Camera
-from .collider import Collider
+from .collider import Collider, PhysicsMaterialCombine
 from .box_collider import BoxCollider
 from .sphere_collider import SphereCollider
 from .capsule_collider import CapsuleCollider
@@ -43,6 +43,7 @@ __all__ = [
     "SkinnedMeshRenderer",
     "Camera",
     "Collider",
+    "PhysicsMaterialCombine",
     "BoxCollider",
     "SphereCollider",
     "CapsuleCollider",

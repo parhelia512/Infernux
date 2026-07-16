@@ -8,6 +8,7 @@
 // Jolt types are no longer exposed in collider headers — no Jolt include needed here
 
 #include "ComponentBindingRegistry.h"
+#include "JsonPyBridge.h"
 #include "core/log/InxLog.h"
 #include "function/resources/AssetRegistry/AssetRegistry.h"
 #include "function/resources/InxMaterial/InxMaterial.h"
@@ -21,11 +22,14 @@
 #include "function/scene/Light.h"
 #include "function/scene/MeshCollider.h"
 #include "function/scene/MeshRenderer.h"
+#include "function/scene/ObjectHandle.h"
 #include "function/scene/PrimitiveMeshes.h"
 #include "function/scene/PyComponentProxy.h"
 #include "function/scene/Rigidbody.h"
 #include "function/scene/Scene.h"
+#include "function/scene/SceneDocumentReadTask.h"
 #include "function/scene/SceneManager.h"
+#include "function/scene/SceneResourceDependencyPreflight.h"
 #include "function/scene/SkinnedMeshRenderer.h"
 #include "function/scene/SphereCollider.h"
 #include "function/scene/SpriteRenderer.h"
@@ -45,6 +49,99 @@ namespace py = pybind11;
 
 namespace infernux
 {
+
+class ScenePlayModeSnapshot
+{
+  public:
+    explicit ScenePlayModeSnapshot(nlohmann::json document) : m_document(std::move(document))
+    {
+    }
+
+    [[nodiscard]] py::tuple GetPythonComponentRecords() const
+    {
+        py::set objectIds;
+        py::set nativeTypes;
+        py::list descriptors;
+
+        const auto visit = [&](const auto &self, const nlohmann::json &object) -> void {
+            if (!object.is_object())
+                return;
+
+            const auto idIt = object.find("id");
+            if (idIt == object.end() || !idIt->is_number_unsigned())
+                return;
+            const uint64_t objectId = idIt->get<uint64_t>();
+            objectIds.add(py::int_(objectId));
+
+            const auto componentsIt = object.find("components");
+            bool hasPythonComponent = false;
+            if (componentsIt != object.end() && componentsIt->is_array()) {
+                for (const auto &component : *componentsIt) {
+                    const auto typeIt = component.find("type_id");
+                    if (typeIt != component.end() && typeIt->is_string() &&
+                        typeIt->get_ref<const std::string &>().rfind("python:", 0) == 0) {
+                        hasPythonComponent = true;
+                        break;
+                    }
+                }
+            }
+
+            if (hasPythonComponent) {
+                const auto transformIt = object.find("transform");
+                if (transformIt != object.end() && transformIt->is_object()) {
+                    const auto typeIt = transformIt->find("type");
+                    if (typeIt != transformIt->end() && typeIt->is_string()) {
+                        nativeTypes.add(py::make_tuple(objectId, typeIt->get<std::string>()));
+                    }
+                }
+
+                size_t componentIndex = 0;
+                for (const auto &component : *componentsIt) {
+                    const auto typeIt = component.find("type_id");
+                    if (typeIt != component.end() && typeIt->is_string()) {
+                        const std::string &typeId = typeIt->get_ref<const std::string &>();
+                        if (typeId.rfind("native:", 0) == 0) {
+                            nativeTypes.add(py::make_tuple(objectId, typeId.substr(7)));
+                        } else if (typeId.rfind("python:", 0) == 0) {
+                            descriptors.append(py::make_tuple(objectId,
+                                                              "snapshot.objects[id=" + std::to_string(objectId) +
+                                                                  "].components[" + std::to_string(componentIndex) +
+                                                                  "]",
+                                                              JsonToPython(component)));
+                        }
+                    }
+                    ++componentIndex;
+                }
+            }
+
+            const auto childrenIt = object.find("children");
+            if (childrenIt != object.end() && childrenIt->is_array()) {
+                for (const auto &child : *childrenIt)
+                    self(self, child);
+            }
+        };
+
+        const auto objectsIt = m_document.find("objects");
+        if (objectsIt != m_document.end() && objectsIt->is_array()) {
+            for (const auto &object : *objectsIt)
+                visit(visit, object);
+        }
+        return py::make_tuple(std::move(objectIds), std::move(nativeTypes), std::move(descriptors));
+    }
+
+    void PreflightResourceDependencies() const
+    {
+        PreflightSceneResourceDependencies(m_document);
+    }
+
+    [[nodiscard]] std::shared_ptr<SceneCommitToken> CommitRetainingWorld(Scene &scene) const
+    {
+        return scene.CommitDocumentRetainingCurrentWorld(m_document);
+    }
+
+  private:
+    nlohmann::json m_document;
+};
 
 /// Resolve a Python component type (str, class with _cpp_type_name, or class with __name__)
 /// to a C++ type name string. Returns empty string on failure.
@@ -126,6 +223,26 @@ static void GetPrimitiveMeshData(PrimitiveType type, const std::vector<Vertex> *
     }
 }
 
+static void AddPrimitiveCollider(GameObject &object, PrimitiveType type)
+{
+    switch (type) {
+    case PrimitiveType::Cube:
+        object.AddComponent<BoxCollider>();
+        break;
+    case PrimitiveType::Sphere:
+        object.AddComponent<SphereCollider>();
+        break;
+    case PrimitiveType::Capsule:
+        object.AddComponent<CapsuleCollider>();
+        break;
+    case PrimitiveType::Cylinder:
+    case PrimitiveType::Plane:
+    case PrimitiveType::Quad:
+        object.AddComponent<MeshCollider>();
+        break;
+    }
+}
+
 /**
  * @brief Helper function to create a primitive GameObject.
  * Auto-reserves capacity when rapid creation is detected.
@@ -161,7 +278,11 @@ static GameObject *CreatePrimitiveObject(Scene *scene, PrimitiveType type, const
     if (obj) {
         MeshRenderer *renderer = obj->AddComponent<MeshRenderer>();
         if (renderer) {
-            renderer->SetSharedPrimitiveMesh(*vertices, *indices, objectName);
+            // The GameObject's display name is independent from the mesh
+            // identity. Keeping the canonical primitive name lets scene
+            // serialization store a compact built-in reference.
+            renderer->SetSharedPrimitiveMesh(*vertices, *indices, defaultName);
+            AddPrimitiveCollider(*obj, type);
         }
     }
     return obj;
@@ -195,7 +316,8 @@ static py::list CreatePrimitiveObjectsBatch(Scene *scene, PrimitiveType type, si
         if (obj) {
             MeshRenderer *renderer = obj->AddComponent<MeshRenderer>();
             if (renderer) {
-                renderer->SetSharedPrimitiveMesh(*vertices, *indices, prefix);
+                renderer->SetSharedPrimitiveMesh(*vertices, *indices, defaultName);
+                AddPrimitiveCollider(*obj, type);
             }
         }
         result[i] = py::cast(obj, py::return_value_policy::reference);
@@ -263,13 +385,14 @@ static std::vector<std::string> SplitCommaList(const std::string &csv)
     return out;
 }
 
-static const InxResourceMeta *GetModelMeta(const std::string &guid, const std::shared_ptr<InxMesh> &mesh)
+static std::shared_ptr<const InxResourceMeta> GetModelMeta(const std::string &guid,
+                                                           const std::shared_ptr<InxMesh> &mesh)
 {
     auto *adb = AssetRegistry::Instance().GetAssetDatabase();
     if (!adb)
         return nullptr;
     if (!guid.empty()) {
-        if (const auto *meta = adb->GetMetaByGuid(guid))
+        if (auto meta = adb->GetMetaByGuid(guid))
             return meta;
     }
     if (mesh && !mesh->GetFilePath().empty())
@@ -301,15 +424,16 @@ static std::string TryGetMetaString(const InxResourceMeta *meta, const std::stri
 
 static std::vector<std::string> GetAnimationTakeNames(const std::string &guid, const std::shared_ptr<InxMesh> &mesh)
 {
-    return SplitCommaList(TryGetMetaString(GetModelMeta(guid, mesh), "animation_names_csv"));
+    const auto meta = GetModelMeta(guid, mesh);
+    return SplitCommaList(TryGetMetaString(meta.get(), "animation_names_csv"));
 }
 
 static bool ShouldUseSkinnedRenderer(const std::string &guid, const std::shared_ptr<InxMesh> &mesh)
 {
-    const auto *meta = GetModelMeta(guid, mesh);
+    const auto meta = GetModelMeta(guid, mesh);
     if (!meta)
         return false;
-    if (TryGetMetaInt(meta, "animation_count", 0) > 0)
+    if (TryGetMetaInt(meta.get(), "animation_count", 0) > 0)
         return true;
     return !GetAnimationTakeNames(guid, mesh).empty();
 }
@@ -329,7 +453,6 @@ static GameObject *CreateModelObject(Scene *scene, const std::string &guid, cons
     uint32_t nodeGroupCount = mesh->GetNodeGroupCount();
     const auto &nodeNames = mesh->GetNodeNames();
     const bool useSkinnedRenderer = ShouldUseSkinnedRenderer(guid, mesh);
-    const auto animationTakeNames = GetAnimationTakeNames(guid, mesh);
 
     if (nodeGroupCount <= 1) {
         // Single node — one object with the mesh asset.
@@ -340,9 +463,6 @@ static GameObject *CreateModelObject(Scene *scene, const std::string &guid, cons
             auto *renderer = obj->AddComponent<SkinnedMeshRenderer>();
             if (renderer) {
                 renderer->SetSourceModelGuid(guid);
-                renderer->SetSourceModelPath(mesh->GetFilePath());
-                renderer->SetAnimationTakeNames(animationTakeNames);
-                renderer->SetMeshAsset(guid, mesh);
                 ApplyFbxMaterialData(renderer, mesh);
             }
         } else {
@@ -371,9 +491,6 @@ static GameObject *CreateModelObject(Scene *scene, const std::string &guid, cons
             auto *renderer = child->AddComponent<SkinnedMeshRenderer>();
             if (renderer) {
                 renderer->SetSourceModelGuid(guid);
-                renderer->SetSourceModelPath(mesh->GetFilePath());
-                renderer->SetAnimationTakeNames(animationTakeNames);
-                renderer->SetMeshAsset(guid, mesh);
                 renderer->SetNodeGroup(static_cast<int32_t>(g));
                 ApplyFbxMaterialData(renderer, mesh);
             }
@@ -412,12 +529,28 @@ void RegisterSceneBindings(py::module_ &m)
         .value("World", CoordinateSpace::World)
         .export_values();
 
+    py::class_<ObjectHandle>(m, "ObjectHandle")
+        .def(py::init<>())
+        .def(py::init<uint64_t, uint64_t, uint64_t>(), py::arg("id"), py::arg("generation"), py::arg("world_id"))
+        .def_readonly("id", &ObjectHandle::id)
+        .def_readonly("generation", &ObjectHandle::generation)
+        .def_property_readonly("world_id", [](const ObjectHandle &handle) { return handle.worldId; })
+        .def_property_readonly("is_valid", &ObjectHandle::IsValid)
+        .def("__bool__", &ObjectHandle::IsValid)
+        .def("__eq__", [](const ObjectHandle &lhs, const ObjectHandle &rhs) { return lhs == rhs; })
+        .def("__hash__", [](const ObjectHandle &handle) {
+            return py::hash(py::make_tuple(handle.id, handle.generation, handle.worldId));
+        });
+
     // ========================================================================
     // Component binding
     // ========================================================================
     py::class_<Component>(m, "Component")
         .def_property_readonly("type_name", &Component::GetTypeName)
         .def_property_readonly("component_id", &Component::GetComponentID)
+        .def_property_readonly("handle", &Component::GetHandle)
+        .def("_set_component_id", &Component::SetComponentID, py::arg("component_id"),
+             "Internal transactional restore hook")
         .def_property("enabled", &Component::IsEnabled, &Component::SetEnabled)
         .def_property("execution_order", &Component::GetExecutionOrder, &Component::SetExecutionOrder)
         .def_property_readonly(
@@ -425,6 +558,16 @@ void RegisterSceneBindings(py::module_ &m)
             "Get the GameObject this component is attached to")
         .def("serialize", &Component::Serialize, "Serialize component to JSON string")
         .def("deserialize", &Component::Deserialize, py::arg("json_str"), "Deserialize component from JSON string")
+        .def(
+            "serialize_document",
+            [](const Component &component) { return JsonToPython(component.SerializeDocument()); },
+            "Serialize component to a Python document")
+        .def(
+            "deserialize_document",
+            [](Component &component, py::handle document) {
+                return component.DeserializeDocument(PythonToJson(document));
+            },
+            py::arg("document"), "Deserialize component from a Python document")
         .def_property_readonly("required_component_types", &Component::GetRequiredComponentTypes,
                                "List of type names this component depends on (RequireComponent)")
         .def("is_component_type", &Component::IsComponentType, py::arg("type_name"),
@@ -844,24 +987,15 @@ void RegisterSceneBindings(py::module_ &m)
         .def(py::init<>())
         .def_property_readonly("source_model_guid", &SkinnedMeshRenderer::GetSourceModelGuid,
                                "GUID of the animated source model asset")
-        .def_property_readonly("source_model_path", &SkinnedMeshRenderer::GetSourceModelPath,
-                               "Filesystem path of the animated source model")
         .def(
             "set_source_model_guid",
             [](SkinnedMeshRenderer &sr, const std::string &guid) {
-                auto mesh = guid.empty() ? std::shared_ptr<InxMesh>()
-                                         : AssetRegistry::Instance().LoadAsset<InxMesh>(guid, ResourceType::Mesh);
                 sr.SetSourceModelGuid(guid);
-                sr.SetSourceModelPath(mesh ? mesh->GetFilePath() : std::string());
-                sr.SetAnimationTakeNames(mesh ? GetAnimationTakeNames(guid, mesh) : std::vector<std::string>{});
-                if (mesh) {
-                    sr.SetMeshAsset(guid, mesh);
+                const auto mesh = sr.GetMeshAssetRef().Get();
+                if (mesh)
                     ApplyFbxMaterialData(&sr, mesh);
-                }
             },
             py::arg("guid"), "Assign the skinned source model by GUID")
-        .def("set_source_model_path", &SkinnedMeshRenderer::SetSourceModelPath, py::arg("path"),
-             "Assign the skinned source model path")
         .def_property("active_take_name", &SkinnedMeshRenderer::GetActiveTakeName,
                       &SkinnedMeshRenderer::SetActiveTakeName, "Currently selected animation take name")
         .def_property_readonly("has_animation_takes", &SkinnedMeshRenderer::HasAnimationTakes,
@@ -1008,7 +1142,11 @@ void RegisterSceneBindings(py::module_ &m)
     py::class_<PyComponentProxy, Component>(m, "PyComponentProxy")
         .def("get_py_component", &PyComponentProxy::GetPyComponent, "Get the underlying Python component")
         .def("get_py_type_name", &PyComponentProxy::GetPyTypeName, "Get the Python type name")
-        .def("is_valid", &PyComponentProxy::IsValid, "Check if this proxy holds a valid Python component");
+        .def("is_valid", &PyComponentProxy::IsValid, "Check if this proxy holds a valid Python component")
+        .def_property_readonly("overrides_update", &PyComponentProxy::OverridesUpdate)
+        .def_property_readonly("has_coroutine_scheduler", &PyComponentProxy::HasCoroutineScheduler)
+        .def_property_readonly("update_dispatch_count", &PyComponentProxy::GetUpdateDispatchCount)
+        .def_property_readonly("update_forward_count", &PyComponentProxy::GetUpdateForwardCount);
 
     // ========================================================================
     // CameraProjection enum
@@ -1140,6 +1278,7 @@ void RegisterSceneBindings(py::module_ &m)
         .def_property_readonly("active_in_hierarchy", &GameObject::IsActiveInHierarchy,
                                "Is active in hierarchy? (Unity: gameObject.activeInHierarchy)")
         .def_property_readonly("id", &GameObject::GetID)
+        .def_property_readonly("handle", &GameObject::GetHandle)
         .def_property("tag", &GameObject::GetTag, &GameObject::SetTag, "Tag string for this GameObject")
         .def_property("layer", &GameObject::GetLayer, &GameObject::SetLayer, "Layer index (0-31) for this GameObject")
         .def_property("is_static", &GameObject::IsStatic, &GameObject::SetStatic,
@@ -1446,6 +1585,28 @@ void RegisterSceneBindings(py::module_ &m)
             },
             py::arg("component_instance"), "Add a Python InxComponent instance to this GameObject")
         .def(
+            "_attach_prepared_py_component",
+            [](GameObject *obj, py::object instance, size_t componentIndex) -> py::object {
+                if (!py::hasattr(instance, "_bind_native_component"))
+                    throw py::type_error("prepared Python component requires _bind_native_component");
+                auto proxy = std::make_unique<PyComponentProxy>(instance);
+                Component *added = obj->AddPreparedPythonComponent(std::move(proxy), componentIndex);
+                try {
+                    instance.attr("_bind_native_component")(py::cast(added, py::return_value_policy::reference),
+                                                            py::cast(obj, py::return_value_policy::reference));
+                } catch (...) {
+                    obj->RemovePreparedPythonComponent(added);
+                    throw;
+                }
+                return instance;
+            },
+            py::arg("component_instance"), py::arg("component_index"),
+            "Internal deferred Python component publication hook")
+        .def("_activate_prepared_py_component", &GameObject::ActivatePreparedPythonComponent,
+             py::arg("native_component"), "Internal prepared Python component activation hook")
+        .def("_remove_prepared_py_component", &GameObject::RemovePreparedPythonComponent, py::arg("native_component"),
+             "Internal prepared Python component rollback hook")
+        .def(
             "get_py_component",
             [](GameObject *obj, py::object componentType) -> py::object {
                 // Find a PyComponentProxy whose Python component is an instance of the given type
@@ -1515,7 +1676,16 @@ void RegisterSceneBindings(py::module_ &m)
         .def("is_active_in_hierarchy", &GameObject::IsActiveInHierarchy,
              "Check if this object and all parents are active")
         .def("serialize", &GameObject::Serialize, "Serialize GameObject to JSON string")
-        .def("deserialize", &GameObject::Deserialize, py::arg("json_str"), "Deserialize GameObject from JSON string")
+        .def(
+            "serialize_document", [](const GameObject &object) { return JsonToPython(object.SerializeDocument()); },
+            "Serialize GameObject to a Python document")
+        .def(
+            "_commit_document",
+            [](GameObject &object, py::handle document, bool preserveDocumentIds) {
+                return object.DeserializeDocument(PythonToJson(document), preserveDocumentIds);
+            },
+            py::arg("document"), py::arg("preserve_document_ids") = true,
+            "Internal native subtree commit; Python callers must preflight first")
         // ---- Hierarchy component search (Unity: GetComponentInChildren/Parent) ----
         .def(
             "get_component_in_children",
@@ -1647,19 +1817,7 @@ void RegisterSceneBindings(py::module_ &m)
             },
             py::return_value_policy::reference, py::arg("tag"),
             "Find all GameObjects with a given tag. Unity: GameObject.FindGameObjectsWithTag(tag)")
-        // ---- Static lifecycle methods (Unity: Object.Instantiate, Object.Destroy) ----
-        .def_static(
-            "instantiate",
-            [](GameObject *original, GameObject *parent) -> GameObject * {
-                if (!original)
-                    return nullptr;
-                Scene *scene = original->GetScene();
-                if (!scene)
-                    scene = SceneManager::Instance().GetActiveScene();
-                return scene ? scene->InstantiateGameObject(original, parent) : nullptr;
-            },
-            py::return_value_policy::reference, py::arg("original"), py::arg("parent") = nullptr,
-            "Clone a GameObject (deep copy). Unity: Object.Instantiate(original)")
+        // ---- Static lifecycle methods (Unity: Object.Destroy) ----
         .def_static(
             "destroy",
             [](GameObject *gameObject) {
@@ -1677,12 +1835,43 @@ void RegisterSceneBindings(py::module_ &m)
         .def_readonly("game_object_id", &Scene::PendingPyComponent::gameObjectId)
         .def_readonly("type_name", &Scene::PendingPyComponent::typeName)
         .def_readonly("script_guid", &Scene::PendingPyComponent::scriptGuid)
-        .def_readonly("fields_json", &Scene::PendingPyComponent::fieldsJson)
-        .def_readonly("enabled", &Scene::PendingPyComponent::enabled);
+        .def_readonly("type_guid", &Scene::PendingPyComponent::typeGuid)
+        .def_property_readonly(
+            "fields_document",
+            [](const Scene::PendingPyComponent &pending) { return JsonToPython(pending.fieldsDocument); })
+        .def_readonly("enabled", &Scene::PendingPyComponent::enabled)
+        .def_readonly("execution_order", &Scene::PendingPyComponent::executionOrder)
+        .def_readonly("component_index", &Scene::PendingPyComponent::componentIndex);
+
+    py::class_<SceneDocumentReadTicket>(m, "_SceneDocumentReadTicket")
+        .def_property_readonly("is_complete", &SceneDocumentReadTicket::IsComplete)
+        .def_property_readonly("is_ready", &SceneDocumentReadTicket::IsReady)
+        .def_property_readonly("ran_on_worker", &SceneDocumentReadTicket::RanOnWorker)
+        .def_property_readonly("status", &SceneDocumentReadTicket::GetStatusName)
+        .def_property_readonly("error", &SceneDocumentReadTicket::GetError)
+        .def("cancel", &SceneDocumentReadTicket::Cancel)
+        .def(
+            "_take_document", [](SceneDocumentReadTicket &ticket) { return JsonToPython(ticket.TakeDocument()); },
+            "Consume and return the validated scene document");
+    m.def("_schedule_scene_document_read", &ScheduleSceneDocumentRead, py::arg("path"),
+          "Schedule scene file IO and structural validation on the native JobSystem");
+    m.def(
+        "_preflight_scene_resource_dependencies",
+        [](py::handle document) { PreflightSceneResourceDependencies(PythonToJson(document)); }, py::arg("document"),
+        "Validate native Scene resource GUIDs and embedded resource documents on the owner thread");
 
     // ========================================================================
     // Scene binding
     // ========================================================================
+    py::class_<SceneCommitToken, std::shared_ptr<SceneCommitToken>>(m, "_SceneCommitToken")
+        .def_property_readonly("is_active", &SceneCommitToken::IsActive)
+        .def("rollback", &SceneCommitToken::Rollback)
+        .def("finalize", &SceneCommitToken::Finalize);
+
+    py::class_<ScenePlayModeSnapshot, std::shared_ptr<ScenePlayModeSnapshot>>(m, "_ScenePlayModeSnapshot")
+        .def("_python_component_records", &ScenePlayModeSnapshot::GetPythonComponentRecords)
+        .def("_preflight_resource_dependencies", &ScenePlayModeSnapshot::PreflightResourceDependencies);
+
     py::class_<Scene>(m, "Scene")
         .def_property("name", &Scene::GetName, &Scene::SetName)
         .def("set_playing", &Scene::SetPlaying, py::arg("playing"), "Set the scene play-state flag")
@@ -1721,9 +1910,38 @@ void RegisterSceneBindings(py::module_ &m)
             py::return_value_policy::reference, "Get all root-level GameObjects")
         .def("get_all_objects", &Scene::GetAllObjects, py::return_value_policy::reference,
              "Get all GameObjects in the scene")
+        .def(
+            "find_objects_with_component",
+            [](Scene &scene, const std::string &typeName) {
+                std::vector<GameObject *> result;
+                for (GameObject *object : scene.GetAllObjects()) {
+                    if (!object)
+                        continue;
+                    for (const auto &component : object->GetAllComponents()) {
+                        if (component && component->IsComponentType(typeName)) {
+                            result.push_back(object);
+                            break;
+                        }
+                    }
+                }
+                return result;
+            },
+            py::return_value_policy::reference, py::arg("type_name"),
+            "Find GameObjects containing a native component type")
         .def("find", &Scene::Find, py::return_value_policy::reference, py::arg("name"), "Find a GameObject by name")
         .def("find_by_id", &Scene::FindByID, py::return_value_policy::reference, py::arg("id"),
              "Find a GameObject by ID")
+        .def("resolve_game_object", &Scene::ResolveGameObject, py::return_value_policy::reference, py::arg("handle"),
+             "Resolve a stable GameObject handle, or return None when stale")
+        .def(
+            "resolve_component",
+            [](Scene &scene, const ObjectHandle &handle) -> py::object {
+                Component *component = scene.ResolveComponent(handle);
+                if (!component)
+                    return py::none();
+                return ComponentBindingRegistry::Instance().CastToPython(component);
+            },
+            py::arg("handle"), "Resolve a stable Component or Transform handle, or return None when stale")
         .def("find_object_by_id", &Scene::FindByID, py::return_value_policy::reference, py::arg("id"),
              "Alias for find_by_id. Find a GameObject by ID")
         .def("find_with_tag", &Scene::FindWithTag, py::return_value_policy::reference, py::arg("tag"),
@@ -1734,27 +1952,56 @@ void RegisterSceneBindings(py::module_ &m)
              py::arg("layer"), "Find all GameObjects in a given layer")
         .def("destroy_game_object", &Scene::DestroyGameObject, py::arg("game_object"),
              "Destroy a GameObject (will be removed at end of frame)")
-        .def("instantiate_game_object", &Scene::InstantiateGameObject, py::return_value_policy::reference,
-             py::arg("source"), py::arg("parent") = nullptr,
-             "Clone a GameObject (deep copy). Unity: Object.Instantiate()")
-        .def("instantiate_from_json", &Scene::InstantiateFromJson, py::return_value_policy::reference,
-             py::arg("json_str"), py::arg("parent") = nullptr,
-             "Instantiate a GameObject hierarchy from a JSON string (e.g. prefab). Fresh IDs are assigned.")
+        .def("_clone_game_object", &Scene::InstantiateGameObject, py::return_value_policy::reference, py::arg("source"),
+             py::arg("parent") = nullptr, "Internal native subtree clone; Python callers must preflight first")
+        .def(
+            "_instantiate_document",
+            [](Scene &scene, py::handle document, GameObject *parent) {
+                return scene.InstantiateFromDocument(PythonToJson(document), parent);
+            },
+            py::return_value_policy::reference, py::arg("document"), py::arg("parent") = nullptr,
+            "Internal native ObjectGraph instantiate; Python callers must preflight first")
         .def("process_pending_destroys", &Scene::ProcessPendingDestroys, "Process pending GameObject destroys")
         .def("is_playing", &Scene::IsPlaying, "Check if the scene is in play mode")
         .def("start", &Scene::Start, "Trigger Awake+Start on all components (idempotent — skipped if already started)")
         .def("awake_object", &Scene::AwakeObject, py::arg("game_object"),
              "Re-run Awake+OnEnable on a GameObject and its descendants (used after undo deserialization)")
         .def("serialize", &Scene::Serialize, "Serialize scene to JSON string")
-        .def("deserialize", &Scene::Deserialize, py::arg("json_str"), "Deserialize scene from JSON string")
+        .def(
+            "serialize_document", [](const Scene &scene) { return JsonToPython(scene.SerializeDocument()); },
+            "Serialize scene to a Python document")
+        .def(
+            "_capture_play_mode_snapshot",
+            [](const Scene &scene) { return std::make_shared<ScenePlayModeSnapshot>(scene.SerializeDocument()); },
+            "Capture an opaque native scene document for Play Mode restoration")
+        .def(
+            "_commit_document",
+            [](Scene &scene, py::handle document) { return scene.DeserializeDocument(PythonToJson(document)); },
+            py::arg("document"), "Internal native staging commit; Python callers must preflight first")
+        .def(
+            "_commit_document_retaining_world",
+            [](Scene &scene, py::handle document) {
+                return scene.CommitDocumentRetainingCurrentWorld(PythonToJson(document));
+            },
+            py::arg("document"), "Commit a candidate and retain the previous native world until finalized")
+        .def(
+            "_commit_play_mode_snapshot_retaining_world",
+            [](Scene &scene, const std::shared_ptr<ScenePlayModeSnapshot> &snapshot) {
+                if (!snapshot)
+                    return std::shared_ptr<SceneCommitToken>{};
+                return snapshot->CommitRetainingWorld(scene);
+            },
+            py::arg("snapshot"), "Commit an opaque Play Mode snapshot without crossing the Python JSON bridge")
         .def("save_to_file", &Scene::SaveToFile, py::arg("path"), "Save scene to a JSON file")
-        .def("load_from_file", &Scene::LoadFromFile, py::arg("path"), "Load scene from a JSON file")
         .def("has_pending_py_components", &Scene::HasPendingPyComponents,
              "Check if there are pending Python components to restore")
+        .def("get_pending_py_components", &Scene::GetPendingPyComponents,
+             "Get a read-only snapshot of pending Python component descriptors")
         .def("take_pending_py_components", &Scene::TakePendingPyComponents,
              "Get and clear pending Python components for restoration")
         .def_property_readonly("structure_version", &Scene::GetStructureVersion,
                                "Monotonic counter bumped on structural changes (add/remove/reparent)")
+        .def_property_readonly("world_id", &Scene::GetWorldId, "Unique identity of this native Scene world")
         // Camera management
         .def_property("main_camera", &Scene::GetMainCamera, &Scene::SetMainCamera, py::return_value_policy::reference,
                       "Get/set the main Camera component for this scene (used by Game View)");
@@ -1774,8 +2021,11 @@ void RegisterSceneBindings(py::module_ &m)
         .def("set_active_scene", &SceneManager::SetActiveScene, py::arg("scene"), "Set the active scene")
         .def("get_scene", &SceneManager::GetScene, py::return_value_policy::reference, py::arg("name"),
              "Get a scene by name")
+        .def_property_readonly("scene_count", &SceneManager::GetSceneCount, "Number of currently loaded scenes")
         .def("is_playing", &SceneManager::IsPlaying, "Check if in play mode")
         .def("play", &SceneManager::Play, "Enter play mode")
+        .def("_start_active_scene_for_play", &SceneManager::StartActiveSceneForPlay,
+             "Internal: publish a transactionally loaded Scene into the current play session")
         .def("stop", &SceneManager::Stop, "Stop play mode")
         .def("pause", &SceneManager::Pause, "Pause play mode")
         .def("is_paused", &SceneManager::IsPaused, "Check if paused")
@@ -1786,8 +2036,40 @@ void RegisterSceneBindings(py::module_ &m)
              "Get the max clamped frame delta used by the fixed-step accumulator")
         .def("set_max_fixed_delta_time", &SceneManager::SetMaxFixedDeltaTime, py::arg("value"),
              "Set the max clamped frame delta used by the fixed-step accumulator")
+        .def_property("time_scale", &SceneManager::GetTimeScale, &SceneManager::SetTimeScale,
+                      "Global scale applied to gameplay and fixed-step simulation")
+        .def_property_readonly("fixed_time", &SceneManager::GetFixedTime,
+                               "Scaled simulation time at the current fixed step")
+        .def_property_readonly("fixed_unscaled_time", &SceneManager::GetFixedUnscaledTime,
+                               "Real time represented by completed fixed steps")
         .def("step", &SceneManager::Step, py::arg("delta_time") = 0.016f,
              "Execute one frame while paused (Update + LateUpdate + EndFrame). No-op if not paused.")
+        .def("get_last_collider_sync_candidate_count", &SceneManager::GetLastColliderSyncCandidateCount,
+             "Number of dirty collider handles considered by the most recent simulation frame")
+        .def("get_last_rigidbody_sync_candidate_count", &SceneManager::GetLastRigidbodySyncCandidateCount,
+             "Number of active physics bodies considered for pose readback in the most recent simulation frame")
+        .def("get_last_interpolation_candidate_count", &SceneManager::GetLastInterpolationCandidateCount,
+             "Number of physics bodies considered for presentation interpolation in the most recent frame")
+        .def(
+            "get_last_frame_profile",
+            [](const SceneManager &manager) {
+                const auto &profile = manager.GetLastFrameProfile();
+                py::dict result;
+                result["sync_colliders_ms"] = profile.syncCollidersMs;
+                result["fixed_update_ms"] = profile.fixedUpdateMs;
+                result["physics_step_ms"] = profile.physicsStepMs;
+                result["physics_events_ms"] = profile.physicsEventsMs;
+                result["sync_rigidbodies_ms"] = profile.syncRigidbodiesMs;
+                result["interpolation_ms"] = profile.interpolationMs;
+                result["fixed_steps"] = profile.fixedSteps;
+                result["collider_sync_candidates"] = profile.colliderSyncCandidates;
+                result["rigidbody_sync_candidates"] = profile.rigidbodySyncCandidates;
+                result["interpolation_candidates"] = profile.interpolationCandidates;
+                result["contact_events"] = profile.contactEvents;
+                result["dynamic_ccd_splits"] = profile.dynamicCCDSplits;
+                return result;
+            },
+            "Return normalized timing and candidate counters for the most recent frame")
         .def("dont_destroy_on_load", &SceneManager::DontDestroyOnLoad, py::arg("game_object"),
              "Mark a root GameObject so it survives scene switches. Unity: DontDestroyOnLoad()")
         .def("mark_mesh_renderers_dirty", &SceneManager::MarkMeshRenderersDirtyForAsset, py::arg("mesh_guid"),

@@ -37,7 +37,8 @@ if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
 
-# Lazy numpy import — numpy may not be available in non-JIT packaged builds.
+# NumPy is a required engine runtime dependency. Import it on first batch API
+# use so importing this module itself stays lightweight.
 _np = None
 
 
@@ -112,7 +113,7 @@ def _try_cds_gather(targets: Sequence, prop_name: str):
         return None
     field_id, type_code = entry
 
-    # Collect slot indices.
+    # Collect generational slot handles as an (N, 2) uint32 array.
     np = _get_np()
     slots = np.array([t._cds_slot for t in targets], dtype=np.uint32)
     lib = _get_lib()
@@ -281,7 +282,7 @@ def batch_read(targets: Sequence, prop: Any) -> NDArray:
     return _component_gather(targets, prop_name)
 
 
-def batch_write(targets: Sequence, data: NDArray, prop: Any) -> None:
+def batch_write(targets: Sequence, data: NDArray, prop: Any):
     """Write a numpy array back to a property on all *targets*.
 
     Parameters
@@ -300,8 +301,7 @@ def batch_write(targets: Sequence, data: NDArray, prop: Any) -> None:
     lib = _get_lib()
     if isinstance(targets, lib.TransformBatchHandle):
         if prop_name in _TRANSFORM_ALL_PROPS:
-            lib._transform_batch_write(targets, data, prop_name)
-            return
+            return lib._transform_batch_write(targets, data, prop_name)
         raise ValueError(
             f"Unknown Transform property '{prop_name}'. "
             f"Supported: {sorted(_TRANSFORM_ALL_PROPS)}"
@@ -324,10 +324,44 @@ def batch_write(targets: Sequence, data: NDArray, prop: Any) -> None:
     _component_scatter(targets, data, prop_name)
 
 
-def create_batch_handle(targets: list) -> "TransformBatchHandle":
-    """Create a ``TransformBatchHandle`` that caches the C++ Transform
-    pointers for *targets*.  Re-use the handle across ``batch_read`` /
-    ``batch_write`` calls to avoid repeated pybind11 extraction overhead.
+def create_batch_handle(targets: list, *, mode: str = "strict") -> "TransformBatchHandle":
+    """Create a validated ``TransformBatchHandle`` for *targets*.
+
+    Re-use the handle across ``batch_read`` / ``batch_write`` calls to avoid
+    repeated pybind11 extraction overhead. Every operation validates the
+    stored ECS generations and scene world IDs. ``mode="strict"`` rejects any
+    stale transform. ``mode="compact"`` skips stale entries and makes reads
+    return ``(values, valid_mask)`` while writes return ``valid_mask``.
     """
     lib = _get_lib()
-    return lib.TransformBatchHandle(targets)
+    modes = {
+        "strict": lib.TransformBatchMode.STRICT,
+        "compact": lib.TransformBatchMode.COMPACT,
+    }
+    try:
+        validation_mode = modes[mode]
+    except KeyError as exc:
+        raise ValueError("batch handle mode must be 'strict' or 'compact'") from exc
+    return lib.TransformBatchHandle(targets, validation_mode)
+
+
+def create_scene_batch_handle(scene, *, name_prefix: str = "", mode: str = "strict") -> "TransformBatchHandle":
+    """Create a Transform batch from native Scene filtering.
+
+    This avoids materializing every matching GameObject and Transform in Python,
+    which is important for large authored scenes and Play Mode startup.
+    """
+    if scene is None:
+        raise ValueError("scene is required")
+    if not isinstance(name_prefix, str):
+        raise TypeError("name_prefix must be a string")
+    lib = _get_lib()
+    modes = {
+        "strict": lib.TransformBatchMode.STRICT,
+        "compact": lib.TransformBatchMode.COMPACT,
+    }
+    try:
+        validation_mode = modes[mode]
+    except KeyError as exc:
+        raise ValueError("batch handle mode must be 'strict' or 'compact'") from exc
+    return lib._create_scene_transform_batch_handle(scene, name_prefix, validation_mode)

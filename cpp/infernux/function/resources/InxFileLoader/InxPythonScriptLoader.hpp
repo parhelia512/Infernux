@@ -28,20 +28,25 @@ class InxPythonScriptLoader : public IAssetLoader
     InxPythonScriptLoader();
 
     // -- IAssetLoader meta interface --
-    bool LoadMeta(const char *content, const std::string &filePath, InxResourceMeta &metaData) override;
     void CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
-                    InxResourceMeta &metaData) override;
+                    InxResourceMeta &metaData) const override;
 
     // -- IAssetLoader runtime interface (no-op for scripts) --
-    std::shared_ptr<void> Load(const std::string & /*filePath*/, const std::string & /*guid*/,
-                               AssetDatabase * /*adb*/) override
+    RuntimeAssetPayload Load(const std::string & /*filePath*/, const std::string & /*guid*/,
+                             AssetDatabase * /*adb*/) override
     {
         return nullptr;
     }
-    bool Reload(std::shared_ptr<void> /*existing*/, const std::string & /*filePath*/, const std::string & /*guid*/,
-                AssetDatabase * /*adb*/) override
+    bool Reload(const RuntimeAssetPayload & /*existing*/, const std::string & /*filePath*/,
+                const std::string & /*guid*/, AssetDatabase * /*adb*/) override
     {
         return false;
+    }
+    [[nodiscard]] size_t EstimateRuntimeBytes(const RuntimeAssetPayload &payload) const override
+    {
+        if (payload)
+            throw std::logic_error("Python script loader cannot own a C++ runtime payload");
+        return 0;
     }
     std::set<std::string> ScanDependencies(const std::string & /*filePath*/, AssetDatabase * /*adb*/) override
     {

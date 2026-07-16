@@ -93,6 +93,10 @@ class TransientResourcePool
 
     /// @brief Get number of currently in-use entries.
     [[nodiscard]] size_t GetActiveEntryCount() const noexcept;
+    [[nodiscard]] uint64_t GetResidentBytes() const noexcept
+    {
+        return m_residentBytes;
+    }
 
   private:
     /// @brief A single pooled render target (image + view + memory).
@@ -101,6 +105,7 @@ class TransientResourcePool
         VkImage image = VK_NULL_HANDLE;
         VkImageView view = VK_NULL_HANDLE;
         VmaAllocation allocation = VK_NULL_HANDLE;
+        uint64_t allocationBytes = 0;
         int width = 0;
         int height = 0;
         VkFormat format = VK_FORMAT_UNDEFINED;
@@ -149,6 +154,7 @@ class TransientResourcePool
 
     // Free-list indexed by (w, h, fmt, samples): maps to vector of available slot IDs
     std::unordered_map<RTKey, std::vector<uint32_t>, RTKeyHash> m_freeList;
+    uint64_t m_residentBytes = 0;
 };
 
 } // namespace infernux

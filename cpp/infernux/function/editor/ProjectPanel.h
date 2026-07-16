@@ -30,6 +30,7 @@ class ProjectPanel : public EditorPanel
 {
   public:
     ProjectPanel();
+    std::unordered_map<std::string, double> ConsumeSubTimings() override;
 
     // ── Public API (called from Python bootstrap / other panels) ─────
 
@@ -83,6 +84,8 @@ class ProjectPanel : public EditorPanel
         createShader;
     /// Create material: (currentPath, name) → (ok, errorMsg)
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createMaterial;
+    /// Create physics material: (currentPath, name) → (ok, errorMsg)
+    std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createPhysicMaterial;
     /// Create scene: (currentPath, name) → (ok, errorMsg)
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createScene;
     /// Create animation clip: (currentPath, name) → (ok, errorMsg)
@@ -91,6 +94,8 @@ class ProjectPanel : public EditorPanel
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimClip3D;
     /// Create animation state machine: (currentPath, name) → (ok, errorMsg)
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimFsm;
+    /// Create VFX system: (currentPath, name) → (ok, errorMsg)
+    std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createVfxSystem;
     /// Create transform timeline: (currentPath, name) → (ok, errorMsg)
     std::function<std::pair<bool, std::string>(const std::string &, const std::string &)> createAnimTimeline;
     /// Create timeline state machine: (currentPath, name) → (ok, errorMsg)
@@ -119,6 +124,8 @@ class ProjectPanel : public EditorPanel
     std::function<void(const std::string &)> openAnimClip;
     /// Open animation state machine: (filePath)
     std::function<void(const std::string &)> openAnimFsm;
+    /// Open VFX system: (filePath)
+    std::function<void(const std::string &)> openVfxSystem;
     /// Open transform timeline: (filePath)
     std::function<void(const std::string &)> openAnimTimeline;
     /// Open timeline state machine: (filePath)
@@ -152,6 +159,7 @@ class ProjectPanel : public EditorPanel
   protected:
     void OnRenderContent(InxGUIContext *ctx) override;
     void PreRender(InxGUIContext *ctx) override;
+    void VisiblePreRender(InxGUIContext *ctx) override;
 
   private:
     // ── Translation cache ────────────────────────────────────────────
@@ -175,12 +183,14 @@ class ProjectPanel : public EditorPanel
         std::string parentPath; // for sub-assets
         uint64_t mtimeNs = 0;
         int slotIndex = -1; // for SubMaterial
+        ResourceType resourceType = ResourceType::DefaultText;
     };
 
     // ── Directory snapshot cache ─────────────────────────────────────
     struct DirSnapshot
     {
         uint64_t mtimeNs = 0;
+        uint64_t assetGeneration = 0;
         double lastValidatedAt = 0.0; // steady-clock seconds
         std::vector<FileItem> dirs;
         std::vector<FileItem> files;
@@ -244,25 +254,31 @@ class ProjectPanel : public EditorPanel
     std::unordered_map<std::string, std::pair<uint64_t, double>> m_materialMtimeCache;
     std::unordered_map<std::string, std::pair<uint64_t, double>> m_textureMtimeCache;
     std::unordered_map<std::string, std::pair<uint64_t, double>> m_modelMtimeCache;
+    struct PrefabTypeCacheEntry
+    {
+        uint64_t mtimeNs = 0;
+        bool isUi = false;
+    };
+    std::unordered_map<std::string, PrefabTypeCacheEntry> m_prefabTypeCache;
 
     void ProcessPendingThumbnails();
     uint64_t GetThumbnail(const std::string &filePath, uint64_t cachedMtimeNs);
-    uint64_t GetMaterialThumbnail(const std::string &filePath);
+    uint64_t GetMaterialThumbnail(const std::string &filePath, uint64_t cachedMtimeNs);
     uint64_t GetEmbeddedMaterialThumbnail(const FileItem &item);
-    uint64_t GetModelThumbnail(const std::string &filePath);
-    uint64_t GetPrefabThumbnail(const std::string &filePath);
+    uint64_t GetModelThumbnail(const std::string &filePath, uint64_t cachedMtimeNs);
     uint64_t GetMaterialMtimeNs(const std::string &filePath);
     uint64_t GetTextureMtimeNs(const std::string &filePath);
 
     // ── File-type icon cache ─────────────────────────────────────────
     std::unordered_map<std::string, uint64_t> m_typeIconCache;
+    std::unordered_set<std::string> m_pendingTypeIconIds;
     bool m_typeIconsLoaded = false;
     std::string m_iconsDir;
 
     void EnsureTypeIconsLoaded();
     uint64_t GetTypeIconId(const FileItem &item) const;
     uint64_t GetModel3dIconId() const;
-    static bool IsUiPrefabFile(const std::string &filePath);
+    bool IsUiPrefabFile(const std::string &filePath, uint64_t cachedMtimeNs);
 
     // ── Drag-drop maps ───────────────────────────────────────────────
     struct DragDropInfo
@@ -296,6 +312,18 @@ class ProjectPanel : public EditorPanel
     std::string m_preferredNavPath;
     /// When true, bare project root is not a valid browse target ([..] stops at subfolders).
     bool m_navHasSubfolders = false;
+    bool m_canNavigateUp = false;
+    double m_subPreIcons = 0.0;
+    double m_subPrePreview = 0.0;
+    double m_subPreOther = 0.0;
+    double m_subBreadcrumb = 0.0;
+    double m_subFolderTree = 0.0;
+    double m_subFileGrid = 0.0;
+    double m_subTail = 0.0;
+    double m_subGridContext = 0.0;
+    double m_subGridData = 0.0;
+    double m_subGridItems = 0.0;
+    double m_subGridTail = 0.0;
     std::string m_lastNotifiedPath;
 
     // Breadcrumb
@@ -319,6 +347,9 @@ class ProjectPanel : public EditorPanel
     std::string m_renamingPath;
     char m_renameBuf[256] = {};
     bool m_renameFocusRequested = false;
+    // Skip IsItemDeactivated commit for the frame that opens rename (F2/context menu),
+    // otherwise the new InputText can deactivate immediately and cancel the rename UI.
+    int m_renameSkipDeactivateFrames = 0;
 
     // Deferred cache invalidation — set by operations that modify the filesystem
     // mid-render (CommitRename, Delete, Paste, Move) so that the file grid's item
@@ -359,6 +390,9 @@ class ProjectPanel : public EditorPanel
     void RenderDragDropSource(InxGUIContext *ctx, const FileItem &item);
     void RenderFolderDropTarget(InxGUIContext *ctx, const std::string &folderPath);
     void RenderItemLabel(InxGUIContext *ctx, const FileItem &item, float iconSize, float cellStartX);
+    [[nodiscard]] std::string MakeProjectFolderSemanticId(const std::string &path) const;
+    [[nodiscard]] std::string MakeProjectItemSemanticId(const FileItem &item) const;
+    [[nodiscard]] std::string MakeProjectRelativeSemanticPath(const std::string &path) const;
 
     // ── Click & keyboard handling ────────────────────────────────────
     void HandleItemClick(const FileItem &item, InxGUIContext *ctx);
@@ -374,6 +408,9 @@ class ProjectPanel : public EditorPanel
     void CancelRename();
     void CreateAndRename(const std::string &baseName, const std::string &extension,
                          std::function<std::pair<bool, std::string>(const std::string &)> createFn);
+    /// Immediately clear directory caches. Prefer InvalidateDirCache() which defers
+    /// until the next OnRenderContent so mid-frame item pointers stay valid.
+    void ClearDirCachesNow();
 
     // ── Clipboard helpers ────────────────────────────────────────────
     void ClipboardCopy(const std::vector<std::string> &paths);
@@ -395,6 +432,7 @@ class ProjectPanel : public EditorPanel
     /// Lowest folder users may browse (Assets/Logs when present, else project root).
     std::string GetMinimumBrowsePath() const;
     void ClampNavigationPath();
+    void UpdateNavigationCache();
     void AssignCurrentPath(const std::string &path);
     /// True when [..] may move to the parent folder (blocked at project-root subfolders).
     bool CanNavigateUpFromCurrent() const;

@@ -101,15 +101,15 @@ class SetPropertyCommand(UndoCommand):
 
 
 class GenericComponentCommand(UndoCommand):
-    """Snapshot-based undo for a full component's JSON state."""
+    """Snapshot-based undo for a full native-component document."""
 
     MERGE_WINDOW: float
 
     def __init__(
         self,
         comp: Any,
-        old_json: str,
-        new_json: str,
+        old_document: dict[str, Any],
+        new_document: dict[str, Any],
         description: str = "",
     ) -> None: ...
 
@@ -202,8 +202,8 @@ class MoveGameObjectCommand(UndoCommand):
 
 # ── Material commands ─────────────────────────────────────────────────
 
-class MaterialJsonCommand(UndoCommand):
-    """Snapshot-based undo for a material's JSON state."""
+class MaterialDocumentCommand(UndoCommand):
+    """Snapshot-based undo for a material document."""
 
     MERGE_WINDOW: float
     marks_dirty: bool
@@ -211,16 +211,29 @@ class MaterialJsonCommand(UndoCommand):
     def __init__(
         self,
         material: Any,
-        old_json: str,
-        new_json: str,
+        old_document: dict[str, Any],
+        new_document: dict[str, Any],
         description: str = "",
+        refresh_callback: Optional[Callable[[Any], None]] = None,
+        edit_key: str = "",
     ) -> None: ...
 
     def execute(self) -> None: ...
     def undo(self) -> None: ...
     def redo(self) -> None: ...
     def can_merge(self, other: UndoCommand) -> bool: ...
-    def merge(self, other: MaterialJsonCommand) -> None: ...
+    def merge(self, other: MaterialDocumentCommand) -> None: ...
+
+class ResourceDocumentCommand(UndoCommand):
+    marks_dirty: bool
+    def __init__(self, resource: Any, old_document: dict[str, Any], new_document: dict[str, Any],
+                 description: str = ..., publish_callback: Optional[Callable[[Any], None]] = ...,
+                 edit_key: str = ...) -> None: ...
+    def execute(self) -> None: ...
+    def undo(self) -> None: ...
+    def redo(self) -> None: ...
+    def can_merge(self, other: UndoCommand) -> bool: ...
+    def merge(self, other: ResourceDocumentCommand) -> None: ...
 
 
 # ── RenderStack commands ──────────────────────────────────────────────
@@ -395,12 +408,12 @@ class HierarchyUndoTracker:
 
 # ── RenderStack snapshot helpers ──────────────────────────────────────
 
-def snapshot_renderstack(stack: Any) -> str:
-    """Serialize a RenderStack's full state to JSON."""
+def snapshot_renderstack(stack: Any) -> dict[str, Any]:
+    """Snapshot a RenderStack as a document."""
     ...
 
-def restore_renderstack(stack: Any, json_str: str) -> None:
-    """Restore a RenderStack's state from a JSON snapshot."""
+def restore_renderstack(stack: Any, document: dict[str, Any]) -> None:
+    """Restore a RenderStack from a document snapshot."""
     ...
 
 
@@ -463,12 +476,15 @@ class UndoManager:
     @enabled.setter
     def enabled(self, value: bool) -> None: ...
 
-    def execute(self, cmd: UndoCommand) -> None:
+    def execute(self, cmd: UndoCommand) -> bool:
         """Execute *cmd* and push it onto the undo stack.
 
         Args:
             cmd: The command to execute. If it can merge with the stack
                  top, the merge is performed instead of pushing a new entry.
+
+        Returns:
+            ``True`` when execution succeeded, otherwise ``False``.
         """
         ...
 

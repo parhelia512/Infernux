@@ -321,6 +321,15 @@ class SceneViewPanel(SceneViewGizmoMixin, SceneViewCameraMixin, SceneViewOverlay
     def _window_flags(self) -> int:
         return Theme.WINDOW_FLAGS_VIEWPORT | Theme.WINDOW_FLAGS_NO_SCROLL
 
+    def _window_title_suffix(self) -> str:
+        try:
+            from Infernux.engine.scene_manager import SceneFileManager
+
+            manager = SceneFileManager.instance()
+            return " *" if manager is not None and manager.is_dirty else ""
+        except Exception:
+            return ""
+
     def save_state(self) -> dict:
         # Scene view keeps many runtime-only camera/gizmo/render caches.
         # Persisting them across sessions can corrupt first-frame behavior.
@@ -354,7 +363,7 @@ class SceneViewPanel(SceneViewGizmoMixin, SceneViewCameraMixin, SceneViewOverlay
         if self._engine:
             self._engine.set_scene_view_visible(False)
 
-    def _pre_render(self, ctx):
+    def _update_visible_frame_state(self):
         import time
         current_time = time.time()
         self._delta_time = current_time - self._last_frame_time if self._last_frame_time > 0 else 0.016
@@ -375,6 +384,7 @@ class SceneViewPanel(SceneViewGizmoMixin, SceneViewCameraMixin, SceneViewOverlay
             self._play_border_clr = Theme.BORDER_PAUSE if pm.state == PlayModeState.PAUSED else Theme.BORDER_PLAY
 
     def _on_visible_pre(self, ctx):
+        self._update_visible_frame_state()
         # Activate C++ scene rendering and request full-speed frames only
         # when the Scene View panel is actually visible.  Previously these
         # lived in _pre_render (which runs every frame for all panels) and
@@ -387,7 +397,7 @@ class SceneViewPanel(SceneViewGizmoMixin, SceneViewCameraMixin, SceneViewOverlay
                 native.request_full_speed_frame()
 
         # Track focus to auto-exit UI Mode
-        focused = (ClosablePanel.get_active_panel_id() == self.window_id) or ctx.is_window_focused(0)
+        focused = (ClosablePanel.get_active_panel_id() == self.window_id) or self._is_window_or_child_focused(ctx)
         if not focused and self._camera_capture_active:
             self._is_camera_dragging = False
             self._end_camera_capture(restore_cursor=False)
@@ -448,7 +458,7 @@ class SceneViewPanel(SceneViewGizmoMixin, SceneViewCameraMixin, SceneViewOverlay
         if ctx.want_text_input():
             return
 
-        panel_active = (ClosablePanel.get_active_panel_id() == self.window_id) or ctx.is_window_focused(0)
+        panel_active = (ClosablePanel.get_active_panel_id() == self.window_id) or self._is_window_or_child_focused(ctx)
         if not (panel_active or is_scene_hovered):
             return
 

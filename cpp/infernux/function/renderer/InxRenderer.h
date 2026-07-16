@@ -1,6 +1,8 @@
 #pragma once
 
 // Minimal includes required for public API value types and POD members
+#include "CaptureService.h"
+#include "GpuResidency.h"
 #include "InxRenderStruct.h"
 #include "ProfileConfig.h"
 #include <array>
@@ -12,6 +14,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace infernux
@@ -25,6 +28,7 @@ namespace infernux
 class EditorGizmos;
 class EditorTools;
 class GizmosDrawCallBuffer;
+class ParticleDrawCallBuffer;
 class InxGUI;
 class InxGUIRenderable;
 class InxMaterial;
@@ -39,6 +43,64 @@ class SceneRenderTarget;
 class TransientResourcePool;
 class InxGUIContext;
 class InxScreenUIRenderer;
+namespace vk
+{
+class ImageReadbackTicket;
+}
+
+struct RendererFrameTelemetrySnapshot
+{
+    uint64_t frame = 0;
+    bool sceneViewVisible = false;
+    bool sceneTargetReady = false;
+    bool gameCameraEnabled = false;
+    bool gameCameraAvailable = false;
+    bool gameTargetReady = false;
+    uint32_t sceneTargetWidth = 0;
+    uint32_t sceneTargetHeight = 0;
+    uint32_t gameTargetWidth = 0;
+    uint32_t gameTargetHeight = 0;
+    size_t sceneDrawCallCount = 0;
+    size_t sceneShadowDrawCallCount = 0;
+    size_t gameDrawCallCount = 0;
+    size_t gameShadowDrawCallCount = 0;
+    size_t lightCount = 0;
+    size_t particleCount = 0;
+    std::string sceneRenderGraphName;
+    std::string gameRenderGraphName;
+    uint64_t sceneRenderGraphExecutionCount = 0;
+    uint64_t gameRenderGraphExecutionCount = 0;
+    bool sceneRenderGraphCurrentExecuted = false;
+    bool gameRenderGraphCurrentExecuted = false;
+    std::vector<std::string> sceneRenderGraphPassNames;
+    std::vector<std::string> gameRenderGraphPassNames;
+    double gameRenderMs = 0.0;
+    double gameOnlyFrameMs = 0.0;
+    double sceneUpdateMs = 0.0;
+    double guiBuildMs = 0.0;
+    double prepareFrameMs = 0.0;
+    std::unordered_map<std::string, double> guiPanelTimesMs;
+    std::unordered_map<std::string, std::unordered_map<std::string, double>> guiPanelSubTimesMs;
+};
+
+struct UIPerformanceMetricStats
+{
+    size_t sampleCount = 0;
+    double meanMs = 0.0;
+    double medianMs = 0.0;
+    double p95Ms = 0.0;
+    double maxMs = 0.0;
+};
+
+struct RendererUIPerformanceSnapshot
+{
+    uint64_t firstFrame = 0;
+    uint64_t lastFrame = 0;
+    size_t sampleCount = 0;
+    UIPerformanceMetricStats guiBuild;
+    std::unordered_map<std::string, UIPerformanceMetricStats> panelTimes;
+    std::unordered_map<std::string, std::unordered_map<std::string, UIPerformanceMetricStats>> panelSubTimes;
+};
 
 class InxRenderer
 {
@@ -71,6 +133,41 @@ class InxRenderer
 
     /// @brief Drain GPU work before destructive scene/resource replacement.
     void WaitForGpuIdle();
+    [[nodiscard]] size_t GetPendingMeshUploadCount() const;
+    [[nodiscard]] uint64_t GetSubmittedMeshUploadCount() const;
+    [[nodiscard]] uint64_t GetCompletedMeshUploadCount() const;
+    [[nodiscard]] uint64_t GetAsyncMeshUploadCount() const;
+    [[nodiscard]] size_t GetPendingTextureCpuLoadCount() const;
+    [[nodiscard]] size_t GetPendingTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetSubmittedTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetCompletedTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetAsyncTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetStagingPoolBytes() const;
+    [[nodiscard]] size_t GetStagingPoolBufferCount() const;
+    [[nodiscard]] uint64_t GetStagingAllocationCount() const;
+    [[nodiscard]] uint64_t GetStagingReuseCount() const;
+    [[nodiscard]] uint64_t GetStagingDiscardCount() const;
+    [[nodiscard]] uint64_t GetTextureGpuResidentBytes() const;
+    [[nodiscard]] uint64_t GetTextureGpuBudgetBytes() const;
+    [[nodiscard]] size_t GetTextureGpuCacheEntryCount() const;
+    [[nodiscard]] size_t GetRetiredTextureGpuLeaseCount() const;
+    [[nodiscard]] uint64_t GetTextureGpuEvictionCount() const;
+    void SetTextureGpuBudgetBytes(uint64_t bytes);
+    [[nodiscard]] size_t TrimTextureGpuBudget();
+    [[nodiscard]] uint64_t GetMeshGpuResidentBytes() const;
+    [[nodiscard]] uint64_t GetMeshGpuBudgetBytes() const;
+    [[nodiscard]] size_t GetMeshGpuCacheEntryCount() const;
+    [[nodiscard]] size_t GetRetiredMeshGpuLeaseCount() const;
+    [[nodiscard]] uint64_t GetMeshGpuEvictionCount() const;
+    void SetMeshGpuBudgetBytes(uint64_t bytes);
+    [[nodiscard]] size_t TrimMeshGpuBudget();
+    [[nodiscard]] GpuResidencySnapshot GetGpuResidencySnapshot() const;
+    [[nodiscard]] RendererFrameTelemetrySnapshot GetFrameTelemetrySnapshot();
+    [[nodiscard]] RendererUIPerformanceSnapshot GetUIPerformanceSnapshot(size_t maxSamples = 240) const;
+    [[nodiscard]] uint64_t GetGpuResidencyBudgetBytes() const;
+    void SetGpuResidencyBudgetBytes(uint64_t bytes);
+    [[nodiscard]] size_t TrimGpuResidencyBudget();
+    [[nodiscard]] std::vector<GpuAssetResidencyRecord> GetAssetGpuResidency() const;
 
     void LoadShader(const char *name, const std::vector<char> &code, const char *type);
     bool HasShader(const std::string &name, const std::string &type) const;
@@ -81,8 +178,17 @@ class InxRenderer
                                const std::string &passTag = "", const std::string &stencil = "",
                                const std::string &alphaClip = "");
     bool GetUserEvent();
+    uint64_t QueueSyntheticKeyInput(int scancode, bool pressed, bool repeat = false);
+    uint64_t QueueSyntheticMouseButtonInput(int button, bool pressed, float x, float y);
+    uint64_t QueueSyntheticMouseMotionInput(float x, float y, float deltaX, float deltaY);
+    uint64_t QueueSyntheticMouseWheelInput(float horizontal, float vertical);
+    uint64_t QueueSyntheticTextInput(const std::string &text);
+    uint64_t QueueSyntheticCloseRequest();
+    [[nodiscard]] uint64_t GetLastProcessedSyntheticInputSequence() const;
+    [[nodiscard]] size_t GetPendingSyntheticInputCount() const;
     void ShowWindow();
     void HideWindow();
+    [[nodiscard]] bool IsWindowMinimized() const;
     void SetWindowIcon(const std::string &iconPath);
     void SetWindowFullscreen(bool fullscreen);
     void SetWindowTitle(const std::string &title);
@@ -102,11 +208,24 @@ class InxRenderer
     void SetGUIPlayerMode(bool enabled);
 
     // ImGui texture management
-    uint64_t UploadTextureForImGui(const std::string &name, const unsigned char *pixels, int width, int height,
-                                   VkFilter filter = VK_FILTER_LINEAR);
+    uint64_t SubmitTextureForImGui(const std::string &name, const unsigned char *pixels, size_t byteCount, int width,
+                                   int height, VkFilter filter = VK_FILTER_LINEAR, bool pinned = false);
     void RemoveImGuiTexture(const std::string &name);
     bool HasImGuiTexture(const std::string &name) const;
     uint64_t GetImGuiTextureId(const std::string &name) const;
+    uint64_t GetImGuiTextureVersion(const std::string &name) const;
+    uint64_t GetFailedImGuiTextureVersion(const std::string &name) const;
+    void SetImGuiTextureBudgetBytes(uint64_t bytes);
+    [[nodiscard]] size_t TrimImGuiTextureBudget();
+    [[nodiscard]] uint64_t GetImGuiTextureBudgetBytes() const;
+    [[nodiscard]] uint64_t GetImGuiTextureResidentBytes() const;
+    [[nodiscard]] size_t GetImGuiTextureEntryCount() const;
+    [[nodiscard]] size_t GetPendingImGuiTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetPendingImGuiTextureUploadBytes() const;
+    [[nodiscard]] uint64_t GetSubmittedImGuiTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetCompletedImGuiTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetAsyncImGuiTextureUploadCount() const;
+    [[nodiscard]] uint64_t GetImGuiTextureEvictionCount() const;
 
     // Resource preview manager
     ResourcePreviewManager *GetResourcePreviewManager();
@@ -123,6 +242,10 @@ class InxRenderer
     // Scene render target for offscreen rendering
     uint64_t GetSceneTextureId() const;
     void ResizeSceneRenderTarget(uint32_t width, uint32_t height);
+    [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket> RequestRenderTargetReadback(bool gameView);
+    [[nodiscard]] uint64_t RequestCapture(CaptureSource source, const std::string &outputPath);
+    [[nodiscard]] CaptureSnapshot QueryCapture(uint64_t captureId) const;
+    [[nodiscard]] bool CancelCapture(uint64_t captureId);
 
     // Editor gizmos
     void SetShowGrid(bool show);
@@ -134,6 +257,9 @@ class InxRenderer
 
     /// @brief Access the component gizmos draw call buffer used by the scripting layer
     GizmosDrawCallBuffer *GetGizmosDrawCallBuffer();
+
+    /// @brief Access the persistent particle billboard batch buffer.
+    ParticleDrawCallBuffer *GetParticleDrawCallBuffer();
 
     /// @brief Set the selected object ID for outline tracking
     void SetSelectedObjectId(uint64_t objectId)
@@ -156,20 +282,15 @@ class InxRenderer
     // Material pipeline refresh - call this after modifying material shader paths
     bool RefreshMaterialPipeline(std::shared_ptr<InxMaterial> material);
 
-    /// @brief Render a material preview sphere using the material's real GPU pipeline.
-    /// @return true if GPU rendering succeeded and outPixels was filled.
-    bool RenderMaterialPreviewGPU(std::shared_ptr<InxMaterial> material, int size,
-                                  std::vector<unsigned char> &outPixels);
+    [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket>
+    BeginMaterialPreviewGPU(const std::shared_ptr<InxMaterial> &material, int size);
+    bool TryCompleteMaterialPreviewGPU(const std::shared_ptr<vk::ImageReadbackTicket> &ticket, int outputSize,
+                                       std::vector<unsigned char> &outPixels);
 
-    /// @brief Render a mesh preview using real GPU shaders with per-submesh materials.
-    /// @return true if GPU rendering succeeded and outPixels was filled.
-    bool RenderMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
-                              std::vector<unsigned char> &outPixels);
-
-    /// @brief Mesh preview with an explicit camera (no auto-fit) — interactive Timeline viewport.
-    bool RenderMeshPreviewGPUCamera(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials,
-                                    int size, const glm::mat4 &view, const glm::mat4 &proj, const glm::vec3 &cameraPos,
-                                    std::vector<unsigned char> &outPixels, bool cloneMaterials = true);
+    [[nodiscard]] std::shared_ptr<vk::ImageReadbackTicket>
+    BeginMeshPreviewGPU(const InxMesh &mesh, const std::vector<std::shared_ptr<InxMaterial>> &materials, int size);
+    bool TryCompleteMeshPreviewGPU(const std::shared_ptr<vk::ImageReadbackTicket> &ticket, int outputSize,
+                                   std::vector<unsigned char> &outPixels);
 
     uint64_t RenderMeshPreviewGPUImGuiCamera(const InxMesh &mesh,
                                              const std::vector<std::shared_ptr<InxMaterial>> &materials, int size,
@@ -280,6 +401,13 @@ class InxRenderer
     /// @brief Set present mode: 0=IMMEDIATE, 1=MAILBOX, 2=FIFO, 3=FIFO_RELAXED
     void SetPresentMode(int mode);
 
+    /// @brief Set a callback invoked immediately before scene Update.
+    /// Gameplay timing is advanced here so scripts observe the current frame.
+    void SetPreSceneUpdateCallback(std::function<void(float)> callback)
+    {
+        m_preSceneUpdateCallback = std::move(callback);
+    }
+
     /// @brief Set a callback invoked each frame before GUI::BuildFrame().
     /// Scene-mutating deferred tasks run here to prevent stale-reference hangs.
     void SetPreGuiCallback(std::function<void()> callback)
@@ -353,13 +481,29 @@ class InxRenderer
     std::unique_ptr<InxVkCoreModular> m_vkCore;
     std::unique_ptr<InxGUI> m_gui;
     std::unique_ptr<InxView> m_view;
+    bool m_guiPlayerMode = false;
+    uint64_t m_lastSemanticSyntheticInputSequence = 0;
     std::unique_ptr<SceneRenderTarget> m_sceneRenderTarget;
     std::unique_ptr<SceneRenderGraph> m_sceneRenderGraph;
+    std::unique_ptr<CaptureService> m_captureService;
+    struct PendingCapture
+    {
+        uint64_t id = 0;
+        CaptureSource source = CaptureSource::Game;
+    };
+    [[nodiscard]] bool HasPendingCapture(CaptureSource source) const;
+    void SubmitPendingCaptureReadbacks();
+    std::vector<PendingCapture> m_pendingCaptures;
+    uint64_t m_sceneRenderTargetGeneration = 0;
+    uint64_t m_gameRenderTargetGeneration = 0;
     std::unique_ptr<EditorGizmos> m_editorGizmos;
     std::unique_ptr<EditorTools> m_editorTools;
     std::unique_ptr<GizmosDrawCallBuffer> m_componentGizmos;
+    std::unique_ptr<ParticleDrawCallBuffer> m_particleDrawCalls;
     std::unique_ptr<OutlineRenderer> m_outlineRenderer;
     std::unique_ptr<TransientResourcePool> m_transientResourcePool;
+    uint64_t m_gpuResidencyBudgetBytes = 0;
+    uint32_t m_gpuResidencyCheckFrames = 0;
 
     // Game Camera: separate render target + graph for Game View
     std::unique_ptr<SceneRenderTarget> m_gameRenderTarget;
@@ -372,6 +516,19 @@ class InxRenderer
     double m_guiBuildMs = 0.0;       ///< GUI::BuildFrame (all ImGui panels) (ms)
     double m_prepareFrameMs = 0.0;   ///< PrepareFrame (collect/cull) (ms)
     double m_gameOnlyFrameMs = 0.0;  ///< Sum of game-only phases (ms)
+
+    static constexpr size_t UI_PERFORMANCE_HISTORY_SIZE = 240;
+    struct UIMetricHistory
+    {
+        std::array<double, UI_PERFORMANCE_HISTORY_SIZE> values{};
+        std::array<uint64_t, UI_PERFORMANCE_HISTORY_SIZE> frames{};
+    };
+    UIMetricHistory m_uiBuildHistory;
+    std::unordered_map<std::string, UIMetricHistory> m_uiPanelHistory;
+    std::unordered_map<std::string, std::unordered_map<std::string, UIMetricHistory>> m_uiPanelSubHistory;
+    size_t m_uiPerformanceWriteIndex = 0;
+    size_t m_uiPerformanceSampleCount = 0;
+    void RecordUIPerformanceFrame();
 
     /// Per-frame cached game camera pointer, lazily resolved once per frame
     /// by FindGameCameraCached() and cleared at the start of each DrawFrame.
@@ -438,6 +595,9 @@ class InxRenderer
     /// operations (deserialize, scene load) complete before any ImGui
     /// panel renders — preventing stale-reference hangs.
     std::function<void()> m_preGuiCallback;
+
+    /// Callback invoked before SceneManager::Update with the raw frame delta.
+    std::function<void(float)> m_preSceneUpdateCallback;
 
     /// Callback invoked once per frame AFTER VkCore::DrawFrame() + EndFrame().
     /// Used by Python to run heavy scene loads between frames, avoiding

@@ -7,6 +7,7 @@ from Infernux.lib import (
     ConsolePanel,
     HierarchyPanel,
     PlayState,
+    LogLevel,
     WindowTypeInfo,
 )
 
@@ -21,37 +22,60 @@ class TestStatusBarPanel:
         sb = StatusBarPanel()
         assert sb is not None
 
-    def test_set_latest_message(self):
-        sb = StatusBarPanel()
-        sb.set_latest_message("Hello world", "info")
-        # No crash — message is rendered next frame
-
-    def test_set_latest_message_multiline(self):
-        sb = StatusBarPanel()
-        sb.set_latest_message("Line1\nLine2\nLine3", "warning")
-
-    def test_clear_counts(self):
-        sb = StatusBarPanel()
-        sb.increment_warn_count()
-        sb.increment_error_count()
-        sb.clear_counts()
-        # Can't directly read counts, but no crash
-
-    def test_increment_counts(self):
-        sb = StatusBarPanel()
-        sb.increment_warn_count()
-        sb.increment_warn_count()
-        sb.increment_error_count()
-
     def test_set_engine_status(self):
         sb = StatusBarPanel()
-        sb.set_engine_status("Loading...", 0.5)
-        sb.set_engine_status("", -1.0)  # clear
+        sb.set_engine_status("Loading...", 0.5, "progress")
+        sb.set_engine_status("Done", 1.0, "success")
+        sb.set_engine_status("", -1.0, "idle")
 
     def test_set_console_panel(self):
         sb = StatusBarPanel()
         console = ConsolePanel()
         sb.set_console_panel(console)
+
+
+class TestConsolePanel:
+
+    def test_status_snapshot_is_exact_before_panel_render(self):
+        console = ConsolePanel()
+        console.log_from_python(LogLevel.Info, "first")
+        console.log_from_python(LogLevel.Warn, "second")
+        console.log_from_python(LogLevel.Error, "latest")
+
+        message, level, info, warning, error, uid = console._get_status_snapshot()
+        assert (message, level) == ("latest", "error")
+        assert (info, warning, error) == (1, 1, 1)
+        assert uid > 0
+
+        console._select_entry(uid)
+        assert console._selected_uid == uid
+
+    def test_error_pause_callback_runs_when_error_enters_console(self):
+        console = ConsolePanel()
+        calls = []
+        console.error_pause = True
+        console.on_error_pause = lambda: calls.append("pause")
+
+        console.log_from_python(LogLevel.Error, "runtime failure")
+        console._get_status_snapshot()
+        assert calls == ["pause"]
+
+    def test_clear_resets_authoritative_summary_and_counts(self):
+        console = ConsolePanel()
+        console.log_from_python(LogLevel.Warn, "warning")
+        console._get_status_snapshot()
+        revision = console._revision
+
+        console.clear()
+        assert console._revision > revision
+        assert console._get_status_snapshot() == ("", "info", 0, 0, 0, 0)
+
+    def test_select_requests_window_manager_focus(self):
+        console = ConsolePanel()
+        calls = []
+        console.on_request_focus = lambda: calls.append("focus")
+        console.select_latest_entry()
+        assert calls == ["focus"]
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -107,7 +131,9 @@ class TestToolbarPanel:
     def test_camera_settings_roundtrip(self):
         tb = ToolbarPanel()
         settings = {
+            "orthographic": True,
             "fov": 75.0,
+            "orthographic_size": 12.0,
             "rotation_speed": 0.1,
             "pan_speed": 2.0,
             "zoom_speed": 1.5,
@@ -116,7 +142,9 @@ class TestToolbarPanel:
         }
         tb.set_camera_settings(settings)
         result = tb.get_camera_settings()
+        assert result["orthographic"] is True
         assert abs(result["fov"] - 75.0) < 0.01
+        assert abs(result["orthographic_size"] - 12.0) < 0.01
         assert abs(result["rotation_speed"] - 0.1) < 0.01
         assert abs(result["pan_speed"] - 2.0) < 0.01
         assert abs(result["zoom_speed"] - 1.5) < 0.01
@@ -126,6 +154,7 @@ class TestToolbarPanel:
     def test_camera_settings_defaults(self):
         tb = ToolbarPanel()
         result = tb.get_camera_settings()
+        assert result["orthographic"] is False
         assert abs(result["fov"] - 60.0) < 0.01
         assert abs(result["move_speed"] - 5.0) < 0.01
 
@@ -179,13 +208,21 @@ class TestMenuBarPanel:
         mb = MenuBarPanel()
         calls = []
         mb.on_save = lambda: calls.append("save")
+        mb.on_save_as = lambda: calls.append("save_as")
+        mb.on_save_focused = lambda: calls.append("save_focused")
+        mb.on_save_focused_as = lambda: calls.append("save_focused_as")
         mb.on_new_scene = lambda: calls.append("new")
         mb.on_request_close = lambda: calls.append("close")
 
         mb.on_save()
+        mb.on_save_as()
+        mb.on_save_focused()
+        mb.on_save_focused_as()
         mb.on_new_scene()
         mb.on_request_close()
-        assert calls == ["save", "new", "close"]
+        assert calls == [
+            "save", "save_as", "save_focused", "save_focused_as", "new", "close"
+        ]
 
     def test_undo_callbacks(self):
         mb = MenuBarPanel()
@@ -220,6 +257,7 @@ class TestMenuBarPanel:
 
         windows = mb.get_open_windows()
         assert windows["console"] is True
+        mb.invalidate_window_type_cache()
 
     def test_open_close_window(self):
         mb = MenuBarPanel()
@@ -360,6 +398,12 @@ class TestHierarchyPanel:
         assert hp.selection_count() == 1
         hp.clear_selection()
         assert hp.is_selection_empty()
+
+    def test_native_selection_and_runtime_hidden_snapshots(self):
+        hp = HierarchyPanel()
+        hp.set_selection_snapshot([10, 20], 20)
+        hp.set_runtime_hidden_ids({30, 40})
+        hp.set_scene_header_snapshot("Sample *", False, "")
 
     def test_on_selection_changed_callback(self):
         hp = HierarchyPanel()

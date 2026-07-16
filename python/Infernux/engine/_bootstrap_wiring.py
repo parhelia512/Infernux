@@ -22,7 +22,6 @@ from Infernux.engine.resources_manager import ResourcesManager
 from Infernux.engine.play_mode import PlayModeManager, PlayModeState
 from Infernux.engine.scene_manager import SceneFileManager
 from Infernux.engine.ui import (
-    FrameSchedulerPanel,
     SceneViewPanel,
     GameViewPanel,
     WindowManager,
@@ -42,6 +41,20 @@ from Infernux.engine.ui import panel_state as _panel_state
 class BootstrapWiringMixin:
     """BootstrapWiringMixin method group for EditorBootstrap."""
 
+    @staticmethod
+    def _save_focused_document(wm, sfm, *, save_as: bool = False) -> None:
+        from Infernux.engine.ui.closable_panel import ClosablePanel
+
+        panel_id = ClosablePanel.get_active_panel_id()
+        panel = wm.get_window_instance(panel_id) if panel_id else None
+        handler = getattr(panel, "handle_save_command", None)
+        if callable(handler) and bool(handler(save_as=save_as)):
+            return
+        if save_as:
+            sfm.save_scene_as()
+        else:
+            sfm.save_current_scene()
+
     def _wire_menu_bar_callbacks(self, wm):
         """Wire C++ MenuBarPanel callbacks to Python managers."""
         mb = self.menu_bar
@@ -51,8 +64,14 @@ class BootstrapWiringMixin:
         # Scene file operations
         if sfm:
             mb.on_save = lambda: sfm.save_current_scene()
+            mb.on_save_as = lambda: sfm.save_scene_as()
             mb.on_new_scene = lambda: sfm.new_scene()
             mb.on_request_close = lambda: sfm.request_close()
+
+            mb.on_save_focused = lambda: self._save_focused_document(wm, sfm)
+            mb.on_save_focused_as = lambda: self._save_focused_document(
+                wm, sfm, save_as=True
+            )
 
         # Undo
         def _undo():
@@ -114,6 +133,8 @@ class BootstrapWiringMixin:
             return wm.get_open_windows()
 
         mb.get_registered_types = _get_registered_types
+        wm.add_type_change_listener(mb.invalidate_window_type_cache)
+        mb.invalidate_window_type_cache()
         mb.get_open_windows = _get_open_windows
         mb.open_window = lambda tid: wm.open_window(tid)
         mb.close_window = lambda tid: wm.close_window(tid)
@@ -157,14 +178,25 @@ class BootstrapWiringMixin:
         _pref = self._preferences
         _plm = self._physics_layer_matrix
         _sfm = sfm
+        from Infernux.engine.ui.dirty_panel_confirmation import (
+            DirtyPanelConfirmationCoordinator,
+        )
+        from Infernux.engine.ui.project_delete_confirmation import (
+            ProjectDeleteConfirmationCoordinator,
+        )
+        _dirty_panels = DirtyPanelConfirmationCoordinator.instance()
+        _project_delete = ProjectDeleteConfirmationCoordinator.instance()
 
         class _MenuBarFloatingPanels(InxGUIRenderable):
             def on_render(self, ctx: InxGUIContext):
                 _bs.render(ctx)
                 _pref.render(ctx)
                 _plm.render(ctx)
+                _dirty_panels.render(ctx)
+                _project_delete.render(ctx)
                 if _sfm:
                     _sfm.render_confirmation_popup(ctx)
+                    _sfm.render_save_as_popup(ctx)
 
         self._menu_bar_floats = _MenuBarFloatingPanels()
         engine.register_gui("menu_bar_floats", self._menu_bar_floats)
@@ -174,47 +206,39 @@ class BootstrapWiringMixin:
         self._wire_toolbar_callbacks_on(self.toolbar, engine)
 
     def _wire_status_bar_listener(self):
-        """Wire C++ StatusBarPanel to DebugConsole listener + EngineStatus."""
+        """Wire the native status bar to the shared EngineStatus state."""
         sb = self.status_bar
+        from Infernux.engine.i18n import t as _t
 
-        # Subscribe to DebugConsole for latest message + count updates
-        from Infernux.debug import DebugConsole, LogType
-        from Infernux.engine.ui.console_utils import is_internal, sanitize_text
-
-        def _on_log_entry(entry):
-            if is_internal(entry):
-                return
-            msg = sanitize_text(getattr(entry, 'message', ''))
-            level_map = {
-                LogType.LOG: "info",
-                LogType.WARNING: "warning",
-                LogType.ERROR: "error",
-                LogType.ASSERT: "error",
-                LogType.EXCEPTION: "error",
-            }
-            level = level_map.get(entry.log_type, "info")
-            sb.set_latest_message(msg, level)
-            if level == "warning":
-                sb.increment_warn_count()
-            elif level == "error":
-                sb.increment_error_count()
-
-        console = DebugConsole.instance()
-        for entry in console.get_entries():
-            _on_log_entry(entry)
-        console.add_listener(_on_log_entry)
-
-        # Register a lightweight renderable that syncs EngineStatus each frame
-        from Infernux.lib import InxGUIRenderable, InxGUIContext
+        # Fold status expiry/synchronization into the existing Python frame tick.
+        # A separate Python ImGui renderable would add another C++/Python virtual
+        # dispatch every frame even though status text changes rarely.
         from Infernux.engine.ui.engine_status import EngineStatus
 
-        class _EngineStatusSync(InxGUIRenderable):
-            def on_render(self, ctx: InxGUIContext):
-                text, progress = EngineStatus.get()
-                sb.set_engine_status(text, progress)
+        last_status = [None]
+        last_hierarchy_header = [None]
 
-        self._engine_status_sync = _EngineStatusSync()
-        self.engine.register_gui("engine_status_sync", self._engine_status_sync)
+        def _sync_engine_status():
+            state = EngineStatus.get()
+            if state != last_status[0]:
+                last_status[0] = state
+                text, progress, kind = state
+                sb.set_engine_status(text, progress, kind)
+
+            sfm = self.scene_file_manager
+            prefab_mode = bool(sfm and sfm.is_prefab_mode)
+            scene_name = sfm.get_display_name() if sfm else ""
+            prefab_name = (
+                _t("hierarchy.prefab_mode_header").format(name=scene_name)
+                if prefab_mode else ""
+            )
+            header_state = (scene_name, prefab_mode, prefab_name)
+            if header_state != last_hierarchy_header[0]:
+                last_hierarchy_header[0] = header_state
+                self.hierarchy.set_scene_header_snapshot(*header_state)
+
+        self.engine._editor_frame_sync_callback = _sync_engine_status
+        _sync_engine_status()
 
     def _wire_hierarchy_callbacks(self):
         """Wire C++ HierarchyPanel callbacks to Python managers."""
@@ -236,7 +260,7 @@ class BootstrapWiringMixin:
         hierarchy = self.hierarchy
         scene_view = self.scene_view
         game_view = self.game_view
-        from Infernux.engine.ui.closable_panel import ClosablePanel
+        from Infernux.engine.ui.event_bus import EditorEvent, EditorEventBus
 
         def on_ui_mode_request(enter: bool):
             hierarchy.set_ui_mode(enter)
@@ -262,9 +286,14 @@ class BootstrapWiringMixin:
 
         hierarchy.on_selection_changed_ui_editor = on_hierarchy_ui_sync
 
-        def on_panel_focus_changed(_old_panel_id: str, new_panel_id: str):
+        def on_panel_focused(panel_id: str):
             if self.window_manager is not None:
-                self.window_manager.note_panel_focus(new_panel_id)
+                self.window_manager.note_panel_focus(panel_id)
 
-        ClosablePanel.set_on_panel_focus_changed(on_panel_focus_changed)
+        bus = EditorEventBus.instance()
+        previous = getattr(self, "_panel_focus_event_handler", None)
+        if previous is not None:
+            bus.unsubscribe(EditorEvent.PANEL_FOCUSED, previous)
+        self._panel_focus_event_handler = on_panel_focused
+        bus.subscribe(EditorEvent.PANEL_FOCUSED, on_panel_focused)
 

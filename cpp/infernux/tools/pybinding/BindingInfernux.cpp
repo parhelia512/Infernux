@@ -6,17 +6,20 @@
 #include <core/log/InxLog.h>
 #include <function/renderer/EditorTools.h>
 #include <function/renderer/GizmosDrawCallBuffer.h>
+#include <function/renderer/ParticleDrawCallBuffer.h>
 #include <function/renderer/SceneRenderGraph.h>
 #include <function/renderer/ScriptableRenderContext.h>
 #include <function/renderer/gui/InxGUIContext.h>
 #include <function/renderer/gui/InxGUIRenderable.h>
 #include <function/renderer/gui/InxResourcePreviewer.h>
 #include <function/renderer/gui/InxScreenUIRenderer.h>
+#include <function/renderer/vk/VkResourceManager.h>
 #include <function/scene/EditorCameraController.h>
 #include <glm/glm.hpp>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <stdexcept>
 
 using namespace infernux;
 namespace py = pybind11;
@@ -31,6 +34,7 @@ void RegisterResourceBindings(py::module_ &m);
 void RegisterSceneBindings(py::module_ &m);
 void RegisterAssetDatabaseBindings(py::module_ &m);
 void RegisterAssetRegistryBindings(py::module_ &m);
+void RegisterRhiBindings(py::module_ &m);
 void RegisterRenderGraphBindings(py::module_ &m);
 void RegisterRenderPipelineBindings(py::module_ &m);
 void RegisterCommandBufferBindings(py::module_ &m);
@@ -61,6 +65,24 @@ PYBIND11_MODULE(_Infernux, m)
         .value("Fatal", LogLevel::LOG_FATAL)
         .export_values();
 
+    py::class_<AssetRuntimeRecord>(m, "AssetRuntimeRecord")
+        .def_readonly("guid", &AssetRuntimeRecord::guid)
+        .def_readonly("resource_type", &AssetRuntimeRecord::type)
+        .def_readonly("runtime_type_name", &AssetRuntimeRecord::runtimeTypeName)
+        .def_readonly("runtime_version", &AssetRuntimeRecord::runtimeVersion)
+        .def_readonly("cpu_resident", &AssetRuntimeRecord::cpuResident)
+        .def_readonly("cpu_bytes", &AssetRuntimeRecord::cpuBytes)
+        .def_readonly("explicit_cpu_pin_count", &AssetRuntimeRecord::explicitCpuPinCount)
+        .def_readonly("external_cpu_reference_count", &AssetRuntimeRecord::externalCpuReferenceCount)
+        .def_readonly("cpu_evictable", &AssetRuntimeRecord::cpuEvictable)
+        .def_readonly("gpu_resident_bytes", &AssetRuntimeRecord::gpuResidentBytes)
+        .def_readonly("gpu_pending_bytes", &AssetRuntimeRecord::gpuPendingBytes)
+        .def_readonly("stale_gpu_bytes", &AssetRuntimeRecord::staleGpuBytes)
+        .def_readonly("gpu_allocation_count", &AssetRuntimeRecord::gpuAllocationCount)
+        .def_readonly("stale_gpu_allocation_count", &AssetRuntimeRecord::staleGpuAllocationCount)
+        .def_readonly("gpu_pinned", &AssetRuntimeRecord::gpuPinned)
+        .def_readonly("gpu_version_synchronized", &AssetRuntimeRecord::gpuVersionSynchronized);
+
     // ---- EngineConfig (centralised runtime configuration) ----
     py::class_<EngineConfig>(m, "EngineConfig",
                              "Centralised engine configuration singleton.\n"
@@ -88,6 +110,17 @@ PYBIND11_MODULE(_Infernux, m)
         .def_readwrite("physics_max_body_pairs", &EngineConfig::physicsMaxBodyPairs)
         .def_readwrite("physics_max_contact_constraints", &EngineConfig::physicsMaxContactConstraints)
         .def_readwrite("physics_collision_steps", &EngineConfig::physicsCollisionSteps)
+        .def_readwrite("physics_velocity_steps", &EngineConfig::physicsVelocitySteps)
+        .def_readwrite("physics_position_steps", &EngineConfig::physicsPositionSteps)
+        .def_readwrite("physics_penetration_slop", &EngineConfig::physicsPenetrationSlop)
+        .def_readwrite("physics_speculative_contact_distance", &EngineConfig::physicsSpeculativeContactDistance)
+        .def_readwrite("physics_linear_cast_max_penetration", &EngineConfig::physicsLinearCastMaxPenetration)
+        .def_readwrite("physics_baumgarte", &EngineConfig::physicsBaumgarte)
+        .def_readwrite("physics_max_penetration_distance", &EngineConfig::physicsMaxPenetrationDistance)
+        .def_readwrite("physics_linear_cast_threshold", &EngineConfig::physicsLinearCastThreshold)
+        .def_readwrite("physics_min_velocity_for_restitution", &EngineConfig::physicsMinVelocityForRestitution)
+        .def_readwrite("physics_time_before_sleep", &EngineConfig::physicsTimeBeforeSleep)
+        .def_readwrite("physics_point_velocity_sleep_threshold", &EngineConfig::physicsPointVelocitySleepThreshold)
         .def_property(
             "physics_gravity", [](EngineConfig &self) { return self.physicsGravity; },
             [](EngineConfig &self, const glm::vec3 &v) { self.physicsGravity = v; },
@@ -102,7 +135,6 @@ PYBIND11_MODULE(_Infernux, m)
         .def_readwrite("default_rigidbody_angular_drag", &EngineConfig::defaultRigidbodyAngularDrag)
         .def_readwrite("default_max_angular_velocity", &EngineConfig::defaultMaxAngularVelocity)
         .def_readwrite("default_max_linear_velocity", &EngineConfig::defaultMaxLinearVelocity)
-        .def_readwrite("default_max_depenetration_velocity", &EngineConfig::defaultMaxDepenetrationVelocity)
         // Physics — Layers
         .def_readwrite("physics_layer_count", &EngineConfig::physicsLayerCount)
         .def_readwrite("default_query_layer_mask", &EngineConfig::defaultQueryLayerMask)
@@ -137,6 +169,30 @@ PYBIND11_MODULE(_Infernux, m)
                     cam->SetFieldOfView(v);
             },
             "Vertical field of view in degrees")
+        .def_property(
+            "orthographic",
+            [](EditorCameraController &self) -> bool {
+                auto *cam = self.GetCamera();
+                return cam && cam->GetProjectionMode() == CameraProjection::Orthographic;
+            },
+            [](EditorCameraController &self, bool value) {
+                auto *cam = self.GetCamera();
+                if (cam)
+                    cam->SetProjectionMode(value ? CameraProjection::Orthographic : CameraProjection::Perspective);
+            },
+            "Whether the Scene camera uses orthographic projection")
+        .def_property(
+            "orthographic_size",
+            [](EditorCameraController &self) -> float {
+                auto *cam = self.GetCamera();
+                return cam ? cam->GetOrthographicSize() : 5.0f;
+            },
+            [](EditorCameraController &self, float value) {
+                auto *cam = self.GetCamera();
+                if (cam)
+                    cam->SetOrthographicSize(value);
+            },
+            "Orthographic Scene camera half-height")
         .def_property(
             "near_clip",
             [](EditorCameraController &self) -> float {
@@ -225,6 +281,8 @@ PYBIND11_MODULE(_Infernux, m)
     py::class_<InxScreenUIRenderer>(m, "InxScreenUIRenderer")
         .def("begin_frame", &InxScreenUIRenderer::BeginFrame, py::arg("width"), py::arg("height"),
              "Reset draw lists for a new frame")
+        .def("begin_frame_cached", &InxScreenUIRenderer::BeginFrameCached, py::arg("width"), py::arg("height"),
+             py::arg("content_revision"), "Reuse draw lists when the UI content revision is unchanged")
         .def("add_filled_rect", &InxScreenUIRenderer::AddFilledRect, py::arg("list"), py::arg("min_x"),
              py::arg("min_y"), py::arg("max_x"), py::arg("max_y"), py::arg("r") = 1.0f, py::arg("g") = 1.0f,
              py::arg("b") = 1.0f, py::arg("a") = 1.0f, py::arg("rounding") = 0.0f,
@@ -258,10 +316,427 @@ PYBIND11_MODULE(_Infernux, m)
              "Enable or disable rendering (commands still accumulate)")
         .def("is_enabled", &InxScreenUIRenderer::IsEnabled, "Check if rendering is enabled");
 
+    py::enum_<RuntimeMode>(m, "RuntimeMode")
+        .value("Graphical", RuntimeMode::Graphical)
+        .value("Headless", RuntimeMode::Headless)
+        .export_values();
+
+    py::enum_<vk::ImageReadbackStatus>(m, "ImageReadbackStatus")
+        .value("Pending", vk::ImageReadbackStatus::Pending)
+        .value("Completed", vk::ImageReadbackStatus::Completed)
+        .value("Failed", vk::ImageReadbackStatus::Failed)
+        .value("Cancelled", vk::ImageReadbackStatus::Cancelled);
+
+    py::class_<vk::ImageReadbackTicket, std::shared_ptr<vk::ImageReadbackTicket>>(m, "ImageReadbackTicket")
+        .def_property_readonly("status", &vk::ImageReadbackTicket::GetStatus)
+        .def_property_readonly("done", &vk::ImageReadbackTicket::IsDone)
+        .def_property_readonly("width", &vk::ImageReadbackTicket::GetWidth)
+        .def_property_readonly("height", &vk::ImageReadbackTicket::GetHeight)
+        .def_property_readonly("channel_count", &vk::ImageReadbackTicket::GetChannelCount)
+        .def_property_readonly("element_type", &vk::ImageReadbackTicket::GetElementType)
+        .def_property_readonly("byte_size", &vk::ImageReadbackTicket::GetByteSize)
+        .def_property_readonly("error", &vk::ImageReadbackTicket::GetError)
+        .def("cancel", &vk::ImageReadbackTicket::Cancel)
+        .def("result_bytes",
+             [](const vk::ImageReadbackTicket &ticket) {
+                 const auto &data = ticket.GetData();
+                 return py::bytes(reinterpret_cast<const char *>(data.data()), data.size());
+             })
+        .def("result_numpy", [](const std::shared_ptr<vk::ImageReadbackTicket> &ticket) {
+            const auto &data = ticket->GetData();
+            const py::ssize_t channels = static_cast<py::ssize_t>(ticket->GetChannelCount());
+            const py::ssize_t width = static_cast<py::ssize_t>(ticket->GetWidth());
+            const py::ssize_t height = static_cast<py::ssize_t>(ticket->GetHeight());
+            const py::ssize_t elementBytes =
+                static_cast<py::ssize_t>(ticket->GetByteSize()) / (height * width * channels);
+            const std::vector<py::ssize_t> shape{height, width, channels};
+            const std::vector<py::ssize_t> strides{width * channels * elementBytes, channels * elementBytes,
+                                                   elementBytes};
+            py::array result(py::dtype(ticket->GetElementType()), shape, strides, data.data(), py::cast(ticket));
+            result.attr("setflags")(false);
+            return result;
+        });
+
     py::class_<Infernux>(m, "Infernux")
-        .def(py::init<std::string>(), py::arg("dll_path"))
+        .def(py::init<std::string, RuntimeMode>(), py::arg("dll_path"), py::arg("mode") = RuntimeMode::Graphical)
         .def("init_renderer", &Infernux::InitRenderer, py::arg("width"), py::arg("height"), py::arg("project_path"),
              py::arg("builtin_resource_path") = std::string())
+        .def("init_headless", &Infernux::InitHeadless, py::arg("project_path"),
+             py::arg("builtin_resource_path") = std::string(),
+             "Initialize scene, physics, assets, and workers without SDL/Vulkan/ImGui/audio")
+        .def("tick", &Infernux::Tick, py::arg("delta_time"), "Advance one deterministic headless frame")
+        .def_property_readonly("exit_requested", &Infernux::IsExitRequested, "Whether shutdown has been requested")
+        .def_property_readonly("runtime_mode", &Infernux::GetRuntimeMode)
+        .def_property_readonly("has_renderer", [](const Infernux &self) { return self.GetRenderer() != nullptr; })
+        .def_property_readonly("pending_mesh_gpu_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetPendingMeshUploadCount() : size_t{0};
+                               })
+        .def_property_readonly("submitted_mesh_gpu_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetSubmittedMeshUploadCount() : uint64_t{0};
+                               })
+        .def_property_readonly("completed_mesh_gpu_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetCompletedMeshUploadCount() : uint64_t{0};
+                               })
+        .def_property_readonly("async_mesh_gpu_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetAsyncMeshUploadCount() : uint64_t{0};
+                               })
+        .def_property_readonly("pending_texture_cpu_load_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetPendingTextureCpuLoadCount() : size_t{0};
+                               })
+        .def_property_readonly("pending_texture_gpu_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetPendingTextureUploadCount() : size_t{0};
+                               })
+        .def_property_readonly("submitted_texture_gpu_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetSubmittedTextureUploadCount() : uint64_t{0};
+                               })
+        .def_property_readonly("completed_texture_gpu_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetCompletedTextureUploadCount() : uint64_t{0};
+                               })
+        .def_property_readonly("async_texture_gpu_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetAsyncTextureUploadCount() : uint64_t{0};
+                               })
+        .def_property_readonly("staging_pool_bytes",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetStagingPoolBytes() : uint64_t{0};
+                               })
+        .def_property_readonly("staging_pool_buffer_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetStagingPoolBufferCount() : size_t{0};
+                               })
+        .def_property_readonly("staging_buffer_allocation_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetStagingAllocationCount() : uint64_t{0};
+                               })
+        .def_property_readonly("staging_buffer_reuse_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetStagingReuseCount() : uint64_t{0};
+                               })
+        .def_property_readonly("staging_buffer_discard_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetStagingDiscardCount() : uint64_t{0};
+                               })
+        .def_property_readonly("pending_imgui_texture_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetPendingImGuiTextureUploadCount() : size_t{0};
+                               })
+        .def_property_readonly("pending_imgui_texture_upload_bytes",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetPendingImGuiTextureUploadBytes() : uint64_t{0};
+                               })
+        .def_property_readonly("submitted_imgui_texture_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetSubmittedImGuiTextureUploadCount() : uint64_t{0};
+                               })
+        .def_property_readonly("completed_imgui_texture_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetCompletedImGuiTextureUploadCount() : uint64_t{0};
+                               })
+        .def_property_readonly("async_imgui_texture_upload_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetAsyncImGuiTextureUploadCount() : uint64_t{0};
+                               })
+        .def_property_readonly("imgui_texture_resident_bytes",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetImGuiTextureResidentBytes() : uint64_t{0};
+                               })
+        .def_property_readonly("imgui_texture_budget_bytes",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetImGuiTextureBudgetBytes() : uint64_t{0};
+                               })
+        .def_property_readonly("imgui_texture_entry_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetImGuiTextureEntryCount() : size_t{0};
+                               })
+        .def_property_readonly("imgui_texture_eviction_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetImGuiTextureEvictionCount() : uint64_t{0};
+                               })
+        .def(
+            "set_imgui_texture_budget_bytes",
+            [](Infernux &self, uint64_t bytes) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Cannot set the ImGui texture budget without an initialized renderer");
+                renderer->SetImGuiTextureBudgetBytes(bytes);
+            },
+            py::arg("bytes"))
+        .def(
+            "trim_imgui_texture_budget",
+            [](Infernux &self) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Cannot trim the ImGui texture budget without an initialized renderer");
+                return renderer->TrimImGuiTextureBudget();
+            })
+        .def_property_readonly("texture_gpu_resident_bytes",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetTextureGpuResidentBytes() : uint64_t{0};
+                               })
+        .def_property_readonly("texture_gpu_budget_bytes",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetTextureGpuBudgetBytes() : uint64_t{0};
+                               })
+        .def_property_readonly("texture_gpu_cache_entry_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetTextureGpuCacheEntryCount() : size_t{0};
+                               })
+        .def_property_readonly("retired_texture_gpu_lease_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetRetiredTextureGpuLeaseCount() : size_t{0};
+                               })
+        .def_property_readonly("texture_gpu_eviction_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetTextureGpuEvictionCount() : uint64_t{0};
+                               })
+        .def(
+            "set_texture_gpu_budget_bytes",
+            [](Infernux &self, uint64_t bytes) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Cannot set the GPU texture budget without an initialized renderer");
+                renderer->SetTextureGpuBudgetBytes(bytes);
+            },
+            py::arg("bytes"))
+        .def(
+            "trim_texture_gpu_budget",
+            [](Infernux &self) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Cannot trim the GPU texture budget without an initialized renderer");
+                return renderer->TrimTextureGpuBudget();
+            })
+        .def_property_readonly("mesh_gpu_resident_bytes",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetMeshGpuResidentBytes() : uint64_t{0};
+                               })
+        .def_property_readonly("mesh_gpu_budget_bytes",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetMeshGpuBudgetBytes() : uint64_t{0};
+                               })
+        .def_property_readonly("mesh_gpu_cache_entry_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetMeshGpuCacheEntryCount() : size_t{0};
+                               })
+        .def_property_readonly("retired_mesh_gpu_lease_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetRetiredMeshGpuLeaseCount() : size_t{0};
+                               })
+        .def_property_readonly("mesh_gpu_eviction_count",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetMeshGpuEvictionCount() : uint64_t{0};
+                               })
+        .def(
+            "set_mesh_gpu_budget_bytes",
+            [](Infernux &self, uint64_t bytes) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Cannot set the GPU mesh budget without an initialized renderer");
+                renderer->SetMeshGpuBudgetBytes(bytes);
+            },
+            py::arg("bytes"))
+        .def(
+            "trim_mesh_gpu_budget",
+            [](Infernux &self) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Cannot trim the GPU mesh budget without an initialized renderer");
+                return renderer->TrimMeshGpuBudget();
+            })
+        .def_property_readonly("gpu_residency_snapshot",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   const GpuResidencySnapshot snapshot =
+                                       renderer ? renderer->GetGpuResidencySnapshot() : GpuResidencySnapshot{};
+                                   py::dict result;
+                                   result["budget_bytes"] = snapshot.budgetBytes;
+                                   result["allocator_allocation_bytes"] = snapshot.allocatorAllocationBytes;
+                                   result["allocator_block_bytes"] = snapshot.allocatorBlockBytes;
+                                   result["allocator_allocation_count"] = snapshot.allocatorAllocationCount;
+                                   result["device_local_allocation_bytes"] = snapshot.deviceLocalAllocationBytes;
+                                   result["device_local_usage_bytes"] = snapshot.deviceLocalUsageBytes;
+                                   result["device_local_budget_bytes"] = snapshot.deviceLocalBudgetBytes;
+                                    result["mesh_bytes"] = snapshot.meshBytes;
+                                    result["particle_bytes"] = snapshot.particleBytes;
+                                   result["texture_bytes"] = snapshot.textureBytes;
+                                   result["imgui_texture_bytes"] = snapshot.imguiTextureBytes;
+                                   result["pending_imgui_texture_bytes"] = snapshot.pendingImguiTextureBytes;
+                                    result["staging_pool_bytes"] = snapshot.stagingPoolBytes;
+                                    result["pending_readback_bytes"] = snapshot.pendingReadbackBytes;
+                                    result["pending_readback_count"] = snapshot.pendingReadbackCount;
+                                    result["pending_gpu_transfer_count"] = snapshot.pendingGpuTransferCount;
+                                    result["upload_timeline_enabled"] = snapshot.uploadTimelineEnabled;
+                                    result["timeline_upload_publication_count"] =
+                                        snapshot.timelineUploadPublicationCount;
+                                    result["required_upload_timeline_value"] = snapshot.requiredUploadTimelineValue;
+                                    result["device_wait_idle_count"] = snapshot.deviceWaitIdleCount;
+                                    result["shader_hot_reload_retirement_count"] =
+                                        snapshot.shaderHotReloadRetirementCount;
+                                    result["pending_async_graphics_submission_count"] =
+                                        snapshot.pendingAsyncGraphicsSubmissionCount;
+                                    result["async_graphics_submission_count"] = snapshot.asyncGraphicsSubmissionCount;
+                                   result["render_target_bytes"] = snapshot.renderTargetBytes;
+                                   result["render_graph_bytes"] = snapshot.renderGraphBytes;
+                                   result["transient_pool_bytes"] = snapshot.transientPoolBytes;
+                                   result["material_ubo_bytes"] = snapshot.materialUboBytes;
+                                   result["material_render_data_count"] = snapshot.materialRenderDataCount;
+                                   result["runtime_material_count"] = snapshot.runtimeMaterialCount;
+                                   result["asset_material_count"] = snapshot.assetMaterialCount;
+                                   result["material_descriptor_set_count"] = snapshot.materialDescriptorSetCount;
+                                   result["retired_material_descriptor_set_count"] =
+                                       snapshot.retiredMaterialDescriptorSetCount;
+                                   result["material_descriptor_pool_count"] = snapshot.materialDescriptorPoolCount;
+                                   result["material_pipeline_count"] = snapshot.materialPipelineCount;
+                                   result["runtime_mesh_entry_count"] = snapshot.runtimeMeshEntryCount;
+                                   result["runtime_mesh_bytes"] = snapshot.runtimeMeshBytes;
+                                   result["scheduled_release_bytes"] = snapshot.scheduledReleaseBytes;
+                                   result["tracked_bytes"] = snapshot.trackedBytes;
+                                   result["unclassified_bytes"] = snapshot.unclassifiedBytes;
+                                   result["effective_allocation_bytes"] = snapshot.effectiveAllocationBytes;
+                                   result["over_budget_bytes"] = snapshot.overBudgetBytes;
+                                   return result;
+                               })
+        .def_property_readonly("renderer_frame_snapshot",
+                               [](Infernux &self) {
+                                   auto *renderer = self.GetRenderer();
+                                   const RendererFrameTelemetrySnapshot snapshot =
+                                       renderer ? renderer->GetFrameTelemetrySnapshot() : RendererFrameTelemetrySnapshot{};
+                                   py::dict result;
+                                   result["frame"] = snapshot.frame;
+                                   result["scene_view_visible"] = snapshot.sceneViewVisible;
+                                   result["scene_target_ready"] = snapshot.sceneTargetReady;
+                                   result["game_camera_enabled"] = snapshot.gameCameraEnabled;
+                                   result["game_camera_available"] = snapshot.gameCameraAvailable;
+                                   result["game_target_ready"] = snapshot.gameTargetReady;
+                                   result["scene_target_width"] = snapshot.sceneTargetWidth;
+                                   result["scene_target_height"] = snapshot.sceneTargetHeight;
+                                   result["game_target_width"] = snapshot.gameTargetWidth;
+                                   result["game_target_height"] = snapshot.gameTargetHeight;
+                                   result["scene_draw_call_count"] = snapshot.sceneDrawCallCount;
+                                   result["scene_shadow_draw_call_count"] = snapshot.sceneShadowDrawCallCount;
+                                   result["game_draw_call_count"] = snapshot.gameDrawCallCount;
+                                   result["game_shadow_draw_call_count"] = snapshot.gameShadowDrawCallCount;
+                                   result["light_count"] = snapshot.lightCount;
+                                   result["particle_count"] = snapshot.particleCount;
+                                   result["scene_render_graph_name"] = snapshot.sceneRenderGraphName;
+                                   result["game_render_graph_name"] = snapshot.gameRenderGraphName;
+                                   result["scene_render_graph_execution_count"] =
+                                       snapshot.sceneRenderGraphExecutionCount;
+                                   result["game_render_graph_execution_count"] =
+                                       snapshot.gameRenderGraphExecutionCount;
+                                   result["scene_render_graph_current_executed"] =
+                                       snapshot.sceneRenderGraphCurrentExecuted;
+                                   result["game_render_graph_current_executed"] =
+                                       snapshot.gameRenderGraphCurrentExecuted;
+                                   result["scene_render_graph_pass_names"] = snapshot.sceneRenderGraphPassNames;
+                                   result["game_render_graph_pass_names"] = snapshot.gameRenderGraphPassNames;
+                                   result["game_render_ms"] = snapshot.gameRenderMs;
+                                   result["game_only_frame_ms"] = snapshot.gameOnlyFrameMs;
+                                   result["scene_update_ms"] = snapshot.sceneUpdateMs;
+                                   result["gui_build_ms"] = snapshot.guiBuildMs;
+                                   result["prepare_frame_ms"] = snapshot.prepareFrameMs;
+                                   result["ui_panel_times_ms"] = snapshot.guiPanelTimesMs;
+                                   result["ui_panel_sub_times_ms"] = snapshot.guiPanelSubTimesMs;
+                                   return result;
+                               })
+        .def_property_readonly("renderer_ui_performance_snapshot",
+                               [](Infernux &self) {
+                                   auto *renderer = self.GetRenderer();
+                                   const RendererUIPerformanceSnapshot snapshot =
+                                       renderer ? renderer->GetUIPerformanceSnapshot()
+                                                : RendererUIPerformanceSnapshot{};
+                                   const auto encodeStats = [](const UIPerformanceMetricStats &stats) {
+                                       py::dict result;
+                                       result["sample_count"] = stats.sampleCount;
+                                       result["mean_ms"] = stats.meanMs;
+                                       result["median_ms"] = stats.medianMs;
+                                       result["p95_ms"] = stats.p95Ms;
+                                       result["max_ms"] = stats.maxMs;
+                                       return result;
+                                   };
+                                   py::dict panelTimes;
+                                   for (const auto &[name, stats] : snapshot.panelTimes)
+                                       panelTimes[py::str(name)] = encodeStats(stats);
+                                   py::dict panelSubTimes;
+                                   for (const auto &[panelName, stages] : snapshot.panelSubTimes) {
+                                       py::dict encodedStages;
+                                       for (const auto &[stageName, stats] : stages)
+                                           encodedStages[py::str(stageName)] = encodeStats(stats);
+                                       panelSubTimes[py::str(panelName)] = std::move(encodedStages);
+                                   }
+                                   py::dict result;
+                                   result["first_frame"] = snapshot.firstFrame;
+                                   result["last_frame"] = snapshot.lastFrame;
+                                   result["sample_count"] = snapshot.sampleCount;
+                                   result["gui_build"] = encodeStats(snapshot.guiBuild);
+                                   result["panel_times"] = std::move(panelTimes);
+                                   result["panel_sub_times"] = std::move(panelSubTimes);
+                                   return result;
+                               })
+        .def_property_readonly("asset_runtime_records", &Infernux::GetAssetRuntimeRecords)
+        .def_property_readonly("gpu_residency_budget_bytes",
+                               [](const Infernux &self) {
+                                   const auto *renderer = self.GetRenderer();
+                                   return renderer ? renderer->GetGpuResidencyBudgetBytes() : uint64_t{0};
+                               })
+        .def(
+            "set_gpu_residency_budget_bytes",
+            [](Infernux &self, uint64_t bytes) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Cannot set GPU residency budget without an initialized renderer");
+                renderer->SetGpuResidencyBudgetBytes(bytes);
+            },
+            py::arg("bytes"))
+        .def(
+            "trim_gpu_residency_budget",
+            [](Infernux &self) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Cannot trim GPU residency without an initialized renderer");
+                return renderer->TrimGpuResidencyBudget();
+            })
         .def(
             "set_gui_font",
             [](Infernux &self, const std::string &fontPath, float fontSize) {
@@ -277,7 +752,34 @@ PYBIND11_MODULE(_Infernux, m)
                 return r ? r->GetDisplayScale() : 1.0f;
             },
             "Get the OS display scale factor (e.g. 2.0 for 200%% scaling)")
-        .def("run", &Infernux::Run)
+        .def(
+            "run",
+            [](Infernux &self) {
+                // The native frame loop can run for the lifetime of the Editor.
+                // Release the GIL so loopback MCP and other Python worker threads
+                // can make progress between Python callback boundaries.
+                py::gil_scoped_release release;
+                self.Run();
+            })
+        .def(
+            "set_pre_scene_update_callback",
+            [](Infernux &self, py::object callback) {
+                if (callback.is_none()) {
+                    self.SetPreSceneUpdateCallback(nullptr);
+                } else {
+                    py::function fn = py::cast<py::function>(callback);
+                    self.SetPreSceneUpdateCallback([fn](float deltaTime) {
+                        py::gil_scoped_acquire acquire;
+                        try {
+                            fn(deltaTime);
+                        } catch (py::error_already_set &e) {
+                            e.restore();
+                        }
+                    });
+                }
+            },
+            py::arg("callback"),
+            "Set a Python callback invoked before scene Update in graphical and headless modes.")
         .def(
             "set_pre_gui_callback",
             [](Infernux &self, py::object callback) {
@@ -287,10 +789,9 @@ PYBIND11_MODULE(_Infernux, m)
                 if (callback.is_none()) {
                     r->SetPreGuiCallback(nullptr);
                 } else {
-                    // GIL is already held during DrawFrame (Run() keeps it),
-                    // so no acquire needed in the callback.
                     py::function fn = py::cast<py::function>(callback);
                     r->SetPreGuiCallback([fn]() {
+                        py::gil_scoped_acquire acquire;
                         try {
                             fn();
                         } catch (py::error_already_set &e) {
@@ -313,6 +814,7 @@ PYBIND11_MODULE(_Infernux, m)
                 } else {
                     py::function fn = py::cast<py::function>(callback);
                     r->SetPostDrawCallback([fn]() {
+                        py::gil_scoped_acquire acquire;
                         try {
                             fn();
                         } catch (py::error_already_set &e) {
@@ -328,6 +830,26 @@ PYBIND11_MODULE(_Infernux, m)
         .def(
             "pump_events", [](Infernux & /*self*/) { SDL_PumpEvents(); },
             "Pump the OS message queue to prevent Windows Not Responding during long operations")
+        .def("queue_synthetic_key_input", &Infernux::QueueSyntheticKeyInput, py::arg("scancode"),
+             py::arg("pressed"), py::arg("repeat") = false,
+             "Queue a synthetic key event for the next graphical input frame")
+        .def("queue_synthetic_mouse_button_input", &Infernux::QueueSyntheticMouseButtonInput, py::arg("button"),
+             py::arg("pressed"), py::arg("x"), py::arg("y"),
+             "Queue a synthetic mouse-button event for the next graphical input frame")
+        .def("queue_synthetic_mouse_motion_input", &Infernux::QueueSyntheticMouseMotionInput, py::arg("x"),
+             py::arg("y"), py::arg("delta_x"), py::arg("delta_y"),
+             "Queue a synthetic mouse-motion event for the next graphical input frame")
+        .def("queue_synthetic_mouse_wheel_input", &Infernux::QueueSyntheticMouseWheelInput, py::arg("horizontal"),
+             py::arg("vertical"), "Queue a synthetic mouse-wheel event for the next graphical input frame")
+        .def("queue_synthetic_text_input", &Infernux::QueueSyntheticTextInput, py::arg("text"),
+             "Queue UTF-8 text input for the next graphical input frame")
+        .def("queue_synthetic_close_request", &Infernux::QueueSyntheticCloseRequest,
+             "Queue a window-close request through the graphical event loop")
+        .def_property_readonly("last_processed_synthetic_input_sequence",
+                               &Infernux::GetLastProcessedSyntheticInputSequence,
+                               "Sequence of the last synthetic input event consumed by the graphical event loop")
+        .def_property_readonly("pending_synthetic_input_count", &Infernux::GetPendingSyntheticInputCount,
+                               "Number of queued synthetic input events")
         .def("set_log_level", &Infernux::SetLogLevel)
         .def(
             "register_gui_renderable",
@@ -390,6 +912,13 @@ PYBIND11_MODULE(_Infernux, m)
             },
             "Hide the Infernux window")
         .def(
+            "is_window_minimized",
+            [](Infernux &self) -> bool {
+                auto *r = self.GetRenderer();
+                return r && r->IsWindowMinimized();
+            },
+            "Return whether the Infernux window is currently minimized or occluded")
+        .def(
             "set_window_icon",
             [](Infernux &self, const std::string &iconPath) {
                 auto *r = self.GetRenderer();
@@ -429,12 +958,9 @@ PYBIND11_MODULE(_Infernux, m)
                     r->SetWindowResizable(resizable);
             },
             py::arg("resizable"), "Set whether the window is resizable")
-        .def("modify_resources", &Infernux::ModifyResources, py::arg("file_path"))
-        .def("delete_resources", &Infernux::DeleteResources, py::arg("file_path"))
-        .def("move_resources", &Infernux::MoveResources, py::arg("old_file_path"), py::arg("new_file_path"))
-        .def("reload_shader", &Infernux::ReloadShader, py::arg("shader_path"),
-             "Reload a shader file and refresh materials using it. Returns empty string on success, error message on "
-             "failure.")
+        .def("reload_shader_runtime", &Infernux::ReloadShaderRuntime, py::arg("shader_path"),
+             py::arg("previous_shader_id"),
+             "Compile an already-imported shader and refresh renderer state. Returns empty string on success.")
         .def("reload_texture", &Infernux::ReloadTexture, py::arg("texture_path"),
              "Invalidate cached texture and force materials to reload it")
         .def("reload_mesh", &Infernux::ReloadMesh, py::arg("mesh_path"),
@@ -444,15 +970,23 @@ PYBIND11_MODULE(_Infernux, m)
         .def("get_asset_database", &Infernux::GetAssetDatabase, py::return_value_policy::reference,
              "Get the asset database instance")
         .def(
-            "upload_texture_for_imgui",
-            [](Infernux &self, const std::string &name, const std::vector<unsigned char> &pixels, int width, int height,
-               bool nearest) -> uint64_t {
+            "submit_imgui_texture",
+            [](Infernux &self, const std::string &name, const py::buffer &pixels, int width, int height, bool nearest,
+               bool pinned) -> uint64_t {
                 auto *r = self.GetRenderer();
+                if (!r)
+                    throw std::logic_error("Cannot submit an ImGui texture without an initialized renderer");
+                const py::buffer_info info = pixels.request();
+                if (info.ndim != 1 || info.itemsize != 1 || info.strides[0] != 1)
+                    throw std::invalid_argument("ImGui pixels must be a contiguous one-dimensional byte buffer");
                 VkFilter f = nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
-                return r ? r->UploadTextureForImGui(name, pixels.data(), width, height, f) : 0;
+                py::gil_scoped_release release;
+                return r->SubmitTextureForImGui(name, static_cast<const unsigned char *>(info.ptr), info.size, width,
+                                                height, f, pinned);
             },
             py::arg("name"), py::arg("pixels"), py::arg("width"), py::arg("height"), py::arg("nearest") = false,
-            "Upload texture data for ImGui display, returns texture ID")
+            py::arg("pinned") = false,
+            "Submit RGBA8 data for ImGui display and return its monotonic upload version")
         .def(
             "remove_imgui_texture",
             [](Infernux &self, const std::string &name) {
@@ -476,19 +1010,26 @@ PYBIND11_MODULE(_Infernux, m)
             },
             py::arg("name"), "Get texture ID for an already uploaded texture")
         .def(
+            "get_imgui_texture_version",
+            [](Infernux &self, const std::string &name) -> uint64_t {
+                auto *r = self.GetRenderer();
+                return r ? r->GetImGuiTextureVersion(name) : 0;
+            },
+            py::arg("name"), "Get the published upload version for an ImGui texture")
+        .def(
+            "get_failed_imgui_texture_version",
+            [](Infernux &self, const std::string &name) -> uint64_t {
+                auto *r = self.GetRenderer();
+                return r ? r->GetFailedImGuiTextureVersion(name) : 0;
+            },
+            py::arg("name"), "Get the latest failed upload version for an ImGui texture")
+        .def(
             "get_resource_preview_manager",
             [](Infernux &self) -> ResourcePreviewManager * {
                 auto *r = self.GetRenderer();
                 return r ? r->GetResourcePreviewManager() : nullptr;
             },
             py::return_value_policy::reference, "Get the resource preview manager for file previews")
-        .def("init_preview_task_system", &Infernux::InitPreviewTaskSystem, py::arg("worker_count") = 1,
-             "Initialize C++ preview task worker threads")
-        .def("shutdown_preview_task_system", &Infernux::ShutdownPreviewTaskSystem,
-             "Shutdown C++ preview task worker threads")
-        .def("schedule_material_preview_task", &Infernux::ScheduleMaterialPreviewTask, py::arg("resource_key"),
-             py::arg("mat_file_path"), py::arg("stamp"), py::call_guard<py::gil_scoped_release>(),
-             "Schedule material preview generation task (legacy)")
         .def("query_or_schedule_material_preview", &Infernux::QueryOrScheduleMaterialPreview, py::arg("resource_key"),
              py::arg("mat_file_path"), py::arg("material_json") = "", py::arg("file_mtime_hint") = 0,
              py::call_guard<py::gil_scoped_release>(),
@@ -496,17 +1037,48 @@ PYBIND11_MODULE(_Infernux, m)
         .def("query_or_schedule_mesh_preview", &Infernux::QueryOrScheduleMeshPreview, py::arg("resource_key"),
              py::arg("mesh_file_path"), py::arg("file_mtime_hint") = 0, py::call_guard<py::gil_scoped_release>(),
              "Combined query + schedule for mesh/model preview. Returns ImGui texture id.")
-        .def("schedule_texture_preview_task", &Infernux::ScheduleTexturePreviewTask, py::arg("resource_key"),
-             py::arg("texture_file_path"), py::arg("stamp"), py::arg("nearest") = false, py::arg("srgb") = false,
-             py::call_guard<py::gil_scoped_release>(), "Schedule texture preview generation task (always 256x256)")
         .def("pump_preview_tasks", &Infernux::PumpPreviewTasks, py::call_guard<py::gil_scoped_release>(),
-             "Pump completed preview tasks and upload textures on main thread")
-        .def("flush_all_material_previews", &Infernux::FlushAllMaterialPreviews,
-             py::call_guard<py::gil_scoped_release>(),
-             "Synchronously render+upload ALL queued material previews (bootstrap only)")
+             "Pump completed preview work and submit texture upload tickets")
         .def("get_material_preview_texture_id", &Infernux::GetMaterialPreviewTextureId, py::arg("resource_key"),
              py::call_guard<py::gil_scoped_release>(),
              "Get texture id for material preview (stale-return for anti-flicker)")
+        .def("is_material_preview_ready", &Infernux::IsMaterialPreviewReady, py::arg("resource_key"),
+             py::call_guard<py::gil_scoped_release>(),
+             "Check whether a material preview matches its latest requested generation")
+        .def_property_readonly(
+            "preview_task_snapshots",
+            [](const Infernux &self) {
+                py::list result;
+                for (const auto &snapshot : self.GetPreviewTaskSnapshots()) {
+                    py::dict item;
+                    item["kind"] = snapshot.kind;
+                    item["resource_key"] = snapshot.resourceKey;
+                    item["texture_name"] = snapshot.textureName;
+                    item["generation"] = snapshot.generation;
+                    item["ready_generation"] = snapshot.readyGeneration;
+                    item["pending_upload_version"] = snapshot.pendingUploadVersion;
+                    item["pending_preview_generation"] = snapshot.pendingPreviewGeneration;
+                    item["published_upload_version"] = snapshot.publishedUploadVersion;
+                    item["failed_upload_version"] = snapshot.failedUploadVersion;
+                    item["texture_id"] = snapshot.textureId;
+                    item["in_flight"] = snapshot.inFlight;
+                    item["has_render_ticket"] = snapshot.hasRenderTicket;
+                    item["render_ticket_done"] = snapshot.renderTicketDone;
+                    item["pending_width"] = snapshot.pendingWidth;
+                    item["pending_height"] = snapshot.pendingHeight;
+                    item["ready_width"] = snapshot.readyWidth;
+                    item["ready_height"] = snapshot.readyHeight;
+                    item["pixel_generation"] = snapshot.pixelGeneration;
+                    item["pixel_hash"] = snapshot.pixelHash;
+                    item["non_transparent_pixel_count"] = snapshot.nonTransparentPixelCount;
+                    item["min_rgb"] = snapshot.minRgb;
+                    item["max_rgb"] = snapshot.maxRgb;
+                    item["imgui_draw_command_count"] = snapshot.imguiDrawCommandCount;
+                    result.append(std::move(item));
+                }
+                return result;
+            },
+            "Read-only diagnostics for active material, texture, and mesh preview tasks")
         .def("render_timeline_cube_preview", &Infernux::RenderTimelineCubePreview, py::arg("px"), py::arg("py"),
              py::arg("pz"), py::arg("rx"), py::arg("ry"), py::arg("rz"), py::arg("sx"), py::arg("sy"), py::arg("sz"),
              py::arg("cam_yaw"), py::arg("cam_pitch"), py::arg("cam_distance"), py::arg("size") = 192,
@@ -528,10 +1100,20 @@ PYBIND11_MODULE(_Infernux, m)
              py::arg("srgb") = false, py::arg("pump") = true, py::call_guard<py::gil_scoped_release>(),
              "Combined pump + query + schedule for texture preview. Returns (tex_id, width, height). C++ manages "
              "caching via generation counterching via generation counter.")
-        .def("schedule_texture_preview_from_memory", &Infernux::ScheduleTexturePreviewFromMemory,
-             py::arg("resource_key"), py::arg("image_data"), py::arg("stamp"), py::arg("nearest") = false,
-             py::call_guard<py::gil_scoped_release>(),
-             "Schedule texture preview from in-memory image bytes (JPEG/PNG/etc.)")
+        .def(
+            "schedule_texture_preview_from_memory",
+            [](Infernux &self, const std::string &resourceKey, const py::buffer &imageData, uint64_t stamp,
+               bool nearest) {
+                const py::buffer_info info = imageData.request();
+                if (info.ndim != 1 || info.itemsize != 1 || info.strides[0] != 1)
+                    throw std::invalid_argument("encoded image data must be a contiguous one-dimensional byte buffer");
+                const auto *begin = static_cast<const unsigned char *>(info.ptr);
+                std::vector<unsigned char> owned(begin, begin + info.size);
+                py::gil_scoped_release release;
+                return self.ScheduleTexturePreviewFromMemory(resourceKey, std::move(owned), stamp, nearest);
+            },
+            py::arg("resource_key"), py::arg("image_data"), py::arg("stamp"), py::arg("nearest") = false,
+            "Schedule texture preview from an encoded in-memory image buffer (JPEG/PNG/etc.)")
         .def("schedule_material_save_snapshot_task", &Infernux::ScheduleMaterialSaveSnapshotTask, py::arg("key"),
              py::arg("file_path"), py::arg("json_snapshot"), "Schedule async material save task from JSON snapshot")
         // ========================================================================
@@ -583,6 +1165,62 @@ PYBIND11_MODULE(_Infernux, m)
                 return r ? r->GetGameTextureId() : 0;
             },
             "Get game render target texture ID for ImGui display")
+        .def(
+            "request_render_target_readback",
+            [](Infernux &self, bool gameView) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("GPU image readback requires graphical renderer initialization");
+                return renderer->RequestRenderTargetReadback(gameView);
+            },
+            py::arg("game_view") = true,
+            "Asynchronously read the most recently submitted scene or game render target")
+        .def(
+            "request_capture",
+            [](Infernux &self, const std::string &source, const std::string &outputPath) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Capture requires graphical renderer initialization");
+                CaptureSource captureSource;
+                if (source == "scene")
+                    captureSource = CaptureSource::Scene;
+                else if (source == "game")
+                    captureSource = CaptureSource::Game;
+                else
+                    throw std::invalid_argument("Capture source must be 'scene' or 'game'");
+                return renderer->RequestCapture(captureSource, outputPath);
+            },
+            py::arg("source"), py::arg("output_path"),
+            "Capture an engine-owned render target asynchronously without reading OS window or desktop pixels")
+        .def(
+            "query_capture",
+            [](Infernux &self, uint64_t captureId) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer)
+                    throw std::logic_error("Capture requires graphical renderer initialization");
+                const CaptureSnapshot value = renderer->QueryCapture(captureId);
+                py::dict result;
+                result["capture_id"] = value.id;
+                result["source"] = CaptureSourceName(value.source);
+                result["pixel_origin"] = "engine_render_target";
+                result["os_capture_fallback"] = false;
+                result["status"] = CaptureStatusName(value.status);
+                result["source_generation"] = value.sourceGeneration;
+                result["engine_frame"] = value.engineFrame;
+                result["width"] = value.width;
+                result["height"] = value.height;
+                result["output_path"] = value.outputPath;
+                result["error"] = value.error;
+                return result;
+            },
+            py::arg("capture_id"), "Return status and metadata for an engine capture request")
+        .def(
+            "cancel_capture",
+            [](Infernux &self, uint64_t captureId) {
+                auto *renderer = self.GetRenderer();
+                return renderer && renderer->CancelCapture(captureId);
+            },
+            py::arg("capture_id"), "Cancel an unfinished engine capture request")
         .def(
             "resize_game_render_target",
             [](Infernux &self, uint32_t width, uint32_t height) {
@@ -958,6 +1596,54 @@ PYBIND11_MODULE(_Infernux, m)
                     buf->ClearIcons();
             },
             "Clear all component gizmo icon data")
+        .def(
+            "submit_particle_instances",
+            [](Infernux &self, uint64_t batchId, py::buffer instanceBuffer, const std::string &materialGuid,
+               float originX, float originY, float originZ) {
+                auto *renderer = self.GetRenderer();
+                if (!renderer || !renderer->GetParticleDrawCallBuffer())
+                    throw std::logic_error("particle submission requires graphical renderer initialization");
+                py::buffer_info info = instanceBuffer.request();
+                if (info.ndim != 2 || info.shape[1] != 9 || info.itemsize != sizeof(float) ||
+                    info.format != py::format_descriptor<float>::format()) {
+                    throw std::invalid_argument("particle instances must be a contiguous float32 array shaped (N, 9)");
+                }
+                if (info.strides[1] != static_cast<py::ssize_t>(sizeof(float)) ||
+                    info.strides[0] != static_cast<py::ssize_t>(9 * sizeof(float))) {
+                    throw std::invalid_argument("particle instances must be C-contiguous");
+                }
+
+                const float *source = static_cast<const float *>(info.ptr);
+                std::vector<ParticleInstance> instances;
+                instances.reserve(static_cast<size_t>(info.shape[0]));
+                for (py::ssize_t index = 0; index < info.shape[0]; ++index) {
+                    const float *row = source + index * 9;
+                    for (size_t component = 0; component < 9; ++component) {
+                        if (!std::isfinite(row[component]))
+                            throw std::invalid_argument("particle instances must contain only finite values");
+                    }
+                    if (row[3] < 0.0f)
+                        throw std::invalid_argument("particle instance size must be non-negative");
+                    ParticleInstance instance;
+                    instance.position = glm::vec3(row[0] + originX, row[1] + originY, row[2] + originZ);
+                    instance.size = row[3];
+                    instance.color = glm::vec4(row[4], row[5], row[6], row[7]);
+                    instance.rotation = row[8];
+                    instances.push_back(instance);
+                }
+                renderer->GetParticleDrawCallBuffer()->SetBatch(batchId, std::move(instances), materialGuid);
+            },
+            py::arg("batch_id"), py::arg("instances"), py::arg("material_guid") = "", py::arg("origin_x") = 0.0f,
+            py::arg("origin_y") = 0.0f, py::arg("origin_z") = 0.0f,
+            "Submit one contiguous particle instance batch (position3, size, color4, rotation)")
+        .def(
+            "remove_particle_batch",
+            [](Infernux &self, uint64_t batchId) {
+                auto *renderer = self.GetRenderer();
+                if (renderer && renderer->GetParticleDrawCallBuffer())
+                    renderer->GetParticleDrawCallBuffer()->RemoveBatch(batchId);
+            },
+            py::arg("batch_id"), "Remove a persistent particle instance batch")
         // ========================================================================
         // Material Pipeline API - for refreshing material shaders at runtime
         // ========================================================================
@@ -1018,8 +1704,9 @@ PYBIND11_MODULE(_Infernux, m)
     RegisterAssetRegistryBindings(m);
     RegisterSceneBindings(m);
     RegisterTagLayerBindings(m);
+    RegisterRhiBindings(m);
     RegisterRenderGraphBindings(m);
-    RegisterCommandBufferBindings(m); // Must come before RenderPipeline (provides VkFormat, RenderTargetHandle, etc.)
+    RegisterCommandBufferBindings(m);
     RegisterRenderPipelineBindings(m);
     RegisterInputBindings(m);
     RegisterPhysicsBindings(m);

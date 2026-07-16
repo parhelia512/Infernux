@@ -697,6 +697,9 @@ class RenderGraph
         return m_passes.size();
     }
 
+    /// Passes in the compiled execution order, excluding culled passes.
+    [[nodiscard]] std::vector<std::string> GetExecutionPassNames() const;
+
     /**
      * @brief Get resource count
      */
@@ -724,6 +727,7 @@ class RenderGraph
 
     [[nodiscard]] VkImageView ResolveTextureView(ResourceHandle handle) const;
     [[nodiscard]] VkBuffer ResolveBuffer(ResourceHandle handle) const;
+    [[nodiscard]] uint64_t GetTransientResidentBytes() const;
 
   private:
     // ========================================================================

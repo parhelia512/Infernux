@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <queue>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace infernux
 {
@@ -1267,6 +1268,27 @@ void RenderGraph::FreeResources()
         }
     }
     m_aliasedMemoryHeaps.clear();
+}
+
+uint64_t RenderGraph::GetTransientResidentBytes() const
+{
+    if (!m_context)
+        return 0;
+    const VmaAllocator allocator = m_context->GetVmaAllocator();
+    std::unordered_set<VmaAllocation> allocations;
+    for (const auto &resource : m_resources) {
+        if (!resource.isExternal && resource.allocatedMemory != VK_NULL_HANDLE)
+            allocations.insert(resource.allocatedMemory);
+    }
+    allocations.insert(m_aliasedMemoryHeaps.begin(), m_aliasedMemoryHeaps.end());
+
+    uint64_t bytes = 0;
+    for (const VmaAllocation allocation : allocations) {
+        VmaAllocationInfo info{};
+        vmaGetAllocationInfo(allocator, allocation, &info);
+        bytes += info.size;
+    }
+    return bytes;
 }
 
 } // namespace vk

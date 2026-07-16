@@ -11,9 +11,19 @@ Example::
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Callable, Dict, Optional
 
 from Infernux.lib import InxGUIRenderable
+
+
+class WindowState(Enum):
+    CLOSED: WindowState
+    OPENING: WindowState
+    OPEN: WindowState
+    FOCUS_REQUESTED: WindowState
+    FOCUSED: WindowState
+    CLOSING: WindowState
 
 
 class WindowInfo:
@@ -81,6 +91,8 @@ class WindowManager:
     def get_registered_types(self) -> Dict[str, WindowInfo]: ...
 
     def get_open_windows(self) -> Dict[str, bool]: ...
+    def get_window_instance(self, window_id: str) -> Optional[InxGUIRenderable]: ...
+    def get_window_state(self, window_id: str) -> WindowState: ...
 
     def register_existing_window(
         self,

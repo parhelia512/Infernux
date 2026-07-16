@@ -14,6 +14,7 @@ namespace infernux
 
 // Static component ID generator
 static std::atomic<uint64_t> s_nextComponentID{1};
+static std::atomic<uint64_t> s_nextComponentLifetimeGeneration{1};
 
 uint64_t Component::GenerateComponentID()
 {
@@ -29,25 +30,31 @@ void Component::EnsureNextComponentID(uint64_t id)
     }
 }
 
-Component::Component() : m_componentId(GenerateComponentID()), m_wasEnabled(false)
+Component::Component()
+    : m_wasEnabled(false), m_componentId(GenerateComponentID()),
+      m_lifetimeGeneration(s_nextComponentLifetimeGeneration.fetch_add(1, std::memory_order_relaxed))
 {
     GetInstanceRegistry()[m_componentId] = this;
 }
 
 Component::~Component()
 {
-    GetInstanceRegistry().erase(m_componentId);
+    auto &registry = GetInstanceRegistry();
+    const auto entry = registry.find(m_componentId);
+    if (entry != registry.end() && entry->second == this)
+        registry.erase(entry);
 }
 
 Component::Component(Component &&other) noexcept
     : m_gameObject(other.m_gameObject), m_enabled(other.m_enabled), m_wasEnabled(other.m_wasEnabled),
       m_hasAwake(other.m_hasAwake), m_hasStarted(other.m_hasStarted), m_hasDestroyed(other.m_hasDestroyed),
       m_isBeingDestroyed(other.m_isBeingDestroyed), m_executionOrder(other.m_executionOrder),
-      m_componentId(other.m_componentId)
+      m_componentId(other.m_componentId), m_lifetimeGeneration(other.m_lifetimeGeneration)
 {
     // Update registry to point to this new address
     GetInstanceRegistry()[m_componentId] = this;
     other.m_componentId = 0;
+    other.m_lifetimeGeneration = 0;
 }
 
 Component &Component::operator=(Component &&other) noexcept
@@ -63,10 +70,18 @@ Component &Component::operator=(Component &&other) noexcept
         m_isBeingDestroyed = other.m_isBeingDestroyed;
         m_executionOrder = other.m_executionOrder;
         m_componentId = other.m_componentId;
+        m_lifetimeGeneration = other.m_lifetimeGeneration;
         GetInstanceRegistry()[m_componentId] = this;
         other.m_componentId = 0;
+        other.m_lifetimeGeneration = 0;
     }
     return *this;
+}
+
+ObjectHandle Component::GetHandle() const
+{
+    const Scene *scene = m_gameObject ? m_gameObject->GetScene() : nullptr;
+    return ObjectHandle{m_componentId, m_lifetimeGeneration, scene ? scene->GetWorldId() : 0};
 }
 
 void Component::CallAwake()
@@ -209,44 +224,71 @@ Transform *Component::GetTransform() const
     return nullptr;
 }
 
-std::string Component::Serialize() const
+nlohmann::json Component::SerializeDocument() const
 {
     json j;
-    j["schema_version"] = 1;
+    j["schema_version"] = GetSerializationSchemaVersion();
     j["type"] = GetTypeName();
     j["enabled"] = m_enabled;
     j["execution_order"] = m_executionOrder;
     j["component_id"] = m_componentId;
-    j["instance_guid"] = m_componentId;
-    return j.dump(2);
+    return j;
+}
+
+std::string Component::Serialize() const
+{
+    return SerializeDocument().dump(2);
 }
 
 bool Component::Deserialize(const std::string &jsonStr)
 {
     try {
-        json j = json::parse(jsonStr);
-        // C++ components store schema_version = 1 (see Serialize()).
-        //
-        // NOTE: Python components have a *separate* schema migration path
-        // using __schema_version__ / __migrate__() on the Python class —
-        // see Infernux.components.component._deserialize_fields().
-        // The two systems are independent: C++ versions track the base
-        // Component wire format; Python versions track per-script field
-        // layout changes.  Keep both in sync when adding new base fields.
-        if (!j.contains("schema_version")) {
-            INXLOG_ERROR("Component::Deserialize: missing 'schema_version' field — data predates versioning system");
+        return DeserializeDocument(json::parse(jsonStr));
+    } catch (const std::exception &e) {
+        INXLOG_ERROR("Component::Deserialize failed to parse JSON for '", GetTypeName(), "': ", e.what());
+        return false;
+    }
+}
+
+bool Component::DeserializeDocument(const nlohmann::json &j)
+{
+    try {
+        if (!j.is_object()) {
+            INXLOG_ERROR("Component::Deserialize for '", GetTypeName(), "': expected an object document");
             return false;
         }
-        if (j.contains("enabled")) {
-            m_enabled = j["enabled"].get<bool>();
+
+        const int expectedVersion = GetSerializationSchemaVersion();
+        if (!j.contains("schema_version") || !j["schema_version"].is_number_integer() ||
+            j["schema_version"].get<int>() != expectedVersion) {
+            INXLOG_ERROR("Component::Deserialize for '", GetTypeName(), "': expected schema_version ", expectedVersion);
+            return false;
         }
-        if (j.contains("execution_order")) {
-            m_executionOrder = j["execution_order"].get<int>();
+
+        if (!j.contains("type") || !j["type"].is_string() || j["type"].get<std::string>() != GetTypeName()) {
+            INXLOG_ERROR("Component::Deserialize for '", GetTypeName(), "': document type does not match");
+            return false;
         }
+        if (!j.contains("enabled") || !j["enabled"].is_boolean() || !j.contains("execution_order") ||
+            !j["execution_order"].is_number_integer()) {
+            INXLOG_ERROR("Component::Deserialize for '", GetTypeName(), "': missing or invalid base fields");
+            return false;
+        }
+        if (j.contains("instance_guid")) {
+            INXLOG_ERROR("Component::Deserialize for '", GetTypeName(),
+                         "': instance_guid was removed; use component_id");
+            return false;
+        }
+
+        m_enabled = j["enabled"].get<bool>();
+        m_executionOrder = j["execution_order"].get<int>();
         if (j.contains("component_id")) {
+            if (!j["component_id"].is_number_unsigned()) {
+                INXLOG_ERROR("Component::Deserialize for '", GetTypeName(), "': component_id must be unsigned");
+                return false;
+            }
             SetComponentID(j["component_id"].get<uint64_t>());
         }
-        // instance_guid is now derived from component_id; ignore legacy string values
         return true;
     } catch (const std::exception &e) {
         INXLOG_ERROR("Component::Deserialize failed for '", GetTypeName(), "' (id=", m_componentId, "): ", e.what());

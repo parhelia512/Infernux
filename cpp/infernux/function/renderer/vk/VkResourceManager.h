@@ -27,11 +27,17 @@
 
 #pragma once
 
+#include "../rhi/RhiUpload.h"
+#include "AsyncTransferContext.h"
 #include "VkHandle.h"
 #include "VkTypes.h"
+#include <atomic>
+#include <function/resources/InxTexture/InxTexture.h>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -42,6 +48,188 @@ namespace vk
 
 // Forward declarations
 class VkDeviceContext;
+class VkResourceManager;
+class GraphicsSubmissionTicket;
+class GraphicsImageReadbackRecorder;
+
+class BufferUploadTicket final
+{
+  public:
+    [[nodiscard]] bool IsComplete() const noexcept
+    {
+        return m_complete;
+    }
+    [[nodiscard]] bool IsPublished() const noexcept
+    {
+        return m_published;
+    }
+    [[nodiscard]] bool IsAsync() const noexcept
+    {
+        return m_async;
+    }
+    [[nodiscard]] VkDeviceSize GetSize() const noexcept
+    {
+        return m_size;
+    }
+    [[nodiscard]] const std::shared_ptr<VkBufferHandle> &GetBuffer() const;
+
+  private:
+    friend class VkResourceManager;
+    VkResourceManager *m_manager = nullptr;
+    std::shared_ptr<VkBufferHandle> m_staging;
+    std::shared_ptr<VkBufferHandle> m_destination;
+    AsyncSubmissionHandle m_upload;
+    VkDeviceSize m_size = 0;
+    bool m_complete = false;
+    bool m_published = false;
+    bool m_async = false;
+};
+
+class TextureUploadTicket final
+{
+  public:
+    [[nodiscard]] bool IsComplete() const noexcept
+    {
+        return m_complete;
+    }
+    [[nodiscard]] bool IsPublished() const noexcept
+    {
+        return m_published;
+    }
+    [[nodiscard]] bool IsAsync() const noexcept
+    {
+        return m_async;
+    }
+    [[nodiscard]] VkDeviceSize GetResidentBytes() const noexcept
+    {
+        return m_residentBytes;
+    }
+    [[nodiscard]] const std::shared_ptr<VkTexture> &GetTexture() const;
+
+  private:
+    friend class VkResourceManager;
+    VkResourceManager *m_manager = nullptr;
+    std::shared_ptr<VkBufferHandle> m_staging;
+    std::shared_ptr<VkTexture> m_texture;
+    AsyncSubmissionHandle m_upload;
+    VkFormat m_format = VK_FORMAT_UNDEFINED;
+    VkFilter m_filter = VK_FILTER_LINEAR;
+    VkSamplerAddressMode m_addressMode = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    int m_aniso = -1;
+    uint32_t m_mipLevels = 0;
+    VkDeviceSize m_residentBytes = 0;
+    bool m_complete = false;
+    bool m_published = false;
+    bool m_async = false;
+};
+
+enum class ImageReadbackStatus : uint8_t
+{
+    Pending,
+    Completed,
+    Failed,
+    Cancelled,
+};
+
+class ImageReadbackTicket final
+{
+  public:
+    [[nodiscard]] ImageReadbackStatus GetStatus() const noexcept
+    {
+        return m_status.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] bool IsDone() const noexcept
+    {
+        return GetStatus() != ImageReadbackStatus::Pending;
+    }
+    [[nodiscard]] uint32_t GetWidth() const noexcept
+    {
+        return m_width;
+    }
+    [[nodiscard]] uint32_t GetHeight() const noexcept
+    {
+        return m_height;
+    }
+    [[nodiscard]] uint32_t GetChannelCount() const noexcept
+    {
+        return m_channelCount;
+    }
+    [[nodiscard]] const std::string &GetElementType() const noexcept
+    {
+        return m_elementType;
+    }
+    [[nodiscard]] size_t GetByteSize() const noexcept
+    {
+        return m_byteSize;
+    }
+    [[nodiscard]] const std::string &GetError() const noexcept
+    {
+        return m_error;
+    }
+    [[nodiscard]] const std::vector<uint8_t> &GetData() const;
+    void Cancel() noexcept;
+
+  private:
+    friend class VkResourceManager;
+    friend class GraphicsImageReadbackRecorder;
+    std::shared_ptr<VkBufferHandle> m_staging;
+    AsyncSubmissionHandle m_submission;
+    std::shared_ptr<GraphicsSubmissionTicket> m_graphicsSubmission;
+    std::atomic<ImageReadbackStatus> m_status{ImageReadbackStatus::Pending};
+    std::vector<uint8_t> m_data;
+    std::string m_elementType;
+    std::string m_error;
+    uint32_t m_width = 0;
+    uint32_t m_height = 0;
+    uint32_t m_channelCount = 0;
+    size_t m_byteSize = 0;
+};
+
+class GraphicsSubmissionTicket final
+{
+  public:
+    [[nodiscard]] bool IsComplete() const noexcept
+    {
+        return m_complete.load(std::memory_order_acquire);
+    }
+
+  private:
+    friend class VkResourceManager;
+    VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
+    VkFence m_fence = VK_NULL_HANDLE;
+    std::function<void()> m_releaseResources;
+    std::atomic<bool> m_complete{false};
+};
+
+class GraphicsImageReadbackRecorder final
+{
+  public:
+    GraphicsImageReadbackRecorder() = default;
+    ~GraphicsImageReadbackRecorder();
+
+    GraphicsImageReadbackRecorder(const GraphicsImageReadbackRecorder &) = delete;
+    GraphicsImageReadbackRecorder &operator=(const GraphicsImageReadbackRecorder &) = delete;
+    GraphicsImageReadbackRecorder(GraphicsImageReadbackRecorder &&other) noexcept;
+    GraphicsImageReadbackRecorder &operator=(GraphicsImageReadbackRecorder &&other) noexcept;
+
+    [[nodiscard]] VkCommandBuffer GetCommandBuffer() const noexcept
+    {
+        return m_commandBuffer;
+    }
+    [[nodiscard]] VkBuffer GetStagingBuffer() const noexcept
+    {
+        return m_ticket && m_ticket->m_staging ? m_ticket->m_staging->GetBuffer() : VK_NULL_HANDLE;
+    }
+    [[nodiscard]] std::shared_ptr<ImageReadbackTicket> Submit(std::function<void()> releaseResources = {});
+
+  private:
+    friend class VkResourceManager;
+    void Reset() noexcept;
+
+    VkResourceManager *m_manager = nullptr;
+    std::shared_ptr<ImageReadbackTicket> m_ticket;
+    VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
+};
 
 /**
  * @brief Descriptor binding information
@@ -72,11 +260,11 @@ class VkResourceManager
     VkResourceManager() = default;
     ~VkResourceManager();
 
-    // Non-copyable, movable
+    // Bound to one device/transfer context for its full lifetime.
     VkResourceManager(const VkResourceManager &) = delete;
     VkResourceManager &operator=(const VkResourceManager &) = delete;
-    VkResourceManager(VkResourceManager &&other) noexcept;
-    VkResourceManager &operator=(VkResourceManager &&other) noexcept;
+    VkResourceManager(VkResourceManager &&other) = delete;
+    VkResourceManager &operator=(VkResourceManager &&other) = delete;
 
     // ========================================================================
     // Initialization
@@ -125,6 +313,68 @@ class VkResourceManager
      * @return Unique pointer to buffer handle
      */
     [[nodiscard]] std::unique_ptr<VkBufferHandle> CreateIndexBuffer(const void *data, VkDeviceSize size);
+
+    [[nodiscard]] std::shared_ptr<BufferUploadTicket> BeginBufferUpload(const rhi::BufferUploadRequest &request);
+    [[nodiscard]] bool TryPublishBufferUpload(const std::shared_ptr<BufferUploadTicket> &ticket);
+    void DrainBufferUploads() noexcept;
+
+    [[nodiscard]] std::shared_ptr<TextureUploadTicket> BeginTextureUpload(const TextureCpuData &cpuData,
+                                                                          VkFormat format, VkFilter filter,
+                                                                          VkSamplerAddressMode addressMode, int aniso);
+    [[nodiscard]] bool TryPublishTextureUpload(const std::shared_ptr<TextureUploadTicket> &ticket);
+    void PollGpuUploads();
+
+    [[nodiscard]] std::shared_ptr<ImageReadbackTicket>
+    BeginImageReadback(VkImage image, VkImageLayout layout, VkImageAspectFlags aspect, VkPipelineStageFlags sourceStage,
+                       VkAccessFlags sourceAccess, uint32_t width, uint32_t height, VkFormat format);
+    [[nodiscard]] GraphicsImageReadbackRecorder BeginGraphicsImageReadback(uint32_t width, uint32_t height,
+                                                                           VkFormat format);
+    void PollImageReadbacks();
+    void DrainImageReadbacks() noexcept;
+    [[nodiscard]] size_t GetPendingImageReadbackCount() const noexcept
+    {
+        return m_pendingImageReadbacks.size();
+    }
+    [[nodiscard]] uint64_t GetPendingImageReadbackBytes() const noexcept;
+    [[nodiscard]] size_t GetPendingGpuTransferCount() const noexcept
+    {
+        return m_pendingBufferUploads.size() + m_pendingTextureUploads.size();
+    }
+    [[nodiscard]] uint64_t GetTimelineUploadPublicationCount() const noexcept
+    {
+        return m_timelineUploadPublicationCount;
+    }
+    [[nodiscard]] bool IsUploadTimelineEnabled() const noexcept
+    {
+        return m_asyncTransfer && m_asyncTransfer->IsAsyncCapable() &&
+               m_asyncTransfer->GetTimelineSemaphore() != VK_NULL_HANDLE;
+    }
+    [[nodiscard]] VkSemaphore GetUploadTimelineSemaphore() const noexcept;
+    [[nodiscard]] uint64_t GetRequiredUploadTimelineValue() const noexcept
+    {
+        return m_requiredUploadTimelineValue;
+    }
+
+    [[nodiscard]] VkDeviceSize GetStagingPoolBytes() const noexcept
+    {
+        return m_stagingPoolBytes;
+    }
+    [[nodiscard]] size_t GetStagingPoolBufferCount() const noexcept
+    {
+        return m_stagingPoolBufferCount;
+    }
+    [[nodiscard]] uint64_t GetStagingAllocationCount() const noexcept
+    {
+        return m_stagingAllocationCount;
+    }
+    [[nodiscard]] uint64_t GetStagingReuseCount() const noexcept
+    {
+        return m_stagingReuseCount;
+    }
+    [[nodiscard]] uint64_t GetStagingDiscardCount() const noexcept
+    {
+        return m_stagingDiscardCount;
+    }
 
     /**
      * @brief Create a uniform buffer
@@ -207,7 +457,7 @@ class VkResourceManager
                 VkSamplerAddressMode addressMode = VK_SAMPLER_ADDRESS_MODE_REPEAT, int aniso = -1);
 
     /**
-     * @brief Create a texture from raw pixel data
+     * @brief Create a texture immediately for renderer bootstrap resources.
      *
      * @param pixels Pixel data (RGBA)
      * @param width Width
@@ -216,10 +466,10 @@ class VkResourceManager
      * @return Unique pointer to texture handle
      */
     [[nodiscard]] std::unique_ptr<VkTexture>
-    CreateTextureFromPixels(const unsigned char *pixels, uint32_t width, uint32_t height,
-                            VkFormat format = VK_FORMAT_R8G8B8A8_SRGB, bool generateMipmaps = false,
-                            VkFilter filter = VK_FILTER_LINEAR,
-                            VkSamplerAddressMode addressMode = VK_SAMPLER_ADDRESS_MODE_REPEAT, int aniso = -1);
+    CreateTextureFromPixelsImmediate(const unsigned char *pixels, uint32_t width, uint32_t height,
+                                     VkFormat format = VK_FORMAT_R8G8B8A8_SRGB, bool generateMipmaps = false,
+                                     VkFilter filter = VK_FILTER_LINEAR,
+                                     VkSamplerAddressMode addressMode = VK_SAMPLER_ADDRESS_MODE_REPEAT, int aniso = -1);
 
     /**
      * @brief Create a solid color texture
@@ -289,6 +539,18 @@ class VkResourceManager
      * @param cmdBuffer Command buffer to submit
      */
     void EndSingleTimeCommands(VkCommandBuffer cmdBuffer);
+    [[nodiscard]] std::shared_ptr<GraphicsSubmissionTicket>
+    EndSingleTimeCommandsAsync(VkCommandBuffer cmdBuffer, std::function<void()> releaseResources = {});
+    void PollAsyncGraphicsSubmissions();
+    void DrainAsyncGraphicsSubmissions() noexcept;
+    [[nodiscard]] size_t GetPendingAsyncGraphicsSubmissionCount() const noexcept
+    {
+        return m_pendingAsyncGraphicsSubmissions.size();
+    }
+    [[nodiscard]] uint64_t GetAsyncGraphicsSubmissionCount() const noexcept
+    {
+        return m_asyncGraphicsSubmissionCount;
+    }
 
     // ========================================================================
     // Descriptor Management
@@ -382,13 +644,24 @@ class VkResourceManager
     }
 
   private:
+    friend class GraphicsImageReadbackRecorder;
     // ========================================================================
     // Internal Methods
     // ========================================================================
 
     /// @brief Create a buffer with given usage and properties
     std::unique_ptr<VkBufferHandle> CreateBufferInternal(VkDeviceSize size, VkBufferUsageFlags usage,
-                                                         VkMemoryPropertyFlags properties);
+                                                         VkMemoryPropertyFlags properties,
+                                                         const std::vector<uint32_t> &queueFamilies = {});
+    std::shared_ptr<VkBufferHandle> AcquireStagingBuffer(VkDeviceSize size);
+    void RecycleStagingBuffer(std::shared_ptr<VkBufferHandle> buffer) noexcept;
+    void ClearStagingPool() noexcept;
+    void FinalizeTextureUpload(TextureUploadTicket &ticket);
+    void FinalizeImageReadback(const std::shared_ptr<ImageReadbackTicket> &ticket) noexcept;
+    std::shared_ptr<ImageReadbackTicket> SubmitGraphicsImageReadback(GraphicsImageReadbackRecorder &recorder,
+                                                                     std::function<void()> releaseResources);
+    void AbandonGraphicsImageReadback(GraphicsImageReadbackRecorder &recorder) noexcept;
+    void AssertReadbackThread() const;
 
     /// @brief Get best depth format for the device
     VkFormat FindDepthFormat() const;
@@ -402,23 +675,16 @@ class VkResourceManager
         m_skipWaitIdle = v;
     }
 
-    /**
-     * @brief Plug an AsyncTransferContext for opt-in async-queue uploads.
-     *
-     * When set, CreateTextureFromPixels first attempts the async path
-     * (VK_SHARING_MODE_CONCURRENT image + transfer-queue submit). On
-     * single-queue-family GPUs, when async upload isn't legal (e.g. mipmap
-     * generation requires graphics-queue blit), or when the async submit
-     * itself fails, we transparently fall back to the legacy graphics-queue
-     * synchronous path so behaviour is identical from the caller's view.
-     *
-     * Pass nullptr to disable; resource manager is independent of the
-     * async-transfer subsystem.
-     */
+    /// Configure the transfer context used by explicit Buffer/TextureUploadTicket submissions.
     void SetAsyncTransferContext(class AsyncTransferContext *transfer, uint32_t graphicsQueueFamily)
     {
         m_asyncTransfer = transfer;
         m_graphicsQueueFamily = graphicsQueueFamily;
+    }
+
+    void SetAsyncReadbackContext(class AsyncTransferContext *readback)
+    {
+        m_asyncReadback = readback;
     }
 
   private:
@@ -428,12 +694,25 @@ class VkResourceManager
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
+    std::thread::id m_ownerThread;
 
     // Optional plug-in async-transfer context. Lifetime is owned externally
     // (typically InxVkCoreModular::m_asyncTransferContext) — VkResourceManager
     // never destroys it. nullptr means "always use the synchronous path".
     class AsyncTransferContext *m_asyncTransfer = nullptr;
+    class AsyncTransferContext *m_asyncReadback = nullptr;
     uint32_t m_graphicsQueueFamily = 0;
+    std::vector<std::shared_ptr<BufferUploadTicket>> m_pendingBufferUploads;
+    std::vector<std::shared_ptr<TextureUploadTicket>> m_pendingTextureUploads;
+    std::vector<std::shared_ptr<ImageReadbackTicket>> m_pendingImageReadbacks;
+    std::unordered_map<VkDeviceSize, std::vector<std::shared_ptr<VkBufferHandle>>> m_stagingPool;
+    VkDeviceSize m_stagingPoolBytes = 0;
+    size_t m_stagingPoolBufferCount = 0;
+    uint64_t m_stagingAllocationCount = 0;
+    uint64_t m_stagingReuseCount = 0;
+    uint64_t m_stagingDiscardCount = 0;
+    uint64_t m_requiredUploadTimelineValue = 0;
+    uint64_t m_timelineUploadPublicationCount = 0;
 
     // Cached samplers
     VkSampler m_linearSampler = VK_NULL_HANDLE;
@@ -463,6 +742,8 @@ class VkResourceManager
     std::vector<VkFence> m_freeSingleTimeFences;
     std::vector<VkFence> m_allSingleTimeFences;             // owned, destroyed in Destroy()
     std::vector<VkCommandBuffer> m_allSingleTimeCmdBuffers; // owned via m_commandPool
+    std::vector<std::shared_ptr<GraphicsSubmissionTicket>> m_pendingAsyncGraphicsSubmissions;
+    uint64_t m_asyncGraphicsSubmissionCount = 0;
     std::mutex m_singleTimeMutex;
 };
 

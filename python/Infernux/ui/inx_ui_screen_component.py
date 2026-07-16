@@ -12,19 +12,26 @@ import math
 from Infernux.components import serialized_field
 from .inx_ui_component import InxUIComponent
 from .enums import ScreenAlignH, ScreenAlignV
+from .ui_render_revision import mark_runtime_ui_dirty
 
-# Per-frame rect cache — avoids repeated hierarchy walks via pybind11.
-# Cleared at the start of each frame by clear_rect_cache().
+# Rect cache — avoids repeated hierarchy walks and serialized-field reads.
+# Runtime callers retain it until hierarchy or geometry changes; editor tools
+# may still provide a unique token when they need frame-local invalidation.
 _rect_cache: dict = {}
-_rect_cache_frame: int = -1
+_rect_cache_frame = None
 
 
-def clear_rect_cache(frame_id: int = 0) -> None:
-    """Call once per frame before any get_rect() usage."""
+def clear_rect_cache(frame_id=0) -> None:
+    """Clear cached rectangles when the caller's invalidation token changes."""
     global _rect_cache, _rect_cache_frame
     if frame_id != _rect_cache_frame:
         _rect_cache.clear()
         _rect_cache_frame = frame_id
+
+
+def _invalidate_rect_cache() -> None:
+    """Discard cached hierarchy rectangles after a geometry mutation."""
+    _rect_cache.clear()
 
 
 class InxUIScreenComponent(InxUIComponent):
@@ -42,6 +49,22 @@ class InxUIScreenComponent(InxUIComponent):
     """
 
     _hide_transform_: bool = True
+    _GEOMETRY_FIELDS = frozenset({
+        "align_h", "align_v", "x", "y", "width", "height", "rotation",
+    })
+
+    def __setattr__(self, name, value):
+        super().__setattr__(name, value)
+        if name.startswith("_"):
+            return
+        object.__setattr__(
+            self,
+            "_ui_render_revision",
+            int(getattr(self, "_ui_render_revision", 0)) + 1,
+        )
+        mark_runtime_ui_dirty()
+        if name in self._GEOMETRY_FIELDS:
+            _invalidate_rect_cache()
 
     align_h: ScreenAlignH = serialized_field(default=ScreenAlignH.Left, tooltip="Horizontal anchor", group="Position")
     align_v: ScreenAlignV = serialized_field(default=ScreenAlignV.Top, tooltip="Vertical anchor", group="Position")
@@ -201,6 +224,7 @@ class InxUIScreenComponent(InxUIComponent):
         self.y = float(rect_y) - py - anchor_y
         self.width = float(rect_w)
         self.height = float(rect_h)
+        _invalidate_rect_cache()
 
     def set_visual_position(self, vis_x: float, vis_y: float,
                             canvas_width: float, canvas_height: float):
@@ -227,6 +251,7 @@ class InxUIScreenComponent(InxUIComponent):
         anchor_x, anchor_y = self._anchor_origin(pw, ph)
         self.x = new_rx - px - anchor_x
         self.y = new_ry - py - anchor_y
+        _invalidate_rect_cache()
 
     def set_size_preserve_visual_position(self, width: float, height: float,
                                           canvas_width: float, canvas_height: float):
@@ -246,6 +271,7 @@ class InxUIScreenComponent(InxUIComponent):
         self.y = new_ry - py - anchor_y
         self.width = new_width
         self.height = new_height
+        _invalidate_rect_cache()
 
     def set_size_preserve_center(self, width: float, height: float,
                                  canvas_width: float, canvas_height: float):
@@ -264,6 +290,7 @@ class InxUIScreenComponent(InxUIComponent):
         self.y = new_rect_y - py - anchor_y
         self.width = new_width
         self.height = new_height
+        _invalidate_rect_cache()
 
     def set_size_preserve_corner(self, width: float, height: float,
                                  canvas_width: float, canvas_height: float,
@@ -290,6 +317,7 @@ class InxUIScreenComponent(InxUIComponent):
         self.y = new_rect_y - py - anchor_y
         self.width = new_width
         self.height = new_height
+        _invalidate_rect_cache()
 
     # ------------------------------------------------------------------
     # Pointer event hooks (override in subclasses)

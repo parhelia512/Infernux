@@ -118,9 +118,6 @@ class RenderStackPipeline(RenderPipeline):
         This builds a graph directly from ``DefaultForwardPipeline`` without
         injecting any user passes.
         """
-        context.setup_camera_properties(camera)
-        culling = context.cull(camera)
-
         if self._fallback_desc is None:
             from Infernux.rendergraph.graph import RenderGraph
             from Infernux.renderstack.default_forward_pipeline import (
@@ -137,5 +134,4 @@ class RenderStackPipeline(RenderPipeline):
             graph.set_output("color")
             self._fallback_desc = graph.build()
 
-        context.apply_graph(self._fallback_desc)
-        context.submit_culling(culling)
+        context.render_with_graph(camera, self._fallback_desc)

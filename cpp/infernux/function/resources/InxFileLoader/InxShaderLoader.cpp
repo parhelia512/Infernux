@@ -103,15 +103,8 @@ void InxShaderLoader::SetShaderCompilerOptions(const std::string &prop, bool val
     }
 }
 
-bool InxShaderLoader::LoadMeta(const char *content, const std::string &filePath, InxResourceMeta &metaData)
-{
-    INXLOG_DEBUG("Loading shader with metadata from file: ", filePath);
-    // not implemented yet.
-    return false;
-}
-
 void InxShaderLoader::CreateMeta(const char *content, size_t contentSize, const std::string &filePath,
-                                 InxResourceMeta &metaData)
+                                 InxResourceMeta &metaData) const
 {
     if (!content) {
         INXLOG_ERROR("Invalid shader content for metadata creation");
@@ -148,12 +141,6 @@ void InxShaderLoader::CreateMeta(const char *content, size_t contentSize, const 
     std::string type = "vertex";
     if (desc.fileExtension == ".frag")
         type = "fragment";
-    else if (desc.fileExtension == ".geom")
-        type = "geometry";
-    else if (desc.fileExtension == ".tesc")
-        type = "tess_control";
-    else if (desc.fileExtension == ".tese")
-        type = "tess_evaluation";
     metaData.AddMetadata("type", type);
 
     // Build properties JSON from descriptor
@@ -1208,12 +1195,6 @@ EShLanguage InxShaderLoader::GetShaderType(const std::string &typeStr)
         return EShLangVertex;
     } else if (typeStr == "fragment") {
         return EShLangFragment;
-    } else if (typeStr == "geometry") {
-        return EShLangGeometry;
-    } else if (typeStr == "tess_control") {
-        return EShLangTessControl;
-    } else if (typeStr == "tess_evaluation") {
-        return EShLangTessEvaluation;
     }
     return EShLangCount;
 }

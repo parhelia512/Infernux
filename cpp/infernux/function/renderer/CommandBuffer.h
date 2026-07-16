@@ -19,6 +19,7 @@
 #pragma once
 
 #include "InxRenderStruct.h"
+#include "rhi/RhiTypes.h"
 
 #include <array>
 #include <cstdint>
@@ -26,7 +27,6 @@
 #include <string>
 #include <variant>
 #include <vector>
-#include <vulkan/vulkan.h>
 
 namespace infernux
 {
@@ -81,7 +81,6 @@ enum class RenderCommandType : uint8_t
     SetGlobalFloat,
     SetGlobalVector,
     SetGlobalMatrix,
-    RequestAsyncReadback,
 };
 
 // ---- Per-command parameter structs ----
@@ -91,8 +90,8 @@ struct GetTemporaryRTParams
     uint32_t handleId = UINT32_MAX;
     int width = 0;
     int height = 0;
-    VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
-    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
+    rhi::PixelFormat format = rhi::PixelFormat::RGBA8UNorm;
+    rhi::SampleCount samples = rhi::SampleCount::One;
 };
 
 struct ReleaseTemporaryRTParams
@@ -148,18 +147,11 @@ struct SetGlobalMatrixParams
     std::array<float, 16> data{};
 };
 
-struct RequestAsyncReadbackParams
-{
-    uint32_t handleId = UINT32_MAX;
-    std::string callbackId;
-};
-
 // ---- Variant-based command storage ----
 
-using RenderCommandData =
-    std::variant<GetTemporaryRTParams, ReleaseTemporaryRTParams, SetRenderTargetParams, ClearRenderTargetParams,
-                 DrawMeshParams, SetGlobalTextureParams, SetGlobalFloatParams, SetGlobalVectorParams,
-                 SetGlobalMatrixParams, RequestAsyncReadbackParams>;
+using RenderCommandData = std::variant<GetTemporaryRTParams, ReleaseTemporaryRTParams, SetRenderTargetParams,
+                                       ClearRenderTargetParams, DrawMeshParams, SetGlobalTextureParams,
+                                       SetGlobalFloatParams, SetGlobalVectorParams, SetGlobalMatrixParams>;
 
 struct RenderCommand
 {
@@ -203,8 +195,8 @@ class CommandBuffer
 
     /// @brief Allocate a temporary render target.
     /// The actual GPU resource is created at execution time by TransientResourcePool.
-    RenderTargetHandle GetTemporaryRT(int width, int height, VkFormat format = VK_FORMAT_R8G8B8A8_UNORM,
-                                      VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
+    RenderTargetHandle GetTemporaryRT(int width, int height, rhi::PixelFormat format = rhi::PixelFormat::RGBA8UNorm,
+                                      rhi::SampleCount samples = rhi::SampleCount::One);
 
     /// @brief Mark a temporary RT for release (returned to pool at frame end).
     void ReleaseTemporaryRT(RenderTargetHandle handle);
@@ -226,14 +218,6 @@ class CommandBuffer
     void SetGlobalFloat(const std::string &name, float value);
     void SetGlobalVector(const std::string &name, float x, float y, float z, float w);
     void SetGlobalMatrix(const std::string &name, const std::array<float, 16> &data);
-
-    // ====================================================================
-    // Async readback
-    // ====================================================================
-
-    /// @brief Request an asynchronous GPU→CPU readback of a render target.
-    /// The result can be retrieved as a NumPy array via a callback ID.
-    void RequestAsyncReadback(RenderTargetHandle handle, const std::string &callbackId);
 
     // ====================================================================
     // Accessors

@@ -6,6 +6,7 @@
 
 #include "gui/InxGUIContext.h"
 #include "gui/InxGUIRenderable.h"
+#include "gui/InxGUISemantics.h"
 #include "gui/InxResourcePreviewer.h"
 #include <function/editor/ConsolePanel.h>
 #include <function/editor/EditorPanel.h>
@@ -67,6 +68,8 @@ PropertyDesc DecodePropertyDesc(const py::dict &d)
     p.type = static_cast<PropertyDesc::Type>(d["t"].cast<int>());
     p.widgetId = d["w"].cast<std::string>();
     p.label = d["n"].cast<std::string>();
+    if (d.contains("sid"))
+        p.semanticId = d["sid"].cast<std::string>();
     switch (p.type) {
     case PropertyDesc::Float:
         p.fVal[0] = d["f"].cast<float>();
@@ -118,6 +121,8 @@ PropertyDesc DecodePropertyDesc(const py::dict &d)
         p.multiline = d["ml"].cast<bool>();
     if (d.contains("mix"))
         p.mixed = d["mix"].cast<bool>();
+    if (d.contains("fl"))
+        p.fieldLabel = d["fl"].cast<bool>();
     if (d.contains("hdr"))
         p.header = d["hdr"].cast<std::string>();
     if (d.contains("spc"))
@@ -136,6 +141,44 @@ std::vector<PropertyDesc> DecodePropertyBatch(py::list descriptors)
         props.push_back(DecodePropertyDesc(descriptors[i].cast<py::dict>()));
     }
     return props;
+}
+
+void UpdatePropertyBatchValues(PropertyBatchPlan &plan, const py::sequence &values)
+{
+    if (py::len(values) != static_cast<py::ssize_t>(plan.descriptors.size()))
+        throw py::value_error("Property batch value count does not match the compiled plan.");
+
+    for (size_t i = 0; i < plan.descriptors.size(); ++i) {
+        auto &desc = plan.descriptors[i];
+        const py::handle value = values[static_cast<py::ssize_t>(i)];
+        switch (desc.type) {
+        case PropertyDesc::Float:
+            desc.fVal[0] = py::cast<float>(value);
+            break;
+        case PropertyDesc::Int:
+        case PropertyDesc::Enum:
+            desc.iVal = py::cast<int>(value);
+            break;
+        case PropertyDesc::Bool:
+            desc.bVal = py::cast<bool>(value);
+            break;
+        case PropertyDesc::String:
+            desc.sVal = py::cast<std::string>(value);
+            break;
+        case PropertyDesc::Vec2:
+        case PropertyDesc::Vec3:
+        case PropertyDesc::Vec4:
+        case PropertyDesc::Color: {
+            const auto components = py::reinterpret_borrow<py::sequence>(value);
+            const int count = desc.type == PropertyDesc::Vec2 ? 2 : desc.type == PropertyDesc::Vec3 ? 3 : 4;
+            if (py::len(components) != count)
+                throw py::value_error("Property batch vector value has the wrong component count.");
+            for (int component = 0; component < count; ++component)
+                desc.fVal[component] = py::cast<float>(components[component]);
+            break;
+        }
+        }
+    }
 }
 
 py::dict EncodePropertyChanges(const std::vector<PropertyChange> &changes)
@@ -180,6 +223,62 @@ py::dict EncodePropertyChanges(const std::vector<PropertyChange> &changes)
 
 void RegisterGUIBindings(py::module_ &m)
 {
+    m.def("set_gui_semantic_capture_enabled", &InxGUISemantics::SetCaptureEnabled, py::arg("enabled"),
+          "Enable or disable the read-only editor UI semantic capture registry.");
+    m.def(
+        "request_gui_semantic_snapshot", []() { return InxGUISemantics::RequestSnapshot(); },
+        "Request one semantic UI snapshot from the next rendered Editor frame.");
+    m.def(
+        "get_gui_semantic_snapshot",
+        []() {
+            const InxGUISemanticSnapshot snapshot = InxGUISemantics::GetSnapshot();
+            py::dict result;
+            result["capture_enabled"] = snapshot.captureEnabled;
+            result["frame"] = snapshot.frame;
+            result["snapshot_id"] = std::to_string(snapshot.frame);
+            result["request_sequence"] = snapshot.requestSequence;
+            result["input_sequence"] = snapshot.inputSequence;
+            result["mouse"] = py::make_tuple(snapshot.mouseX, snapshot.mouseY);
+            result["wants_text_input"] = snapshot.wantsTextInput;
+            result["focused_window"] = snapshot.focusedWindow;
+            result["focused_window_id"] = snapshot.focusedWindowId;
+            py::list targets;
+            for (const auto &target : snapshot.targets) {
+                py::dict item;
+                item["id"] = target.id;
+                item["semantic_id"] = target.semanticId;
+                item["label"] = target.label;
+                item["kind"] = target.kind;
+                item["window"] = target.window;
+                item["window_id"] = target.windowId;
+                if (!target.occludedByWindow.empty()) {
+                    item["occluded_by_window"] = target.occludedByWindow;
+                    item["occluded_by_window_id"] = target.occludedByWindowId;
+                }
+                item["item_id"] = target.itemId;
+                item["rect"] = py::make_tuple(target.x, target.y, target.width, target.height);
+                item["has_click_point"] = target.hasClickPoint;
+                if (target.hasClickPoint)
+                    item["click_point"] = py::make_tuple(target.clickX, target.clickY);
+                item["enabled"] = target.enabled;
+                item["visible"] = target.visible;
+                item["active"] = target.active;
+                item["focused"] = target.focused;
+                if (target.hasBoolValue) {
+                    item["value"] = target.boolValue;
+                    item["checked"] = target.boolValue;
+                } else if (target.hasNumericValue) {
+                    item["value"] = target.numericValue;
+                } else if (target.hasStringValue) {
+                    item["value"] = target.stringValue;
+                }
+                targets.append(std::move(item));
+            }
+            result["targets"] = std::move(targets);
+            return result;
+        },
+        "Return targets actually rendered by the latest captured editor UI frame.");
+
     // ── Editor theme single source of truth ─────────────────────────────
     // Python's Theme class calls these once at import and overrides its
     // class attributes by name, so styling is defined in C++
@@ -335,22 +434,23 @@ void RegisterGUIBindings(py::module_ &m)
         .def(
             "vector2",
             [](InxGUIContext &ctx, const std::string &label, float x, float y, float speed,
-               float labelWidth) -> py::tuple {
+               float labelWidth, const std::string &semanticId) -> py::tuple {
                 float value[2] = {x, y};
-                ctx.Vector2Control(label, value, speed, labelWidth);
+                ctx.Vector2Control(label, value, speed, labelWidth, semanticId);
                 return py::make_tuple(py::float_(value[0]), py::float_(value[1]));
             },
-            py::arg("label"), py::arg("x"), py::arg("y"), py::arg("speed") = 0.1f, py::arg("label_width") = 0.0f)
+            py::arg("label"), py::arg("x"), py::arg("y"), py::arg("speed") = 0.1f,
+            py::arg("label_width") = 0.0f, py::arg("semantic_id") = "")
         .def(
             "vector3",
             [](InxGUIContext &ctx, const std::string &label, float x, float y, float z, float speed,
-               float labelWidth) -> py::tuple {
+               float labelWidth, const std::string &semanticId) -> py::tuple {
                 float value[3] = {x, y, z};
-                ctx.Vector3Control(label, value, speed, labelWidth);
+                ctx.Vector3Control(label, value, speed, labelWidth, semanticId);
                 return py::make_tuple(py::float_(value[0]), py::float_(value[1]), py::float_(value[2]));
             },
             py::arg("label"), py::arg("x"), py::arg("y"), py::arg("z"), py::arg("speed") = 0.1f,
-            py::arg("label_width") = 0.0f)
+            py::arg("label_width") = 0.0f, py::arg("semantic_id") = "")
         .def(
             "vector4",
             [](InxGUIContext &ctx, const std::string &label, float x, float y, float z, float w, float speed,
@@ -370,6 +470,10 @@ void RegisterGUIBindings(py::module_ &m)
                 return currentItem;
             },
             py::arg("label"), py::arg("current_item"), py::arg("items"), py::arg("popup_max_height_in_items") = -1)
+        .def("searchable_combo", &InxGUIContext::SearchableCombo, py::arg("id"), py::arg("current_item"),
+             py::arg("items"), py::arg("width") = 0.0f, py::arg("max_visible_items") = 8,
+             py::arg("search_hint") = "Filter...", py::arg("empty_text") = "No results",
+             "Render the shared keyboard-navigable searchable dropdown")
         .def(
             "list_box",
             [](InxGUIContext &ctx, const std::string &label, int currentItem, const std::vector<std::string> &items,
@@ -420,9 +524,24 @@ void RegisterGUIBindings(py::module_ &m)
         .def("begin_popup_context_item", &InxGUIContext::BeginPopupContextItem, py::arg("id") = "",
              py::arg("mouse_button") = 1, "Open context popup on right-click of last item")
         .def("begin_popup_context_window", &InxGUIContext::BeginPopupContextWindow, py::arg("id") = "",
-             py::arg("mouse_button") = 1, "Open context popup on right-click anywhere in window")
+             py::arg("mouse_button") = 1, py::arg("no_open_over_items") = false,
+             "Open context popup on right-click in a window, optionally excluding rendered items")
         .def("end_popup", &InxGUIContext::EndPopup)
         .def("close_current_popup", &InxGUIContext::CloseCurrentPopup, "Close current popup")
+        .def("record_semantic_item", &InxGUIContext::RecordSemanticItem, py::arg("kind"), py::arg("label"),
+             py::arg("enabled") = true, py::arg("semantic_id") = "",
+             py::arg("bool_value") = std::nullopt,
+             py::arg("numeric_value") = std::nullopt,
+             py::arg("string_value") = std::nullopt,
+             "Record a stable semantic identity for the previously rendered widget.")
+        .def("record_semantic_rect", &InxGUIContext::RecordSemanticRect, py::arg("kind"), py::arg("label"),
+             py::arg("x"), py::arg("y"), py::arg("width"), py::arg("height"), py::arg("enabled") = true,
+             py::arg("semantic_id") = "", "Record a semantic target for engine UI drawn without an ImGui item.")
+        .def("record_semantic_window", &InxGUIContext::RecordSemanticWindow, py::arg("kind"), py::arg("label"),
+             py::arg("semantic_id") = "", "Record a stable semantic identity for the current window.")
+        .def_property_readonly(
+            "semantic_capture_enabled", [](const InxGUIContext &) { return InxGUISemantics::IsCaptureEnabled(); },
+            "Whether this GUI frame is collecting a requested semantic snapshot.")
         .def("begin_tooltip", &InxGUIContext::BeginTooltip)
         .def("end_tooltip", &InxGUIContext::EndTooltip)
         .def("set_tooltip", &InxGUIContext::SetTooltip)
@@ -490,6 +609,7 @@ void RegisterGUIBindings(py::module_ &m)
         .def("is_item_active", &InxGUIContext::IsItemActive)
         .def("is_any_item_active", &InxGUIContext::IsAnyItemActive)
         .def("is_item_hovered", &InxGUIContext::IsItemHovered)
+        .def("is_item_focused", &InxGUIContext::IsItemFocused)
         .def("set_keyboard_focus_here", &InxGUIContext::SetKeyboardFocusHere, py::arg("offset") = 0,
              "Set keyboard focus to the next item (or previous with negative offset)")
         .def("is_item_deactivated", &InxGUIContext::IsItemDeactivated,
@@ -746,7 +866,23 @@ void RegisterGUIBindings(py::module_ &m)
                 return EncodePropertyChanges(ctx.RenderPropertyBatch(plan->descriptors, labelWidth));
             },
             py::arg("plan"), py::arg("label_width"),
-            "Render a reusable native property batch plan. Returns {index: new_value} for changed fields.");
+            "Render a reusable native property batch plan. Returns {index: new_value} for changed fields.")
+        .def(
+            "render_property_batch_plan_values",
+            [](InxGUIContext &ctx, const std::shared_ptr<PropertyBatchPlan> &plan, py::sequence values,
+               float labelWidth) -> py::dict {
+                if (!plan)
+                    return py::dict();
+                UpdatePropertyBatchValues(*plan, values);
+                return EncodePropertyChanges(ctx.RenderPropertyBatch(plan->descriptors, labelWidth));
+            },
+            py::arg("plan"), py::arg("values"), py::arg("label_width"),
+            "Update only the values of a compiled property plan, render it, and return changed fields.")
+        .def("render_object_field_chrome", &InxGUIContext::RenderObjectFieldChrome, py::arg("field_id"),
+             py::arg("display_text"), py::arg("type_hint"), py::arg("selected") = false,
+             py::arg("clickable") = true, py::arg("has_picker") = false, py::arg("picker_texture_id") = 0,
+             py::arg("semantic_id") = "",
+             "Render steady-state object-reference chrome in one native call; returns interaction flags.");
 
     py::class_<InxGUIRenderable, PyGUIRenderable, std::shared_ptr<InxGUIRenderable>>(m, "InxGUIRenderable",
                                                                                      py::dynamic_attr())
@@ -790,6 +926,20 @@ void RegisterGUIBindings(py::module_ &m)
         .def("get_warning_count", &ConsolePanel::GetWarningCount, "Get count of warning messages")
         .def("get_error_count", &ConsolePanel::GetErrorCount, "Get count of error messages")
         .def("select_latest_entry", &ConsolePanel::SelectLatestEntry, "Select last visible entry and focus window")
+        .def("_select_entry", &ConsolePanel::SelectEntry, py::arg("uid"))
+        .def_property_readonly("_selected_uid", &ConsolePanel::GetSelectedUid)
+        .def_property_readonly("_revision", &ConsolePanel::GetRevision)
+        .def("_get_status_snapshot",
+             [](ConsolePanel &self) {
+                 std::string message;
+                 std::string level;
+                 int infoCount = 0;
+                 int warningCount = 0;
+                 int errorCount = 0;
+                 uint64_t uid = 0;
+                 self.GetStatusBarSnapshot(message, level, infoCount, warningCount, errorCount, uid);
+                 return py::make_tuple(message, level, infoCount, warningCount, errorCount, uid);
+             })
         .def_readwrite("show_info", &ConsolePanel::showInfo)
         .def_readwrite("show_warnings", &ConsolePanel::showWarnings)
         .def_readwrite("show_errors", &ConsolePanel::showErrors)
@@ -797,7 +947,9 @@ void RegisterGUIBindings(py::module_ &m)
         .def_readwrite("clear_on_play", &ConsolePanel::clearOnPlay)
         .def_readwrite("error_pause", &ConsolePanel::errorPause)
         .def_readwrite("auto_scroll", &ConsolePanel::autoScroll)
-        .def_readwrite("on_double_click_entry", &ConsolePanel::onDoubleClickEntry);
+        .def_readwrite("on_double_click_entry", &ConsolePanel::onDoubleClickEntry)
+        .def_readwrite("on_error_pause", &ConsolePanel::onErrorPause)
+        .def_readwrite("on_request_focus", &ConsolePanel::onRequestFocus);
 
     // ── PlayState enum ─────────────────────────────────────────────────
     py::enum_<PlayState>(m, "PlayState")
@@ -820,13 +972,8 @@ void RegisterGUIBindings(py::module_ &m)
             "set_console_panel",
             [](StatusBarPanel &self, std::shared_ptr<ConsolePanel> panel) { self.SetConsolePanel(panel.get()); },
             py::arg("console"), py::keep_alive<1, 2>(), "Wire to ConsolePanel for click-to-select-latest")
-        .def("set_latest_message", &StatusBarPanel::SetLatestMessage, py::arg("message"), py::arg("level"),
-             "Show a new log message in the left zone")
-        .def("clear_counts", &StatusBarPanel::ClearCounts, "Reset counts and latest message")
         .def("set_engine_status", &StatusBarPanel::SetEngineStatus, py::arg("text"), py::arg("progress"),
-             "Update engine-status indicator")
-        .def("increment_warn_count", &StatusBarPanel::IncrementWarnCount)
-        .def("increment_error_count", &StatusBarPanel::IncrementErrorCount);
+             py::arg("kind") = "activity", "Update engine-status indicator");
 
     // ── ToolbarPanel ───────────────────────────────────────────────────
     py::class_<ToolbarPanel, EditorPanel, std::shared_ptr<ToolbarPanel>>(m, "ToolbarPanel")
@@ -844,7 +991,9 @@ void RegisterGUIBindings(py::module_ &m)
             [](const ToolbarPanel &self) -> py::dict {
                 auto s = self.GetCameraSettings();
                 py::dict d;
+                d["orthographic"] = s.orthographic;
                 d["fov"] = s.fov;
+                d["orthographic_size"] = s.orthographicSize;
                 d["rotation_speed"] = s.rotationSpeed;
                 d["pan_speed"] = s.panSpeed;
                 d["zoom_speed"] = s.zoomSpeed;
@@ -857,7 +1006,9 @@ void RegisterGUIBindings(py::module_ &m)
             "set_camera_settings",
             [](ToolbarPanel &self, py::dict d) {
                 ToolbarPanel::CameraSettings s;
+                s.orthographic = d.contains("orthographic") ? d["orthographic"].cast<bool>() : false;
                 s.fov = d.contains("fov") ? d["fov"].cast<float>() : 60.0f;
+                s.orthographicSize = d.contains("orthographic_size") ? d["orthographic_size"].cast<float>() : 5.0f;
                 s.rotationSpeed = d.contains("rotation_speed") ? d["rotation_speed"].cast<float>() : 0.05f;
                 s.panSpeed = d.contains("pan_speed") ? d["pan_speed"].cast<float>() : 1.0f;
                 s.zoomSpeed = d.contains("zoom_speed") ? d["zoom_speed"].cast<float>() : 1.0f;
@@ -870,9 +1021,12 @@ void RegisterGUIBindings(py::module_ &m)
             "sync_camera_from_engine", [](const ToolbarPanel &self) -> py::object { return py::none(); },
             [](ToolbarPanel &self, py::function fn) {
                 self.syncCameraFromEngine = [fn]() -> ToolbarPanel::CameraSettings {
+                    py::gil_scoped_acquire acquire;
                     py::dict d = fn();
                     ToolbarPanel::CameraSettings s;
+                    s.orthographic = d.contains("orthographic") ? d["orthographic"].cast<bool>() : false;
                     s.fov = d.contains("fov") ? d["fov"].cast<float>() : 60.0f;
+                    s.orthographicSize = d.contains("orthographic_size") ? d["orthographic_size"].cast<float>() : 5.0f;
                     s.rotationSpeed = d.contains("rotation_speed") ? d["rotation_speed"].cast<float>() : 0.05f;
                     s.panSpeed = d.contains("pan_speed") ? d["pan_speed"].cast<float>() : 1.0f;
                     s.zoomSpeed = d.contains("zoom_speed") ? d["zoom_speed"].cast<float>() : 1.0f;
@@ -886,8 +1040,11 @@ void RegisterGUIBindings(py::module_ &m)
             "apply_camera_to_engine", [](const ToolbarPanel &self) -> py::object { return py::none(); },
             [](ToolbarPanel &self, py::function fn) {
                 self.applyCameraToEngine = [fn](const ToolbarPanel::CameraSettings &s) {
+                    py::gil_scoped_acquire acquire;
                     py::dict d;
+                    d["orthographic"] = s.orthographic;
                     d["fov"] = s.fov;
+                    d["orthographic_size"] = s.orthographicSize;
                     d["rotation_speed"] = s.rotationSpeed;
                     d["pan_speed"] = s.panSpeed;
                     d["zoom_speed"] = s.zoomSpeed;
@@ -901,7 +1058,11 @@ void RegisterGUIBindings(py::module_ &m)
     // ── MenuBarPanel ───────────────────────────────────────────────────
     py::class_<MenuBarPanel, InxGUIRenderable, std::shared_ptr<MenuBarPanel>>(m, "MenuBarPanel")
         .def(py::init<>())
+        .def("invalidate_window_type_cache", &MenuBarPanel::InvalidateWindowTypeCache)
         .def_readwrite("on_save", &MenuBarPanel::onSave)
+        .def_readwrite("on_save_as", &MenuBarPanel::onSaveAs)
+        .def_readwrite("on_save_focused", &MenuBarPanel::onSaveFocused)
+        .def_readwrite("on_save_focused_as", &MenuBarPanel::onSaveFocusedAs)
         .def_readwrite("on_new_scene", &MenuBarPanel::onNewScene)
         .def_readwrite("on_request_close", &MenuBarPanel::onRequestClose)
         .def_readwrite("on_undo", &MenuBarPanel::onUndo)
@@ -933,8 +1094,13 @@ void RegisterGUIBindings(py::module_ &m)
         .def("clear_selection_and_notify", &HierarchyPanel::ClearSelectionAndNotify)
         .def("set_selected_object_by_id", &HierarchyPanel::SetSelectedObjectById, py::arg("id"),
              py::arg("clear_search") = false)
+        .def("set_selection_snapshot", &HierarchyPanel::SetSelectionSnapshot, py::arg("ids"), py::arg("primary"))
+        .def("set_runtime_hidden_ids", &HierarchyPanel::SetRuntimeHiddenIds, py::arg("ids"))
+        .def("set_scene_header_snapshot", &HierarchyPanel::SetSceneHeaderSnapshot, py::arg("scene_display_name"),
+             py::arg("prefab_mode"), py::arg("prefab_display_name"))
         .def("expand_to_object", &HierarchyPanel::ExpandToObject, py::arg("obj_id"))
         .def("set_pending_expand_id", &HierarchyPanel::SetPendingExpandId, py::arg("obj_id"))
+        .def("invalidate_scene_structure_cache", &HierarchyPanel::InvalidateSceneStructureCache)
         // Selection callbacks
         .def_readwrite("is_selected", &HierarchyPanel::isSelected)
         .def_readwrite("select_id", &HierarchyPanel::selectId)
@@ -1028,10 +1194,12 @@ void RegisterGUIBindings(py::module_ &m)
         .def_readwrite("create_script", &ProjectPanel::createScript)
         .def_readwrite("create_shader", &ProjectPanel::createShader)
         .def_readwrite("create_material", &ProjectPanel::createMaterial)
+        .def_readwrite("create_physic_material", &ProjectPanel::createPhysicMaterial)
         .def_readwrite("create_scene", &ProjectPanel::createScene)
         .def_readwrite("create_animclip", &ProjectPanel::createAnimClip)
         .def_readwrite("create_animclip3d", &ProjectPanel::createAnimClip3D)
         .def_readwrite("create_animfsm", &ProjectPanel::createAnimFsm)
+        .def_readwrite("create_vfxsystem", &ProjectPanel::createVfxSystem)
         .def_readwrite("create_animtimeline", &ProjectPanel::createAnimTimeline)
         .def_readwrite("create_timelinefsm", &ProjectPanel::createTimelineFsm)
         .def_readwrite("create_prefab_from_hierarchy", &ProjectPanel::createPrefabFromHierarchy)
@@ -1045,6 +1213,7 @@ void RegisterGUIBindings(py::module_ &m)
         .def_readwrite("open_prefab_mode", &ProjectPanel::openPrefabMode)
         .def_readwrite("open_anim_clip", &ProjectPanel::openAnimClip)
         .def_readwrite("open_anim_fsm", &ProjectPanel::openAnimFsm)
+        .def_readwrite("open_vfx_system", &ProjectPanel::openVfxSystem)
         .def_readwrite("open_anim_timeline", &ProjectPanel::openAnimTimeline)
         .def_readwrite("open_timeline_fsm", &ProjectPanel::openTimelineFsm)
         .def_readwrite("reveal_in_explorer", &ProjectPanel::revealInExplorer)

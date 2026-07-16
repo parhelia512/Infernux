@@ -7,8 +7,9 @@ from typing import Any, Dict, Optional, Type
 from .serialized_field import FieldMetadata
 
 
-def get_serializable_class(qualname: str) -> Optional[Type[SerializableObject]]:
-    """Look up a registered SerializableObject subclass by qualname."""
+def get_serializable_type_id(value: type | SerializableObject) -> str: ...
+def get_serializable_class(type_id: str) -> Optional[Type[SerializableObject]]:
+    """Look up a registered SerializableObject subclass by module:qualname."""
     ...
 
 

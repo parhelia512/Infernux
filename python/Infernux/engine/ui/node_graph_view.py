@@ -153,6 +153,10 @@ class NodeGraphView:
 
     def __init__(self) -> None:
         self.graph: Optional[NodeGraph] = None
+        # Hosts set this to a stable editor-specific namespace (for example
+        # ``animfsm.graph``). It keeps generic canvas semantics unambiguous
+        # when several graph editors are open in one Editor session.
+        self.semantic_namespace: str = "node_graph"
 
         # Camera
         self.pan_x: float = 50.0
@@ -186,6 +190,9 @@ class NodeGraphView:
 
         # Cached layouts
         self._layouts: Dict[str, _NodeLayout] = {}
+        # Test doubles predating request-driven capture do not expose the
+        # native property, so direct helper tests keep semantic behavior.
+        self._semantic_capture_active: bool = True
 
         # Hovered link uid (for highlight)
         self._hovered_link: str = ""
@@ -229,8 +236,57 @@ class NodeGraphView:
 
     # ── Public API ────────────────────────────────────────────────────
 
+    def reset_interaction_state(self) -> None:
+        """Drop selection and transient gestures when the host replaces the graph."""
+        self.selected_nodes.clear()
+        self.selected_link = ""
+        self._dragging_pin = False
+        self._drag_src_node = ""
+        self._drag_src_pin = ""
+        self._dragging_node = False
+        self._drag_node_id = ""
+        self._panning = False
+        self._layouts.clear()
+        self._hovered_link = ""
+        self._hovered_pin = ("", "", PinKind.OUTPUT)
+        self._header_color_popup_node_uid = ""
+        self._open_header_color_popup_next_frame = False
+        self._header_color_popup_initial_color = None
+        self._header_color_popup_changed = False
+
     def register_body_renderer(self, type_id: str, renderer: Callable) -> None:
         self._body_renderers[type_id] = renderer
+
+    def _semantic_id(self, suffix: str) -> str:
+        root = str(self.semantic_namespace or "node_graph").strip(".") or "node_graph"
+        return f"{root}.{suffix}" if suffix else root
+
+    def _record_semantic_item(
+        self, ctx, kind: str, label: str, enabled: bool, suffix: str, **values
+    ) -> None:
+        if not self._semantic_capture_active:
+            return
+        recorder = getattr(ctx, "record_semantic_item", None)
+        if callable(recorder):
+            recorder(kind, label, enabled, self._semantic_id(suffix), **values)
+
+    def _record_semantic_rect(
+        self,
+        ctx,
+        kind: str,
+        label: str,
+        enabled: bool,
+        suffix: str,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+    ) -> None:
+        if not self._semantic_capture_active:
+            return
+        recorder = getattr(ctx, "record_semantic_rect", None)
+        if callable(recorder):
+            recorder(kind, label, x, y, width, height, enabled, self._semantic_id(suffix))
 
     def get_layout(self, uid: str) -> Optional[_NodeLayout]:
         """Return cached screen-space layout for *uid*, or None."""
@@ -249,14 +305,31 @@ class NodeGraphView:
     def center_on_nodes(self) -> None:
         if not self.graph or not self.graph.nodes:
             return
-        min_x = min(n.pos_x for n in self.graph.nodes)
-        max_x = max(n.pos_x for n in self.graph.nodes)
-        min_y = min(n.pos_y for n in self.graph.nodes)
-        max_y = max(n.pos_y for n in self.graph.nodes)
-        cx = (min_x + max_x) * 0.5
-        cy = (min_y + max_y) * 0.5
-        self.pan_x = self._canvas_w * 0.5 - cx * self.zoom
-        self.pan_y = self._canvas_h * 0.5 - cy * self.zoom
+        bounds = []
+        for node in self.graph.nodes:
+            typedef = self.graph.get_type(node.type_id)
+            if typedef is None:
+                continue
+            max_pins = max(len(typedef.input_pins()), len(typedef.output_pins()), 1)
+            extra_pad = getattr(typedef, "body_bottom_pad", 0.0) or 0.0
+            width = float(typedef.min_width)
+            height = _NODE_HEADER_H + max_pins * _NODE_PIN_ROW_H + _NODE_BODY_MIN_H + extra_pad
+            bounds.append((node.pos_x, node.pos_y, node.pos_x + width, node.pos_y + height))
+        if not bounds:
+            return
+
+        min_x = min(value[0] for value in bounds)
+        min_y = min(value[1] for value in bounds)
+        max_x = max(value[2] for value in bounds)
+        max_y = max(value[3] for value in bounds)
+        bounds_w = max(max_x - min_x, 1.0)
+        bounds_h = max(max_y - min_y, 1.0)
+        padding = 32.0
+        usable_w = max(self._canvas_w - padding * 2.0, 1.0)
+        usable_h = max(self._canvas_h - padding * 2.0, 1.0)
+        self.zoom = max(_ZOOM_MIN, min(1.0, usable_w / bounds_w, usable_h / bounds_h))
+        self.pan_x = (self._canvas_w - bounds_w * self.zoom) * 0.5 - min_x * self.zoom
+        self.pan_y = (self._canvas_h - bounds_h * self.zoom) * 0.5 - min_y * self.zoom
 
     # ── Main render ───────────────────────────────────────────────────
 
@@ -278,11 +351,13 @@ class NodeGraphView:
 
         self._origin_x = ctx.get_window_pos_x()
         self._origin_y = ctx.get_window_pos_y()
+        self._semantic_capture_active = bool(getattr(ctx, "semantic_capture_enabled", True))
 
         # Invisible button for mouse events
         ctx.set_cursor_pos_x(0)
         ctx.set_cursor_pos_y(0)
         ctx.invisible_button("##canvas_bg", canvas_w, canvas_h)
+        self._record_semantic_item(ctx, "node_graph_canvas", "Node Graph", True, "canvas")
         canvas_hovered = ctx.is_item_hovered()
 
         # Clipping
@@ -434,6 +509,60 @@ class NodeGraphView:
     def _draw_nodes(self, ctx) -> None:
         for uid, layout in self._layouts.items():
             self._draw_one_node(ctx, layout)
+            if not self._semantic_capture_active:
+                continue
+            label = str(layout.node.data.get("label", layout.typedef.label))
+            center_x = layout.sx + layout.w * 0.5
+            center_y = layout.sy + layout.h * 0.5
+            center_enabled = self._node_drag_point_hits(uid, center_x, center_y)
+            self._record_semantic_rect(
+                ctx,
+                "node_graph_node",
+                label,
+                center_enabled,
+                f"node.{uid}",
+                layout.sx,
+                layout.sy,
+                layout.w,
+                layout.h,
+            )
+            drag_point = self._find_node_drag_semantic_point(uid, layout)
+            drag_x, drag_y = drag_point or (center_x, center_y)
+            handle_size = 8.0 * max(1.0, self.zoom)
+            self._record_semantic_rect(
+                ctx,
+                "node_graph_node_drag_handle",
+                f"{label} Drag",
+                drag_point is not None,
+                f"node.{uid}.drag",
+                drag_x - handle_size * 0.5,
+                drag_y - handle_size * 0.5,
+                handle_size,
+                handle_size,
+            )
+
+    def _node_drag_point_hits(self, uid: str, x: float, y: float) -> bool:
+        pin_node, pin_id, _pin_kind = self._hit_test_pin(x, y)
+        if pin_id is not None or pin_node:
+            return False
+        if self._hit_test_header_color_swatch(x, y):
+            return False
+        return self._hit_test_node(x, y) == uid
+
+    def _find_node_drag_semantic_point(self, uid: str, layout: _NodeLayout) -> Optional[Tuple[float, float]]:
+        sx, sy, w, h = layout.sx, layout.sy, layout.w, layout.h
+        candidates = [
+            (sx + w * 0.5, sy + h * 0.5),
+            (sx + 6.0 * self.zoom, sy + h * 0.65),
+            (sx + w - 6.0 * self.zoom, sy + h * 0.65),
+            (sx + w * 0.25, sy + h * 0.75),
+            (sx + w * 0.75, sy + h * 0.75),
+            (sx + w * 0.5, sy + h * 0.85),
+        ]
+        for x, y in candidates:
+            if self._node_drag_point_hits(uid, x, y):
+                return x, y
+        return None
 
     def _draw_one_node(self, ctx, layout: _NodeLayout) -> None:
         sx, sy, w, h = layout.sx, layout.sy, layout.w, layout.h
@@ -517,6 +646,7 @@ class NodeGraphView:
             self._draw_pin(ctx, pl, PinKind.INPUT, pin_r, node_uid)
         for pl in layout.output_pins:
             self._draw_pin(ctx, pl, PinKind.OUTPUT, pin_r, node_uid)
+        self._record_pin_semantics(ctx, layout, str(label))
 
         # Pin labels
         dim_font = max(10.5, 12.5 * z)
@@ -541,11 +671,45 @@ class NodeGraphView:
                       + max(len(layout.input_pins), len(layout.output_pins)) * row_h)
             renderer(ctx, layout.node, sx + pad_x, body_y, w - pad_x * 2)
 
+    def _record_pin_semantics(self, ctx, layout: _NodeLayout, node_label: str) -> None:
+        if not self._semantic_capture_active:
+            return
+        pin_hit_r = _PIN_HIT_RADIUS * self.zoom
+        node_uid = layout.node.uid
+        for pl in layout.input_pins:
+            hit_node, hit_pin, hit_kind = self._hit_test_pin(pl.cx, pl.cy)
+            enabled = hit_node == node_uid and hit_pin == pl.pin_def.id and hit_kind == PinKind.INPUT
+            self._record_semantic_rect(
+                ctx,
+                "node_graph_port",
+                f"{node_label} {pl.pin_def.label} Input",
+                enabled,
+                f"port.{node_uid}.input.{pl.pin_def.id}",
+                pl.cx - pin_hit_r,
+                pl.cy - pin_hit_r,
+                pin_hit_r * 2.0,
+                pin_hit_r * 2.0,
+            )
+        for pl in layout.output_pins:
+            hit_node, hit_pin, hit_kind = self._hit_test_pin(pl.cx, pl.cy)
+            enabled = hit_node == node_uid and hit_pin == pl.pin_def.id and hit_kind == PinKind.OUTPUT
+            self._record_semantic_rect(
+                ctx,
+                "node_graph_port",
+                f"{node_label} {pl.pin_def.label} Output",
+                enabled,
+                f"port.{node_uid}.output.{pl.pin_def.id}",
+                pl.cx - pin_hit_r,
+                pl.cy - pin_hit_r,
+                pin_hit_r * 2.0,
+                pin_hit_r * 2.0,
+            )
+
     def _draw_pin(self, ctx, pl: _PinLayout, kind: PinKind, radius: float,
                    node_uid: str = "") -> None:
         color = pl.pin_def.color
         z = self.zoom
-        connected = self._is_pin_connected(pl.pin_def.id, kind == PinKind.OUTPUT)
+        connected = self._is_pin_connected(node_uid, pl.pin_def.id, kind == PinKind.OUTPUT)
         # Crisp dot: dark outline (matches the dark theme) + filled/hollow core.
         ctx.draw_filled_circle(pl.cx, pl.cy, radius + 1.2 * z, 0.08, 0.08, 0.09, 1.0)
         if connected:
@@ -560,13 +724,13 @@ class NodeGraphView:
             ctx.draw_circle(pl.cx, pl.cy, radius + 3.0 * self.zoom,
                             *_PIN_HOVER_COLOR, 1.8 * self.zoom)
 
-    def _is_pin_connected(self, pin_id: str, is_output: bool) -> bool:
+    def _is_pin_connected(self, node_uid: str, pin_id: str, is_output: bool) -> bool:
         if self.graph is None:
             return False
         for lk in self.graph.links:
-            if is_output and lk.source_pin == pin_id:
+            if is_output and lk.source_node == node_uid and lk.source_pin == pin_id:
                 return True
-            if not is_output and lk.target_pin == pin_id:
+            if not is_output and lk.target_node == node_uid and lk.target_pin == pin_id:
                 return True
         return False
 
@@ -603,6 +767,41 @@ class NodeGraphView:
                 color, thick = _LINK_DEFAULT_COLOR, _LINK_THICKNESS * self.zoom
 
             self._draw_link_with_arrow(ctx, sx2, sy2, ex2, ey2, color, thick)
+            if not self._semantic_capture_active:
+                continue
+            points = _bezier_points(sx2, sy2, ex2, ey2)
+            hit_point = self._find_link_semantic_point(lk.uid, points)
+            mid_x, mid_y = hit_point or points[len(points) // 2]
+            source = self.graph.find_node(lk.source_node)
+            target = self.graph.find_node(lk.target_node)
+            source_label = str(source.data.get("label", lk.source_node)) if source else lk.source_node
+            target_label = str(target.data.get("label", lk.target_node)) if target else lk.target_node
+            link_hit_r = 7.0 * max(1.0, self.zoom)
+            self._record_semantic_rect(
+                ctx,
+                "node_graph_link",
+                f"{source_label} to {target_label}",
+                hit_point is not None,
+                f"link.{lk.uid}",
+                mid_x - link_hit_r,
+                mid_y - link_hit_r,
+                link_hit_r * 2.0,
+                link_hit_r * 2.0,
+            )
+
+    def _find_link_semantic_point(self, link_uid: str, points: List[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
+        if not points:
+            return None
+        midpoint = len(points) // 2
+        indices = sorted(range(len(points)), key=lambda index: abs(index - midpoint))
+        for index in indices:
+            x, y = points[index]
+            pin_node, pin_id, _pin_kind = self._hit_test_pin(x, y)
+            if pin_id is not None or pin_node or self._hit_test_node(x, y):
+                continue
+            if self._hit_test_link(x, y) == link_uid:
+                return x, y
+        return None
 
     def _draw_pending_link(self, ctx) -> None:
         src_l = self._layouts.get(self._drag_src_node)
@@ -639,12 +838,15 @@ class NodeGraphView:
         a_half = 7.0 * z
         tipx, tipy = ex - dx * gap, ey - dy * gap
         basex, basey = tipx - dx * a_len, tipy - dy * a_len
+        # Draw through the arrow base exactly. Distance-to-end trimming can
+        # stop at the previous coarse Bezier sample and leave a visible gap.
         cutoff = gap + a_len
         for i in range(len(pts) - 1):
             ax, ay = pts[i]
-            if math.hypot(ex - ax, ey - ay) <= cutoff:
-                break
             bx, by = pts[i + 1]
+            if math.hypot(ex - bx, ey - by) <= cutoff:
+                ctx.draw_line(ax, ay, basex, basey, *color, thickness)
+                break
             ctx.draw_line(ax, ay, bx, by, *color, thickness)
         self._draw_filled_arrow(ctx, tipx, tipy, basex, basey, a_half, color)
 
@@ -1037,6 +1239,8 @@ class NodeGraphView:
 
     def _find_drag_target_pin(self, mx, my):
         """Find the nearest valid target pin during a link drag."""
+        if self.graph is None:
+            return "", "", PinKind.OUTPUT
         hit_r = _PIN_HIT_RADIUS * self.zoom
         want_kind = (PinKind.INPUT if self._drag_src_kind == PinKind.OUTPUT
                      else PinKind.OUTPUT)
@@ -1047,7 +1251,16 @@ class NodeGraphView:
                     else layout.output_pins)
             for pl in pins:
                 if _dist(mx, my, pl.cx, pl.cy) <= hit_r:
-                    return uid, pl.pin_def.id, want_kind
+                    if self._drag_src_kind == PinKind.OUTPUT:
+                        endpoints = (
+                            self._drag_src_node, self._drag_src_pin, uid, pl.pin_def.id
+                        )
+                    else:
+                        endpoints = (
+                            uid, pl.pin_def.id, self._drag_src_node, self._drag_src_pin
+                        )
+                    if self.graph.validate_link(*endpoints):
+                        return uid, pl.pin_def.id, want_kind
         return "", "", PinKind.OUTPUT
 
     def _hit_test_link(self, mx, my, threshold=6.0):
@@ -1096,6 +1309,8 @@ class NodeGraphView:
         else:
             src_n, src_p = target_node, target_pin
             dst_n, dst_p = self._drag_src_node, self._drag_src_pin
+        if self.graph is not None and not self.graph.validate_link(src_n, src_p, dst_n, dst_p):
+            return
         if self.on_link_created:
             self.on_link_created(src_n, src_p, dst_n, dst_p)
         elif self.graph:
@@ -1112,9 +1327,21 @@ class NodeGraphView:
             return
 
         # Add node sub-menu
-        if ctx.begin_menu("Add Node"):
+        add_node_open = ctx.begin_menu("Add Node")
+        self._record_semantic_item(
+            ctx, "menu", "Add Node", True, "context.add_node", bool_value=add_node_open
+        )
+        if add_node_open:
             for typedef in self.graph.registered_types():
-                if ctx.menu_item(typedef.label, "", False, True):
+                added = ctx.menu_item(typedef.label, "", False, True)
+                self._record_semantic_item(
+                    ctx,
+                    "menu_item",
+                    typedef.label,
+                    True,
+                    f"context.add_node.{typedef.type_id}",
+                )
+                if added:
                     if self.on_node_add_request:
                         self.on_node_add_request(typedef.type_id, gx, gy)
                     else:
@@ -1124,7 +1351,9 @@ class NodeGraphView:
         # Delete selected nodes
         if self.selected_nodes:
             label = f"Delete Node ({len(self.selected_nodes)})"
-            if ctx.menu_item(label, "", False, True):
+            deleted = ctx.menu_item(label, "", False, True)
+            self._record_semantic_item(ctx, "menu_item", label, True, "context.delete_nodes")
+            if deleted:
                 if self.on_nodes_deleted:
                     self.on_nodes_deleted(list(self.selected_nodes))
                 else:
@@ -1134,7 +1363,9 @@ class NodeGraphView:
 
         # Delete selected link
         if self.selected_link:
-            if ctx.menu_item("Delete Link", "", False, True):
+            deleted = ctx.menu_item("Delete Link", "", False, True)
+            self._record_semantic_item(ctx, "menu_item", "Delete Link", True, "context.delete_link")
+            if deleted:
                 if self.on_link_deleted:
                     self.on_link_deleted(self.selected_link)
                 else:
@@ -1142,9 +1373,13 @@ class NodeGraphView:
                 self.selected_link = ""
 
         ctx.separator()
-        if ctx.menu_item("Center View", "", False, True):
+        centered = ctx.menu_item("Center View", "", False, True)
+        self._record_semantic_item(ctx, "menu_item", "Center View", True, "context.center_view")
+        if centered:
             self.center_on_nodes()
-        if ctx.menu_item("Reset Zoom", "", False, True):
+        reset_zoom = ctx.menu_item("Reset Zoom", "", False, True)
+        self._record_semantic_item(ctx, "menu_item", "Reset Zoom", True, "context.reset_zoom")
+        if reset_zoom:
             self.zoom = 1.0
 
 

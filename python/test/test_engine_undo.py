@@ -91,11 +91,13 @@ CreateGameObjectCommand = _undo_mod.CreateGameObjectCommand
 DeleteGameObjectCommand = _undo_mod.DeleteGameObjectCommand
 ReparentCommand = _undo_mod.ReparentCommand
 MoveGameObjectCommand = _undo_mod.MoveGameObjectCommand
-MaterialJsonCommand = _undo_mod.MaterialJsonCommand
+MaterialDocumentCommand = _undo_mod.MaterialDocumentCommand
 CompoundCommand = _undo_mod.CompoundCommand
 SelectionCommand = _undo_mod.SelectionCommand
 EditorSelectionCommand = _undo_mod.EditorSelectionCommand
 PrefabModeCommand = _undo_mod.PrefabModeCommand
+PrefabUnpackCommand = _undo_mod.PrefabUnpackCommand
+PrefabRevertCommand = _undo_mod.PrefabRevertCommand
 InspectorSnapshotCommand = _undo_mod.InspectorSnapshotCommand
 InspectorUndoTracker = _undo_mod.InspectorUndoTracker
 RenderStackFieldCommand = _undo_mod.RenderStackFieldCommand
@@ -115,15 +117,15 @@ def _patch_undo_modules(monkeypatch, attr: str, value):
 
 @contextmanager
 def _override_recreate_game_object(fn):
-    orig_root = _undo_mod._recreate_game_object_from_json
-    orig_sub = _recreate_mod._recreate_game_object_from_json
-    _undo_mod._recreate_game_object_from_json = fn
-    _recreate_mod._recreate_game_object_from_json = fn
+    orig_root = _undo_mod._recreate_game_object_from_document
+    orig_sub = _recreate_mod._recreate_game_object_from_document
+    _undo_mod._recreate_game_object_from_document = fn
+    _recreate_mod._recreate_game_object_from_document = fn
     try:
         yield
     finally:
-        _undo_mod._recreate_game_object_from_json = orig_root
-        _recreate_mod._recreate_game_object_from_json = orig_sub
+        _undo_mod._recreate_game_object_from_document = orig_root
+        _recreate_mod._recreate_game_object_from_document = orig_sub
 
 
 # ── Helpers ──
@@ -136,17 +138,18 @@ class _Obj:
 
 
 class _FakeComp:
-    """Fake component with serialize/deserialize for GenericComponentCommand."""
+    """Fake native component with typed document serialization."""
     def __init__(self):
         self.component_id = 42
         self.type_name = "FakeComp"
-        self._json = "{}"
+        self._document = {}
 
-    def serialize(self):
-        return self._json
+    def serialize_document(self):
+        return dict(self._document)
 
-    def deserialize(self, json_str):
-        self._json = json_str
+    def deserialize_document(self, document):
+        self._document = dict(document)
+        return True
 
 
 class _FakeStack:
@@ -334,21 +337,33 @@ class TestSetPropertyCommand:
 class TestGenericComponentCommand:
     def test_execute_and_undo(self):
         comp = _FakeComp()
-        cmd = GenericComponentCommand(comp, '{"old": 1}', '{"new": 2}')
+        cmd = GenericComponentCommand(comp, {"old": 1}, {"new": 2})
         cmd.execute()
-        assert comp._json == '{"new": 2}'
+        assert comp._document == {"new": 2}
         cmd.undo()
-        assert comp._json == '{"old": 1}'
+        assert comp._document == {"old": 1}
 
     def test_merge(self):
         comp = _FakeComp()
-        cmd1 = GenericComponentCommand(comp, "{}", '{"a":1}')
-        cmd2 = GenericComponentCommand(comp, '{"a":1}', '{"a":2}')
+        cmd1 = GenericComponentCommand(comp, {}, {"a": 1})
+        cmd2 = GenericComponentCommand(comp, {"a": 1}, {"a": 2})
         cmd2.timestamp = cmd1.timestamp + 0.1
         assert cmd1.can_merge(cmd2)
         cmd1.merge(cmd2)
         cmd1.execute()
-        assert comp._json == '{"a":2}'
+        assert comp._document == {"a": 2}
+
+    def test_documents_are_owned_by_command(self):
+        comp = _FakeComp()
+        old_document = {"value": [1]}
+        new_document = {"value": [2]}
+        cmd = GenericComponentCommand(comp, old_document, new_document)
+        old_document["value"].append(99)
+        new_document["value"].append(99)
+        cmd.execute()
+        assert comp._document == {"value": [2]}
+        cmd.undo()
+        assert comp._document == {"value": [1]}
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -369,41 +384,53 @@ class TestBuiltinPropertyCommand:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# MaterialJsonCommand
+# MaterialDocumentCommand
 # ══════════════════════════════════════════════════════════════════════
 
-class TestMaterialJsonCommand:
+class TestMaterialDocumentCommand:
     def test_execute_undo_redo(self):
         mat = _FakeComp()
         mat.guid = "test-guid"
-        cmd = MaterialJsonCommand(mat, '{"old":1}', '{"new":2}')
+        cmd = MaterialDocumentCommand(mat, {"old": 1}, {"new": 2})
         cmd.execute()
-        assert mat._json == '{"new":2}'
+        assert mat._document == {"new": 2}
         cmd.undo()
-        assert mat._json == '{"old":1}'
+        assert mat._document == {"old": 1}
         cmd.redo()
-        assert mat._json == '{"new":2}'
+        assert mat._document == {"new": 2}
 
     def test_marks_dirty_false(self):
         mat = _FakeComp()
-        cmd = MaterialJsonCommand(mat, "{}", "{}")
+        cmd = MaterialDocumentCommand(mat, {}, {})
         assert cmd.marks_dirty is False
 
     def test_merge(self):
         mat = _FakeComp()
         mat.guid = "g"
-        cmd1 = MaterialJsonCommand(mat, "{}", '{"a":1}')
-        cmd2 = MaterialJsonCommand(mat, '{"a":1}', '{"a":2}')
+        cmd1 = MaterialDocumentCommand(mat, {}, {"a": 1})
+        cmd2 = MaterialDocumentCommand(mat, {"a": 1}, {"a": 2})
         cmd2.timestamp = cmd1.timestamp + 0.1
         assert cmd1.can_merge(cmd2)
 
     def test_merge_rejected_different_edit_key(self):
         mat = _FakeComp()
         mat.guid = "g"
-        cmd1 = MaterialJsonCommand(mat, "{}", '{"a":1}', edit_key="property.a")
-        cmd2 = MaterialJsonCommand(mat, '{"a":1}', '{"b":2}', edit_key="property.b")
+        cmd1 = MaterialDocumentCommand(mat, {}, {"a": 1}, edit_key="property.a")
+        cmd2 = MaterialDocumentCommand(mat, {"a": 1}, {"b": 2}, edit_key="property.b")
         cmd2.timestamp = cmd1.timestamp + 0.1
         assert not cmd1.can_merge(cmd2)
+
+    def test_documents_are_owned_by_command(self):
+        mat = _FakeComp()
+        old_document = {"properties": {"x": [1]}}
+        new_document = {"properties": {"x": [2]}}
+        cmd = MaterialDocumentCommand(mat, old_document, new_document)
+        old_document["properties"]["x"].append(99)
+        new_document["properties"]["x"].append(99)
+        cmd.execute()
+        assert mat._document == {"properties": {"x": [2]}}
+        cmd.undo()
+        assert mat._document == {"properties": {"x": [1]}}
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -597,6 +624,49 @@ class TestEditorSelectionCommand:
         cmd.undo()
         cmd.redo()
         assert applied == [([1], ""), ([], "Assets/test.mat")]
+
+
+class TestPrefabUnpackCommand:
+    def test_execute_undo_redo_restore_complete_linkage(self, monkeypatch):
+        class _GameObject:
+            def __init__(self, object_id, guid, is_root=False, children=None):
+                self.id = object_id
+                self.prefab_guid = guid
+                self.prefab_root = is_root
+                self._children = list(children or [])
+
+            def get_children(self):
+                return list(self._children)
+
+        left = _GameObject(2, "prefab-guid")
+        right = _GameObject(3, "prefab-guid")
+        root = _GameObject(1, "prefab-guid", True, [left, right])
+        objects = {obj.id: obj for obj in (root, left, right)}
+
+        class _Scene:
+            @staticmethod
+            def find_by_id(object_id):
+                return objects.get(object_id)
+
+        monkeypatch.setattr(_structural_mod, "_get_active_scene", lambda: _Scene())
+
+        cmd = PrefabUnpackCommand(root.id)
+        cmd.execute()
+        assert [(obj.prefab_guid, obj.prefab_root) for obj in (root, left, right)] == [
+            ("", False), ("", False), ("", False),
+        ]
+
+        cmd.undo()
+        assert [(obj.prefab_guid, obj.prefab_root) for obj in (root, left, right)] == [
+            ("prefab-guid", True),
+            ("prefab-guid", False),
+            ("prefab-guid", False),
+        ]
+
+        cmd.redo()
+        assert [(obj.prefab_guid, obj.prefab_root) for obj in (root, left, right)] == [
+            ("", False), ("", False), ("", False),
+        ]
 
 
 class TestPrefabModeCommand:
@@ -836,6 +906,19 @@ class TestUndoManager:
     def test_suppress_context_manager(self, _reset_undo_manager):
         mgr = _reset_undo_manager
         assert not mgr.is_executing
+
+    def test_execute_reports_failure_without_recording(self, _reset_undo_manager):
+        mgr = _reset_undo_manager
+
+        class FailingCommand(UndoCommand):
+            def execute(self):
+                raise RuntimeError("expected test failure")
+
+            def undo(self):
+                pass
+
+        assert mgr.execute(FailingCommand("fail")) is False
+        assert not mgr.can_undo
         with mgr.suppress():
             assert mgr.is_executing
         assert not mgr.is_executing
@@ -1145,6 +1228,20 @@ class TestSelectionUndoIntegration:
     def _apply_fn(self, ids):
         self.sel.set_ids(ids)
 
+    def test_editor_navigation_does_not_push_main_undo(self, _reset_undo_manager):
+        module = _direct_import(
+            "Infernux.engine._bootstrap_selection",
+            "engine/_bootstrap_selection.py",
+        )
+
+        selection = module.BootstrapSelectionMixin()
+        selection._prev_selection_ids = []
+        selection._prev_selected_file = ""
+        selection._record_editor_selection_change([42], "")
+
+        assert _reset_undo_manager._undo_stack == []
+        assert selection._prev_selection_ids == [42]
+
     def test_select_undo_redo_cycle(self, _reset_undo_manager, _fresh_selection):
         mgr = _reset_undo_manager
         sel = self.sel
@@ -1235,7 +1332,7 @@ class TestDeleteCommandSelectionRestore:
         try:
             self.sel.set_ids([42])
             cmd = DeleteGameObjectCommand(42, "Delete")
-            cmd._snapshot_json = '{"id": 42}'
+            cmd._document = {"id": 42}
             with _override_recreate_game_object(lambda *a, **k: None):
                 cmd.undo()
             assert restored == [[42]]
@@ -1259,7 +1356,7 @@ class TestDeleteCommandSelectionRestore:
         try:
             cmd = DeleteGameObjectCommand(42, "Delete")
             cmd._pre_delete_selection_ids = [42]
-            cmd._snapshot_json = '{"id": 42}'
+            cmd._document = {"id": 42}
             with _override_recreate_game_object(lambda *a, **k: None):
                 cmd.undo()  # should not raise
         finally:
@@ -1273,7 +1370,7 @@ class TestDeleteCommandSelectionRestore:
         try:
             # Don't select anything → pre_delete_selection_ids is []
             cmd = DeleteGameObjectCommand(42, "Delete")
-            cmd._snapshot_json = '{"id": 42}'
+            cmd._document = {"id": 42}
             with _override_recreate_game_object(lambda *a, **k: None):
                 cmd.undo()
             # Empty list → fn not called (guard: `if fn and ids`)
@@ -1378,8 +1475,8 @@ class TestImmediateDestroyHelpers:
                 self.name = f"Obj{object_id}"
                 self.transform = _FakeTransform()
 
-            def serialize(self):
-                return "{}"
+            def serialize_document(self):
+                return {"id": self.id}
 
             def get_parent(self):
                 return None
@@ -1419,7 +1516,7 @@ class TestImmediateDestroyHelpers:
         try:
             cmd = CreateGameObjectCommand(99, "Create")
             cmd._post_create_ids = [99]
-            cmd._snapshot_json = '{"id": 99}'
+            cmd._document = {"id": 99}
             with _override_recreate_game_object(lambda *a, **k: None):
                 cmd.redo()
             assert restored == [[99]]
@@ -1434,7 +1531,7 @@ class TestImmediateDestroyHelpers:
         try:
             cmd = CreateGameObjectCommand(99, "Create")
             cmd._post_create_ids = []
-            cmd._snapshot_json = '{"id": 99}'
+            cmd._document = {"id": 99}
             with _override_recreate_game_object(lambda *a, **k: None):
                 cmd.redo()
             assert restored == []

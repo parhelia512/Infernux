@@ -53,7 +53,8 @@ void RegisterRenderPipelineBindings(py::module_ &m)
                                "Get the scene associated with this render context")
         .def("setup_camera_properties", &ScriptableRenderContext::SetupCameraProperties, py::arg("camera"),
              "Set camera VP matrices for rendering")
-        .def("cull", &ScriptableRenderContext::Cull, py::arg("camera"), "Cull scene objects, return CullingResults")
+        .def("cull", &ScriptableRenderContext::Cull, py::arg("camera"), py::return_value_policy::reference_internal,
+             "Cull scene objects, return context-owned CullingResults")
         // RenderGraph-driven API
         .def("apply_graph", &ScriptableRenderContext::ApplyGraph, py::arg("description"),
              "Apply a Python-defined RenderGraph topology to the scene render graph")

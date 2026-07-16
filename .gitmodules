@@ -18,7 +18,7 @@
 	url = https://github.com/nothings/stb.git
 [submodule "external/JoltPhysics"]
 	path = external/JoltPhysics
-	url = https://github.com/jrouwe/JoltPhysics.git
+	url = https://github.com/ChenlizheMe/JoltPhysics.git
 [submodule "external/VulkanMemoryAllocator"]
 	path = external/VulkanMemoryAllocator
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git

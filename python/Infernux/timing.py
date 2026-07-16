@@ -22,6 +22,7 @@ Note:
 from __future__ import annotations
 
 import time as _time_mod
+import math as _math
 from Infernux.debug import Debug
 
 
@@ -74,20 +75,43 @@ class _TimeMeta(type):
     @property
     def fixed_delta_time(cls) -> float:
         """Physics / ``fixed_update`` interval (seconds, default 0.02 = 50 Hz)."""
-        return cls._fixed_delta_time
+        try:
+            from Infernux.lib import SceneManager
+            return float(SceneManager.instance().get_fixed_time_step())
+        except (ImportError, AttributeError, RuntimeError):
+            return cls._fixed_delta_time
 
     @fixed_delta_time.setter
     def fixed_delta_time(cls, value: float) -> None:
-        cls._fixed_delta_time = max(0.001, float(value))
+        value = float(value)
+        if not _math.isfinite(value) or value < 0.001:
+            raise ValueError("fixed_delta_time must be finite and at least 0.001")
+        from Infernux.lib import SceneManager
+        SceneManager.instance().set_fixed_time_step(value)
+        cls._fixed_delta_time = value
 
     @property
     def fixed_time(cls) -> float:
         """Scaled time accumulated across physics steps."""
+        try:
+            from Infernux.lib import SceneManager
+            manager = SceneManager.instance()
+            if manager.is_playing():
+                return float(manager.fixed_time)
+        except (ImportError, AttributeError, RuntimeError):
+            pass
         return cls._fixed_time
 
     @property
     def fixed_unscaled_time(cls) -> float:
         """Unscaled time accumulated across physics steps."""
+        try:
+            from Infernux.lib import SceneManager
+            manager = SceneManager.instance()
+            if manager.is_playing():
+                return float(manager.fixed_unscaled_time)
+        except (ImportError, AttributeError, RuntimeError):
+            pass
         return cls._fixed_unscaled_time
 
     # -- Time scale ---------------------------------------------------------
@@ -95,11 +119,20 @@ class _TimeMeta(type):
     @property
     def time_scale(cls) -> float:
         """Global time multiplier (0 = frozen, 1 = normal)."""
-        return cls._time_scale
+        try:
+            from Infernux.lib import SceneManager
+            return float(SceneManager.instance().time_scale)
+        except (ImportError, AttributeError, RuntimeError):
+            return cls._time_scale
 
     @time_scale.setter
     def time_scale(cls, value: float) -> None:
-        cls._time_scale = max(0.0, float(value))
+        value = float(value)
+        if not _math.isfinite(value) or value < 0.0:
+            raise ValueError("time_scale must be finite and non-negative")
+        from Infernux.lib import SceneManager
+        SceneManager.instance().time_scale = value
+        cls._time_scale = value
         # Keep PlayModeManager in sync (lazy import to avoid cycles)
         try:
             from Infernux.engine.play_mode import PlayModeManager
@@ -132,11 +165,20 @@ class _TimeMeta(type):
     @property
     def maximum_delta_time(cls) -> float:
         """Upper clamp for ``delta_time`` to prevent spiral-of-death (default 0.1 s)."""
-        return cls._maximum_delta_time
+        try:
+            from Infernux.lib import SceneManager
+            return float(SceneManager.instance().get_max_fixed_delta_time())
+        except (ImportError, AttributeError, RuntimeError):
+            return cls._maximum_delta_time
 
     @maximum_delta_time.setter
     def maximum_delta_time(cls, value: float) -> None:
-        cls._maximum_delta_time = max(0.01, float(value))
+        value = float(value)
+        if not _math.isfinite(value) or value < cls.fixed_delta_time:
+            raise ValueError("maximum_delta_time must be finite and not less than fixed_delta_time")
+        from Infernux.lib import SceneManager
+        SceneManager.instance().set_max_fixed_delta_time(value)
+        cls._maximum_delta_time = value
 
 
 # ---------------------------------------------------------------------------
@@ -187,13 +229,19 @@ class Time(metaclass=_TimeMeta):
         cls._unscaled_time = 0.0
         cls._fixed_time = 0.0
         cls._fixed_unscaled_time = 0.0
+        try:
+            from Infernux.lib import SceneManager
+            SceneManager.instance().time_scale = 1.0
+        except (ImportError, AttributeError, RuntimeError):
+            pass
 
     @classmethod
     def _tick(cls, raw_delta_time: float) -> None:
         """Advance one frame.  Called by ``PlayModeManager.tick()``."""
-        clamped = min(max(raw_delta_time, 0.0), cls._maximum_delta_time)
+        clamped = min(max(raw_delta_time, 0.0), cls.maximum_delta_time)
+        time_scale = cls.time_scale
         cls._unscaled_delta_time = clamped
-        cls._delta_time = clamped * cls._time_scale
+        cls._delta_time = clamped * time_scale
         cls._time += cls._delta_time
         cls._unscaled_time += clamped
         cls._frame_count += 1
@@ -201,5 +249,5 @@ class Time(metaclass=_TimeMeta):
     @classmethod
     def _tick_fixed(cls, fixed_dt: float) -> None:
         """Advance fixed time by one step.  Called each physics iteration."""
-        cls._fixed_time += fixed_dt * cls._time_scale
+        cls._fixed_time += fixed_dt * cls.time_scale
         cls._fixed_unscaled_time += fixed_dt

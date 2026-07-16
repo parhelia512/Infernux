@@ -11,7 +11,9 @@ class in <b>Infernux.components.builtin</b>
 Controls physics simulation for the GameObject.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+For dynamic bodies, use forces or velocity rather than writing Transform every frame. Use move operations for kinematic bodies and issue simulation commands from fixed updates.
 <!-- USER CONTENT END -->
 
 ## Properties
@@ -39,8 +41,8 @@ Controls physics simulation for the GameObject.
 | velocity | `Any` | The linear velocity of the rigidbody in world space. |
 | angular_velocity | `Any` | The angular velocity of the rigidbody in radians per second. |
 | world_center_of_mass | `Any` | The center of mass in world space. *(read-only)* |
-| position | `Any` | The position of the rigidbody in world space. *(read-only)* |
-| rotation | `Tuple[float, float, float, float]` | The rotation of the rigidbody as a quaternion (x, y, z, w). *(read-only)* |
+| position | `Any` | The position of the rigidbody in world space. |
+| rotation | `Tuple[float, float, float, float]` | The rotation of the rigidbody as a quaternion (x, y, z, w). |
 
 <!-- USER CONTENT START --> properties
 
@@ -70,12 +72,24 @@ Controls physics simulation for the GameObject.
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for Rigidbody
+from Infernux import InxComponent, Rigidbody, Vector3
+
+
+class Thruster(InxComponent):
+    def start(self) -> None:
+        self.body = self.game_object.get_component(Rigidbody)
+
+    def fixed_update(self, fixed_delta_time: float) -> None:
+        if self.body is not None:
+            self.body.add_force(Vector3(0.0, 12.0, 0.0))
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [Physics Manual](../manual/physics.md)
+- [Physics](Physics.md)
+- [Collider](Collider.md)
+- [InxComponent](InxComponent.md)
 <!-- USER CONTENT END -->

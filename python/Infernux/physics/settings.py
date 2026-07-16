@@ -8,6 +8,7 @@ editor UI layer.
 from __future__ import annotations
 
 import json
+import math
 import os
 from typing import Dict
 
@@ -19,7 +20,132 @@ DEFAULT_PHYSICS_SETTINGS: Dict[str, object] = {
     "gravity": [0.0, -9.81, 0.0],
     "fixed_delta_time": 0.02,
     "max_fixed_delta_time": 0.1,
+    "collision_steps": 2,
+    "velocity_steps": 10,
+    "position_steps": 3,
+    "penetration_slop": 0.002,
+    "speculative_contact_distance": 0.01,
+    "linear_cast_max_penetration": 0.1,
+    "baumgarte": 0.15,
+    "max_penetration_distance": 0.05,
+    "linear_cast_threshold": 0.5,
+    "min_velocity_for_restitution": 1.0,
+    "time_before_sleep": 0.5,
+    "point_velocity_sleep_threshold": 0.03,
+    "temp_allocator_mb": 256,
+    "max_jobs": 4096,
+    "max_barriers": 16,
+    "max_bodies": 65536,
+    "max_body_pairs": 65536,
+    "max_contact_constraints": 65536,
+    "max_worker_threads": 0,
 }
+
+_SCHEMA_VERSION = 2
+_DOCUMENT_KEYS = {"schema_version", *DEFAULT_PHYSICS_SETTINGS}
+
+
+class PhysicsSettingsError(ValueError):
+    """Raised when an existing physics settings document is invalid."""
+
+
+def _finite_number(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise PhysicsSettingsError(f"{field} must be a number")
+    result = float(value)
+    if not math.isfinite(result):
+        raise PhysicsSettingsError(f"{field} must be finite")
+    return result
+
+
+def _integer(value: object, field: str, minimum: int, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise PhysicsSettingsError(f"{field} must be an integer")
+    if value < minimum or value > maximum:
+        raise PhysicsSettingsError(f"{field} must be in [{minimum}, {maximum}]")
+    return value
+
+
+def _validate_document(data: object, *, require_schema: bool) -> dict:
+    if not isinstance(data, dict):
+        raise PhysicsSettingsError("physics settings must be a JSON object")
+
+    if require_schema and data.get("schema_version") != _SCHEMA_VERSION:
+        raise PhysicsSettingsError(f"expected physics settings schema_version {_SCHEMA_VERSION}")
+
+    allowed = _DOCUMENT_KEYS if require_schema else _DOCUMENT_KEYS - {"schema_version"}
+    unknown = set(data) - allowed
+    if unknown:
+        raise PhysicsSettingsError(f"unknown physics settings fields: {', '.join(sorted(unknown))}")
+
+    required = set(DEFAULT_PHYSICS_SETTINGS)
+    missing = required - set(data)
+    if missing:
+        raise PhysicsSettingsError(f"missing physics settings fields: {', '.join(sorted(missing))}")
+
+    gravity = data["gravity"]
+    if not isinstance(gravity, list) or len(gravity) != 3:
+        raise PhysicsSettingsError("gravity must contain exactly three numbers")
+    validated_gravity = [_finite_number(value, f"gravity[{index}]") for index, value in enumerate(gravity)]
+
+    fixed_dt = _finite_number(data["fixed_delta_time"], "fixed_delta_time")
+    max_fixed_dt = _finite_number(data["max_fixed_delta_time"], "max_fixed_delta_time")
+    if fixed_dt < 0.001:
+        raise PhysicsSettingsError("fixed_delta_time must be at least 0.001")
+    if max_fixed_dt < fixed_dt:
+        raise PhysicsSettingsError("max_fixed_delta_time must be greater than or equal to fixed_delta_time")
+
+    result = {
+        "gravity": validated_gravity,
+        "fixed_delta_time": fixed_dt,
+        "max_fixed_delta_time": max_fixed_dt,
+    }
+    result.update(
+        collision_steps=_integer(data["collision_steps"], "collision_steps", 1, 16),
+        velocity_steps=_integer(data["velocity_steps"], "velocity_steps", 2, 64),
+        position_steps=_integer(data["position_steps"], "position_steps", 1, 64),
+        temp_allocator_mb=_integer(data["temp_allocator_mb"], "temp_allocator_mb", 16, 4096),
+        max_jobs=_integer(data["max_jobs"], "max_jobs", 64, 1_000_000),
+        max_barriers=_integer(data["max_barriers"], "max_barriers", 1, 4096),
+        max_bodies=_integer(data["max_bodies"], "max_bodies", 1024, 10_000_000),
+        max_body_pairs=_integer(data["max_body_pairs"], "max_body_pairs", 1024, 10_000_000),
+        max_contact_constraints=_integer(
+            data["max_contact_constraints"], "max_contact_constraints", 1024, 10_000_000
+        ),
+        max_worker_threads=_integer(data["max_worker_threads"], "max_worker_threads", 0, 256),
+    )
+    for field in (
+        "penetration_slop",
+        "speculative_contact_distance",
+        "linear_cast_max_penetration",
+        "baumgarte",
+        "max_penetration_distance",
+        "linear_cast_threshold",
+    ):
+        value = _finite_number(data[field], field)
+        if value < 0.0 or value > 1.0:
+            raise PhysicsSettingsError(f"{field} must be in [0, 1]")
+        result[field] = value
+
+    restitution_threshold = _finite_number(
+        data["min_velocity_for_restitution"], "min_velocity_for_restitution"
+    )
+    if restitution_threshold <= 0.0 or restitution_threshold > 1000.0:
+        raise PhysicsSettingsError("min_velocity_for_restitution must be in (0, 1000]")
+    result["min_velocity_for_restitution"] = restitution_threshold
+
+    time_before_sleep = _finite_number(data["time_before_sleep"], "time_before_sleep")
+    if time_before_sleep < 0.0 or time_before_sleep > 60.0:
+        raise PhysicsSettingsError("time_before_sleep must be in [0, 60]")
+    result["time_before_sleep"] = time_before_sleep
+
+    sleep_threshold = _finite_number(
+        data["point_velocity_sleep_threshold"], "point_velocity_sleep_threshold"
+    )
+    if sleep_threshold <= 0.0 or sleep_threshold > 100.0:
+        raise PhysicsSettingsError("point_velocity_sleep_threshold must be in (0, 100]")
+    result["point_velocity_sleep_threshold"] = sleep_threshold
+    return result
 
 
 def settings_path(project_path: str) -> str:
@@ -28,7 +154,7 @@ def settings_path(project_path: str) -> str:
 
 
 def load(project_path: str) -> dict:
-    """Load physics settings from *project_path*, falling back to defaults."""
+    """Load and strictly validate the current physics settings schema."""
     if not project_path:
         return dict(DEFAULT_PHYSICS_SETTINGS)
 
@@ -37,44 +163,61 @@ def load(project_path: str) -> dict:
         return dict(DEFAULT_PHYSICS_SETTINGS)
 
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except (json.JSONDecodeError, OSError, ValueError):
-        return dict(DEFAULT_PHYSICS_SETTINGS)
-
-    result = dict(DEFAULT_PHYSICS_SETTINGS)
-    gravity = data.get("gravity")
-    if isinstance(gravity, list) and len(gravity) >= 3:
-        result["gravity"] = [float(gravity[0]), float(gravity[1]), float(gravity[2])]
-    if "fixed_delta_time" in data:
-        result["fixed_delta_time"] = max(0.001, float(data["fixed_delta_time"]))
-    if "max_fixed_delta_time" in data:
-        result["max_fixed_delta_time"] = max(result["fixed_delta_time"], float(data["max_fixed_delta_time"]))
-    return result
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+        raise PhysicsSettingsError(f"failed to read {path}: {exc}") from exc
+    return _validate_document(data, require_schema=True)
 
 
 def save(project_path: str, settings: dict) -> None:
-    """Persist physics settings to *project_path*."""
+    """Validate and atomically persist physics settings."""
     if not project_path:
-        return
+        raise PhysicsSettingsError("project_path is required to save physics settings")
+    validated = _validate_document(settings, require_schema=False)
     path = settings_path(project_path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
+    document = {"schema_version": _SCHEMA_VERSION, **validated}
+    content = json.dumps(document, indent=2, ensure_ascii=False) + "\n"
+    from Infernux.core.document_store import DocumentStore
+    DocumentStore.instance().write_and_wait(path, content)
 
 
 def apply(settings: dict) -> None:
     """Push *settings* into the live engine (gravity, fixed timestep, etc.)."""
-    from Infernux.lib import SceneManager, Vector3
+    from Infernux.lib import EngineConfig, SceneManager, Vector3
     from Infernux.physics import Physics
     from Infernux.timing import Time
 
-    gravity = settings.get("gravity", DEFAULT_PHYSICS_SETTINGS["gravity"])
-    fixed_dt = max(0.001, float(settings.get("fixed_delta_time", DEFAULT_PHYSICS_SETTINGS["fixed_delta_time"])))
-    max_fixed_dt = max(fixed_dt, float(settings.get("max_fixed_delta_time", DEFAULT_PHYSICS_SETTINGS["max_fixed_delta_time"])))
+    validated = _validate_document(settings, require_schema=False)
+    gravity = validated["gravity"]
+    fixed_dt = validated["fixed_delta_time"]
+    max_fixed_dt = validated["max_fixed_delta_time"]
+
+    config = EngineConfig.get()
+    config.physics_collision_steps = validated["collision_steps"]
+    config.physics_velocity_steps = validated["velocity_steps"]
+    config.physics_position_steps = validated["position_steps"]
+    config.physics_penetration_slop = validated["penetration_slop"]
+    config.physics_speculative_contact_distance = validated["speculative_contact_distance"]
+    config.physics_linear_cast_max_penetration = validated["linear_cast_max_penetration"]
+    config.physics_baumgarte = validated["baumgarte"]
+    config.physics_max_penetration_distance = validated["max_penetration_distance"]
+    config.physics_linear_cast_threshold = validated["linear_cast_threshold"]
+    config.physics_min_velocity_for_restitution = validated["min_velocity_for_restitution"]
+    config.physics_time_before_sleep = validated["time_before_sleep"]
+    config.physics_point_velocity_sleep_threshold = validated["point_velocity_sleep_threshold"]
+    config.physics_temp_allocator_size = validated["temp_allocator_mb"] * 1024 * 1024
+    config.physics_max_jobs = validated["max_jobs"]
+    config.physics_max_barriers = validated["max_barriers"]
+    config.physics_max_bodies = validated["max_bodies"]
+    config.physics_max_body_pairs = validated["max_body_pairs"]
+    config.physics_max_contact_constraints = validated["max_contact_constraints"]
+    config.physics_max_worker_threads = validated["max_worker_threads"]
 
     Physics.gravity = coerce_vec3(gravity)
     sm = SceneManager.instance()
     sm.set_fixed_time_step(fixed_dt)
     sm.set_max_fixed_delta_time(max_fixed_dt)
-    Time.fixed_delta_time = fixed_dt
+    Time._fixed_delta_time = fixed_dt
+    Time._maximum_delta_time = max_fixed_dt

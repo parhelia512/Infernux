@@ -11,6 +11,7 @@ Opened from Window menu → 2D Animation Clip Editor.
 from __future__ import annotations
 
 import os
+import copy
 import json
 import threading
 import time
@@ -22,6 +23,7 @@ from Infernux.debug import Debug
 from Infernux.engine.i18n import t
 from Infernux.lib import InxGUIContext
 
+from .asset_save_dialog import AssetSaveAsDialog
 from .editor_panel import EditorPanel
 from .igui import IGUI
 from .panel_registry import editor_panel
@@ -38,6 +40,7 @@ class _ClipState:
     name: str = "NewClip"
     frame_indices: List[int] = field(default_factory=list)
     fps: float = 12.0
+    loop: bool = True
     saved_path: str = ""          # .animclip2d file path (empty = unsaved)
     saved_texture_guid: str = ""
     saved_texture_path: str = ""
@@ -111,7 +114,13 @@ class AnimClip2DEditorPanel(EditorPanel):
         self._last_frame_time: float = 0.0
         self._dirty: bool = False
         self._last_saved_signature: str = ""
+        self._last_saved_state: dict = {}
+        self._save_as_dialog = AssetSaveAsDialog("animclip2d.save_as", "2D animation clip")
+        self._pending_save_as_clip: Optional[_ClipState] = None
         self._mark_saved_snapshot()
+        # A newly opened authoring window owns an untitled in-memory document.
+        self._last_saved_signature = ""
+        self._dirty = True
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -156,6 +165,7 @@ class AnimClip2DEditorPanel(EditorPanel):
                     "name": c.name,
                     "frames": list(c.frame_indices),
                     "fps": float(c.fps),
+                    "loop": bool(c.loop),
                     "saved_path": c.saved_path,
                     "saved_texture_guid": c.saved_texture_guid,
                     "saved_texture_path": c.saved_texture_path,
@@ -168,6 +178,7 @@ class AnimClip2DEditorPanel(EditorPanel):
     def _mark_saved_snapshot(self) -> None:
         self._last_saved_signature = self._current_edit_signature()
         self._dirty = False
+        self._last_saved_state = copy.deepcopy(self.save_state())
         self._sync_project_dirty_flag()
 
     def _recompute_dirty(self) -> None:
@@ -178,16 +189,21 @@ class AnimClip2DEditorPanel(EditorPanel):
         for c in self._clips:
             clips_data.append({
                 "name": c.name, "frame_indices": c.frame_indices,
-                "fps": c.fps, "saved_path": c.saved_path,
+                "fps": c.fps, "loop": c.loop, "saved_path": c.saved_path,
                 "saved_texture_guid": c.saved_texture_guid,
                 "saved_texture_path": c.saved_texture_path,
             })
-        d: dict = {"active_clip": self._active_clip_idx, "clips": clips_data}
+        d: dict = {
+            "active_clip": self._active_clip_idx,
+            "clips": clips_data,
+            "dirty": bool(self._dirty),
+        }
         if self._tex:
             d["texture_path"] = self._tex.file_path
         return d
 
     def load_state(self, data: dict):
+        restore_dirty = bool(data.get("dirty", False))
         tex_path = data.get("texture_path", "")
         if tex_path and os.path.isfile(tex_path):
             self._load_texture(tex_path)
@@ -199,6 +215,7 @@ class AnimClip2DEditorPanel(EditorPanel):
                     name=cd.get("name", "NewClip"),
                     frame_indices=list(cd.get("frame_indices", [])),
                     fps=float(cd.get("fps", 12.0)),
+                    loop=bool(cd.get("loop", True)),
                     saved_path=cd.get("saved_path", ""),
                     saved_texture_guid=cd.get("saved_texture_guid", ""),
                     saved_texture_path=cd.get("saved_texture_path", tex_path if cd.get("saved_path", "") else ""),
@@ -208,50 +225,55 @@ class AnimClip2DEditorPanel(EditorPanel):
         self._active_clip_idx = max(0, min(
             int(data.get("active_clip", 0)), len(self._clips) - 1))
         self._mark_saved_snapshot()
+        if restore_dirty:
+            self._last_saved_signature = ""
+            self._dirty = True
+            self._sync_project_dirty_flag()
 
     # ------------------------------------------------------------------
     # Render — layout: header -> tabs -> preview/details -> sequence -> palette
     # ------------------------------------------------------------------
 
     # ImGuiKey / ImGuiMod constants
-    _IMGUI_MOD_CTRL = 1 << 12  # 4096
-    _IMGUI_KEY_S = 564
-
     def on_render_content(self, ctx: InxGUIContext):
         self._recompute_dirty()
         self._sync_project_dirty_flag()
-        # Ctrl+S save shortcut
-        if ctx.is_key_down(self._IMGUI_MOD_CTRL) and ctx.is_key_pressed(self._IMGUI_KEY_S):
-            clip = self._active_clip
-            if clip is not None and self._tex is not None and len(clip.frame_indices) > 0:
-                self._save_clip(clip)
-
-        avail_w = ctx.get_content_region_avail_width()
-        self._render_texture_slot(ctx, avail_w)
-        ctx.dummy(0, 8)
-
-        if self._tex is None:
-            self._render_empty_state(ctx)
-            return
-
-        # Guard against stale texture (e.g. import settings changed externally)
-        if not self._validate_texture():
-            self._render_empty_state(ctx)
-            return
-
-        if self._tex.texture_id == 0:
-            self._render_empty_state(ctx)
-            return
-
         try:
-            clip = self._active_clip
-            if clip is None:
+            avail_w = ctx.get_content_region_avail_width()
+            self._render_texture_slot(ctx, avail_w)
+            ctx.dummy(0, 8)
+
+            if self._tex is None:
+                self._render_empty_state(ctx)
                 return
 
-            self._render_main_workspace(ctx, clip, ctx.get_content_region_avail_width())
+            # Guard against stale texture (e.g. import settings changed externally)
+            if not self._validate_texture():
+                self._render_empty_state(ctx)
+                return
 
-        except Exception as exc:
-            Debug.log_warning(f"[AnimClipEditor] Render error: {exc}")
+            if self._tex.texture_id == 0:
+                self._render_empty_state(ctx)
+                return
+
+            try:
+                clip = self._active_clip
+                if clip is None:
+                    return
+
+                self._render_main_workspace(ctx, clip, ctx.get_content_region_avail_width())
+
+            except Exception as exc:
+                Debug.log_warning(f"[AnimClipEditor] Render error: {exc}")
+        finally:
+            self._render_save_as_dialog(ctx)
+
+    def _render_save_as_dialog(self, ctx: InxGUIContext) -> None:
+        self._save_as_dialog.render(
+            ctx,
+            self._save_pending_clip,
+            cancel_callback=self._cancel_pending_save_as,
+        )
 
     # ------------------------------------------------------------------
     # Header / empty state helpers
@@ -267,6 +289,7 @@ class AnimClip2DEditorPanel(EditorPanel):
             accept="TEXTURE_FILE",
             on_drop=self._on_texture_drop,
             on_clear=self._on_texture_clear if tex else None,
+            semantic_id="animclip2d.texture",
         )
 
         IGUI.drop_target(ctx, "ANIMCLIP_FILE", self._on_animclip_drop, outline=True)
@@ -354,7 +377,11 @@ class AnimClip2DEditorPanel(EditorPanel):
                 ctx.push_style_color(ImGuiCol.Button, 0.25, 0.45, 0.7, 1.0)
 
             label = clip.name if clip.name else f"Clip {i}"
-            if ctx.button(f"{label}##clip_tab_{i}"):
+            clicked = ctx.button(f"{label}##clip_tab_{i}")
+            ctx.record_semantic_item(
+                "button", label, True, f"animclip2d.clip_tab.{i}",
+            )
+            if clicked:
                 self._active_clip_idx = i
                 self._stop_playback()
 
@@ -362,7 +389,9 @@ class AnimClip2DEditorPanel(EditorPanel):
                 ctx.pop_style_color(1)
 
         ctx.same_line(0, 8)
-        if ctx.button(f"+##add_clip"):
+        add_clicked = ctx.button(f"+##add_clip")
+        ctx.record_semantic_item("button", "Add Clip", True, "animclip2d.clip.add")
+        if add_clicked:
             self._clips.append(_ClipState(name=f"Clip_{len(self._clips)}"))
             self._active_clip_idx = len(self._clips) - 1
             self._stop_playback()
@@ -371,7 +400,10 @@ class AnimClip2DEditorPanel(EditorPanel):
         if len(self._clips) > 1:
             ctx.same_line(0, 8)
             ctx.push_style_color(ImGuiCol.Button, 0.6, 0.15, 0.15, 0.8)
-            if ctx.button(t("animclip_editor.delete_clip")):
+            delete_label = t("animclip_editor.delete_clip")
+            delete_clicked = ctx.button(delete_label)
+            ctx.record_semantic_item("button", delete_label, True, "animclip2d.clip.delete")
+            if delete_clicked:
                 idx = self._active_clip_idx
                 self._clips.pop(idx)
                 self._active_clip_idx = max(0, min(idx, len(self._clips) - 1))
@@ -392,6 +424,9 @@ class AnimClip2DEditorPanel(EditorPanel):
         ctx.same_line(0, 4)
         ctx.set_next_item_width(min(140, avail_w * 0.2))
         new_name = ctx.text_input("##clip_name", clip.name, 256)
+        ctx.record_semantic_item(
+            "text_input", f"{name_label}: {new_name}", True, "animclip2d.clip.name",
+        )
         if new_name != clip.name:
             clip.name = new_name
             # Notify FSM editor of clip name change
@@ -406,10 +441,19 @@ class AnimClip2DEditorPanel(EditorPanel):
         can_save = self._tex is not None and fc > 0
         if not can_save:
             ctx.begin_disabled(True)
-        if ctx.button(save_label + "##info_save"):
+        save_clicked = ctx.button(save_label + "##info_save")
+        ctx.record_semantic_item(
+            "button", save_label, can_save, "animclip2d.clip.save",
+        )
+        if save_clicked:
             self._save_clip(clip)
         ctx.same_line(0, 4)
-        if ctx.button(t("animclip_editor.save_as") + "##info_save_as"):
+        save_as_label = t("animclip_editor.save_as")
+        save_as_clicked = ctx.button(save_as_label + "##info_save_as")
+        ctx.record_semantic_item(
+            "button", save_as_label, can_save, "animclip2d.clip.save_as",
+        )
+        if save_as_clicked:
             self._show_save_as_dialog(clip)
         if not can_save:
             ctx.end_disabled()
@@ -452,24 +496,47 @@ class AnimClip2DEditorPanel(EditorPanel):
 
         is_playing = self._playback == _PLAYBACK_PLAYING
         if is_playing:
-            if ctx.button(t("animclip_editor.pause") + "##transport"):
+            play_label = t("animclip_editor.pause")
+            play_clicked = ctx.button(play_label + "##transport")
+            ctx.record_semantic_item(
+                "button", play_label, bool(fc), "animclip2d.transport.play_pause",
+            )
+            if play_clicked:
                 self._playback = _PLAYBACK_STOPPED
         else:
-            if ctx.button(t("animclip_editor.play") + "##transport"):
+            play_label = t("animclip_editor.play")
+            play_clicked = ctx.button(play_label + "##transport")
+            ctx.record_semantic_item(
+                "button", play_label, bool(fc), "animclip2d.transport.play_pause",
+            )
+            if play_clicked:
                 self._playback = _PLAYBACK_PLAYING
                 self._last_frame_time = time.perf_counter()
                 if self._preview_frame_idx >= fc:
                     self._preview_frame_idx = 0
 
         ctx.same_line(0, 4)
-        if ctx.button(t("animclip_editor.stop") + "##transport"):
+        stop_label = t("animclip_editor.stop")
+        stop_clicked = ctx.button(stop_label + "##transport")
+        ctx.record_semantic_item(
+            "button", stop_label, bool(fc), "animclip2d.transport.stop",
+        )
+        if stop_clicked:
             self._stop_playback()
 
         ctx.same_line(0, 8)
-        if ctx.button("|<##step_back"):
+        step_back_clicked = ctx.button("|<##step_back")
+        ctx.record_semantic_item(
+            "button", "Previous Frame", bool(fc), "animclip2d.transport.previous",
+        )
+        if step_back_clicked:
             self._preview_frame_idx = max(0, self._preview_frame_idx - 1)
         ctx.same_line(0, 2)
-        if ctx.button(">|##step_fwd"):
+        step_forward_clicked = ctx.button(">|##step_fwd")
+        ctx.record_semantic_item(
+            "button", "Next Frame", bool(fc), "animclip2d.transport.next",
+        )
+        if step_forward_clicked:
             self._preview_frame_idx = min(
                 max(0, fc - 1), self._preview_frame_idx + 1)
 
@@ -486,6 +553,9 @@ class AnimClip2DEditorPanel(EditorPanel):
         ctx.same_line(0, 4)
         ctx.set_next_item_width(60)
         new_fps = ctx.drag_float("##clip_fps", clip.fps, 0.1, 0.1, 120.0)
+        ctx.record_semantic_item(
+            "drag_float", f"{fps_label}: {new_fps:g}", bool(fc), "animclip2d.clip.fps",
+        )
         if new_fps != clip.fps:
             clip.fps = max(0.1, new_fps)
 
@@ -494,6 +564,14 @@ class AnimClip2DEditorPanel(EditorPanel):
         ctx.push_style_color(ImGuiCol.Text, *Theme.META_TEXT)
         ctx.label(f"{fc}f {dur:.2f}s")
         ctx.pop_style_color(1)
+
+        ctx.same_line(0, 8)
+        loop_label = t("animclip_editor.clip_loop")
+        new_loop = ctx.checkbox(f"{loop_label}##clip_loop", clip.loop)
+        ctx.record_semantic_item(
+            "checkbox", loop_label, bool(fc), "animclip2d.clip.loop", bool(new_loop),
+        )
+        clip.loop = bool(new_loop)
 
         if not fc:
             ctx.end_disabled()
@@ -574,7 +652,11 @@ class AnimClip2DEditorPanel(EditorPanel):
             clear_label = t("animclip_editor.clear_sequence")
             clear_w = ctx.calc_text_width(clear_label) + 20.0
             ctx.same_line(max(ctx.get_window_width() - clear_w - 18.0, 180.0))
-            if ctx.button(clear_label + "##seq_clear"):
+            clear_clicked = ctx.button(clear_label + "##seq_clear")
+            ctx.record_semantic_item(
+                "button", clear_label, True, "animclip2d.sequence.clear",
+            )
+            if clear_clicked:
                 clip.frame_indices = []
                 self._stop_playback()
 
@@ -617,6 +699,10 @@ class AnimClip2DEditorPanel(EditorPanel):
                             save_x = ctx.get_cursor_pos_x()
                             save_y = ctx.get_cursor_pos_y()
                             ctx.button(f"##seq_{seq_i}", width=thumb, height=thumb)
+                            ctx.record_semantic_item(
+                                "button", f"Sequence {seq_i}: Frame {frame_idx}", True,
+                                f"animclip2d.sequence.frame.{seq_i}",
+                            )
                             hovered = ctx.is_item_hovered()
 
                             if is_preview:
@@ -636,6 +722,10 @@ class AnimClip2DEditorPanel(EditorPanel):
                                 to_remove = seq_i
                         else:
                             ctx.button(f"?##seq_{seq_i}", width=thumb, height=thumb)
+                            ctx.record_semantic_item(
+                                "button", f"Sequence {seq_i}: Missing Frame {frame_idx}", True,
+                                f"animclip2d.sequence.frame.{seq_i}",
+                            )
 
                     ctx.end_table()
 
@@ -689,6 +779,10 @@ class AnimClip2DEditorPanel(EditorPanel):
                         save_x = ctx.get_cursor_pos_x()
                         save_y = ctx.get_cursor_pos_y()
                         clicked = ctx.button(f"##palette_{i}", width=thumb, height=thumb)
+                        ctx.record_semantic_item(
+                            "button", f"Frame {i}: {frame.name}", True,
+                            f"animclip2d.palette.frame.{i}",
+                        )
                         hovered = ctx.is_item_hovered()
 
                         if in_clip:
@@ -996,6 +1090,7 @@ class AnimClip2DEditorPanel(EditorPanel):
             name=clip_data.name,
             frame_indices=list(clip_data.frame_indices),
             fps=clip_data.fps,
+            loop=clip_data.loop,
             saved_path=animclip_path,
             saved_texture_guid=clip_data.authoring_texture_guid or (self._tex.guid if self._tex else ""),
             saved_texture_path=self._tex.file_path if self._tex else clip_data.authoring_texture_path,
@@ -1015,6 +1110,16 @@ class AnimClip2DEditorPanel(EditorPanel):
             self._do_save_clip(clip, clip.saved_path)
             return
         self._show_save_as_dialog(clip)
+
+    def handle_save_command(self, save_as: bool = False) -> bool:
+        clip = self._active_clip
+        if clip is None or self._tex is None or not clip.frame_indices:
+            return True
+        if save_as:
+            self._show_save_as_dialog(clip)
+        else:
+            self._save_clip(clip)
+        return True
 
     @staticmethod
     def _texture_identity(guid: str = "", path: str = "") -> str:
@@ -1040,7 +1145,7 @@ class AnimClip2DEditorPanel(EditorPanel):
         current_identity = self._current_texture_identity()
         return bool(saved_identity and current_identity and saved_identity == current_identity)
 
-    def _do_save_clip(self, clip: _ClipState, save_path: str):
+    def _do_save_clip(self, clip: _ClipState, save_path: str) -> bool:
         """Write the .animclip2d file to *save_path*."""
         from Infernux.core.animation_clip import AnimationClip
         tex = self._tex
@@ -1051,7 +1156,7 @@ class AnimClip2DEditorPanel(EditorPanel):
             authoring_texture_path=tex.file_path if tex else "",
             frame_indices=list(clip.frame_indices),
             fps=clip.fps,
-            loop=True,
+            loop=clip.loop,
         )
         ac.file_path = save_path
         ok = ac.save()
@@ -1066,36 +1171,43 @@ class AnimClip2DEditorPanel(EditorPanel):
             except Exception:
                 pass
             self._mark_saved_snapshot()
+            return True
         else:
             Debug.log_warning(f"[AnimClipEditor] Failed to save: {save_path}")
+            return False
 
-    def _show_save_as_dialog(self, clip: _ClipState):
-        """Open a native Save As file dialog on a background thread."""
-        try:
-            from Infernux.engine.project_context import get_project_root
-            initial_dir = os.path.join(get_project_root() or ".", "Assets")
-        except Exception:
-            initial_dir = "."
-
+    def _show_save_as_dialog(self, clip: _ClipState) -> None:
+        """Open the editor-owned Save As modal for one animation clip."""
         safe_name = clip.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
-        default_filename = f"{safe_name}.animclip2d"
+        if not self._save_as_dialog.request(
+            title="Save 2D Animation Clip",
+            extension="animclip2d",
+            default_name=safe_name,
+            current_path=clip.saved_path,
+        ):
+            Debug.log_warning("[AnimClipEditor] No project root set - cannot save animation clip.")
+            return
+        self._pending_save_as_clip = clip
 
-        result = None
-        try:
-            from ._dialogs import save_file_dialog
+    def _save_pending_clip(self, save_path: str) -> bool:
+        clip = self._pending_save_as_clip
+        if clip is None:
+            Debug.log_warning("[AnimClipEditor] Save As completed without a pending animation clip.")
+            return False
+        saved = self._do_save_clip(clip, save_path)
+        if saved:
+            self._pending_save_as_clip = None
+        return saved
 
-            result = save_file_dialog(
-                title="Save 2D Animation Clip",
-                win32_filter="2D AnimClip files (*.animclip2d)\0*.animclip2d\0All files (*.*)\0*.*\0\0",
-                initial_dir=initial_dir,
-                default_filename=default_filename,
-                default_ext="animclip2d",
-                tk_filetypes=[("2D AnimClip", "*.animclip2d"), ("All Files", "*.*")],
-            )
-        except Exception as exc:
-            Debug.log_warning(f"[AnimClipEditor] Save dialog error: {exc}")
-        if result:
-            self._do_save_clip(clip, result)
+    def _cancel_pending_save_as(self) -> None:
+        self._pending_save_as_clip = None
+
+    def _discard_unsaved_changes(self) -> bool:
+        self._cancel_pending_save_as()
+        self.load_state(copy.deepcopy(self._last_saved_state))
+        self._recompute_dirty()
+        self._sync_project_dirty_flag()
+        return not self._dirty
 
     # ------------------------------------------------------------------
     # Playback helpers

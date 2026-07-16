@@ -40,6 +40,7 @@ from .builtin import (
 )
 from Infernux.lib import Transform, Component
 from .serializable_object import SerializableObject
+from .value_codec import ValueCodecDescriptor, ValueCodecRegistry, VALUE_CODECS
 from .serialized_field import (
     serialized_field,
     int_field,
@@ -99,6 +100,7 @@ from .decorators import (
 from .spirit_animator import SpiritAnimator
 from .skeletal_animator import SkeletalAnimator
 from .timeline_action import TimelineAction
+from .particle_system import ParticleSystem
 
 __all__ = [
     "InxComponent",
@@ -144,6 +146,9 @@ __all__ = [
     "ComponentRef",
     "PrefabRef",
     "SerializableObject",
+    "ValueCodecDescriptor",
+    "ValueCodecRegistry",
+    "VALUE_CODECS",
     "list_field",
     "component_field",
     "component_list_field",
@@ -174,6 +179,7 @@ __all__ = [
     "HelpURL",
     "Icon",
     # Animation
+    "ParticleSystem",
     "SpiritAnimator",
     "SkeletalAnimator",
     "TimelineAction",

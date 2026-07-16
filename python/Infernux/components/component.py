@@ -19,7 +19,6 @@ Example:
 """
 
 from typing import Optional, Dict, Any, Type, TYPE_CHECKING, List
-import copy
 import threading
 import weakref
 
@@ -74,11 +73,21 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
     # remove themselves from the registry in _call_on_destroy().
     _active_instances: Dict[int, List['InxComponent']] = {}
 
+    # Python script components need a strong lifecycle registry and numeric-field
+    # storage. Native component facades override both flags because C++ owns their
+    # lifetime and property data.
+    _registers_active_instance: bool = True
+    _uses_component_data_store: bool = True
+
     # Component category for the Add Component menu.
     # Override in subclasses to group related components together.
     # Examples: "Physics", "Rendering", "Audio", "UI", etc.
     # When empty, script components default to the "Scripts" group.
     _component_category_: str = ""
+
+    _intrinsic_script_guid_: str = ""
+    _type_guid_: str = ""
+    _asset_script_guid_: str = ""
 
     # Gizmo visibility: when True, on_draw_gizmos() is called every frame
     # for this component.  When False, on_draw_gizmos() is only called when
@@ -89,6 +98,13 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
     # Thread-safe component ID generator
     _next_component_id: int = 1
     _id_lock: threading.Lock = threading.Lock()
+
+    @classmethod
+    def reserve_instances(cls, count: int) -> None:
+        """Preallocate numeric-field storage for bulk creation of this component type."""
+        from ._cds_bridge import reserve_class
+
+        reserve_class(cls, count)
     
     def __init_subclass__(cls, **kwargs):
         """
@@ -100,6 +116,11 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
                 count = int_field(10)
         """
         super().__init_subclass__(**kwargs)
+
+        from .component_identity import component_type_guid, intrinsic_script_guid
+        cls._intrinsic_script_guid_ = intrinsic_script_guid(cls.__module__)
+        cls._type_guid_ = component_type_guid(cls.__module__, cls.__qualname__)
+        cls._asset_script_guid_ = ""
 
         # ---- Enforce lifecycle: forbid __init__ override ----
         if '__init__' in cls.__dict__:
@@ -260,38 +281,54 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
         self._game_object: Optional['GameObject'] = None  # Reference to the owning GameObject
         self._game_object_ref: Optional[weakref.ref] = None  # Weak reference for safety
         self._cpp_component = None  # Native lifecycle authority (PyComponentProxy or built-in C++ component)
+        self._native_handle = None
+        self._native_scene = None
+        self._native_game_object_handle = None
         self._enabled = True
         self._execution_order = 0
         self._has_started = False
         self._awake_called = False
         self._is_destroyed = False  # Track destruction state
         self._component_name = self.__class__.__name__
-        self._script_guid: Optional[str] = None
+        self._script_guid: str = self.__class__._intrinsic_script_guid_
         self._registered_go_id: Optional[int] = None  # go_id this comp is registered under
         self._native_generation: int = 0
         
         # Coroutine scheduler (lazy-created on first start_coroutine call)
         self._coroutine_scheduler = None
 
-        # Allocate a slot in the C++ ComponentDataStore for numeric fields.
-        from ._cds_bridge import allocate_slot as _cds_alloc, get_class_id as _cds_class_id
-        self._cds_slot: Optional[int] = _cds_alloc(self.__class__)
-        self._cds_class_id: Optional[int] = _cds_class_id(self.__class__)
-        
+        self._cds_slot: Optional[tuple[int, int]] = None
+        self._cds_class_id: Optional[int] = None
+        if self._uses_component_data_store:
+            from ._cds_bridge import allocate_slot as _cds_alloc, get_class_id as _cds_class_id
+            self._cds_slot = _cds_alloc(self.__class__)
+            self._cds_class_id = _cds_class_id(self.__class__)
+
         # Initialize serialized fields with defaults (from class-level declarations)
         self._init_serialized_fields()
 
+    @classmethod
+    def _get_type_guid(cls) -> str:
+        return cls._type_guid_
+
+    @classmethod
+    def _get_intrinsic_script_guid(cls) -> str:
+        return cls._intrinsic_script_guid_
+
     def _init_serialized_fields(self):
         """Initialize all serialized fields with their default values."""
-        from .serialized_field import get_serialized_fields, SerializedFieldDescriptor
+        from .serialized_field import (
+            SerializedFieldDescriptor,
+            copy_serialized_field_default,
+            get_serialized_fields,
+        )
         fields = get_serialized_fields(self.__class__)
         for name, metadata in fields.items():
-            descriptor = self.__class__.__dict__.get(name)
-            try:
-                default_value = copy.deepcopy(metadata.default)
-            except Exception as exc:
-                # Some defaults (e.g. lambdas, C++ objects) can't be deepcopied
-                default_value = metadata.default
+            descriptor = next(
+                (base.__dict__[name] for base in self.__class__.__mro__ if name in base.__dict__),
+                None,
+            )
+            default_value = copy_serialized_field_default(metadata)
 
             if isinstance(descriptor, SerializedFieldDescriptor):
                 # CDS-backed fields: write default to C++ store.
@@ -579,7 +616,7 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
         Args:
             collision: CollisionInfo with contact details (collider,
                        game_object, contact_point, contact_normal,
-                       relative_velocity, impulse).
+                       relative_velocity).
         """
         pass
 
@@ -719,29 +756,3 @@ class InxComponent(ComponentNativeMixin, ComponentLifecycleMixin, ComponentPhysi
 
     def __repr__(self) -> str:
         return f"<{self._component_name} id={self._component_id} enabled={self.enabled}>"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  BrokenComponent — placeholder for scripts that failed to load
-# ═══════════════════════════════════════════════════════════════════════════
-
-class BrokenComponent(InxComponent):
-    """Placeholder attached when a script fails to load or throws at import time.
-
-    Keeps the original serialized field JSON so that saving the scene
-    preserves the data verbatim.  The Inspector shows an error banner
-    instead of field widgets.  Play mode is blocked while any
-    BrokenComponent exists.
-    """
-
-    _is_broken: bool = True
-    _broken_error: str = ""
-    _broken_fields_json: str = ""
-    _broken_type_name: str = ""
-
-    @property
-    def type_name(self) -> str:
-        return self._broken_type_name or "BrokenComponent"
-
-    def _serialize_fields(self) -> str:
-        return self._broken_fields_json or "{}"

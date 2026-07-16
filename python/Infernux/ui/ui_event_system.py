@@ -60,6 +60,9 @@ class UIEventProcessor:
         # Structure version for cache invalidation
         self._last_structure_version: int = -1
 
+        # Last button transition, exposed only through on-demand diagnostics.
+        self._last_pointer_debug: dict = {}
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -123,6 +126,20 @@ class UIEventProcessor:
                 hit_canvas = canvas
                 hit_pos = (cx, cy)
                 break
+
+        if mouse_down or mouse_up:
+            hit_go = getattr(hit_elem, "game_object", None) if hit_elem is not None else None
+            self._last_pointer_debug = {
+                "canvas_count": len(canvases),
+                "canvas_position": [float(hit_pos[0]), float(hit_pos[1])],
+                "mouse_down": bool(mouse_down),
+                "mouse_up": bool(mouse_up),
+                "mouse_held": bool(mouse_held),
+                "hit_type": type(hit_elem).__name__ if hit_elem is not None else "",
+                "hit_object": str(getattr(hit_go, "name", "") or ""),
+                "press_type": type(self._press_target).__name__ if self._press_target is not None else "",
+                "press_object": str(getattr(getattr(self._press_target, "game_object", None), "name", "") or ""),
+            }
 
         # ── Enter / Exit ──
         prev_hover = self._hover_target
@@ -188,6 +205,9 @@ class UIEventProcessor:
                     ev_click.press_position = self._press_position
                     ev_click.click_count = self._click_count
                     hit_elem.on_pointer_click(ev_click)
+                    debug_dispatch = getattr(hit_elem, "debug_dispatch_state", None)
+                    if callable(debug_dispatch):
+                        self._last_pointer_debug["persistent_dispatch"] = debug_dispatch()
 
             # End drag
             if self._is_dragging and self._drag_target is not None:
@@ -222,6 +242,10 @@ class UIEventProcessor:
         self._is_dragging = False
         self._click_count = 0
         self._last_structure_version = -1
+
+    def debug_state(self) -> dict:
+        """Return the last pointer transition without polling input each frame."""
+        return dict(self._last_pointer_debug)
 
     # ------------------------------------------------------------------
     # Helpers

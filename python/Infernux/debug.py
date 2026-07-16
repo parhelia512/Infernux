@@ -245,6 +245,8 @@ class DebugConsole:
         self._log_count = 0
         self._warning_count = 0
         self._error_count = 0
+        if self._native_console is not None:
+            self._native_console.clear()
     
     @property
     def log_count(self) -> int:

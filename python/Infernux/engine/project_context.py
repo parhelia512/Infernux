@@ -12,6 +12,8 @@ _guid_manifest_loaded: bool = False
 _panel_dirty_flags: dict[str, bool] = {}
 _panel_titles: dict[str, str] = {}
 _panel_save_handlers: dict[str, Callable[[], Any]] = {}
+_panel_save_pending_handlers: dict[str, Callable[[], bool]] = {}
+_panel_discard_handlers: dict[str, Callable[[], Any]] = {}
 
 
 def set_project_root(path: Optional[str]) -> None:
@@ -31,6 +33,8 @@ def set_panel_dirty(
     *,
     title: str = "",
     save_handler: Optional[Callable[[], Any]] = None,
+    save_pending_handler: Optional[Callable[[], bool]] = None,
+    discard_handler: Optional[Callable[[], Any]] = None,
 ) -> None:
     """Set or clear project-scoped dirty state for an editor panel.
 
@@ -45,6 +49,10 @@ def set_panel_dirty(
         _panel_titles[pid] = ttl
     if save_handler is not None:
         _panel_save_handlers[pid] = save_handler
+    if save_pending_handler is not None:
+        _panel_save_pending_handlers[pid] = save_pending_handler
+    if discard_handler is not None:
+        _panel_discard_handlers[pid] = discard_handler
     if is_dirty:
         _panel_dirty_flags[pid] = True
     else:
@@ -97,6 +105,8 @@ def clear_panel_tracking(panel_id: str) -> None:
     _panel_dirty_flags.pop(pid, None)
     _panel_titles.pop(pid, None)
     _panel_save_handlers.pop(pid, None)
+    _panel_save_pending_handlers.pop(pid, None)
+    _panel_discard_handlers.pop(pid, None)
 
 
 def get_dirty_panel_entries() -> list[dict]:
@@ -109,6 +119,8 @@ def get_dirty_panel_entries() -> list[dict]:
             "panel_id": pid,
             "title": _panel_titles.get(pid, pid),
             "save_handler": _panel_save_handlers.get(pid),
+            "save_pending_handler": _panel_save_pending_handlers.get(pid),
+            "discard_handler": _panel_discard_handlers.get(pid),
         })
     return entries
 

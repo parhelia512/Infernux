@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cassert>
 #include <core/log/InxLog.h>
+#include <stdexcept>
 
 namespace infernux
 {
@@ -14,7 +15,7 @@ namespace infernux
 namespace
 {
 
-JobSystem *g_instance = nullptr;
+std::atomic<JobSystem *> g_instance{nullptr};
 std::mutex g_singletonMutex;
 
 uint32_t ResolveWorkerCount(uint32_t requested) noexcept
@@ -37,19 +38,18 @@ uint32_t ResolveWorkerCount(uint32_t requested) noexcept
 void JobSystem::Initialize(uint32_t workerCount)
 {
     std::lock_guard<std::mutex> guard(g_singletonMutex);
-    assert(g_instance == nullptr && "JobSystem::Initialize called twice");
-    if (g_instance != nullptr) {
-        INXLOG_WARN("JobSystem::Initialize called twice — ignoring second call");
-        return;
+    if (g_instance.load(std::memory_order_acquire) != nullptr) {
+        throw std::logic_error("JobSystem::Initialize called twice");
     }
 
-    g_instance = new JobSystem();
-    g_instance->m_running.store(true, std::memory_order_release);
+    auto *instance = new JobSystem();
+    instance->m_state.store(State::Running, std::memory_order_release);
+    g_instance.store(instance, std::memory_order_release);
 
     const uint32_t resolved = ResolveWorkerCount(workerCount);
-    g_instance->m_workers.reserve(resolved);
+    instance->m_workers.reserve(resolved);
     for (uint32_t i = 0; i < resolved; ++i) {
-        g_instance->m_workers.emplace_back([] { JobSystem::Get().WorkerLoop(); });
+        instance->m_workers.emplace_back([instance] { instance->WorkerLoop(); });
     }
 
     INXLOG_INFO("JobSystem online with ", resolved,
@@ -61,65 +61,52 @@ void JobSystem::Shutdown()
     JobSystem *toDestroy = nullptr;
     {
         std::lock_guard<std::mutex> guard(g_singletonMutex);
-        toDestroy = g_instance;
-        g_instance = nullptr;
+        toDestroy = g_instance.exchange(nullptr, std::memory_order_acq_rel);
     }
 
     if (toDestroy == nullptr) {
         return;
     }
 
-    toDestroy->m_running.store(false, std::memory_order_release);
-    toDestroy->m_queueCv.notify_all();
-
-    for (auto &t : toDestroy->m_workers) {
-        if (t.joinable()) {
-            t.join();
-        }
-    }
-    toDestroy->m_workers.clear();
-
+    toDestroy->StopAndJoin();
     delete toDestroy;
 }
 
 JobSystem &JobSystem::Get()
 {
-    // Fast path: no lock for the common case where Initialize already ran.
-    // Initialize/Shutdown are coarse one-shot events so a relaxed read here
-    // is fine; the assert protects against misuse from arbitrary call sites.
-    assert(g_instance != nullptr && "JobSystem::Get called before Initialize");
-    return *g_instance;
+    auto *instance = g_instance.load(std::memory_order_acquire);
+    if (instance == nullptr) {
+        throw std::logic_error("JobSystem::Get called outside its lifetime");
+    }
+    return *instance;
 }
 
 bool JobSystem::IsAvailable() noexcept
 {
-    std::lock_guard<std::mutex> guard(g_singletonMutex);
-    return g_instance != nullptr;
+    return g_instance.load(std::memory_order_acquire) != nullptr;
 }
 
 JobSystem::~JobSystem()
 {
-    // Shutdown should already have joined workers; if not, do it defensively
-    // so destruction never leaves a dangling thread.
-    m_running.store(false, std::memory_order_release);
-    m_queueCv.notify_all();
-    for (auto &t : m_workers) {
-        if (t.joinable()) {
-            t.join();
-        }
-    }
+    StopAndJoin();
 }
 
 JobHandle JobSystem::Schedule(JobFn job)
 {
-    auto counter = std::make_shared<std::atomic<int>>(1);
-    Task task{std::move(job), counter};
+    if (!job) {
+        throw std::invalid_argument("JobSystem::Schedule requires a callable");
+    }
+
+    auto state = std::make_shared<JobHandle::State>(1);
     {
         std::lock_guard<std::mutex> guard(m_queueMutex);
-        m_queue.push(std::move(task));
+        if (!m_accepting) {
+            throw std::runtime_error("JobSystem is shutting down");
+        }
+        m_queue.push(Task{std::move(job), state});
     }
     m_queueCv.notify_one();
-    return JobHandle(std::move(counter));
+    return JobHandle(std::move(state));
 }
 
 JobHandle JobSystem::ScheduleBatch(uint32_t count, std::function<JobFn(uint32_t)> factory)
@@ -128,15 +115,28 @@ JobHandle JobSystem::ScheduleBatch(uint32_t count, std::function<JobFn(uint32_t)
         return JobHandle();
     }
 
-    auto counter = std::make_shared<std::atomic<int>>(static_cast<int>(count));
+    std::vector<JobFn> jobs;
+    jobs.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        auto job = factory(i);
+        if (!job) {
+            throw std::invalid_argument("JobSystem::ScheduleBatch factory returned an empty job");
+        }
+        jobs.push_back(std::move(job));
+    }
+
+    auto state = std::make_shared<JobHandle::State>(count);
     {
         std::lock_guard<std::mutex> guard(m_queueMutex);
-        for (uint32_t i = 0; i < count; ++i) {
-            m_queue.push(Task{factory(i), counter});
+        if (!m_accepting) {
+            throw std::runtime_error("JobSystem is shutting down");
+        }
+        for (auto &job : jobs) {
+            m_queue.push(Task{std::move(job), state});
         }
     }
     m_queueCv.notify_all();
-    return JobHandle(std::move(counter));
+    return JobHandle(std::move(state));
 }
 
 void JobSystem::ParallelFor(uint32_t count, std::function<void(uint32_t)> body)
@@ -158,13 +158,46 @@ void JobSystem::Wait(const JobHandle &handle)
     // condition_variable wait, the joining thread runs queued tasks itself
     // until the counter zeroes out. This protects against priority inversion
     // when the main render thread joins on jobs scheduled by helpers.
-    while (handle.m_counter->load(std::memory_order_acquire) > 0) {
+    while (!handle.IsComplete()) {
         if (!TryRunOne()) {
-            // Queue empty but our counter not yet zero → workers are still
-            // executing the last task(s); just yield instead of busy-waiting.
-            std::this_thread::yield();
+            std::unique_lock<std::mutex> lock(handle.m_state->completionMutex);
+            handle.m_state->completionCv.wait(lock, [&handle] { return handle.IsComplete(); });
         }
     }
+
+    std::exception_ptr failure;
+    {
+        std::lock_guard<std::mutex> lock(handle.m_state->completionMutex);
+        failure = handle.m_state->failure;
+    }
+    if (failure) {
+        std::rethrow_exception(failure);
+    }
+    if (handle.IsCancellationRequested())
+        throw JobCancelled("job group was cancelled");
+}
+
+void JobSystem::WaitPassive(const JobHandle &handle)
+{
+    if (!handle.IsValid())
+        return;
+
+    std::exception_ptr failure;
+    {
+        std::unique_lock<std::mutex> lock(handle.m_state->completionMutex);
+        handle.m_state->completionCv.wait(lock, [&handle] { return handle.IsComplete(); });
+        failure = handle.m_state->failure;
+    }
+    if (failure)
+        std::rethrow_exception(failure);
+    if (handle.IsCancellationRequested())
+        throw JobCancelled("job group was cancelled");
+}
+
+size_t JobSystem::GetQueuedTaskCount() const
+{
+    std::lock_guard<std::mutex> guard(m_queueMutex);
+    return m_queue.size();
 }
 
 bool JobSystem::TryRunOne()
@@ -179,45 +212,73 @@ bool JobSystem::TryRunOne()
         m_queue.pop();
     }
 
-    if (task.fn) {
-        task.fn();
-    }
-    if (task.counter) {
-        task.counter->fetch_sub(1, std::memory_order_acq_rel);
-    }
+    Execute(std::move(task));
     return true;
 }
 
 void JobSystem::WorkerLoop()
 {
-    while (m_running.load(std::memory_order_acquire)) {
+    for (;;) {
         Task task;
         {
             std::unique_lock<std::mutex> guard(m_queueMutex);
-            m_queueCv.wait(guard, [this] { return !m_queue.empty() || !m_running.load(std::memory_order_acquire); });
+            m_queueCv.wait(guard, [this] { return !m_queue.empty() || m_stopRequested; });
 
-            if (!m_running.load(std::memory_order_acquire) && m_queue.empty()) {
+            if (m_queue.empty() && m_stopRequested) {
                 return;
-            }
-
-            if (m_queue.empty()) {
-                continue;
             }
 
             task = std::move(m_queue.front());
             m_queue.pop();
         }
 
-        if (task.fn) {
-            // Errors in user-supplied jobs are bugs in the caller — let
-            // them propagate so the worker thread terminates with a
-            // diagnosable stack instead of silently dropping work.
+        Execute(std::move(task));
+    }
+}
+
+void JobSystem::Execute(Task task) noexcept
+{
+    m_activeTasks.fetch_add(1, std::memory_order_acq_rel);
+    try {
+        if (!task.state->cancelRequested.load(std::memory_order_acquire))
             task.fn();
-        }
-        if (task.counter) {
-            task.counter->fetch_sub(1, std::memory_order_acq_rel);
+    } catch (...) {
+        std::lock_guard<std::mutex> lock(task.state->completionMutex);
+        if (!task.state->failure) {
+            task.state->failure = std::current_exception();
         }
     }
+
+    m_activeTasks.fetch_sub(1, std::memory_order_acq_rel);
+
+    if (task.state->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        // Synchronize the final predicate transition with wait(lock, pred).
+        // Without this lock, a waiter can observe remaining > 0, then miss a
+        // notify issued just before it actually blocks.
+        std::lock_guard<std::mutex> lock(task.state->completionMutex);
+        task.state->completionCv.notify_all();
+    }
+}
+
+void JobSystem::StopAndJoin() noexcept
+{
+    State expected = State::Running;
+    if (!m_state.compare_exchange_strong(expected, State::Draining, std::memory_order_acq_rel))
+        return;
+    {
+        std::lock_guard<std::mutex> guard(m_queueMutex);
+        m_accepting = false;
+        m_stopRequested = true;
+    }
+    m_queueCv.notify_all();
+
+    for (auto &worker : m_workers) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    m_workers.clear();
+    m_state.store(State::Stopped, std::memory_order_release);
 }
 
 } // namespace infernux

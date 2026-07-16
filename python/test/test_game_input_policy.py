@@ -34,23 +34,23 @@ class TestShouldRouteGameInput:
 
 
 class TestShouldProcessGameUiEvents:
-    def test_processes_ui_only_while_playing_and_hovered(self):
+    def test_processes_ui_while_playing_and_game_panel_focused(self):
         assert should_process_game_ui_events(
             is_playing=True,
-            viewport_hovered=True,
+            panel_focused=True,
             cursor_locked=False,
         ) is True
 
     def test_blocks_ui_when_cursor_locked(self):
         assert should_process_game_ui_events(
             is_playing=True,
-            viewport_hovered=True,
+            panel_focused=True,
             cursor_locked=True,
         ) is False
 
-    def test_blocks_ui_when_viewport_not_hovered(self):
+    def test_blocks_ui_when_game_panel_is_not_focused(self):
         assert should_process_game_ui_events(
             is_playing=True,
-            viewport_hovered=False,
+            panel_focused=False,
             cursor_locked=False,
         ) is False

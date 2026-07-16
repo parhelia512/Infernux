@@ -56,7 +56,7 @@
 | 方法 | 描述 |
 |------|------|
 | `static Texture.load(file_path: str) → Optional[Texture]` | 从文件路径加载纹理。 |
-| `static Texture.from_memory(data: bytes, width: int, height: int, channels: int = ..., name: str = ...) → Optional[Texture]` | Create a texture from raw pixel data in memory. |
+| `static Texture.decode(data: bytes, name: str = ...) → Optional[Texture]` | Decode PNG/JPEG/BMP/TGA bytes into a texture. |
 | `static Texture.solid_color(width: int, height: int, r: int = ..., g: int = ..., b: int = ..., a: int = ...) → Optional[Texture]` | Create a solid color texture. |
 | `static Texture.checkerboard(width: int, height: int, cell_size: int = ...) → Optional[Texture]` | Create a checkerboard pattern texture. |
 | `static Texture.from_native(native: TextureData) → Texture` | Wrap an existing C++ TextureData. |
@@ -78,9 +78,7 @@
 ## 示例
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for Texture
-```
+> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。
 <!-- USER CONTENT END -->
 
 ## 另请参阅

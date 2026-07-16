@@ -273,7 +273,6 @@ void MaterialDescriptorManager::Shutdown()
 
     m_device = VK_NULL_HANDLE;
     m_physicalDevice = VK_NULL_HANDLE;
-    m_retiredDescriptorSets.clear();
     m_liveDescriptorHandles.clear();
 }
 
@@ -341,22 +340,28 @@ bool MaterialDescriptorManager::TryGetDefaultTextureBinding(std::string_view bin
     return false;
 }
 
-bool MaterialDescriptorManager::TryResolveExplicitTextureBinding(
-    const std::string &texturePath, const std::string &bindingName,
-    MaterialDescriptorSet::TextureBinding &outBinding) const
+TextureResolveStatus
+MaterialDescriptorManager::ResolveExplicitTextureBinding(const std::string &texturePath, const std::string &bindingName,
+                                                         MaterialDescriptorSet::TextureBinding &outBinding) const
 {
     if (!m_textureResolver || texturePath.empty()) {
-        return false;
+        return TextureResolveStatus::Failed;
     }
 
-    auto [imageView, sampler] = m_textureResolver(texturePath, bindingName);
-    if (imageView == VK_NULL_HANDLE || sampler == VK_NULL_HANDLE) {
+    TextureResolveResult result = m_textureResolver(texturePath, bindingName);
+    if (result.status != TextureResolveStatus::Ready) {
         outBinding = {};
-        return false;
+        return result.status;
     }
 
-    outBinding = {imageView, sampler};
-    return true;
+    outBinding = std::move(result.binding);
+    if (outBinding.imageView == VK_NULL_HANDLE || outBinding.sampler == VK_NULL_HANDLE || !outBinding.keepAlive) {
+        outBinding = {};
+        INXLOG_ERROR("Texture resolver returned Ready without a complete GPU binding for texture '", texturePath,
+                     "' (binding='", bindingName, "')");
+        return TextureResolveStatus::Failed;
+    }
+    return TextureResolveStatus::Ready;
 }
 
 MaterialDescriptorSet *MaterialDescriptorManager::GetOrCreateDescriptorSet(const InxMaterial &material,
@@ -390,18 +395,12 @@ MaterialDescriptorSet *MaterialDescriptorManager::GetOrCreateDescriptorSet(const
             return it->second.get();
         } else {
             INXLOG_INFO("Material '", materialName, "' descriptor requirements changed, recreating descriptor set");
-            // Do NOT free the old descriptor set here.  Scene-facing InxMaterial objects
-            // may still carry the old handle in their cached m_passPipelines state.
-            // Freeing (even deferred via deletion queue) produces "Invalid VkDescriptorSet"
-            // validation errors when those cached handles are bound on the next frame.
-            // Instead, retire the stale entry: keep it alive until Clear()/Shutdown()
-            // resets the pool, at which point all physical memory is reclaimed at once.
             auto staleEntry = std::shared_ptr<MaterialDescriptorSet>(std::move(it->second));
             if (staleEntry && staleEntry->descriptorSet != VK_NULL_HANDLE) {
                 m_liveDescriptorHandles.erase(reinterpret_cast<uint64_t>(staleEntry->descriptorSet));
             }
             m_descriptorSets.erase(it);
-            m_retiredDescriptorSets.emplace_back(std::move(staleEntry));
+            RetireDescriptorSet(std::move(staleEntry));
         }
     }
 
@@ -504,9 +503,11 @@ MaterialDescriptorSet *MaterialDescriptorManager::GetOrCreateDescriptorSet(const
                 // Match property name to sampler name from shader reflection
                 if (binding.name == propName) {
                     MaterialDescriptorSet::TextureBinding resolvedBinding{};
-                    const bool resolvedExplicit =
-                        !isPlaceholderTexture &&
-                        TryResolveExplicitTextureBinding(*texturePath, binding.name, resolvedBinding);
+                    const TextureResolveStatus resolveStatus =
+                        isPlaceholderTexture
+                            ? TextureResolveStatus::Pending
+                            : ResolveExplicitTextureBinding(*texturePath, binding.name, resolvedBinding);
+                    const bool resolvedExplicit = resolveStatus == TextureResolveStatus::Ready;
 
                     if (!resolvedExplicit && !TryGetDefaultTextureBinding(binding.name, resolvedBinding)) {
                         matDescSet->textureBindings.erase(binding.binding);
@@ -518,7 +519,7 @@ MaterialDescriptorSet *MaterialDescriptorManager::GetOrCreateDescriptorSet(const
                     if (resolvedExplicit) {
                         INXLOG_DEBUG("Bound texture '", *texturePath, "' to binding ", binding.binding,
                                      " for material '", materialName, "'");
-                    } else if (!isPlaceholderTexture) {
+                    } else if (resolveStatus == TextureResolveStatus::Failed) {
                         INXLOG_WARN("Failed to resolve texture '", *texturePath, "' for material '", materialName,
                                     "' property '", propName, "' — binding default texture");
                     }
@@ -698,19 +699,25 @@ void MaterialDescriptorManager::ResolveTextureProperties(const std::string &mate
                 }
 
                 const bool isPlaceholder = IsPlaceholderTexturePath(*texturePath);
-                const bool resolvedExplicit =
-                    !isPlaceholder && TryResolveExplicitTextureBinding(*texturePath, binding.name, resolvedBinding);
+                const TextureResolveStatus resolveStatus =
+                    isPlaceholder ? TextureResolveStatus::Pending
+                                  : ResolveExplicitTextureBinding(*texturePath, binding.name, resolvedBinding);
+                const bool resolvedExplicit = resolveStatus == TextureResolveStatus::Ready;
                 const bool hasBinding = resolvedExplicit || TryGetDefaultTextureBinding(binding.name, resolvedBinding);
 
                 if (hasBinding) {
                     matDescSet.textureBindings[binding.binding] = resolvedBinding;
                     AppendImageWrite(writes, imageInfos, matDescSet.descriptorSet, binding.binding,
                                      resolvedBinding.imageView, resolvedBinding.sampler);
-                    INXLOG_DEBUG("Re-bound texture '", *texturePath, "' to binding ", binding.binding,
-                                 " for material '", materialName, "'");
+                    if (resolvedExplicit) {
+                        INXLOG_DEBUG("Re-bound texture '", *texturePath, "' to binding ", binding.binding,
+                                     " for material '", materialName, "'");
+                    }
                 } else {
-                    INXLOG_WARN("Failed to resolve texture '", *texturePath, "' for material '", materialName,
-                                "' property '", propName, "' — binding default texture");
+                    if (resolveStatus == TextureResolveStatus::Failed) {
+                        INXLOG_WARN("Failed to resolve texture '", *texturePath, "' for material '", materialName,
+                                    "' property '", propName, "' — binding default texture");
+                    }
                     matDescSet.textureBindings.erase(binding.binding);
                 }
                 break;
@@ -773,20 +780,42 @@ void MaterialDescriptorManager::RemoveDescriptorSet(const std::string &materialN
 {
     auto it = m_descriptorSets.find(materialName);
     if (it != m_descriptorSets.end()) {
-        // Important safety rule:
-        // Do NOT free individual descriptor sets during runtime invalidation.
-        // Scene-facing material instances may still transiently carry old handles;
-        // freeing here can turn those stale references into hard-invalid Vulkan
-        // objects (vkCmdBindDescriptorSets Invalid VkDescriptorSet).
-        // We retire sets logically and reclaim them only when pools are reset
-        // during Clear()/Shutdown().
         auto retiredEntry = std::shared_ptr<MaterialDescriptorSet>(std::move(it->second));
         if (retiredEntry && retiredEntry->descriptorSet != VK_NULL_HANDLE) {
-            m_liveDescriptorHandles.erase(reinterpret_cast<uint64_t>(retiredEntry->descriptorSet));
+            const uint64_t handle = reinterpret_cast<uint64_t>(retiredEntry->descriptorSet);
+            m_liveDescriptorHandles.erase(handle);
+            m_allocatedHandles.erase(handle);
         }
-        m_retiredDescriptorSets.emplace_back(std::move(retiredEntry));
         m_descriptorSets.erase(it);
+        RetireDescriptorSet(std::move(retiredEntry));
     }
+}
+
+void MaterialDescriptorManager::RetireDescriptorSet(std::shared_ptr<MaterialDescriptorSet> descriptorSet)
+{
+    if (!descriptorSet)
+        throw std::invalid_argument("Cannot retire an empty material descriptor set");
+
+    const VkDevice device = m_device;
+    const VkDescriptorPool ownerPool = descriptorSet->ownerPool;
+    const VkDescriptorSet handle = descriptorSet->descriptorSet;
+    auto pending = m_pendingDescriptorSetReleases;
+
+    if (m_deletionQueue) {
+        pending->fetch_add(1, std::memory_order_relaxed);
+        m_deletionQueue->Push([device, ownerPool, handle, descriptorSet = std::move(descriptorSet),
+                               pending = std::move(pending)]() mutable {
+            vkFreeDescriptorSets(device, ownerPool, 1, &handle);
+            descriptorSet->descriptorSet = VK_NULL_HANDLE;
+            descriptorSet.reset();
+            pending->fetch_sub(1, std::memory_order_relaxed);
+        });
+        return;
+    }
+
+    vkDeviceWaitIdle(device);
+    vkFreeDescriptorSets(device, ownerPool, 1, &handle);
+    descriptorSet->descriptorSet = VK_NULL_HANDLE;
 }
 
 void MaterialDescriptorManager::Clear()
@@ -800,7 +829,6 @@ void MaterialDescriptorManager::Clear()
         }
     }
     m_descriptorSets.clear();
-    m_retiredDescriptorSets.clear();
     // All handles are now invalid — clear the live-handle tracking set.
     m_allocatedHandles.clear();
     m_liveDescriptorHandles.clear();

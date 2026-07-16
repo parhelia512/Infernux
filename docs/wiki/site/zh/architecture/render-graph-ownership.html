@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="解释渲染权威的拆分：Python 定义 RenderGraph 拓扑与 RenderStack 组合，C++ 负责验证、编译、资源分配、Vulkan 屏障插入和执行。">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>RenderGraph 的职责与所有权 - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/zh/architecture/render-graph-ownership.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="RenderGraph 的职责与所有权 - Infernux Documentation">
+    <meta property="og:description" content="解释渲染权威的拆分：Python 定义 RenderGraph 拓扑与 RenderStack 组合，C++ 负责验证、编译、资源分配、Vulkan 屏障插入和执行。">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/zh/architecture/render-graph-ownership.html">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="架构">
+    <meta property="article:tag" content="渲染"><meta property="article:tag" content="rendergraph"><meta property="article:tag" content="vulkan"><meta property="article:tag" content="python"><meta property="article:tag" content="资源">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="RenderGraph 的职责与所有权 - Infernux Documentation">
+    <meta name="twitter:description" content="解释渲染权威的拆分：Python 定义 RenderGraph 拓扑与 RenderStack 组合，C++ 负责验证、编译、资源分配、Vulkan 屏障插入和执行。">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://infernux-engine.com/wiki/site/zh/architecture/render-graph-ownership.html#document",
+          "headline": "RenderGraph \u7684\u804c\u8d23\u4e0e\u6240\u6709\u6743",
+          "name": "RenderGraph \u7684\u804c\u8d23\u4e0e\u6240\u6709\u6743",
+          "description": "\u89e3\u91ca\u6e32\u67d3\u6743\u5a01\u7684\u62c6\u5206\uff1aPython \u5b9a\u4e49 RenderGraph \u62d3\u6251\u4e0e RenderStack \u7ec4\u5408\uff0cC++ \u8d1f\u8d23\u9a8c\u8bc1\u3001\u7f16\u8bd1\u3001\u8d44\u6e90\u5206\u914d\u3001Vulkan \u5c4f\u969c\u63d2\u5165\u548c\u6267\u884c\u3002",
+          "url": "https://infernux-engine.com/wiki/site/zh/architecture/render-graph-ownership.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/zh/architecture/render-graph-ownership.html"
+          },
+          "inLanguage": "zh-CN",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Architecture reference",
+          "articleSection": "\u67b6\u6784",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": "Infernux NASA Punk \u4efb\u52a1\u5361\uff0c\u5305\u542b\u7f16\u8f91\u5668\u3001\u7194\u7089\u6807\u5fd7\u548c\u6280\u672f\u9884\u89c8\u72b6\u6001\u3002"
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["\u6e32\u67d3", "rendergraph", "vulkan", "python", "\u8d44\u6e90"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/zh/architecture/render-graph-ownership.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "\u6587\u6863",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "\u67b6\u6784",
+              "item": "https://infernux-engine.com/wiki.html?layer=architecture#written-guides"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "RenderGraph \u7684\u804c\u8d23\u4e0e\u6240\u6709\u6743",
+              "item": "https://infernux-engine.com/wiki/site/zh/architecture/render-graph-ownership.html"
+            }
+            
+          ]
+        }
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/architecture/render-graph-ownership.html">
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/architecture/render-graph-ownership.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/architecture/render-graph-ownership.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
+    <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
+</head>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <!-- Top Navigation -->
+    <nav class="navbar" aria-label="主导航">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/zh/learn/getting-started.html" class="nav-priority">开始使用</a>
+                <a href="/wiki.html#start-here">学习</a>
+                <a href="/wiki.html?layer=manual#written-guides" class="active" aria-current="page">手册</a>
+                <a href="/wiki/site/zh/api/index.html">API</a>
+                <a href="/roadmap.html">路线图</a>
+                <a href="/community.html" class="nav-priority">社区</a>
+                <a href="/download.html">下载</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="复制版本、来源和权威链接" aria-label="复制供 Agent 使用的页面上下文">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>复制给 Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>搜索文档</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell article-page-shell" id="main-content">
+        <div class="container article-page-container">
+            <div class="api-main article-page-content">
+                
+    <nav class="doc-breadcrumb" aria-label="面包屑">
+        <a href="/wiki.html">文档</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html?layer=architecture#written-guides">架构</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">RenderGraph 的职责与所有权</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="文档版本与来源" data-status="preview" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">preview</strong>
+                        <span class="doc-provenance-item"><span>始于</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>已验证</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>读者</span> advanced-user, graphics-contributor, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">文档清单</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/en/architecture/render-graph-ownership.html" lang="en">Read in English</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>源码证据 · 7</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/rendergraph/graph.py" target="_blank" rel="noopener">python/Infernux/rendergraph/graph.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/renderstack/render_pipeline.py" target="_blank" rel="noopener">python/Infernux/renderstack/render_pipeline.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/renderstack/render_stack_pipeline.py" target="_blank" rel="noopener">python/Infernux/renderstack/render_stack_pipeline.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/cpp/infernux/tools/pybinding/BindingRenderGraph.cpp" target="_blank" rel="noopener">cpp/infernux/tools/pybinding/BindingRenderGraph.cpp</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/cpp/infernux/function/renderer/SceneRenderGraph.h" target="_blank" rel="noopener">cpp/infernux/function/renderer/SceneRenderGraph.h</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/cpp/infernux/function/renderer/vk/RenderGraph.h" target="_blank" rel="noopener">cpp/infernux/function/renderer/vk/RenderGraph.h</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/cpp/infernux/function/renderer/vk/RenderGraphCompile.cpp" target="_blank" rel="noopener">cpp/infernux/function/renderer/vk/RenderGraphCompile.cpp</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>本页目录</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>收起章节</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="本页章节"></nav>
+    </aside>
+    
+                <h1 id="rendergraph">RenderGraph 的职责与所有权<a class="headerlink" href="#rendergraph" title="Permanent link">&para;</a></h1>
+<p>Infernux 的渲染采用一条明确的权威分界：<strong>Python 定义一帧应该包含什么，C++ 决定如何把描述变成安全的 Vulkan 工作</strong>。这样既能用脚本组合渲染管线，又不会把资源生命周期、同步和命令录制搬进 Python。</p>
+<h2 id="_1">端到端流程<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>RenderPipeline / RenderStack（Python）
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  → RenderGraph builder
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    → RenderGraphDescription（绑定的 POD）
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>      → SceneRenderGraph::ApplyPythonGraph
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        → vk::RenderGraph::Compile
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>          → 分配 + 裁剪 + 排序 + 屏障
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>            → vk::RenderGraph::Execute
+</code></pre></div>
+<p>Python builder 记录纹理声明、Pass 读写、清除操作、绘制动作、渲染队列过滤、Shader 输入和最终输出。<code>build()</code> 会把这些状态转换成由 <code>BindingRenderGraph.cpp</code> 暴露的原生 <code>GraphTextureDesc</code>、<code>GraphPassDesc</code> 与 <code>RenderGraphDescription</code>。</p>
+<p><code>SceneRenderGraph</code> 保存描述，并把声明的动作翻译为原生 Pass 回调。更底层的 <code>vk::RenderGraph</code> 继续掌握无用 Pass 裁剪、资源生命周期分析、拓扑排序、瞬态资源分配、RenderPass/Framebuffer 创建、执行数据预计算和 Vulkan 图像屏障。</p>
+<h2 id="_2">为什么传递的是数据而不是任意回调<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>公共 builder 暴露一组封闭动作，例如绘制 Renderer、绘制阴影投射者、绘制屏幕 UI 和执行全屏 Shader。Python 不会在每个 Pass 里录制任意 Vulkan 命令。这带来几个直接结果：</p>
+<ul>
+<li>原生编译器能看见完整读写依赖；</li>
+<li>瞬态资源不会被 Python 对象生命周期泄漏；</li>
+<li>命令录制保留在原生热路径；</li>
+<li>不支持的动作会在明确的翻译边界失败；</li>
+<li>图可以从稳定描述中检查并重建。</li>
+</ul>
+<p><code>CUSTOM</code> 动作目前是保留项，不能把它理解为已经提供任意 Python 回调能力。</p>
+<h2 id="renderpipelinerenderstack-rendergraph">RenderPipeline、RenderStack 与 RenderGraph<a class="headerlink" href="#renderpipelinerenderstack-rendergraph" title="Permanent link">&para;</a></h2>
+<p>这些名称分别承担不同责任：</p>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>责任</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RenderPipeline</code></td>
+<td>定义相机的基础拓扑和相机级策略</td>
+</tr>
+<tr>
+<td><code>RenderStack</code></td>
+<td>选择 Pipeline，并组合注入的 Pass / Effect</td>
+</tr>
+<tr>
+<td><code>RenderGraph</code> builder</td>
+<td>记录一次具体图描述</td>
+</tr>
+<tr>
+<td><code>SceneRenderGraph</code></td>
+<td>把描述桥接到场景绘制回调与渲染目标</td>
+</tr>
+<tr>
+<td><code>vk::RenderGraph</code></td>
+<td>编译资源和依赖，并录制可执行 Vulkan 工作</td>
+</tr>
+</tbody>
+</table>
+<p><code>RenderStackPipeline</code> 是引擎入口桥。它为每个相机查找场景中的活动 RenderStack 并委托执行；没有 RenderStack 时，会构建并缓存默认 Forward 回退。C++ 引擎只需要标准 RenderPipeline 回调接口，不需要了解 RenderStack 的专有概念。</p>
+<h2 id="_3">编译阶段与逐帧阶段<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>拓扑变化会把场景图标为 dirty。<code>EnsureGraphBuilt()</code> 在命令录制开始前完成重建与编译。普通帧则应用相机状态、提交裁剪结果、更新不改变 RenderPass 兼容性的值，再执行已编译图。</p>
+<p>这种区分同时保护正确性与性能：</p>
+<ul>
+<li>Pass 连接、附件格式、目标尺寸或 load 行为变化可能要求重新构建和编译；</li>
+<li>只改变 clear color 的数值可以更新缓存执行数据，不必重建拓扑；</li>
+<li>场景切换会先清理跨帧 DrawCall 与图像句柄状态，避免旧图再次执行；</li>
+<li>已编译执行顺序不会包含与最终输出无关、已被裁掉的 Pass。</li>
+</ul>
+<h2 id="_4">资源真相<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>每个图纹理都有名称和使用历史。Pass 必须通过 builder 声明读写；隐藏的资源访问会让同步推导失真。编译器依据这些声明计算生命周期，并把用法转换成 Vulkan layout、access mask 与 pipeline stage。</p>
+<p>资源分为两类：</p>
+<ul>
+<li><strong>导入资源</strong>已经存在于图外，例如场景目标。它们的真实初始/最终状态必须与外部 transition 保持一致。</li>
+<li><strong>瞬态资源</strong>为图注册并在编译时分配。有效寿命由 Pass 使用区间推导，互不重叠时可复用或做内存 alias。</li>
+</ul>
+<p>名称是创作标识，原生层会在执行前把它们解析成类型化 Handle。最终输出同样是显式的，无用 Pass 裁剪会从这个输出反向遍历。</p>
+<h2 id="_5">故障与调试边界<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>图出现问题时，先分类再改代码：</p>
+<ol>
+<li><strong>描述错误</strong>：纹理名缺失/重复、输出错误、动作错误或依赖漏声明。从 Python 拓扑开始。</li>
+<li><strong>翻译错误</strong>：描述有效，但映射到场景回调或附件时出错。从 <code>SceneRenderGraph</code> 与绑定类型开始。</li>
+<li><strong>编译错误</strong>：排序、生命周期、RenderPass 兼容性或分配失败。从 <code>vk::RenderGraph::Compile</code> 和 <code>RenderGraphCompile.cpp</code> 开始。</li>
+<li><strong>执行错误</strong>：屏障、外部 layout、descriptor 或绘制回调错误。检查已编译 Pass 顺序和 Vulkan Validation 输出。</li>
+</ol>
+<p>跨入 C++ 前先使用 <code>RenderGraph.get_debug_string()</code>。运行时再用 <code>SceneRenderGraph.get_debug_string()</code>、Pass 数量、已执行 Pass 名称与瞬态资源常驻字节数，确认预期拓扑是否被接受、编译并真正执行。</p>
+<h2 id="_6">扩展规则<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<p>新增渲染功能时，优先扩展声明式词汇，而不是增加不透明的 Python 命令录制。一个完整功能通常涉及 Python builder 或 RenderStack Pass、绑定描述类型、原生翻译回调，以及依赖/资源行为测试。如果只是改变组合且现有动作足够，工作可以完全留在 Python。</p>
+<p>本页描述的是 2026-07-15 验证过的仓库状态。精确公共类型与方法仍以生成 API 为准。</p>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="文档连续阅读与反馈">
+        <a class="doc-trail-fallback" href="/wiki.html">返回文档中心</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="文档发布证据">
+        <span class="doc-build-label">发布证据</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">正在读取发布版本与来源…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">机器清单 JSON</a>
+    </section>
+    
+    
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">搜索 Infernux 文档</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="关闭文档搜索"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API 符号、系统、工作流…">
+            </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="文档搜索筛选器"></div>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </dialog>
+
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
+</body>
+</html>

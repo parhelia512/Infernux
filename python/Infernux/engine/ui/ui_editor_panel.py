@@ -237,8 +237,11 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
         # Persist canvas panel positions
         for go_id, pos in self._canvas_panel_positions.items():
             cp["UIEditor"][f"canvas_pos_{go_id}"] = f"{pos[0]:.1f},{pos[1]:.1f}"
-        with open(path, "w", encoding="utf-8") as f:
-            cp.write(f)
+        from io import StringIO
+        from Infernux.core.document_store import write_document_text
+        output = StringIO()
+        cp.write(output)
+        write_document_text(path, output.getvalue())
 
     # ------------------------------------------------------------------
     # Helpers — canvas / element discovery
@@ -325,14 +328,12 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
     def _window_flags(self) -> int:
         return Theme.WINDOW_FLAGS_VIEWPORT | Theme.WINDOW_FLAGS_NO_SCROLL
 
-    def _pre_render(self, ctx):
-        self._load_view_settings()
-
     def _on_visible_pre(self, ctx):
+        self._load_view_settings()
         # Keep UI mode active the entire time the panel is visible
         if self._on_request_ui_mode:
             self._on_request_ui_mode(True)
-        self._was_focused = ctx.is_window_focused(0)
+        self._was_focused = self._is_window_or_child_focused(ctx)
 
     def _on_not_visible(self, ctx):
         if self._on_request_ui_mode:
@@ -839,7 +840,7 @@ class UIEditorPanel(UIEditorCanvasOps, UIEditorGeometryMixin, UIEditorAlignmentM
 
         if (self._selected_element_comp is not None
                 and focused_canvas is not None
-                and ctx.is_window_focused(0)
+                and self._is_window_or_child_focused(ctx)
                 and not ctx.want_text_input()):
             dx = dy = 0
             if ctx.is_key_pressed(KEY_LEFT_ARROW):

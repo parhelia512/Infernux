@@ -295,6 +295,14 @@ def _ensure_categories():
         autosave_debounce=0.35,
     )
 
+    _categories["physic_material"] = AssetCategoryDef(
+        display_name="asset.display_physic_material",
+        access_mode=AssetAccessMode.READ_WRITE_RESOURCE,
+        load_fn=_load_physic_material,
+        custom_body_fn=_render_physic_material_body,
+        autosave_debounce=0.2,
+    )
+
     # ── Prefab ─────────────────────────────────────────────────────────
     _categories["prefab"] = AssetCategoryDef(
         display_name="asset.display_prefab",
@@ -341,6 +349,15 @@ def _ensure_categories():
         autosave_debounce=0.5,
     )
 
+    # ── VFX System (.vfxsystem) ────────────────────────────────────────
+    _categories["vfxsystem"] = AssetCategoryDef(
+        display_name="asset.display_vfxsystem",
+        access_mode=AssetAccessMode.READ_WRITE_RESOURCE,
+        load_fn=_load_vfxsystem,
+        custom_body_fn=_render_vfxsystem_body,
+        autosave_debounce=0.35,
+    )
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Per-category loaders
@@ -378,8 +395,8 @@ def _load_material(path: str):
         return None
     native = mat.native
     try:
-        cached = json.loads(native.serialize())
-    except (RuntimeError, ValueError, json.JSONDecodeError):
+        cached = native.serialize_document()
+    except (RuntimeError, ValueError, TypeError):
         cached = {"name": mat.name, "properties": {}}
     old_prop_names = set(cached.get("properties", {}).keys())
     _sync_material_shader_metadata(cached)
@@ -388,7 +405,7 @@ def _load_material(path: str):
         # Vertex/fragment shader sync added new properties — push them to the
         # native C++ material so the UBO picks up the correct default values.
         try:
-            native.deserialize(json.dumps(cached))
+            native.deserialize_document(cached)
         except (RuntimeError, ValueError) as _exc:
             Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
             pass
@@ -400,6 +417,84 @@ def _load_material(path: str):
         "shader_sync_key": "",
         "_applied_version": native.get_version(),
     }
+
+
+def _load_physic_material(path: str):
+    from Infernux.core.physic_material import PhysicMaterial
+    material = PhysicMaterial.load(path)
+    return (material, {}) if material is not None else None
+
+
+def _apply_physic_material_edit(state: _State, field_name: str, value) -> bool:
+    material = state.settings
+    old_document = material.serialize_document()
+    if old_document[field_name] == value:
+        return False
+    new_document = dict(old_document)
+    new_document[field_name] = value
+    execution_layer = state.exec_layer
+
+    def publish(resource):
+        if execution_layer is not None:
+            execution_layer.schedule_rw_save(resource)
+        else:
+            resource.save()
+
+    from Infernux.engine.undo import ResourceDocumentCommand, UndoManager
+    manager = UndoManager.instance()
+    command = ResourceDocumentCommand(
+        material,
+        old_document,
+        new_document,
+        f"Set PhysicMaterial {field_name}",
+        publish_callback=publish,
+        edit_key=field_name,
+    )
+    if manager is not None and manager.enabled and not manager.is_executing:
+        manager.execute(command)
+    else:
+        command.execute()
+    return True
+
+
+def _render_physic_material_body(ctx: InxGUIContext, panel, state: _State):
+    del panel
+    from .inspector_utils import render_compact_section_header
+
+    material = state.settings
+    if material is None:
+        return
+    if not render_compact_section_header(ctx, t("asset.physic_material_properties"), level="secondary"):
+        return
+
+    labels = [
+        t("asset.friction"), t("asset.bounciness"),
+        t("asset.friction_combine"), t("asset.bounce_combine"),
+    ]
+    label_width = max_label_w(ctx, labels)
+    field_label(ctx, labels[0], label_width)
+    friction = ctx.drag_float("##physic_friction", float(material.friction), 0.01, 0.0, 1.0)
+    if friction != material.friction:
+        _apply_physic_material_edit(state, "friction", friction)
+
+    field_label(ctx, labels[1], label_width)
+    bounciness = ctx.drag_float("##physic_bounciness", float(material.bounciness), 0.01, 0.0, 1.0)
+    if bounciness != material.bounciness:
+        _apply_physic_material_edit(state, "bounciness", bounciness)
+
+    combine_labels = [
+        t("asset.combine_average"), t("asset.combine_minimum"),
+        t("asset.combine_multiply"), t("asset.combine_maximum"),
+    ]
+    field_label(ctx, labels[2], label_width)
+    friction_combine = ctx.combo("##physic_friction_combine", int(material.friction_combine), combine_labels)
+    if friction_combine != material.friction_combine:
+        _apply_physic_material_edit(state, "friction_combine", friction_combine)
+
+    field_label(ctx, labels[3], label_width)
+    bounce_combine = ctx.combo("##physic_bounce_combine", int(material.bounce_combine), combine_labels)
+    if bounce_combine != material.bounce_combine:
+        _apply_physic_material_edit(state, "bounce_combine", bounce_combine)
 
 
 def _load_prefab(path: str):
@@ -518,7 +613,6 @@ def _count_prefab_nodes(node: dict) -> int:
 
 def _count_prefab_components(node: dict) -> int:
     total = len(node.get("components", []))
-    total += len(node.get("py_components", []))
     for child in node.get("children", []):
         if isinstance(child, dict):
             total += _count_prefab_components(child)
@@ -526,7 +620,10 @@ def _count_prefab_components(node: dict) -> int:
 
 
 def _count_prefab_script_components(node: dict) -> int:
-    total = len(node.get("py_components", []))
+    total = sum(
+        1 for component in node.get("components", [])
+        if isinstance(component, dict) and str(component.get("type_id", "")).startswith("python:")
+    )
     for child in node.get("children", []):
         if isinstance(child, dict):
             total += _count_prefab_script_components(child)
@@ -545,8 +642,13 @@ def _render_prefab_root_summary(ctx: InxGUIContext, root: dict):
     ctx.label(f"{t('asset.prefab_position')}: {position}")
     ctx.label(f"{t('asset.prefab_rotation')}: {rotation}")
     ctx.label(f"{t('asset.prefab_scale')}: {scale}")
-    ctx.label(f"{t('asset.prefab_native_components')}: {len(root.get('components', []))}")
-    ctx.label(f"{t('asset.prefab_script_components')}: {len(root.get('py_components', []))}")
+    components = root.get("components", [])
+    script_count = sum(
+        1 for component in components
+        if isinstance(component, dict) and str(component.get("type_id", "")).startswith("python:")
+    )
+    ctx.label(f"{t('asset.prefab_native_components')}: {len(components) - script_count}")
+    ctx.label(f"{t('asset.prefab_script_components')}: {script_count}")
     ctx.label(f"{t('asset.prefab_children_count')}: {len(root.get('children', []))}")
 
 
@@ -1123,6 +1225,57 @@ def _load_animfsm(path: str):
     return fsm, {"fsm_path": path}
 
 
+def _load_vfxsystem(path: str):
+    from Infernux.core.vfx_system import VfxSchemaError, VfxSystem
+
+    try:
+        system = VfxSystem.load(path)
+    except (OSError, VfxSchemaError, ValueError, TypeError):
+        return None
+    return system, {"vfx_path": path}
+
+
+def _render_vfxsystem_body(ctx: InxGUIContext, panel, state: _State):
+    from Infernux.core.vfx_system import VfxSystem
+    from .inspector_utils import field_label
+
+    system = state.settings
+    if not isinstance(system, VfxSystem):
+        ctx.label(t("asset.failed_load").format(name=t("asset.display_vfxsystem")))
+        return
+
+    lw = 120.0
+    field_label(ctx, t("asset.display_vfxsystem"), lw)
+    ctx.same_line()
+    ctx.label(getattr(system, "name", "") or os.path.basename(state.file_path))
+    field_label(ctx, t("asset.vfx_emitters"), lw)
+    ctx.same_line()
+    emitters = getattr(system, "emitters", None) or []
+    ctx.label(str(len(emitters)))
+
+    ctx.dummy(0, 8)
+    if ctx.button(t("asset.vfx_open_editor")):
+        open_fn = getattr(panel, "open_vfx_system", None) if panel is not None else None
+        if callable(open_fn):
+            open_fn(state.file_path)
+        else:
+            try:
+                from Infernux.engine.ui.closable_panel import ClosablePanel
+                from Infernux.engine.ui.window_manager import WindowManager
+
+                wm = WindowManager.instance()
+                editor = wm.open_window("vfx_graph_editor") if wm is not None else None
+                if editor is not None and hasattr(editor, "_open_vfxsystem"):
+                    editor._open_vfxsystem(state.file_path)
+                    ClosablePanel.focus_panel_by_id("vfx_graph_editor")
+                    try:
+                        wm._engine.select_docked_window("vfx_graph_editor")
+                    except Exception:
+                        pass
+            except Exception as exc:
+                Debug.log_suppressed("asset_details_renderer.open_vfxsystem", exc)
+
+
 def _render_animfsm_body(ctx: InxGUIContext, panel, state: _State):
     from Infernux.core.anim_state_machine import AnimStateMachine
     from .inspector_utils import render_compact_section_header, field_label
@@ -1187,64 +1340,18 @@ def _refresh_material(state: _State):
     # Fast-path: when the only mutations since the last refresh came from
     # the Python-side property editor (sliders, combos, etc.), cached_data
     # is already in sync with the native material.  Skip the expensive
-    # serialize -> parse -> merge -> re-serialize round-trip (~1-7 ms).
+    # native document -> merge -> preview-cache encoding round-trip (~1-7 ms).
     applied_version = state.extra.get("_applied_version", -2)
     if current_version != -1 and current_version == applied_version:
         return
     state.extra["_applied_version"] = current_version
     try:
-        fresh = json.loads(native.serialize())
-        merged = _merge_material_cached_data(state.extra.get("cached_data"), fresh)
-        _sync_material_shader_metadata(merged)
-        state.extra["cached_data"] = merged
-        state.extra["cached_json"] = json.dumps(merged)
-    except (RuntimeError, ValueError, json.JSONDecodeError) as _exc:
+        document = native.serialize_document()
+        _sync_material_shader_metadata(document)
+        state.extra["cached_data"] = document
+        state.extra["cached_json"] = json.dumps(document)
+    except (RuntimeError, ValueError, TypeError) as _exc:
         Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-
-
-def _merge_material_cached_data(existing: Optional[dict], fresh: dict) -> dict:
-    """Merge native material values into cached inspector data.
-
-    Native material JSON does not preserve Python-only metadata such as
-    shader-derived Color/HDR annotations. Preserve those keys while taking the
-    latest live values from the native material.
-    """
-    if not isinstance(existing, dict):
-        return fresh
-
-    merged = dict(existing)
-    merged.update(fresh)
-
-    # Preserve Python-only metadata that C++ serialiser does not round-trip
-    if "_shader_property_order" in existing and "_shader_property_order" not in fresh:
-        merged["_shader_property_order"] = existing["_shader_property_order"]
-
-    fresh_props = fresh.get("properties") if isinstance(fresh.get("properties"), dict) else {}
-    existing_props = existing.get("properties") if isinstance(existing.get("properties"), dict) else {}
-
-    merged_props = {}
-    for name, fresh_prop in fresh_props.items():
-        if not isinstance(fresh_prop, dict):
-            merged_props[name] = fresh_prop
-            continue
-        merged_prop = dict(fresh_prop)
-        existing_prop = existing_props.get(name)
-        if isinstance(existing_prop, dict):
-            for key, value in existing_prop.items():
-                if key not in ("value", "guid"):
-                    merged_prop[key] = value
-        merged_props[name] = merged_prop
-
-    # Preserve shader-declared properties that exist in cached data but not yet
-    # in the native serialisation (e.g. vertex shader properties just synced).
-    shader_order = existing.get("_shader_property_order", [])
-    shader_declared = set(shader_order) if shader_order else set()
-    for name in shader_declared:
-        if name not in merged_props and name in existing_props:
-            merged_props[name] = existing_props[name]
-
-    merged["properties"] = merged_props
-    return merged
 
 
 def _sync_material_shader_metadata(mat_data: dict):
@@ -1302,6 +1409,7 @@ def render_asset_inspector(ctx: InxGUIContext, panel,
             ctx, _state.is_dirty(),
             on_apply=lambda: _on_apply(),
             on_revert=_on_revert,
+            semantic_prefix=f"asset.{category}.import",
         )
     elif cat_def.access_mode == AssetAccessMode.READ_WRITE_RESOURCE:
         if _state.exec_layer:
@@ -1394,6 +1502,7 @@ def _render_import_fields(ctx: InxGUIContext, cat_def: AssetCategoryDef,
         for fdef in cat_def.editable_fields:
             cur = getattr(state.settings, fdef.key)
             wid = f"##{fdef.key}"
+            semantic_id = f"asset.{state.category}.import.{fdef.key}"
 
             if fdef.field_type == WidgetType.CHECKBOX:
                 # Disable sRGB when texture_type is NORMAL_MAP
@@ -1403,6 +1512,9 @@ def _render_import_fields(ctx: InxGUIContext, cat_def: AssetCategoryDef,
                 if disabled:
                     ctx.begin_disabled(True)
                 new_val = render_inspector_checkbox(ctx, t(fdef.label), cur)
+                ctx.record_semantic_item(
+                    "checkbox", t(fdef.label), not disabled, semantic_id, bool(new_val),
+                )
                 if new_val != cur:
                     setattr(state.settings, fdef.key, new_val)
                 if disabled:
@@ -1417,6 +1529,10 @@ def _render_import_fields(ctx: InxGUIContext, cat_def: AssetCategoryDef,
                 except ValueError:
                     idx = 0
                 new_idx = ctx.combo(wid, idx, display_labels)
+                display_value = display_labels[new_idx] if 0 <= new_idx < len(display_labels) else ""
+                ctx.record_semantic_item(
+                    "combo", f"{t(fdef.label)}: {display_value}", True, semantic_id,
+                )
                 if new_idx != idx:
                     setattr(state.settings, fdef.key, values[new_idx])
                     # Only sync derived fields when texture_type itself changes
@@ -1429,6 +1545,9 @@ def _render_import_fields(ctx: InxGUIContext, cat_def: AssetCategoryDef,
                 v_min = fdef.float_range[0] if fdef.float_range else 0.0
                 v_max = fdef.float_range[1] if fdef.float_range else 0.0
                 new_val = ctx.drag_float(wid, float(cur), speed, v_min, v_max)
+                ctx.record_semantic_item(
+                    "drag_float", f"{t(fdef.label)}: {new_val:g}", True, semantic_id,
+                )
                 if new_val != cur:
                     setattr(state.settings, fdef.key, new_val)
 
@@ -1714,12 +1833,23 @@ def _render_sprite_body(ctx: InxGUIContext, panel, state: _State):
     field_label(ctx, t("sprite.rows"), lw)
     ctx.set_next_item_width(120)
     ss.slice_rows = max(1, ctx.input_int("##sprite_rows", ss.slice_rows, 1, 1))
+    ctx.record_semantic_item(
+        "int_input", f"{t('sprite.rows')}: {ss.slice_rows}", True,
+        "asset.texture.sprite.rows",
+    )
 
     field_label(ctx, t("sprite.cols"), lw)
     ctx.set_next_item_width(120)
     ss.slice_cols = max(1, ctx.input_int("##sprite_cols", ss.slice_cols, 1, 1))
+    ctx.record_semantic_item(
+        "int_input", f"{t('sprite.cols')}: {ss.slice_cols}", True,
+        "asset.texture.sprite.columns",
+    )
 
     ctx.button(t("sprite.auto_slice"), lambda: _auto_slice(settings, ss))
+    ctx.record_semantic_item(
+        "button", t("sprite.auto_slice"), True, "asset.texture.sprite.auto_slice",
+    )
     ctx.dummy(0, 4)
 
     # ── Visual preview with divider lines ────────────────────────────────
@@ -2173,7 +2303,7 @@ def _render_shader_body(ctx: InxGUIContext, panel, state: _State):
 
         if new_path != info.source_path:
             ext = os.path.splitext(new_path)[1].lower()
-            valid = {".vert", ".frag", ".geom", ".tesc", ".tese"}
+            valid = {".vert", ".frag"}
             if ext not in valid:
                 ctx.push_style_color(ImGuiCol.Text, *Theme.ERROR_TEXT)
                 ctx.label(t("asset.shader_invalid_ext").format(ext=ext))

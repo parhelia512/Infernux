@@ -14,7 +14,10 @@ class EngineStatus:
     """Singleton-style engine status (class-level state)."""
 
     @classmethod
-    def set(cls, text: str, progress: float = -1.0) -> None:
+    def set(
+        cls, text: str, progress: float = -1.0, kind: str | None = None,
+        *, source: str = "default", priority: int = 0,
+    ) -> None:
         """Set a persistent status.
 
         Args:
@@ -24,18 +27,22 @@ class EngineStatus:
         ...
 
     @classmethod
-    def flash(cls, text: str, progress: float = -1.0, duration: float = 1.5) -> None:
+    def flash(
+        cls, text: str, progress: float = -1.0, duration: float = 1.5,
+        kind: str | None = None,
+        *, source: str = "default", priority: int = 0,
+    ) -> None:
         """Set a status that auto-clears after *duration* seconds."""
         ...
 
     @classmethod
-    def clear(cls) -> None:
-        """Clear the status immediately."""
+    def clear(cls, *, source: str | None = None) -> None:
+        """Clear one source, or all status sources when omitted."""
         ...
 
     @classmethod
-    def get(cls) -> tuple[str, float]:
-        """Return ``(text, progress)``."""
+    def get(cls) -> tuple[str, float, str]:
+        """Return ``(text, progress, kind)``."""
         ...
 
     @classmethod

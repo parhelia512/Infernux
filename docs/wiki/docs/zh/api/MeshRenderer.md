@@ -11,7 +11,9 @@
 使用网格和材质渲染 3D 几何体的组件。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+MeshRenderer 可使用内联基础体或导入网格，并支持多个材质槽。排查光照效果前先证明网格和材质分配正确。
 <!-- USER CONTENT END -->
 
 ## 属性
@@ -39,7 +41,6 @@
 | `has_render_material() → bool` | Return whether a material is assigned at slot 0. |
 | `get_effective_material(slot: int = ...) → Any` | Return the effective material for the given slot, including fallbacks. |
 | `get_material(slot: int) → Any` | Return the material at the specified slot index. |
-| `set_material(slot: int, guid: str) → None` | Assign a material to the specified slot by asset GUID. |
 | `get_material_guids() → List[str]` | Return the list of material GUIDs for all slots. |
 | `set_materials(guids: List[str]) → None` | Set all material slots from a list of asset GUIDs. |
 | `set_material_slot_count(count: int) → None` | Set the number of material slots on this renderer. |
@@ -64,12 +65,22 @@
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for MeshRenderer
+from Infernux import GameObject, MeshRenderer, PrimitiveType
+
+display = GameObject.find("DisplayObject")
+if display is not None:
+    renderer = display.get_component(MeshRenderer)
+    if renderer is not None:
+        renderer.set_primitive_mesh(PrimitiveType.Cube)
+        renderer.casts_shadows = True
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [3D 基础](../learn/3d-foundations.md)
+- [Material](Material.md)
+- [Light](Light.md)
+- [RenderStack](RenderStack.md)
 <!-- USER CONTENT END -->

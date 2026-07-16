@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="梳理 C++ 运行时、pybind11 模块、Python 公共 API 与 PyComponentProxy 生命周期桥之间的职责，并说明对象身份、生命周期和序列化规则。">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>原生层与 Python 的边界 - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/zh/architecture/native-python-boundary.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="原生层与 Python 的边界 - Infernux Documentation">
+    <meta property="og:description" content="梳理 C++ 运行时、pybind11 模块、Python 公共 API 与 PyComponentProxy 生命周期桥之间的职责，并说明对象身份、生命周期和序列化规则。">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/zh/architecture/native-python-boundary.html">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="架构">
+    <meta property="article:tag" content="cpp"><meta property="article:tag" content="python"><meta property="article:tag" content="pybind11"><meta property="article:tag" content="组件"><meta property="article:tag" content="生命周期">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="原生层与 Python 的边界 - Infernux Documentation">
+    <meta name="twitter:description" content="梳理 C++ 运行时、pybind11 模块、Python 公共 API 与 PyComponentProxy 生命周期桥之间的职责，并说明对象身份、生命周期和序列化规则。">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://infernux-engine.com/wiki/site/zh/architecture/native-python-boundary.html#document",
+          "headline": "\u539f\u751f\u5c42\u4e0e Python \u7684\u8fb9\u754c",
+          "name": "\u539f\u751f\u5c42\u4e0e Python \u7684\u8fb9\u754c",
+          "description": "\u68b3\u7406 C++ \u8fd0\u884c\u65f6\u3001pybind11 \u6a21\u5757\u3001Python \u516c\u5171 API \u4e0e PyComponentProxy \u751f\u547d\u5468\u671f\u6865\u4e4b\u95f4\u7684\u804c\u8d23\uff0c\u5e76\u8bf4\u660e\u5bf9\u8c61\u8eab\u4efd\u3001\u751f\u547d\u5468\u671f\u548c\u5e8f\u5217\u5316\u89c4\u5219\u3002",
+          "url": "https://infernux-engine.com/wiki/site/zh/architecture/native-python-boundary.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/zh/architecture/native-python-boundary.html"
+          },
+          "inLanguage": "zh-CN",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Architecture reference",
+          "articleSection": "\u67b6\u6784",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": "Infernux NASA Punk \u4efb\u52a1\u5361\uff0c\u5305\u542b\u7f16\u8f91\u5668\u3001\u7194\u7089\u6807\u5fd7\u548c\u6280\u672f\u9884\u89c8\u72b6\u6001\u3002"
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["cpp", "python", "pybind11", "\u7ec4\u4ef6", "\u751f\u547d\u5468\u671f"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/zh/architecture/native-python-boundary.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "\u6587\u6863",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "\u67b6\u6784",
+              "item": "https://infernux-engine.com/wiki.html?layer=architecture#written-guides"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "\u539f\u751f\u5c42\u4e0e Python \u7684\u8fb9\u754c",
+              "item": "https://infernux-engine.com/wiki/site/zh/architecture/native-python-boundary.html"
+            }
+            
+          ]
+        }
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/architecture/native-python-boundary.html">
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/architecture/native-python-boundary.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
+    <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
+</head>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <!-- Top Navigation -->
+    <nav class="navbar" aria-label="主导航">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/zh/learn/getting-started.html" class="nav-priority">开始使用</a>
+                <a href="/wiki.html#start-here">学习</a>
+                <a href="/wiki.html?layer=manual#written-guides" class="active" aria-current="page">手册</a>
+                <a href="/wiki/site/zh/api/index.html">API</a>
+                <a href="/roadmap.html">路线图</a>
+                <a href="/community.html" class="nav-priority">社区</a>
+                <a href="/download.html">下载</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="复制版本、来源和权威链接" aria-label="复制供 Agent 使用的页面上下文">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>复制给 Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>搜索文档</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell article-page-shell" id="main-content">
+        <div class="container article-page-container">
+            <div class="api-main article-page-content">
+                
+    <nav class="doc-breadcrumb" aria-label="面包屑">
+        <a href="/wiki.html">文档</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html?layer=architecture#written-guides">架构</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">原生层与 Python 的边界</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="文档版本与来源" data-status="preview" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">preview</strong>
+                        <span class="doc-provenance-item"><span>始于</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>已验证</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>读者</span> advanced-user, contributor, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">文档清单</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/en/architecture/native-python-boundary.html" lang="en">Read in English</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>源码证据 · 7</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/cpp/infernux/tools/pybinding/BindingInfernux.cpp" target="_blank" rel="noopener">cpp/infernux/tools/pybinding/BindingInfernux.cpp</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/cpp/infernux/tools/pybinding/BindingScene.cpp" target="_blank" rel="noopener">cpp/infernux/tools/pybinding/BindingScene.cpp</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/cpp/infernux/function/scene/PyComponentProxy.cpp" target="_blank" rel="noopener">cpp/infernux/function/scene/PyComponentProxy.cpp</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/__init__.py" target="_blank" rel="noopener">python/Infernux/__init__.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/lib/__init__.py" target="_blank" rel="noopener">python/Infernux/lib/__init__.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/components/component.py" target="_blank" rel="noopener">python/Infernux/components/component.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/components/registry.py" target="_blank" rel="noopener">python/Infernux/components/registry.py</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>本页目录</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>收起章节</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="本页章节"></nav>
+    </aside>
+    
+                <h1 id="python">原生层与 Python 的边界<a class="headerlink" href="#python" title="Permanent link">&para;</a></h1>
+<p>Infernux 的创作层以 Python 为中心，但它并不是纯 Python 引擎。运行时刻意把职责拆给 C++ 执行核心与 Python 编排、玩法层。理解这条边界，可以快速回答三个常见问题：一个功能应写在哪里、谁拥有对象生命周期、某个调用是否适合放进逐帧热循环。</p>
+<h2 id="_1">四层结构<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>游戏脚本 / 编辑器工具
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>        │ 公共导入与 Unity 风格包装
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        ▼
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>Infernux Python 包
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        │ Infernux.lib 重新导出原生符号
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        ▼
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>_Infernux pybind11 扩展
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        │ 非拥有型句柄、值转换、回调转发
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        ▼
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>C++ 运行时：场景、渲染、物理、音频、资产
+</code></pre></div>
+<p>原生扩展由 <code>BindingInfernux.cpp</code> 中的 <code>PYBIND11_MODULE(_Infernux, m)</code> 创建，再依次注册场景、资源、RenderGraph、输入、物理、音频和批处理等绑定组。它是底层“能力面”，并不是建议用户直接依赖的命名空间。</p>
+<p><code>Infernux.lib</code> 暴露绑定类型；顶层 <code>Infernux</code> 包及其子包在此之上提供稳定导入、Python 风格包装、编辑器行为、玩法组件和兼容路由。用户代码通常应从文档所列公共模块导入，而不是直接依赖 <code>_Infernux</code>。</p>
+<h2 id="_2">所有权规则<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>最重要的区别是<strong>生命周期权威</strong>与<strong>Python 中仍可访问</strong>并不是一回事。</p>
+<table>
+<thead>
+<tr>
+<th>对象家族</th>
+<th>生命周期权威</th>
+<th>Python 侧看到的对象</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Engine 与管理器</td>
+<td>C++ 单例或引擎实例</td>
+<td>非拥有型门面或绑定实例</td>
+</tr>
+<tr>
+<td>Scene 与 GameObject</td>
+<td>C++ 场景图</td>
+<td>句柄和绑定方法</td>
+</tr>
+<tr>
+<td>内置组件</td>
+<td>C++ GameObject</td>
+<td>原生组件门面，部分会再包装成统一 API</td>
+</tr>
+<tr>
+<td>脚本组件</td>
+<td>C++ <code>PyComponentProxy</code> 加 Python <code>InxComponent</code> 镜像</td>
+<td>用户继承的玩法对象</td>
+</tr>
+<tr>
+<td>纯 Python 创作数据</td>
+<td>Python</td>
+<td>Builder、注册表、编辑器编排</td>
+</tr>
+</tbody>
+</table>
+<p>保留 Python 引用不一定能延长原生对象寿命。切换场景或销毁对象会使原生句柄失效。公共包装层会通过当前 GameObject 重新解析组件，并把原生生命周期异常视为“引用已失效”，而不是复活对象的许可。</p>
+<h2 id="python_1">Python 组件如何进入引擎<a class="headerlink" href="#python_1" title="Permanent link">&para;</a></h2>
+<p>玩法组件继承 <code>InxComponent</code>。在实例产生前，类创建阶段就会完成若干工作：</p>
+<ol>
+<li><code>__init_subclass__</code> 发现可序列化字段并建立稳定类型身份。</li>
+<li>数值字段注册到原生 <code>ComponentDataStore</code> 桥。</li>
+<li>组件类通过 Python 注册表与脚本加载路径变得可发现。</li>
+<li>组件挂到 GameObject 时，原生场景创建持有该 Python 对象的 <code>PyComponentProxy</code>。</li>
+</ol>
+<p>真正的生命周期权威是 Proxy。它把 Python 镜像绑定到原生 Component 与 GameObject，同步 enabled、started、destroyed 等状态，在转发生命周期回调时获取 GIL，并调用 <code>_call_awake</code>、<code>_call_update</code>、<code>_call_on_destroy</code> 以及物理回调入口。</p>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>C++ 场景 tick
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  → PyComponentProxy::Update(deltaTime)
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    → 获取 GIL
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>      → Python InxComponent._call_update(deltaTime)
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        → 用户 update(delta_time)
+</code></pre></div>
+<p>Proxy 会检查 <code>update</code>、<code>fixed_update</code>、<code>late_update</code> 是否真的被覆写。如果没有覆写且没有协程调度器需要该阶段，它可以跳过转发。这能消除空回调，但大量活跃 Python 回调仍意味着大量边界穿越。</p>
+<h2 id="_3">身份与序列化<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>Python 脚本组件的身份不只是一段类名：</p>
+<ul>
+<li><code>type_guid</code> 标识模块与限定类类型；</li>
+<li><code>script_guid</code> 标识用于恢复组件的脚本资产；</li>
+<li><code>component_id</code> 标识当前挂载的组件实例；</li>
+<li><code>py_fields</code> 保存可序列化字段文档。</li>
+</ul>
+<p><code>PyComponentProxy::SerializeDocument</code> 会拒绝序列化缺少稳定脚本 GUID 或类型 GUID 的 Python 组件。加载时，C++ 先恢复原生场景结构和待处理组件记录，再由 Python 解析脚本类型并重建字段。因此移动或重命名脚本首先是资产身份问题，而不只是 Python import 问题。</p>
+<h2 id="_4">边界成本模型<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>每次 Python/原生属性访问都是真实操作：包含分派、可能的类型转换，并且经常涉及 GIL。实践规则如下：</p>
+<ul>
+<li>普通玩法与编辑器交互可以直接使用对象 API；</li>
+<li>大型内层循环避免逐对象反复 getter/setter；</li>
+<li>数据并行工作使用批处理 API 与连续数组；</li>
+<li>资源分配、Vulkan 同步、场景所有权和物理所有权留在原生子系统；</li>
+<li>声明式拓扑、工具、玩法策略和高层组合优先留在 Python，除非性能数据证明需要下沉。</li>
+</ul>
+<p>JIT 架构页会继续解释批处理路径。只有先合并边界流量，JIT 才能有效加速其中的计算。</p>
+<h2 id="_5">贡献者路由<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>改行为时，先从真正的所有者开始：</p>
+<table>
+<thead>
+<tr>
+<th>变更</th>
+<th>起点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>新增或暴露原生能力</td>
+<td>对应 <code>Binding*.cpp</code>，再补公共 Python 导出与类型存根</td>
+</tr>
+<tr>
+<td>修改组件生命周期语义</td>
+<td>同时检查 C++ <code>Component</code> / <code>PyComponentProxy</code> 和 Python 生命周期 mixin</td>
+</tr>
+<tr>
+<td>新增 Inspector 字段类型</td>
+<td>字段元数据、codec、Inspector 渲染；数值类型还要检查原生 CDS</td>
+</tr>
+<tr>
+<td>新增友好的玩法 API</td>
+<td>优先 Python 包装；只有底层能力缺失时才增加绑定</td>
+</tr>
+<tr>
+<td>优化大量对象计算</td>
+<td>先检查批处理桥与数据布局，再考虑 JIT kernel</td>
+</tr>
+</tbody>
+</table>
+<p>不要因为某个符号存在于 <code>_Infernux</code> 就推断它是稳定公共 API。当前发布版的公共契约应以生成 API 页及其版本元数据为准。</p>
+<h2 id="_6">验证说明<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<p>本页描述的是 2026-07-15 验证过的仓库状态，并不承诺 <code>_Infernux</code> 中所有绑定符号均稳定。精确签名请查阅生成 API；高吞吐脚本路径请继续阅读 <a href="jit.html">JIT 加速脚本系统</a>。</p>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="文档连续阅读与反馈">
+        <a class="doc-trail-fallback" href="/wiki.html">返回文档中心</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="文档发布证据">
+        <span class="doc-build-label">发布证据</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">正在读取发布版本与来源…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">机器清单 JSON</a>
+    </section>
+    
+    
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">搜索 Infernux 文档</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="关闭文档搜索"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API 符号、系统、工作流…">
+            </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="文档搜索筛选器"></div>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </dialog>
+
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
+</body>
+</html>

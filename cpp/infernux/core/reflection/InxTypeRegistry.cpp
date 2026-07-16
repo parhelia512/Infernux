@@ -94,6 +94,8 @@ void InxTypeRegistry::Build()
         [](const std::any &v) {
             ResourceType rt = std::any_cast<ResourceType>(v);
             switch (rt) {
+            case ResourceType::Meta:
+                return std::string("Meta");
             case ResourceType::Shader:
                 return std::string("Shader");
             case ResourceType::Texture:
@@ -102,17 +104,23 @@ void InxTypeRegistry::Build()
                 return std::string("Mesh");
             case ResourceType::Script:
                 return std::string("Script");
+            case ResourceType::Audio:
+                return std::string("Audio");
             case ResourceType::DefaultText:
                 return std::string("DefaultText");
             case ResourceType::DefaultBinary:
                 return std::string("DefaultBinary");
             case ResourceType::Material:
                 return std::string("Material");
+            case ResourceType::PhysicMaterial:
+                return std::string("PhysicMaterial");
             default:
                 return std::string("Unknown");
             }
         },
         [](const std::string &s) -> std::any {
+            if (s == "Meta")
+                return std::any{ResourceType::Meta};
             if (s == "Shader")
                 return std::any{ResourceType::Shader};
             if (s == "Texture")
@@ -121,12 +129,16 @@ void InxTypeRegistry::Build()
                 return std::any{ResourceType::Mesh};
             if (s == "Script")
                 return std::any{ResourceType::Script};
+            if (s == "Audio")
+                return std::any{ResourceType::Audio};
             if (s == "DefaultText")
                 return std::any{ResourceType::DefaultText};
             if (s == "DefaultBinary")
                 return std::any{ResourceType::DefaultBinary};
             if (s == "Material")
                 return std::any{ResourceType::Material};
+            if (s == "PhysicMaterial")
+                return std::any{ResourceType::PhysicMaterial};
             if (s == "Unknown")
                 return std::any{ResourceType::DefaultText};
             return std::any{ResourceType::DefaultText};

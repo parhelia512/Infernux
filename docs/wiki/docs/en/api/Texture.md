@@ -67,7 +67,7 @@ Example::
 | Method | Description |
 |------|------|
 | `static Texture.load(file_path: str) → Optional[Texture]` | Load a texture from an image file (PNG, JPG, BMP, TGA). |
-| `static Texture.from_memory(data: bytes, width: int, height: int, channels: int = ..., name: str = ...) → Optional[Texture]` | Create a texture from raw pixel data in memory. |
+| `static Texture.decode(data: bytes, name: str = ...) → Optional[Texture]` | Decode PNG/JPEG/BMP/TGA bytes into a texture. |
 | `static Texture.solid_color(width: int, height: int, r: int = ..., g: int = ..., b: int = ..., a: int = ...) → Optional[Texture]` | Create a solid color texture. |
 | `static Texture.checkerboard(width: int, height: int, cell_size: int = ...) → Optional[Texture]` | Create a checkerboard pattern texture. |
 | `static Texture.from_native(native: TextureData) → Texture` | Wrap an existing C++ TextureData. |
@@ -89,9 +89,7 @@ Example::
 ## Example
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for Texture
-```
+> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
 <!-- USER CONTENT END -->
 
 ## See Also

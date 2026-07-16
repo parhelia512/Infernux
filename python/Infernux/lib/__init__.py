@@ -46,6 +46,19 @@ def _register_native_search_dir(path: str) -> None:
             os.environ["LD_LIBRARY_PATH"] = norm + ((":" + ld_path) if ld_path else "")
 
 
+def _register_native_module_override() -> None:
+    override = os.environ.get("INFERNUX_NATIVE_MODULE_DIR")
+    if override is None:
+        return
+
+    native_dir = os.path.abspath(override)
+    if not os.path.isdir(native_dir):
+        raise ImportError(f"INFERNUX_NATIVE_MODULE_DIR is not a directory: {native_dir}")
+    if native_dir not in __path__:
+        __path__.insert(0, native_dir)
+    _register_native_search_dir(native_dir)
+
+
 def _iter_dev_native_search_dirs():
     repo_root = os.path.abspath(os.path.join(lib_dir, "..", "..", ".."))
     build_root = os.path.join(repo_root, "out", "build")
@@ -202,6 +215,7 @@ def _preload_bundled_crt_dlls() -> None:
                 pass  # Best-effort; the import below will give a clear error.
 
 
+_register_native_module_override()
 _register_native_search_dir(lib_dir)
 _preload_bundled_crt_dlls()
 
@@ -215,6 +229,12 @@ except (ModuleNotFoundError, ImportError):
     except (ModuleNotFoundError, ImportError) as exc:
         _raise_native_import_error(exc)
 
+from ._Infernux import (
+    _SceneDocumentReadTicket,
+    _preflight_scene_resource_dependencies,
+    _schedule_scene_document_read,
+)
+
 # `import *` skips underscore-prefixed names.  Re-export internal C++
 # helpers so that `from Infernux import lib; lib._cds_register_class`
 # works for the Python-side CDS bridge and batch API.
@@ -224,13 +244,16 @@ try:
         _cds_register_field,
         _cds_alloc,
         _cds_free,
+        _cds_reserve,
+        _cds_capacity,
+        _cds_alive_count,
         _cds_get,
         _cds_set,
         _cds_batch_gather,
         _cds_batch_scatter,
-        _cds_clear,
         _transform_batch_read,
         _transform_batch_write,
+        _create_scene_transform_batch_handle,
     )
 except ImportError:
     pass  # graceful fallback if built without batch support
@@ -302,7 +325,7 @@ def _native_safe_default(obj, name: str):
         return _identity_quat()
     if name in {"local_to_world_matrix", "world_to_local_matrix"}:
         return _identity_matrix4x4()
-    if name in {"distance", "impulse"}:
+    if name == "distance":
         return 0.0
 
     if name.startswith("get_") and name.endswith("s"):
@@ -384,6 +407,225 @@ for _native_cls in (GameObject, Component, Transform, RaycastHit, CollisionInfo)
     _install_native_lifetime_guard(_native_cls)
 
 
+class _Vec3WritebackProxy:
+    """Write-through proxy so ``transform.position.x += dt`` actually persists.
+
+    pybind returns Vector3 by value; mutating components of that copy is a silent
+    no-op. This proxy commits component and in-place arithmetic back to the owner.
+    """
+
+    __slots__ = ("_owner", "_prop", "_value", "_setter")
+
+    def __init__(self, owner, prop: str, value, setter):
+        object.__setattr__(self, "_owner", owner)
+        object.__setattr__(self, "_prop", prop)
+        object.__setattr__(self, "_value", value)
+        object.__setattr__(self, "_setter", setter)
+
+    def _commit(self) -> None:
+        self._setter(self._owner, self._value)
+
+    def _set_component(self, name: str, val) -> None:
+        setattr(self._value, name, float(val))
+        self._commit()
+
+    @property
+    def x(self):
+        return self._value.x
+
+    @x.setter
+    def x(self, val):
+        self._set_component("x", val)
+
+    @property
+    def y(self):
+        return self._value.y
+
+    @y.setter
+    def y(self, val):
+        self._set_component("y", val)
+
+    @property
+    def z(self):
+        return self._value.z
+
+    @z.setter
+    def z(self, val):
+        self._set_component("z", val)
+
+    @property
+    def r(self):
+        return self._value.x
+
+    @r.setter
+    def r(self, val):
+        self._set_component("x", val)
+
+    @property
+    def g(self):
+        return self._value.y
+
+    @g.setter
+    def g(self, val):
+        self._set_component("y", val)
+
+    @property
+    def b(self):
+        return self._value.z
+
+    @b.setter
+    def b(self, val):
+        self._set_component("z", val)
+
+    def __getattr__(self, name):
+        return getattr(self._value, name)
+
+    def __setattr__(self, name, val):
+        if name in _Vec3WritebackProxy.__slots__:
+            object.__setattr__(self, name, val)
+            return
+        if name in {"x", "y", "z", "r", "g", "b"}:
+            # Routed via properties when looked up on the class; keep for safety.
+            object.__getattribute__(type(self), name).__set__(self, val)
+            return
+        raise AttributeError(f"_Vec3WritebackProxy has no attribute '{name}'")
+
+    def __iadd__(self, other):
+        object.__setattr__(self, "_value", self._value + other)
+        self._commit()
+        return self
+
+    def __isub__(self, other):
+        object.__setattr__(self, "_value", self._value - other)
+        self._commit()
+        return self
+
+    def __imul__(self, other):
+        object.__setattr__(self, "_value", self._value * other)
+        self._commit()
+        return self
+
+    def __itruediv__(self, other):
+        object.__setattr__(self, "_value", self._value / other)
+        self._commit()
+        return self
+
+    def __add__(self, other):
+        return self._value + other
+
+    def __radd__(self, other):
+        return other + self._value
+
+    def __sub__(self, other):
+        return self._value - other
+
+    def __rsub__(self, other):
+        return other - self._value
+
+    def __mul__(self, other):
+        return self._value * other
+
+    def __rmul__(self, other):
+        return other * self._value
+
+    def __truediv__(self, other):
+        return self._value / other
+
+    def __rtruediv__(self, other):
+        return other / self._value
+
+    def __neg__(self):
+        return -self._value
+
+    def __eq__(self, other):
+        return self._value == (other._value if isinstance(other, _Vec3WritebackProxy) else other)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __bool__(self):
+        return bool(self._value)
+
+    def __len__(self):
+        return 3
+
+    def __getitem__(self, index):
+        if index == 0:
+            return self._value.x
+        if index == 1:
+            return self._value.y
+        if index == 2:
+            return self._value.z
+        raise IndexError("Vector3 index out of range")
+
+    def __setitem__(self, index, val):
+        x, y, z = self._value.x, self._value.y, self._value.z
+        if index == 0:
+            x = float(val)
+        elif index == 1:
+            y = float(val)
+        elif index == 2:
+            z = float(val)
+        else:
+            raise IndexError("Vector3 index out of range")
+        object.__setattr__(self, "_value", type(self._value)(x, y, z))
+        self._commit()
+
+    def __iter__(self):
+        yield self._value.x
+        yield self._value.y
+        yield self._value.z
+
+    def __repr__(self):
+        return repr(self._value)
+
+    def __str__(self):
+        return str(self._value)
+
+    def __copy__(self):
+        return type(self._value)(self._value.x, self._value.y, self._value.z)
+
+    def __deepcopy__(self, memo):
+        return self.__copy__()
+
+
+def _unwrap_vec3(value):
+    if isinstance(value, _Vec3WritebackProxy):
+        return value._value
+    return value
+
+
+def _install_transform_vec3_writeback() -> None:
+    """Make Transform vec3 properties commit component / in-place edits."""
+    for prop_name in (
+        "position",
+        "local_position",
+        "euler_angles",
+        "local_euler_angles",
+        "local_scale",
+    ):
+        current = getattr(Transform, prop_name)
+        orig_get = current.fget
+        orig_set = current.fset
+        if orig_get is None or orig_set is None:
+            continue
+        doc = getattr(current, "__doc__", None)
+
+        def _make(name, getter, setter, documentation):
+            def _get(self):
+                return _Vec3WritebackProxy(self, name, getter(self), setter)
+
+            def _set(self, value):
+                setter(self, _unwrap_vec3(value))
+
+            return property(_get, _set, doc=documentation)
+
+        setattr(Transform, prop_name, _make(prop_name, orig_get, orig_set, doc))
+
+
+_install_transform_vec3_writeback()
+
+
 _native_game_object_add_component = GameObject.add_component
 _native_game_object_remove_component = GameObject.remove_component
 _native_game_object_can_remove_component = GameObject.can_remove_component
@@ -392,7 +634,13 @@ _native_game_object_get_component = GameObject.get_component
 _native_game_object_get_components = GameObject.get_components
 _native_game_object_get_component_in_children = GameObject.get_component_in_children
 _native_game_object_get_component_in_parent = GameObject.get_component_in_parent
-_native_game_object_instantiate = GameObject.instantiate
+def _native_game_object_instantiate(original, parent=None):
+    scene = original.scene
+    if scene is None:
+        raise RuntimeError("instantiate(): source GameObject is detached from a Scene")
+    from Infernux.engine.component_restore import clone_game_object_transactionally
+
+    return clone_game_object_transactionally(scene, original, parent)
 
 
 def _call_native_game_object(method_name: str, native_method, game_object, *args):

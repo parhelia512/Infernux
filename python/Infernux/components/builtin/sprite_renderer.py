@@ -111,6 +111,20 @@ class SpriteRenderer(BuiltinComponent):
         tooltip="Flip sprite vertically",
     )
 
+    casts_shadows = CppProperty(
+        "casts_shadows",
+        FieldType.BOOL,
+        default=False,
+        tooltip="Whether this renderer casts shadows",
+    )
+
+    receives_shadows = CppProperty(
+        "receives_shadows",
+        FieldType.BOOL,
+        default=True,
+        tooltip="Whether this renderer receives shadows",
+    )
+
     # ── Private runtime state ───────────────────────────────────────
 
     _sprite_material = None
@@ -156,6 +170,24 @@ class SpriteRenderer(BuiltinComponent):
         except Exception:
             pass
 
+    def _unsubscribe_asset_events(self):
+        """Release the event-bus reference established while this wrapper is live."""
+        try:
+            from Infernux.engine.ui.event_bus import EditorEventBus, EditorEvent
+            EditorEventBus.instance().unsubscribe(
+                EditorEvent.ASSET_CHANGED, self._on_asset_changed
+            )
+        except Exception:
+            pass
+
+    def _invalidate_native_binding(self):
+        """Release wrapper-owned resources before a scene rebuild invalidates C++."""
+        self._unsubscribe_asset_events()
+        self._sprite_material = None
+        self._material_ready = False
+        self._sprite_frames = []
+        super()._invalidate_native_binding()
+
     def _on_asset_changed(self, file_path: str, event_type: str = "modified"):
         """Called when any asset file is modified/deleted on disk."""
         guid = self.sprite
@@ -197,7 +229,12 @@ class SpriteRenderer(BuiltinComponent):
                 scene = SceneManager.instance().get_active_scene()
             if scene is None:
                 return
-            all_objects = scene.get_all_objects()
+            find_objects = getattr(scene, "find_objects_with_component", None)
+            all_objects = (
+                find_objects("SpriteRenderer")
+                if callable(find_objects)
+                else scene.get_all_objects()
+            )
             count = 0
             for obj in all_objects:
                 try:

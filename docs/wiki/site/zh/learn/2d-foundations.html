@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="使用正交 Camera、SpriteRenderer、导入纹理、明确世界尺度和帧率无关移动检查构建最小 2D 场景。">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>2D 基础 - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/zh/learn/2d-foundations.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="2D 基础 - Infernux Documentation">
+    <meta property="og:description" content="使用正交 Camera、SpriteRenderer、导入纹理、明确世界尺度和帧率无关移动检查构建最小 2D 场景。">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/zh/learn/2d-foundations.html">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="学习">
+    <meta property="article:tag" content="2D"><meta property="article:tag" content="Sprite"><meta property="article:tag" content="相机"><meta property="article:tag" content="入门">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="2D 基础 - Infernux Documentation">
+    <meta name="twitter:description" content="使用正交 Camera、SpriteRenderer、导入纹理、明确世界尺度和帧率无关移动检查构建最小 2D 场景。">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "LearningResource",
+          "@id": "https://infernux-engine.com/wiki/site/zh/learn/2d-foundations.html#document",
+          "headline": "2D \u57fa\u7840",
+          "name": "2D \u57fa\u7840",
+          "description": "\u4f7f\u7528\u6b63\u4ea4 Camera\u3001SpriteRenderer\u3001\u5bfc\u5165\u7eb9\u7406\u3001\u660e\u786e\u4e16\u754c\u5c3a\u5ea6\u548c\u5e27\u7387\u65e0\u5173\u79fb\u52a8\u68c0\u67e5\u6784\u5efa\u6700\u5c0f 2D \u573a\u666f\u3002",
+          "url": "https://infernux-engine.com/wiki/site/zh/learn/2d-foundations.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/zh/learn/2d-foundations.html"
+          },
+          "inLanguage": "zh-CN",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Tutorial",
+          "articleSection": "\u5b66\u4e60",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": "Infernux NASA Punk \u4efb\u52a1\u5361\uff0c\u5305\u542b\u7f16\u8f91\u5668\u3001\u7194\u7089\u6807\u5fd7\u548c\u6280\u672f\u9884\u89c8\u72b6\u6001\u3002"
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["2D", "Sprite", "\u76f8\u673a", "\u5165\u95e8"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/zh/learn/2d-foundations.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "\u6587\u6863",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "\u5b66\u4e60",
+              "item": "https://infernux-engine.com/wiki.html#start-here"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "2D \u57fa\u7840",
+              "item": "https://infernux-engine.com/wiki/site/zh/learn/2d-foundations.html"
+            }
+            
+          ]
+        }
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/learn/2d-foundations.html">
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/learn/2d-foundations.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/learn/2d-foundations.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
+    <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
+</head>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <!-- Top Navigation -->
+    <nav class="navbar" aria-label="主导航">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/zh/learn/getting-started.html" class="nav-priority">开始使用</a>
+                <a href="/wiki.html#start-here" class="active" aria-current="page">学习</a>
+                <a href="/wiki.html?layer=manual#written-guides">手册</a>
+                <a href="/wiki/site/zh/api/index.html">API</a>
+                <a href="/roadmap.html">路线图</a>
+                <a href="/community.html" class="nav-priority">社区</a>
+                <a href="/download.html">下载</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="复制版本、来源和权威链接" aria-label="复制供 Agent 使用的页面上下文">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>复制给 Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>搜索文档</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell article-page-shell" id="main-content">
+        <div class="container article-page-container">
+            <div class="api-main article-page-content">
+                
+    <nav class="doc-breadcrumb" aria-label="面包屑">
+        <a href="/wiki.html">文档</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html#start-here">学习</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">2D 基础</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="文档版本与来源" data-status="preview" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">preview</strong>
+                        <span class="doc-provenance-item"><span>始于</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>已验证</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>读者</span> new-user, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">文档清单</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/en/learn/2d-foundations.html" lang="en">Read in English</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>源码证据 · 3</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/components/builtin/sprite_renderer.py" target="_blank" rel="noopener">python/Infernux/components/builtin/sprite_renderer.py</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/components/builtin/camera.pyi" target="_blank" rel="noopener">python/Infernux/components/builtin/camera.pyi</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/core/asset_types.py" target="_blank" rel="noopener">python/Infernux/core/asset_types.py</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>本页目录</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>收起章节</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="本页章节"></nav>
+    </aside>
+    
+                <h1 id="2d">2D 基础<a class="headerlink" href="#2d" title="Permanent link">&para;</a></h1>
+<p>构建一个小而可验证的 2D 场景：一台正交 Camera、一个可见 Sprite，以及一个不会依赖帧率的移动组件。</p>
+<p><strong>预计时间：</strong> 15–20 分钟<br />
+<strong>完成标准：</strong> Sprite 可见、比例正确，并且帧率变化时视觉移动速度保持一致。</p>
+<h2 id="_1">开始之前<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>先完成<a href="getting-started.html">快速开始</a>和<a href="first-component.html">第一个组件</a>。准备一张带透明通道的 PNG，并保持 Console 可见。</p>
+<h2 id="1-sprite">1. 导入 Sprite 纹理<a class="headerlink" href="#1-sprite" title="Permanent link">&para;</a></h2>
+<p>把图片复制到项目 <code>Assets</code> 层级，在 Project 面板中选择它。</p>
+<ul>
+<li>只有用于屏幕 UI 时才选择 <strong>UI</strong> 纹理类型；世界 Sprite 可使用普通/默认纹理路径。</li>
+<li>彩色美术资源保持 sRGB 开启。</li>
+<li>透明边缘不应重复时使用 Clamp。</li>
+<li>Sprite 在屏幕中始终保持固定大小时可考虑关闭 mipmap；缩放或远近变化时通常保留。</li>
+</ul>
+<p>图片与 <code>.meta</code> 文件必须一起保留。身份规则见<a href="../manual/assets-and-meta.html">资源与 <code>.meta</code> 文件</a>。</p>
+<h2 id="2-camera">2. 配置正交 Camera<a class="headerlink" href="#2-camera" title="Permanent link">&para;</a></h2>
+<p>创建或选择场景 Camera，把投影改为 Orthographic，并让它朝向 Sprite 所在的 XY 平面。</p>
+<p><code>orthographic_size</code> 控制可见世界高度，而不是透视变焦。明确选择一个值，然后用 Game 视图验证目标宽高比。只在 Scene 视图中正确并不代表运行结果已通过。</p>
+<h2 id="3-spriterenderer">3. 添加 SpriteRenderer<a class="headerlink" href="#3-spriterenderer" title="Permanent link">&para;</a></h2>
+<p>为 Sprite 创建 GameObject，添加 <strong>Rendering / Sprite Renderer</strong>，在 Sprite 字段指定刚导入的纹理。</p>
+<p>当前 SpriteRenderer 在 Quad 网格上绘制 Sprite Sheet 的一帧。主要控制项是：</p>
+<ul>
+<li><code>frame_index</code>：显示 Sprite Sheet 的哪一帧；</li>
+<li><code>sprite_color</code>：与纹理相乘的 RGBA 色调；</li>
+<li><code>flip_x</code> / <code>flip_y</code>：视觉镜像；</li>
+<li><code>casts_shadows</code> / <code>receives_shadows</code>：与受光 Sprite 材质的阴影交互。</li>
+</ul>
+<p>先使用白色色调和第 0 帧，再通过 Transform 位置和缩放建立项目统一的世界单位约定。</p>
+<h2 id="4">4. 添加移动检查<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
+<p>把以下组件挂到 Sprite：</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux</span><span class="w"> </span><span class="kn">import</span> <span class="n">InxComponent</span><span class="p">,</span> <span class="n">Vector3</span><span class="p">,</span> <span class="n">serialized_field</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">class</span><span class="w"> </span><span class="nc">SpriteDrift</span><span class="p">(</span><span class="n">InxComponent</span><span class="p">):</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">speed</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">serialized_field</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="mf">2.0</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">))</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">delta_time</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span><span class="n">Vector3</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">speed</span> <span class="o">*</span> <span class="n">delta_time</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
+</code></pre></div>
+<p>进入 Play，在下一次运行前改变 <code>speed</code>。乘以 <code>delta_time</code> 后，这个值表示每秒移动的世界单位。</p>
+<h2 id="5">5. 验证场景<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Game 视图而不只是 Scene 视图能看到 Sprite。</li>
+<li>透明边缘没有重复像素。</li>
+<li>Game 视图宽高比变化时图片不被拉伸。</li>
+<li>移动速度不依赖帧率。</li>
+<li>Console 没有纹理、材质或组件缺失错误。</li>
+</ul>
+<h2 id="_2">常见失败<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<h3 id="sprite">Sprite 不可见<a class="headerlink" href="#sprite" title="Permanent link">&para;</a></h3>
+<p>检查 Camera 方向和裁剪范围、对象相对 Camera 的 Z 位置、纹理分配、活动层级状态与当前渲染管线。</p>
+<h3 id="_3">图片出现意外色调<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>把 <code>sprite_color</code> 设为全 Alpha 白色，并核对源纹理的颜色空间导入设置。</p>
+<h3 id="sprite-sheet">Sprite Sheet 显示了错误格子<a class="headerlink" href="#sprite-sheet" title="Permanent link">&para;</a></h3>
+<p>确认导入元数据提供了预期帧，再选择有效的 <code>frame_index</code>。之后可由 Animator 驱动该字段。</p>
+<h2 id="_4">下一步<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>继续<a href="animation-workflow.html">动画工作流</a>，创建 <code>.animclip2d</code> 并使用 <code>SpiritAnimator</code> 驱动；或者结合<a href="../manual/input-and-time.html">输入与时间</a>控制对象。</p>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="文档连续阅读与反馈">
+        <a class="doc-trail-fallback" href="/wiki.html">返回文档中心</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="文档发布证据">
+        <span class="doc-build-label">发布证据</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">正在读取发布版本与来源…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">机器清单 JSON</a>
+    </section>
+    
+    
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">搜索 Infernux 文档</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="关闭文档搜索"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API 符号、系统、工作流…">
+            </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="文档搜索筛选器"></div>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </dialog>
+
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
+</body>
+</html>

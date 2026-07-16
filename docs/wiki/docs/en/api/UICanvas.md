@@ -27,7 +27,9 @@ Attributes:
     reference_pixels_per_unit: Sprite pixel density hint.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+Design in reference-resolution pixels, then select a scale and screen-match policy for the supported aspect ratios. Decorative elements should not be raycast targets.
 <!-- USER CONTENT END -->
 
 ## Properties
@@ -67,12 +69,23 @@ Attributes:
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for UICanvas
+from Infernux import GameObject
+from Infernux.ui import UICanvas, UIScaleMode
+
+ui_root = GameObject.find("UI")
+if ui_root is not None:
+    canvas = ui_root.get_component(UICanvas)
+    if canvas is not None:
+        canvas.ui_scale_mode = UIScaleMode.ScaleWithScreenSize
+        scale_x, scale_y, text_scale = canvas.compute_scale(1280, 720)
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [Screen-space UI Manual](../manual/ui.md)
+- [UIText](UIText.md)
+- [UIImage](UIImage.md)
+- [UIButton](UIButton.md)
 <!-- USER CONTENT END -->

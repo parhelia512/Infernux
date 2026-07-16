@@ -162,6 +162,8 @@ void InputManager::BeginFrame()
     m_inputString.clear();
     m_touchCount = 0;
     m_droppedFiles.clear();
+    m_hasSyntheticMousePositionThisFrame = false;
+    m_syntheticInputThisFrame = false;
 
     // Re-apply relative mouse mode for the current window/focus state without
     // disturbing persistent capture flags. Editor capture is released on
@@ -274,6 +276,29 @@ void InputManager::ProcessSDLEvent(const SDL_Event &event)
     }
 }
 
+void InputManager::SetSyntheticMousePositionForFrame(float x, float y)
+{
+    m_mouseX = x;
+    m_mouseY = y;
+    m_syntheticMouseX = x;
+    m_syntheticMouseY = y;
+    m_hasSyntheticMousePositionThisFrame = true;
+}
+
+bool InputManager::GetSyntheticMousePositionForFrame(float &x, float &y) const
+{
+    if (!m_hasSyntheticMousePositionThisFrame)
+        return false;
+    x = m_syntheticMouseX;
+    y = m_syntheticMouseY;
+    return true;
+}
+
+void InputManager::MarkSyntheticInputForFrame()
+{
+    m_syntheticInputThisFrame = true;
+}
+
 // ============================================================================
 // Keyboard queries
 // ============================================================================
@@ -367,6 +392,8 @@ void InputManager::ResetAll()
     m_mouseX = m_mouseY = 0.f;
     m_mouseDX = m_mouseDY = 0.f;
     m_scrollX = m_scrollY = 0.f;
+    m_syntheticMouseX = m_syntheticMouseY = 0.f;
+    m_hasSyntheticMousePositionThisFrame = false;
     m_inputString.clear();
     m_touchCount = 0;
     m_droppedFiles.clear();

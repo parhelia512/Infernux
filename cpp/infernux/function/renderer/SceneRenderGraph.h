@@ -19,7 +19,6 @@
 #include "FullscreenRenderer.h"
 #include "InxRenderStruct.h"
 #include "RenderGraphDescription.h"
-#include "RenderPassOutput.h"
 #include "vk/RenderGraph.h"
 #include "vk/VkDeviceContext.h"
 #include "vk/VkPipelineManager.h"
@@ -128,6 +127,8 @@ class SceneRenderGraph
      * @brief Cleanup resources
      */
     void Destroy();
+
+    [[nodiscard]] uint64_t GetTransientResidentBytes() const;
 
     // ========================================================================
     // RenderGraph topology defined from Python
@@ -275,6 +276,27 @@ class SceneRenderGraph
     [[nodiscard]] size_t GetPassCount() const
     {
         return m_hasPythonGraph ? m_pythonGraphDesc.passes.size() : 0;
+    }
+
+    [[nodiscard]] const std::string &GetGraphName() const
+    {
+        return m_pythonGraphDesc.name;
+    }
+
+    [[nodiscard]] uint64_t GetExecutionCount() const
+    {
+        return m_executionCount;
+    }
+
+    [[nodiscard]] bool HasExecutedCurrentGraph() const
+    {
+        return m_graphBuilt && m_executionCount > 0 && m_lastExecutedBuildRevision == m_graphBuildRevision;
+    }
+
+    [[nodiscard]] std::vector<std::string> GetExecutedPassNames() const
+    {
+        return HasExecutedCurrentGraph() && m_renderGraph ? m_renderGraph->GetExecutionPassNames()
+                                                          : std::vector<std::string>{};
     }
 
     // ========================================================================
@@ -460,6 +482,9 @@ class SceneRenderGraph
     bool m_needsCompile = true;
     bool m_graphBuilt = false;
     bool m_hasPythonGraph = false;
+    uint64_t m_graphBuildRevision = 0;
+    uint64_t m_lastExecutedBuildRevision = 0;
+    uint64_t m_executionCount = 0;
 
     // Python graph description (stored for BuildRenderGraph)
     RenderGraphDescription m_pythonGraphDesc;

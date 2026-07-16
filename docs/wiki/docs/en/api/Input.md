@@ -9,7 +9,9 @@ class in <b>Infernux.input</b>
 Interface for reading input from keyboard, mouse, and touch.
 
 <!-- USER CONTENT START --> description
+**Status:** Preview · **Verified with:** 0.2.1
 
+Use held-state queries for continuous actions and down/up queries for one-frame edges. Gameplay mouse work should use Game viewport coordinates and respect Game focus.
 <!-- USER CONTENT END -->
 
 ## Properties
@@ -58,12 +60,24 @@ Interface for reading input from keyboard, mouse, and touch.
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for Input
+from Infernux import InxComponent, Vector3
+from Infernux.input import Input, KeyCode
+
+
+class KeyboardMover(InxComponent):
+    speed: float = 4.0
+
+    def update(self, delta_time: float) -> None:
+        axis = float(Input.get_key(KeyCode.D)) - float(Input.get_key(KeyCode.A))
+        self.transform.translate(Vector3(axis * self.speed * delta_time, 0.0, 0.0))
 ```
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-
+- [Input and Time](../manual/input-and-time.md)
+- [KeyCode](KeyCode.md)
+- [Time](Time.md)
+- [Camera](Camera.md)
 <!-- USER CONTENT END -->

@@ -5,6 +5,7 @@ Functions accept the required state as explicit parameters so they don't
 depend on ``ProjectPanel`` internals.
 """
 
+import json
 import os
 import shutil
 
@@ -51,23 +52,30 @@ void surface(out SurfaceData s) {{
 '''
 
 SCENE_TEMPLATE = '''{{
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "{scene_name}",
   "isPlaying": false,
   "objects": []
 }}
 '''
 MATERIAL_TEMPLATE = '''{{
+  "material_version": 3,
   "name": "{material_name}",
-  "guid": "",
+  "builtin": false,
   "shaders": {{
-        "vertex": "standard",
+    "vertex": "standard",
     "fragment": "unlit"
   }},
   "renderState": {{
-    "cullMode": 2,
-        "frontFace": 1,
+    "cullMode": 1,
+    "frontFace": 1,
     "polygonMode": 0,
+    "lineWidth": 1.0,
+    "depthBiasEnable": false,
+    "depthBiasConstantFactor": 0.0,
+    "depthBiasSlopeFactor": 0.0,
+    "depthBiasClamp": 0.0,
+    "topology": 3,
     "depthTestEnable": true,
     "depthWriteEnable": true,
     "depthCompareOp": 1,
@@ -75,7 +83,13 @@ MATERIAL_TEMPLATE = '''{{
     "srcColorBlendFactor": 6,
     "dstColorBlendFactor": 7,
     "colorBlendOp": 0,
-    "renderQueue": 2000
+    "srcAlphaBlendFactor": 0,
+    "dstAlphaBlendFactor": 1,
+    "alphaBlendOp": 0,
+    "alphaClipEnabled": false,
+    "alphaClipThreshold": 0.5,
+    "renderQueue": 2000,
+    "stencilTestEnable": false
   }},
   "properties": {{
     "baseColor": {{
@@ -84,6 +98,15 @@ MATERIAL_TEMPLATE = '''{{
     }}
   }}
 }}
+'''
+
+PHYSIC_MATERIAL_TEMPLATE = '''{
+  "schema_version": 1,
+  "friction": 0.4,
+  "bounciness": 0.0,
+  "friction_combine": 0,
+  "bounce_combine": 0
+}
 '''
 
 ANIMCLIP_TEMPLATE = '''{
@@ -112,6 +135,30 @@ ANIMFSM_TEMPLATE = '''{
   "default_state": "",
   "mode": "2d",
   "states": [],
+  "parameters": []
+}
+'''
+
+VFXSYSTEM_TEMPLATE = '''{
+  "$format": "infernux.vfx_system",
+  "$version": 1,
+  "name": "{system_name}",
+  "emitters": [
+    {
+      "name": "Emitter",
+      "capacity": 1000,
+      "graph": {
+        "nodes": [],
+        "links": []
+      },
+      "renderer": {
+        "mode": "billboard",
+        "material": "",
+        "blend": "alpha"
+      },
+      "attributes": []
+    }
+  ],
   "parameters": []
 }
 '''
@@ -212,18 +259,8 @@ def _notify_asset_moved(old_path: str, new_path: str, asset_database=None):
     from Infernux.core.assets import AssetManager
     from . import asset_details_renderer
 
-    if asset_database:
-        try:
-            asset_database.on_asset_moved(old_path, new_path)
-        except Exception as _exc:
-            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-            pass
-
-    try:
-        AssetManager.on_asset_moved(old_path, new_path)
-    except Exception as _exc:
-        Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-        pass
+    if not AssetManager.move_asset(old_path, new_path, database=asset_database):
+        raise RuntimeError(f"AssetDatabase failed to move '{old_path}' to '{new_path}'")
 
     # Update BuildSettings.json when a .scene file is renamed/moved
     if old_path.lower().endswith(".scene"):
@@ -231,13 +268,6 @@ def _notify_asset_moved(old_path: str, new_path: str, asset_database=None):
 
     asset_details_renderer.invalidate_asset(old_path)
     asset_details_renderer.invalidate_asset(new_path)
-
-    try:
-        from Infernux.engine.ui.event_bus import EditorEventBus, EditorEvent
-        EditorEventBus.instance().emit(EditorEvent.ASSET_CHANGED, new_path, "moved")
-    except Exception as _exc:
-        Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-
 
 def move_path(old_path: str, new_path: str, asset_database=None):
     """Move or rename a file/directory to *new_path* and notify asset systems."""
@@ -290,6 +320,20 @@ def move_item_to_directory(item_path: str, dest_dir: str, asset_database=None):
 # Create operations
 # ---------------------------------------------------------------------------
 
+def _write_new_text_asset(path: str, content: str) -> tuple[bool, str]:
+    try:
+        from Infernux.core.document_store import write_document_text
+        write_document_text(path, content)
+        return True, ""
+    except (OSError, RuntimeError) as exc:
+        return False, str(exc)
+
+
+def _import_new_asset(path: str, asset_database) -> str:
+    from Infernux.core.assets import AssetManager
+
+    return AssetManager.import_asset(path, database=asset_database).guid
+
 def create_folder(current_path: str, folder_name: str):
     """Create a folder and return ``(True, "")`` or ``(False, error_msg)``."""
     if not folder_name or not current_path:
@@ -334,15 +378,13 @@ def create_script(current_path: str, script_name: str, asset_database=None):
         return False, f"'{script_name}' already exists"
 
     content = SCRIPT_TEMPLATE.format(class_name=class_name)
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-    except OSError as exc:
-        return False, str(exc)
+    written, error = _write_new_text_asset(file_path, content)
+    if not written:
+        return False, error
 
     if asset_database:
         try:
-            guid = asset_database.import_asset(file_path)
+            guid = _import_new_asset(file_path, asset_database)
             print(f"[ProjectPanel] Registered script: {script_name} -> {guid}")
         except Exception as exc:
             return False, str(exc)
@@ -351,7 +393,7 @@ def create_script(current_path: str, script_name: str, asset_database=None):
 
 
 def create_shader(current_path: str, shader_name: str, shader_type: str,
-                  asset_database=None):
+                   asset_database=None):
     """Create a shader file from template. Returns ``(True, "")`` or ``(False, error_msg)``."""
     if not shader_name or not current_path:
         return False, "Invalid shader name"
@@ -360,7 +402,14 @@ def create_shader(current_path: str, shader_name: str, shader_type: str,
     if not shader_name:
         return False, "Shader name cannot be empty"
 
-    for ext in ['.vert', '.frag', '.glsl']:
+    shader_type = str(shader_type).strip().lower()
+    if shader_type not in {"vert", "frag"}:
+        return False, (
+            "Shader type must be 'vert' or 'frag'. Compute shaders are not supported; "
+            "use an external parallel backend."
+        )
+
+    for ext in ['.vert', '.frag']:
         if shader_name.endswith(ext):
             shader_name = shader_name[:-len(ext)]
             break
@@ -378,15 +427,13 @@ def create_shader(current_path: str, shader_name: str, shader_type: str,
     else:
         content = FRAGMENT_SHADER_TEMPLATE.format(shader_id=shader_id)
 
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-    except OSError as exc:
-        return False, str(exc)
+    written, error = _write_new_text_asset(file_path, content)
+    if not written:
+        return False, error
 
     if asset_database:
         try:
-            guid = asset_database.import_asset(file_path)
+            guid = _import_new_asset(file_path, asset_database)
             print(f"[ProjectPanel] Registered shader: {file_name} -> {guid}")
         except Exception as exc:
             return False, str(exc)
@@ -413,15 +460,13 @@ def create_scene(current_path: str, scene_name: str, asset_database=None):
         return False, f"'{file_name}' already exists"
 
     content = SCENE_TEMPLATE.format(scene_name=scene_name)
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-    except OSError as exc:
-        return False, str(exc)
+    written, error = _write_new_text_asset(file_path, content)
+    if not written:
+        return False, error
 
     if asset_database:
         try:
-            guid = asset_database.import_asset(file_path)
+            guid = _import_new_asset(file_path, asset_database)
             print(f"[ProjectPanel] Registered scene: {file_name} -> {guid}")
         except Exception as exc:
             return False, str(exc)
@@ -448,19 +493,47 @@ def create_material(current_path: str, material_name: str, asset_database=None):
         return False, f"'{file_name}' already exists"
 
     content = MATERIAL_TEMPLATE.format(material_name=material_name)
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-    except OSError as exc:
-        return False, str(exc)
+    written, error = _write_new_text_asset(file_path, content)
+    if not written:
+        return False, error
 
     if asset_database:
         try:
-            guid = asset_database.import_asset(file_path)
+            guid = _import_new_asset(file_path, asset_database)
             print(f"[ProjectPanel] Registered material: {file_name} -> {guid}")
         except Exception as exc:
             return False, str(exc)
 
+    # Publish the exact document already in memory. The Project panel can show
+    # this preview before filesystem polling or a later material save completes.
+    from Infernux.core.assets import AssetManager
+    AssetManager._prime_material_preview(file_path, content)
+
+    return True, ""
+
+
+def create_physic_material(current_path: str, material_name: str, asset_database=None):
+    """Create and import a strict ``.physicMaterial`` asset."""
+    if not current_path or not material_name:
+        return False, "Invalid PhysicMaterial name"
+    material_name = material_name.strip()
+    if not material_name:
+        return False, "PhysicMaterial name cannot be empty"
+    extension = ".physicMaterial"
+    if material_name.lower().endswith(extension.lower()):
+        material_name = material_name[:-len(extension)]
+    file_name = material_name + extension
+    file_path = os.path.join(current_path, file_name)
+    if os.path.exists(file_path):
+        return False, f"'{file_name}' already exists"
+
+    written, error = _write_new_text_asset(file_path, PHYSIC_MATERIAL_TEMPLATE)
+    if not written:
+        return False, error
+    if asset_database:
+        guid = _import_new_asset(file_path, asset_database)
+        if not guid:
+            return False, f"AssetDatabase failed to import '{file_name}'"
     return True, ""
 
 
@@ -474,13 +547,19 @@ def create_prefab_from_gameobject(game_object, current_path: str,
     if game_object is None or not current_path:
         return False, "Invalid parameters"
 
-    from Infernux.engine.prefab_manager import save_prefab, PREFAB_EXTENSION
+    from Infernux.engine.prefab_manager import (
+        PREFAB_EXTENSION,
+        _link_created_prefab_source,
+        save_prefab,
+    )
 
     prefab_name = get_unique_name(current_path, game_object.name, PREFAB_EXTENSION)
     file_path = os.path.join(current_path, prefab_name + PREFAB_EXTENSION)
 
     if save_prefab(game_object, file_path, asset_database=asset_database,
                    source_canvas_name=source_canvas_name):
+        if not _link_created_prefab_source(game_object, file_path, asset_database):
+            return False, "Prefab asset was saved, but its source hierarchy could not be linked"
         return True, file_path
     return False, "Failed to save prefab"
 
@@ -504,15 +583,13 @@ def create_animclip(current_path: str, clip_name: str, asset_database=None):
         return False, f"'{file_name}' already exists"
 
     content = ANIMCLIP_TEMPLATE.format(clip_name=clip_name)
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-    except OSError as exc:
-        return False, str(exc)
+    written, error = _write_new_text_asset(file_path, content)
+    if not written:
+        return False, error
 
     if asset_database:
         try:
-            guid = asset_database.import_asset(file_path)
+            guid = _import_new_asset(file_path, asset_database)
             print(f"[ProjectPanel] Registered animclip2d: {file_name} -> {guid}")
         except Exception as exc:
             return False, str(exc)
@@ -539,15 +616,13 @@ def create_animclip3d(current_path: str, clip_name: str, asset_database=None):
         return False, f"'{file_name}' already exists"
 
     content = ANIMCLIP3D_TEMPLATE.format(clip_name=clip_name)
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-    except OSError as exc:
-        return False, str(exc)
+    written, error = _write_new_text_asset(file_path, content)
+    if not written:
+        return False, error
 
     if asset_database:
         try:
-            guid = asset_database.import_asset(file_path)
+            guid = _import_new_asset(file_path, asset_database)
             print(f"[ProjectPanel] Registered animclip3d: {file_name} -> {guid}")
         except Exception as exc:
             return False, str(exc)
@@ -574,19 +649,48 @@ def create_animfsm(current_path: str, fsm_name: str, asset_database=None):
         return False, f"'{file_name}' already exists"
 
     content = ANIMFSM_TEMPLATE.format(fsm_name=fsm_name)
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-    except OSError as exc:
-        return False, str(exc)
+    written, error = _write_new_text_asset(file_path, content)
+    if not written:
+        return False, error
 
     if asset_database:
         try:
-            guid = asset_database.import_asset(file_path)
+            guid = _import_new_asset(file_path, asset_database)
             print(f"[ProjectPanel] Registered animfsm: {file_name} -> {guid}")
         except Exception as exc:
             return False, str(exc)
 
+    return True, ""
+
+
+def create_vfxsystem(current_path: str, system_name: str, asset_database=None):
+    """Create a strict ``.vfxsystem`` authoring asset."""
+    if not system_name or not current_path:
+        return False, "Invalid VFX system name"
+
+    system_name = system_name.strip()
+    if not system_name:
+        return False, "VFX system name cannot be empty"
+    if system_name.lower().endswith(".vfxsystem"):
+        system_name = system_name[:-10]
+
+    file_name = system_name + ".vfxsystem"
+    file_path = os.path.join(current_path, file_name)
+    if os.path.exists(file_path):
+        return False, f"'{file_name}' already exists"
+
+    from Infernux.core.vfx_system import VfxSystem
+
+    content = json.dumps(VfxSystem(name=system_name).to_dict(), indent=2, ensure_ascii=False) + "\n"
+    written, error = _write_new_text_asset(file_path, content)
+    if not written:
+        return False, error
+
+    if asset_database:
+        try:
+            _import_new_asset(file_path, asset_database)
+        except Exception as exc:
+            return False, str(exc)
     return True, ""
 
 
@@ -609,15 +713,13 @@ def create_animtimeline(current_path: str, timeline_name: str, asset_database=No
         return False, f"'{file_name}' already exists"
 
     content = ANIMTIMELINE_TEMPLATE.format(timeline_name=timeline_name)
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-    except OSError as exc:
-        return False, str(exc)
+    written, error = _write_new_text_asset(file_path, content)
+    if not written:
+        return False, error
 
     if asset_database:
         try:
-            guid = asset_database.import_asset(file_path)
+            guid = _import_new_asset(file_path, asset_database)
             print(f"[ProjectPanel] Registered animtimeline: {file_name} -> {guid}")
         except Exception as exc:
             return False, str(exc)
@@ -644,15 +746,13 @@ def create_timelinefsm(current_path: str, fsm_name: str, asset_database=None):
         return False, f"'{file_name}' already exists"
 
     content = TIMELINEFSM_TEMPLATE.format(fsm_name=fsm_name)
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-    except OSError as exc:
-        return False, str(exc)
+    written, error = _write_new_text_asset(file_path, content)
+    if not written:
+        return False, error
 
     if asset_database:
         try:
-            guid = asset_database.import_asset(file_path)
+            guid = _import_new_asset(file_path, asset_database)
             print(f"[ProjectPanel] Registered timelinefsm: {file_name} -> {guid}")
         except Exception as exc:
             return False, str(exc)
@@ -665,7 +765,7 @@ def create_timelinefsm(current_path: str, fsm_name: str, asset_database=None):
 # ---------------------------------------------------------------------------
 
 def _detach_prefab_instances(prefab_path: str, asset_database=None):
-    """Clear prefab_guid/prefab_root on all scene objects linked to this prefab."""
+    """Clear prefab linkage for live instances and return the changed count."""
     guid = ""
     if asset_database:
         try:
@@ -673,20 +773,24 @@ def _detach_prefab_instances(prefab_path: str, asset_database=None):
         except Exception:
             pass
     if not guid:
-        return
+        return 0
 
     from Infernux.lib import SceneManager
     scene = SceneManager.instance().get_active_scene()
     if scene is None:
-        return
+        return 0
+
+    detached = 0
 
     def _walk(objects):
+        nonlocal detached
         for obj in objects:
             try:
                 obj_guid = getattr(obj, 'prefab_guid', '')
                 if obj_guid == guid:
                     obj.prefab_guid = ""
                     obj.prefab_root = False
+                    detached += 1
                 children = list(obj.get_children()) if hasattr(obj, 'get_children') else []
                 _walk(children)
             except Exception:
@@ -697,12 +801,19 @@ def _detach_prefab_instances(prefab_path: str, asset_database=None):
         _walk(roots)
     except Exception as _exc:
         Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+    if detached:
+        from Infernux.engine.scene_manager import SceneFileManager
+
+        manager = SceneFileManager.instance()
+        if manager is not None:
+            manager.mark_dirty()
+    return detached
 
 
 def delete_item(item_path: str, asset_database=None):
     """Delete a file or directory from the filesystem and notify AssetDatabase."""
     if not item_path or not os.path.exists(item_path):
-        return
+        return False
 
     is_dir = os.path.isdir(item_path)
     if is_dir or item_path.lower().endswith('.py'):
@@ -718,10 +829,8 @@ def delete_item(item_path: str, asset_database=None):
     # Notify BEFORE removing the file — GUID is still resolvable at this point
     if not is_dir:
         from Infernux.core.assets import AssetManager
-        AssetManager.on_asset_deleted(item_path)
-
-        if asset_database:
-            asset_database.on_asset_deleted(item_path)
+        if not AssetManager.delete_asset(item_path, database=asset_database):
+            raise RuntimeError(f"AssetDatabase failed to delete '{item_path}'")
 
     try:
         if is_dir:
@@ -747,14 +856,15 @@ def delete_item(item_path: str, asset_database=None):
                     f"Cannot delete '{os.path.basename(item_path)}': "
                     f"file may be in use by another process. ({last_exc})"
                 )
-                return
+                return False
     except OSError as _exc:
         Debug.log_warning(f"Delete failed: {type(_exc).__name__}: {_exc}")
-        return
+        return False
 
     # Invalidate inspector cache so a recreated file won't reuse stale data
     from . import asset_details_renderer
     asset_details_renderer.invalidate_asset(item_path)
+    return True
 
 
 def do_rename(old_path: str, new_name: str, asset_database=None):
@@ -786,4 +896,43 @@ def do_rename(old_path: str, new_name: str, asset_database=None):
             Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
             return None
 
+    if ext.lower() == '.py' and os.path.isfile(old_path):
+        try:
+            _sync_python_script_class_name_on_rename(old_path, new_path)
+        except OSError as _exc:
+            Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
+            return None
+
     return move_path(old_path, new_path, asset_database)
+
+
+def _sync_python_script_class_name_on_rename(old_path: str, new_path: str) -> None:
+    """When renaming ``Foo.py`` → ``Bar.py``, also rename ``class Foo`` → ``class Bar``.
+
+    Only rewrites when the file's primary class name matches the old stem, so
+    hand-authored multi-class scripts are left untouched.
+    """
+    import re
+
+    old_stem = os.path.splitext(os.path.basename(old_path))[0]
+    new_stem = os.path.splitext(os.path.basename(new_path))[0]
+    if not old_stem.isidentifier() or not new_stem.isidentifier() or old_stem == new_stem:
+        return
+
+    with open(old_path, "r", encoding="utf-8") as handle:
+        content = handle.read()
+
+    pattern = re.compile(
+        rf"^class\s+{re.escape(old_stem)}\b",
+        re.MULTILINE,
+    )
+    matches = list(pattern.finditer(content))
+    if len(matches) != 1:
+        return
+
+    updated = pattern.sub(f"class {new_stem}", content, count=1)
+    if updated == content:
+        return
+
+    from Infernux.core.document_store import write_document_text
+    write_document_text(old_path, updated)

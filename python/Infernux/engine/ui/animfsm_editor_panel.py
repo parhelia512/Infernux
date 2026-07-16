@@ -29,13 +29,16 @@ from Infernux.core.node_graph import (
     GraphNode,
     NodeGraph,
     NodeTypeDef,
+    PinCategory,
     PinDef,
     PinKind,
+    node_catalog,
 )
 from Infernux.debug import Debug
 from Infernux.engine.i18n import t
 from Infernux.lib import InxGUIContext
 
+from .asset_save_dialog import AssetSaveAsDialog
 from .editor_panel import EditorPanel
 from .node_graph_view import NodeGraphView
 from ._inspector_references import render_object_field, _picker_assets
@@ -199,8 +202,14 @@ _STATE_TYPE = NodeTypeDef(
     label="State",
     header_color=(0.20, 0.20, 0.22, 1.0),
     pins=[
-        PinDef(id="in", label="In", kind=PinKind.INPUT, color=(0.50, 0.52, 0.55, 1.0)),
-        PinDef(id="out", label="Out", kind=PinKind.OUTPUT, color=(0.52, 0.54, 0.56, 1.0)),
+        PinDef(
+            id="in", label="In", kind=PinKind.INPUT,
+            color=(0.50, 0.52, 0.55, 1.0), pin_category=PinCategory.EXEC,
+        ),
+        PinDef(
+            id="out", label="Out", kind=PinKind.OUTPUT,
+            color=(0.52, 0.54, 0.56, 1.0), pin_category=PinCategory.EXEC,
+        ),
     ],
     min_width=172.0,
     body_bottom_pad=0.0,
@@ -211,7 +220,10 @@ _ENTRY_TYPE = NodeTypeDef(
     label="Entry",
     header_color=(0.22, 0.21, 0.23, 1.0),
     pins=[
-        PinDef(id="out", label="Start", kind=PinKind.OUTPUT, color=Theme.APPLY_BUTTON),
+        PinDef(
+            id="out", label="Start", kind=PinKind.OUTPUT,
+            color=Theme.APPLY_BUTTON, pin_category=PinCategory.EXEC,
+        ),
     ],
     min_width=88.0,
     deletable=False,
@@ -219,6 +231,8 @@ _ENTRY_TYPE = NodeTypeDef(
 
 _DETAIL_PANEL_W = 300.0
 _VARS_PANEL_W = 236.0
+
+node_catalog.register("anim_fsm", [_STATE_TYPE, _ENTRY_TYPE])
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -240,14 +254,17 @@ class AnimFSMEditorPanel(EditorPanel):
         super().__init__(title="Animation State Machine Editor", window_id="animfsm_editor")
         self._fsm: Optional[AnimStateMachine] = None
         self._file_path: str = ""
-        self._dirty: bool = False
+        self._dirty: bool = True
+        self._save_as_dialog = AssetSaveAsDialog("animfsm.save_as", "state machine")
+        self._pending_mode_switch: Optional[str] = None
+        self._mode_switch_confirm_requested: bool = False
+        self._mode_switch_waiting_for_save: bool = False
 
         # Node graph
-        self._graph = NodeGraph()
-        self._graph.register_type(_STATE_TYPE)
-        self._graph.register_type(_ENTRY_TYPE)
+        self._graph = NodeGraph(graph_kind="anim_fsm")
 
         self._view = NodeGraphView()
+        self._view.semantic_namespace = "animfsm.graph"
         self._view.graph = self._graph
         self._view.on_link_created = self._on_link_created
         self._view.on_link_deleted = self._on_link_deleted
@@ -259,7 +276,6 @@ class AnimFSMEditorPanel(EditorPanel):
         self._view.on_node_drag_start = self._on_node_drag_start
         self._view.on_node_drag_end = self._on_node_drag_end
         self._view.on_node_header_color_changed = self._on_node_header_color_changed
-        self._view.on_before_selection_change = self._on_before_graph_selection_change
 
         # Currently selected node uid
         self._selected_uid: str = ""
@@ -283,8 +299,7 @@ class AnimFSMEditorPanel(EditorPanel):
         self._panel_state_restored_once: bool = False
         self._panel_restore_data: Optional[dict] = None
         self._undo_drag_snapshot: Optional[dict] = None
-        self._pending_selection_undo_before: Optional[dict] = None
-        self._last_selection_undo_snapshot: Optional[dict] = None
+        self._undo_drag_node_position: Optional[Tuple[float, float]] = None
         self._clipboard_fsm_nodes: Optional[dict] = None
 
         self._view.on_copy = self._on_graph_copy
@@ -292,7 +307,6 @@ class AnimFSMEditorPanel(EditorPanel):
 
         # Start with a blank FSM
         self._new_fsm()
-        self._last_selection_undo_snapshot = self._undo_snapshot()
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -338,8 +352,77 @@ class AnimFSMEditorPanel(EditorPanel):
         self._fsm = AnimStateMachine(name="New State Machine")
         self._file_path = ""
         self._selected_uid = ""
-        self._dirty = False
+        self._dirty = True
         self._sync_graph_from_fsm()
+
+    def _switch_to_new_mode_resource(self, mode: str) -> None:
+        """Leave the current asset and start a new resource in *mode*."""
+        if self._dirty:
+            self._pending_mode_switch = mode
+            self._mode_switch_confirm_requested = True
+            return
+        self._commit_mode_switch(mode)
+
+    def _commit_mode_switch(self, mode: str) -> None:
+        self._pending_mode_switch = None
+        self._mode_switch_confirm_requested = False
+        self._mode_switch_waiting_for_save = False
+        self._new_fsm()
+        self._fsm.mode = mode
+        self._sync_graph_from_fsm()
+        self._sync_project_dirty_flag()
+
+    def _cancel_pending_mode_switch(self) -> None:
+        self._pending_mode_switch = None
+        self._mode_switch_confirm_requested = False
+        self._mode_switch_waiting_for_save = False
+
+    def _render_mode_switch_confirmation(self, ctx: InxGUIContext) -> None:
+        target_mode = self._pending_mode_switch
+        if not target_mode or self._mode_switch_waiting_for_save:
+            return
+
+        popup_id = "Unsaved State Machine###animfsm_mode_switch_confirm"
+        if self._mode_switch_confirm_requested:
+            ctx.open_popup(popup_id)
+            self._mode_switch_confirm_requested = False
+
+        if not ctx.begin_popup_modal(popup_id, 64):
+            return
+
+        ctx.record_semantic_window(
+            "modal", "Unsaved State Machine", "animfsm.mode_switch.dialog"
+        )
+        ctx.label("The current state machine has unsaved changes.")
+        ctx.label("Save before switching to a new resource?")
+        ctx.spacing()
+        ctx.separator()
+        ctx.spacing()
+
+        def _save() -> None:
+            self._mode_switch_waiting_for_save = True
+            self._do_save()
+            ctx.close_current_popup()
+
+        def _discard() -> None:
+            mode = self._pending_mode_switch
+            if mode:
+                self._commit_mode_switch(mode)
+            ctx.close_current_popup()
+
+        def _cancel() -> None:
+            self._cancel_pending_mode_switch()
+            ctx.close_current_popup()
+
+        ctx.button("Save##animfsm_mode_switch_save", _save)
+        ctx.record_semantic_item("button", "Save", True, "animfsm.mode_switch.save")
+        ctx.same_line()
+        ctx.button("Discard##animfsm_mode_switch_discard", _discard)
+        ctx.record_semantic_item("button", "Discard", True, "animfsm.mode_switch.discard")
+        ctx.same_line()
+        ctx.button("Cancel##animfsm_mode_switch_cancel", _cancel)
+        ctx.record_semantic_item("button", "Cancel", True, "animfsm.mode_switch.cancel")
+        ctx.end_popup()
 
     # ── Lifecycle ──────────────────────────────────────────────────────
 
@@ -433,6 +516,9 @@ class AnimFSMEditorPanel(EditorPanel):
             data["pan_x"] = self._view.pan_x
             data["pan_y"] = self._view.pan_y
             data["zoom"] = self._view.zoom
+        data["dirty"] = bool(self._dirty)
+        if self._dirty and self._fsm is not None:
+            data["draft"] = self._fsm.to_dict()
         return data
 
     def _resolve_saved_fsm_path(self, data: dict) -> str:
@@ -464,6 +550,16 @@ class AnimFSMEditorPanel(EditorPanel):
             self._view.pan_x = float(data.get("pan_x", self._view.pan_x))
             self._view.pan_y = float(data.get("pan_y", self._view.pan_y))
             self._view.zoom = float(data.get("zoom", self._view.zoom))
+        draft = data.get("draft")
+        if bool(data.get("dirty")) and isinstance(draft, dict):
+            self._fsm = AnimStateMachine.from_dict(draft)
+            self._file_path = self._normalize_fsm_path(data.get("file_path") or "")
+            self._fsm.file_path = self._file_path
+            self._dirty = True
+            self._selected_uid = ""
+            self._sync_graph_from_fsm()
+            self._panel_state_restored_once = True
+            return
         self._panel_state_restored_once = False
 
     def _apply_pending_panel_restore(self) -> None:
@@ -606,9 +702,6 @@ class AnimFSMEditorPanel(EditorPanel):
     # ═══════════════════════════════════════════════════════════════════
 
     # ImGuiKey / ImGuiMod constants
-    _IMGUI_MOD_CTRL = 1 << 12  # 4096
-    _IMGUI_KEY_S = 564
-
     def on_render_content(self, ctx: InxGUIContext):
         if not self._panel_state_restored_once:
             if self._panel_restore_data is None:
@@ -620,18 +713,6 @@ class AnimFSMEditorPanel(EditorPanel):
                 else:
                     self._panel_state_restored_once = True
             self._apply_pending_panel_restore()
-
-        # Ctrl+S save shortcut — only when THIS editor window is focused, so the
-        # global key press doesn't also save other open editors.
-        try:
-            _focused = ctx.is_window_focused(3)  # RootAndChildWindows
-        except Exception:
-            _focused = True
-        if (_focused
-                and ctx.is_key_down(self._IMGUI_MOD_CTRL)
-                and ctx.is_key_pressed(self._IMGUI_KEY_S)
-                and self._fsm is not None):
-            self._do_save()
 
         self._render_toolbar(ctx)
         ctx.separator()
@@ -673,6 +754,13 @@ class AnimFSMEditorPanel(EditorPanel):
         if payload_tl:
             self._open_animfsm(payload_tl)
 
+        self._render_mode_switch_confirmation(ctx)
+        self._save_as_dialog.render(
+            ctx,
+            self._execute_save,
+            cancel_callback=self._cancel_pending_mode_switch,
+        )
+
     # ── Toolbar ───────────────────────────────────────────────────────
 
     def _clip_ext_flags(self):
@@ -711,7 +799,10 @@ class AnimFSMEditorPanel(EditorPanel):
         if fsm is None:
             return
 
-        if ctx.button(t("animfsm_editor.new")):
+        new_label = t("animfsm_editor.new")
+        new_pressed = ctx.button(new_label)
+        ctx.record_semantic_item("button", new_label, True, "animfsm.toolbar.new")
+        if new_pressed:
             before = self._undo_snapshot()
             self._new_fsm()
             self._try_record_undo("New state machine", before, self._undo_snapshot())
@@ -719,7 +810,9 @@ class AnimFSMEditorPanel(EditorPanel):
 
         ctx.same_line(0, 8)
         save_label = t("animfsm_editor.save") if self._file_path else t("animfsm_editor.save_as")
-        if ctx.button(save_label):
+        save_pressed = ctx.button(save_label)
+        ctx.record_semantic_item("button", save_label, True, "animfsm.toolbar.save")
+        if save_pressed:
             self._do_save()
 
         ctx.same_line(0, 16)
@@ -727,6 +820,10 @@ class AnimFSMEditorPanel(EditorPanel):
         ctx.same_line(0, 8)
         ctx.set_next_item_width(160)
         new_name = ctx.text_input("##fsm_name", fsm.name, 128)
+        ctx.record_semantic_item(
+            "text_input", t("animfsm_editor.name"), True, "animfsm.toolbar.name",
+            None, None, new_name,
+        )
         if new_name != fsm.name:
             before = self._undo_snapshot()
             fsm.name = new_name
@@ -736,30 +833,27 @@ class AnimFSMEditorPanel(EditorPanel):
         ctx.same_line(0, 16)
         ctx.label(f"{t('animfsm_editor.mode')}:")
         ctx.same_line(0, 8)
-        # One unified mode selector: 2D / 3D / Timeline. Switching is allowed only
-        # while the graph has no incompatible nodes, so a fresh FSM can pick any
-        # mode but you can't silently mix clip and timeline nodes.
-        has_2d, has_3d = self._clip_ext_flags()
-        has_clip_nodes = any(getattr(s, "kind", "clip") in ("clip", "blend") for s in fsm.states)
-        has_tl_nodes = any(getattr(s, "kind", "clip") == "timeline" for s in fsm.states)
+        # Modes represent different asset domains. Switching starts a new
+        # resource after resolving unsaved changes instead of mutating an
+        # incompatible graph in place.
         ctx.set_next_item_width(110)
         _MODES = ["2d", "3d", "timeline"]
         _LABELS = ["2D", "3D", t("animfsm_editor.mode_timeline")]
         mode_idx = _MODES.index(fsm.mode) if fsm.mode in _MODES else 0
         new_mode_idx = ctx.combo("##fsm_mode", mode_idx, _LABELS, 3)
+        ctx.record_semantic_item(
+            "combo", t("animfsm_editor.mode"), True, "animfsm.toolbar.mode",
+            None, None, _MODES[new_mode_idx],
+        )
+        ctx.record_semantic_item(
+            "status", "Asset Path", True, "animfsm.document.path",
+            None, None, self._file_path,
+        )
+        ctx.record_semantic_item(
+            "status", "Dirty", True, "animfsm.document.dirty", bool(self._dirty),
+        )
         if new_mode_idx != mode_idx:
-            want = _MODES[new_mode_idx]
-            blocked = (
-                (want == "timeline" and has_clip_nodes)
-                or (want in ("2d", "3d") and has_tl_nodes)
-                or (want == "3d" and has_2d)
-                or (want == "2d" and has_3d)
-            )
-            if not blocked:
-                before = self._undo_snapshot()
-                fsm.mode = want
-                self._dirty = True
-                self._try_record_undo("Change FSM mode", before, self._undo_snapshot())
+            self._switch_to_new_mode_resource(_MODES[new_mode_idx])
 
         if self._file_path:
             ctx.same_line(0, 12)
@@ -796,7 +890,12 @@ class AnimFSMEditorPanel(EditorPanel):
         self._dirty = True
         self._try_record_undo("Edit transition condition", before, self._undo_snapshot())
 
-    def _render_transition_duration_row(self, ctx: InxGUIContext, lk: GraphLink) -> None:
+    def _render_transition_duration_row(
+        self,
+        ctx: InxGUIContext,
+        lk: GraphLink,
+        semantic_prefix: str = "",
+    ) -> None:
         """Crossfade/blend duration (seconds) for this transition into its target."""
         dur = float(lk.data.get("duration", 0.0) or 0.0)
         ctx.push_style_color(ImGuiCol.Text, 0.55, 0.56, 0.58, 1.0)
@@ -804,6 +903,13 @@ class AnimFSMEditorPanel(EditorPanel):
         ctx.pop_style_color(1)
         ctx.set_next_item_width(-1)
         new_dur = ctx.drag_float("##trdur", dur, 0.01, 0.0, 60.0)
+        if semantic_prefix:
+            ctx.record_semantic_item(
+                "drag_float",
+                f"{t('animfsm_editor.transition_duration')}: {new_dur:g}",
+                True,
+                f"{semantic_prefix}.duration",
+            )
         if new_dur != dur:
             new_dur = max(0.0, float(new_dur))
             before = self._undo_snapshot()
@@ -813,13 +919,18 @@ class AnimFSMEditorPanel(EditorPanel):
             self._try_record_undo("Edit transition duration", before, self._undo_snapshot())
         ctx.dummy(0, 4)
 
-    def _render_transition_condition_block(self, ctx: InxGUIContext, lk: GraphLink) -> None:
+    def _render_transition_condition_block(
+        self,
+        ctx: InxGUIContext,
+        lk: GraphLink,
+        semantic_prefix: str = "",
+    ) -> None:
         fsm = self._fsm
         if fsm is None:
             return
         # Crossfade duration applies to every transition regardless of condition
         # mode, so render it first (before the condition-specific early returns).
-        self._render_transition_duration_row(ctx, lk)
+        self._render_transition_duration_row(ctx, lk, semantic_prefix)
         cond = str(lk.data.get("condition", "") or "")
         if "cond_terms" not in lk.data:
             terms = parse_condition_string_to_model(cond)
@@ -843,11 +954,25 @@ class AnimFSMEditorPanel(EditorPanel):
             ctx.dummy(0, 2)
             ctx.set_next_item_width(-1)
             ctx.combo("##tmode", 0, [mode_clip, mode_param], 2)
+            if semantic_prefix:
+                ctx.record_semantic_item(
+                    "combo",
+                    mode_clip,
+                    False,
+                    f"{semantic_prefix}.condition_mode",
+                )
             return
 
         ctx.set_next_item_width(-1)
         mid_idx = 0 if clip_mode else 1
         new_mid = ctx.combo("##tmode", mid_idx, [mode_clip, mode_param], 2)
+        if semantic_prefix:
+            ctx.record_semantic_item(
+                "combo",
+                mode_clip if mid_idx == 0 else mode_param,
+                True,
+                f"{semantic_prefix}.condition_mode",
+            )
         if new_mid != mid_idx:
             if new_mid == 0:
                 self._apply_condition_model(lk, [])
@@ -872,6 +997,13 @@ class AnimFSMEditorPanel(EditorPanel):
             pi = names.index(pname)
             ctx.set_next_item_width(88)
             new_pi = ctx.combo("##pn", pi, names, len(names))
+            if semantic_prefix:
+                ctx.record_semantic_item(
+                    "combo",
+                    names[pi],
+                    True,
+                    f"{semantic_prefix}.condition.{i}.parameter",
+                )
             ctx.same_line(0, 4)
             op = str(tm.get("op", ">"))
             if op not in _OPS:
@@ -879,10 +1011,24 @@ class AnimFSMEditorPanel(EditorPanel):
             oi = _OPS.index(op)
             ctx.set_next_item_width(48)
             new_oi = ctx.combo("##op", oi, _OPS, len(_OPS))
+            if semantic_prefix:
+                ctx.record_semantic_item(
+                    "combo",
+                    op,
+                    True,
+                    f"{semantic_prefix}.condition.{i}.operator",
+                )
             ctx.same_line(0, 4)
             fv = float(tm.get("value", 0.0))
             ctx.set_next_item_width(-1)
             new_fv = ctx.drag_float("##fv", fv, 0.05, -1e9, 1e9)
+            if semantic_prefix:
+                ctx.record_semantic_item(
+                    "drag_float",
+                    f"{new_fv:g}",
+                    True,
+                    f"{semantic_prefix}.condition.{i}.value",
+                )
             ctx.pop_id()
 
             if new_pi != pi:
@@ -897,12 +1043,26 @@ class AnimFSMEditorPanel(EditorPanel):
 
         ctx.dummy(0, 4)
         ctx.begin_group()
-        if ctx.button("+##addrow", None, 28, 20):
+        add_clicked = ctx.button("+##addrow", None, 28, 20)
+        if semantic_prefix:
+            ctx.record_semantic_item(
+                "button", "Add Condition", True, f"{semantic_prefix}.condition.add",
+            )
+        if add_clicked:
             nt = list(terms)
             nt.append(dict(self._default_compare_term(fsm)))
             self._apply_condition_model(lk, nt)
         ctx.same_line(0, 6)
-        if len(terms) > 1 and ctx.button("−##rmrow", None, 28, 20):
+        can_remove = len(terms) > 1
+        remove_clicked = can_remove and ctx.button("−##rmrow", None, 28, 20)
+        if semantic_prefix:
+            ctx.record_semantic_item(
+                "button",
+                "Remove Condition",
+                can_remove,
+                f"{semantic_prefix}.condition.remove",
+            )
+        if remove_clicked:
             nt = list(terms)
             nt.pop()
             self._apply_condition_model(lk, nt)
@@ -942,7 +1102,10 @@ class AnimFSMEditorPanel(EditorPanel):
         ctx.separator()
         ctx.dummy(0, 4)
 
-        if ctx.button(t("animfsm_editor.add_parameter")):
+        add_parameter_label = t("animfsm_editor.add_parameter")
+        add_parameter_pressed = ctx.button(add_parameter_label)
+        ctx.record_semantic_item("button", add_parameter_label, True, "animfsm.parameters.add")
+        if add_parameter_pressed:
             before = self._undo_snapshot()
             fsm.parameters.append(AnimParameter(name=f"var_{len(fsm.parameters)}", kind="float"))
             self._dirty = True
@@ -1065,6 +1228,51 @@ class AnimFSMEditorPanel(EditorPanel):
             return True
         return False
 
+    @staticmethod
+    def _embedded_clip3d_picker_items(filter_text: str) -> List[Tuple[str, str]]:
+        """List model-embedded takes alongside standalone ``.animclip3d`` assets.
+
+        The Project panel exposes an embedded take as ``<model-guid>::subanim:<n>``.
+        Returning that same public virtual reference keeps object-picker assignment,
+        drag-and-drop assignment, and runtime loading on one contract.
+        """
+        from Infernux.core.asset_types import MESH_EXTENSIONS, read_meta_file, read_meta_guid
+        from Infernux.core.assets import AssetManager
+
+        filt = (filter_text or "").strip().lower()
+        items: List[Tuple[str, str]] = []
+        seen: set[str] = set()
+        for ext in sorted(MESH_EXTENSIONS):
+            for model_path in AssetManager.find_assets(f"*{ext}"):
+                normalized = os.path.normpath(model_path)
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                meta = read_meta_file(model_path) or {}
+                names_csv = meta.get("animation_names_csv") or ""
+                if not isinstance(names_csv, str):
+                    continue
+                take_names = [name.strip() for name in names_csv.split(",") if name.strip()]
+                if not take_names:
+                    continue
+                model_name = os.path.splitext(os.path.basename(model_path))[0]
+                base = read_meta_guid(model_path) or model_path
+                for index, take_name in enumerate(take_names):
+                    display = f"{model_name} | {take_name}"
+                    if filt and filt not in display.lower():
+                        continue
+                    items.append((display, f"{base}::subanim:{index}"))
+        return items
+
+    def _clip_picker_items(self, filter_text: str, extensions) -> List[Tuple[str, str]]:
+        """Return compatible standalone clips and, for 3D FSMs, embedded takes."""
+        result: List[Tuple[str, str]] = []
+        for pattern in extensions:
+            result.extend(_picker_assets(filter_text, pattern, assets_only=False))
+        if self._fsm_clip_asset_type() == "AnimationClip3D":
+            result.extend(self._embedded_clip3d_picker_items(filter_text))
+        return result
+
     def _clip_ref_for_state(self, state: AnimState):
         """Build a clip ref (2D/3D) with path hint resolved for Inspector-style labels."""
         path = (state.clip_path or "").strip()
@@ -1081,14 +1289,27 @@ class AnimFSMEditorPanel(EditorPanel):
             return AnimationClip3DRef(guid=state.clip_guid or "", path_hint=path)
         return AnimationClipRef(guid=state.clip_guid or "", path_hint=path)
 
-    def _detail_checkbox_row_right(self, ctx: InxGUIContext, lw: float, label_key: str, wid: str, value: bool) -> bool:
+    def _detail_checkbox_row_right(
+        self,
+        ctx: InxGUIContext,
+        lw: float,
+        label_key: str,
+        wid: str,
+        value: bool,
+        semantic_id: str,
+    ) -> bool:
         """Label left, checkbox square aligned to the right (inspector-style row)."""
-        field_label(ctx, t(label_key), lw)
+        label = t(label_key)
+        field_label(ctx, label, lw)
         ctx.same_line(0, 8)
         dx = ctx.get_content_region_avail_width() - Theme.INSPECTOR_CHECKBOX_SLOT_W
         if dx > 0:
             ctx.set_cursor_pos_x(ctx.get_cursor_pos_x() + dx)
-        return ctx.checkbox(wid, value)
+        new_value = ctx.checkbox(wid, value)
+        ctx.record_semantic_item(
+            "checkbox", label, True, semantic_id, bool(new_value),
+        )
+        return new_value
 
     def _clip_b_ref_for_state(self, state: AnimState):
         """Build a clip ref for the blend node's second clip (B)."""
@@ -1161,10 +1382,7 @@ class AnimFSMEditorPanel(EditorPanel):
         display = self._clip_b_display_name(state, ref)
 
         def _picker(filt: str):
-            result = []
-            for g in extensions:
-                result += _picker_assets(filt, g, assets_only=False)
-            return result
+            return self._clip_picker_items(filt, extensions)
 
         field_label(ctx, t("animfsm_editor.clip_b"), lw)
         render_object_field(
@@ -1177,6 +1395,7 @@ class AnimFSMEditorPanel(EditorPanel):
             picker_asset_items=_picker,
             on_pick=lambda path, _st=state, _nd=node: self._assign_clip_b_to_state(_st, path, _nd),
             on_clear=lambda _st=state, _nd=node: self._clear_clip_b_from_state(_st, _nd),
+            semantic_id="animfsm.state.clip_b",
         )
 
     def _clip_display_name(self, state: AnimState, ref=None) -> str:
@@ -1227,7 +1446,13 @@ class AnimFSMEditorPanel(EditorPanel):
         return f"GUID:{guid[:8]}\u2026" if guid else "None"
 
     def _render_clip_reference_row(
-        self, ctx: InxGUIContext, state: AnimState, node, lw: float, label: str = "",
+        self,
+        ctx: InxGUIContext,
+        state: AnimState,
+        node,
+        lw: float,
+        label: str = "",
+        semantic_id: str = "animfsm.state.clip",
     ) -> None:
         """Same object-field UX as the main Inspector (basename, picker, drag-drop, clear)."""
         cfg = get_asset_type_config(self._fsm_clip_asset_type()) or {}
@@ -1240,10 +1465,7 @@ class AnimFSMEditorPanel(EditorPanel):
         display = self._clip_display_name(state, ref)
 
         def _picker(filt: str):
-            result = []
-            for g in extensions:
-                result += _picker_assets(filt, g, assets_only=False)
-            return result
+            return self._clip_picker_items(filt, extensions)
 
         def _on_pick(path: str, _st=state, _nd=node):
             self._assign_clip_to_state(_st, path, _nd)
@@ -1264,11 +1486,15 @@ class AnimFSMEditorPanel(EditorPanel):
             picker_asset_items=_picker,
             on_pick=_on_pick,
             on_clear=_on_clear,
+            semantic_id=semantic_id,
         )
 
     def _render_detail_panel(self, ctx: InxGUIContext):
         fsm = self._fsm
         if fsm is None:
+            return
+
+        if self._render_selected_transition_detail(ctx):
             return
 
         node = self._graph.find_node(self._selected_uid)
@@ -1306,12 +1532,19 @@ class AnimFSMEditorPanel(EditorPanel):
             ctx.set_cursor_pos_x(base_x + row_w - tw)
             ctx.push_style_color(ImGuiCol.Text, 0.48, 0.65, 0.45, 1.0)
             ctx.label(badge)
+            ctx.record_semantic_item(
+                "status", "Default: true", False, "animfsm.state.default",
+            )
             ctx.pop_style_color(1)
         else:
             set_lbl = t("animfsm_editor.set_default")
             btn_w = ctx.calc_text_width(set_lbl) + 24.0
             ctx.set_cursor_pos_x(base_x + row_w - btn_w)
-            if ctx.button(set_lbl):
+            set_default_clicked = ctx.button(set_lbl)
+            ctx.record_semantic_item(
+                "button", "Default: false; Set Default", True, "animfsm.state.set_default",
+            )
+            if set_default_clicked:
                 before = self._undo_snapshot()
                 fsm.default_state = state.name
                 self._update_entry_link()
@@ -1324,6 +1557,10 @@ class AnimFSMEditorPanel(EditorPanel):
         ctx.same_line(0, 8)
         ctx.set_next_item_width(-1)
         new_name = ctx.text_input("##state_name_edit", state.name, 128)
+        ctx.record_semantic_item(
+            "text_input", f"{t('animfsm_editor.state_name')}: {new_name}", True,
+            "animfsm.state.name",
+        )
         if new_name != state.name:
             before = self._undo_snapshot()
             if self._try_rename_state(state, new_name.strip()):
@@ -1341,10 +1578,17 @@ class AnimFSMEditorPanel(EditorPanel):
         # time (via the drag-to-create menu or by dropping an asset) and is
         # intentionally not editable here.
         kind = getattr(state, "kind", "clip")
+        ctx.record_semantic_item(
+            "status", f"State Kind: {kind}", False, "animfsm.state.kind",
+        )
 
         if kind == "blend":
             # Symmetric A/B naming for blend nodes.
-            self._render_clip_reference_row(ctx, state, node, lw, label=t("animfsm_editor.clip_a"))
+            self._render_clip_reference_row(
+                ctx, state, node, lw,
+                label=t("animfsm_editor.clip_a"),
+                semantic_id="animfsm.state.clip_a",
+            )
             self._render_clip_b_reference_row(ctx, state, node, lw)
             field_label(ctx, t("animfsm_editor.blend_lerp"), lw)
             ctx.same_line(0, 8)
@@ -1371,6 +1615,10 @@ class AnimFSMEditorPanel(EditorPanel):
         ctx.same_line(0, 8)
         ctx.set_next_item_width(-1)
         new_speed = ctx.drag_float("##speed", state.speed, 0.01, 0.0, 10.0)
+        ctx.record_semantic_item(
+            "drag_float", f"{t('animfsm_editor.speed')}: {new_speed:g}", True,
+            "animfsm.state.speed",
+        )
         if new_speed != state.speed:
             before = self._undo_snapshot()
             state.speed = new_speed
@@ -1382,6 +1630,10 @@ class AnimFSMEditorPanel(EditorPanel):
         ctx.same_line(0, 8)
         ctx.set_next_item_width(-1)
         new_exit_pct = ctx.drag_float("##exit_time", exit_pct, 0.5, 0.0, 100.0)
+        ctx.record_semantic_item(
+            "drag_float", f"{t('animfsm_editor.exit_time')}: {new_exit_pct:g}", True,
+            "animfsm.state.exit_time",
+        )
         if new_exit_pct != exit_pct:
             before = self._undo_snapshot()
             state.exit_time_normalized = max(0.0, min(1.0, new_exit_pct / 100.0))
@@ -1390,6 +1642,7 @@ class AnimFSMEditorPanel(EditorPanel):
 
         new_loop = self._detail_checkbox_row_right(
             ctx, lw, "animfsm_editor.loop", "##state_loop", state.loop,
+            "animfsm.state.loop",
         )
         if new_loop != state.loop:
             before = self._undo_snapshot()
@@ -1400,6 +1653,7 @@ class AnimFSMEditorPanel(EditorPanel):
 
         new_rs = self._detail_checkbox_row_right(
             ctx, lw, "animfsm_editor.restart_same_clip", "##state_restart_same", state.restart_same_clip,
+            "animfsm.state.restart_same_clip",
         )
         if new_rs != state.restart_same_clip:
             before = self._undo_snapshot()
@@ -1441,12 +1695,82 @@ class AnimFSMEditorPanel(EditorPanel):
                 self._dirty = True
                 self._try_record_undo("Remove transition", before, self._undo_snapshot())
 
+    def _render_transition_exit_time_row(self, ctx: InxGUIContext, lk: GraphLink) -> None:
+        source_name = self._uid_to_name.get(lk.source_node, "")
+        state = self._fsm.get_state(source_name) if self._fsm and source_name else None
+        if state is None:
+            return
+        exit_pct = max(0.0, min(100.0, float(state.exit_time_normalized) * 100.0))
+        ctx.push_style_color(ImGuiCol.Text, 0.55, 0.56, 0.58, 1.0)
+        ctx.label(t("animfsm_editor.exit_time"))
+        ctx.pop_style_color(1)
+        ctx.set_next_item_width(-1)
+        new_exit_pct = ctx.drag_float("##transition_exit_time", exit_pct, 0.5, 0.0, 100.0)
+        ctx.record_semantic_item(
+            "drag_float",
+            f"{t('animfsm_editor.exit_time')}: {new_exit_pct:g}",
+            True,
+            "animfsm.transition.exit_time",
+        )
+        if new_exit_pct != exit_pct:
+            before = self._undo_snapshot()
+            state.exit_time_normalized = max(0.0, min(1.0, new_exit_pct / 100.0))
+            self._dirty = True
+            self._try_record_undo("Change transition exit time", before, self._undo_snapshot())
+        ctx.dummy(0, 4)
+
+    def _render_selected_transition_detail(self, ctx: InxGUIContext) -> bool:
+        link_uid = (self._view.selected_link or "").strip()
+        if not link_uid:
+            return False
+        lk = self._graph.find_link(link_uid)
+        if lk is None:
+            self._view.selected_link = ""
+            return False
+
+        source_name = self._uid_to_name.get(lk.source_node, "Entry")
+        target_name = self._uid_to_name.get(lk.target_node, "?")
+        route_label = f"{source_name} -> {target_name}"
+        ctx.record_semantic_item(
+            "panel", f"Transition: {route_label}", False, "animfsm.transition.detail",
+        )
+        ctx.push_style_color(ImGuiCol.Text, 0.55, 0.56, 0.58, 1.0)
+        ctx.label(t("animfsm_editor.section_transitions"))
+        ctx.pop_style_color(1)
+        ctx.separator()
+        ctx.dummy(0, 4)
+        ctx.label(route_label)
+        ctx.record_semantic_item(
+            "status", route_label, False, "animfsm.transition.route",
+        )
+        ctx.dummy(0, Theme.INSPECTOR_SECTION_GAP)
+
+        if lk.source_node == self._entry_uid:
+            return True
+
+        self._render_transition_exit_time_row(ctx, lk)
+        self._render_transition_condition_block(ctx, lk, "animfsm.transition")
+        ctx.dummy(0, Theme.INSPECTOR_SECTION_GAP)
+        delete_label = t("animfsm_editor.delete_transition")
+        delete_clicked = ctx.button(delete_label)
+        ctx.record_semantic_item(
+            "button", delete_label, True, "animfsm.transition.delete",
+        )
+        if delete_clicked:
+            before = self._undo_snapshot()
+            if self._remove_link_and_transition(link_uid):
+                self._view.selected_link = ""
+                self._dirty = True
+                self._try_record_undo("Remove transition", before, self._undo_snapshot())
+        return True
+
     # ═══════════════════════════════════════════════════════════════════
     # FSM ↔ Graph synchronization
     # ═══════════════════════════════════════════════════════════════════
 
     def _sync_graph_from_fsm(self):
         """Rebuild the NodeGraph from the current AnimStateMachine."""
+        self._view.reset_interaction_state()
         self._graph.clear()
         self._name_to_uid.clear()
         self._uid_to_name.clear()
@@ -1633,21 +1957,35 @@ class AnimFSMEditorPanel(EditorPanel):
     def _on_node_drag_start(self, uid: str) -> None:
         if uid == self._entry_uid:
             self._undo_drag_snapshot = None
+            self._undo_drag_node_position = None
             return
         self._undo_drag_snapshot = self._undo_snapshot()
+        node = self._graph.find_node(uid)
+        self._undo_drag_node_position = (
+            (float(node.pos_x), float(node.pos_y)) if node is not None else None
+        )
 
     def _on_node_drag_end(self, uid: str) -> None:
         if uid == self._entry_uid:
             self._undo_drag_snapshot = None
+            self._undo_drag_node_position = None
+            return
+        before = self._undo_drag_snapshot
+        start_position = self._undo_drag_node_position
+        self._undo_drag_snapshot = None
+        self._undo_drag_node_position = None
+        node = self._graph.find_node(uid)
+        if before is None or start_position is None or node is None:
+            return
+        end_position = (float(node.pos_x), float(node.pos_y))
+        if end_position == start_position:
             return
         self._sync_fsm_positions()
+        after = self._undo_snapshot()
+        if before == after:
+            return
         self._dirty = True
         self._sync_project_dirty_flag()
-        before = self._undo_drag_snapshot
-        self._undo_drag_snapshot = None
-        if before is None:
-            return
-        after = self._undo_snapshot()
         self._try_record_undo("Move state node", before, after)
 
     def _on_node_header_color_changed(
@@ -1883,24 +2221,9 @@ class AnimFSMEditorPanel(EditorPanel):
         self._dirty = True
         self._try_record_undo("Create node from link", before, self._undo_snapshot())
 
-    def _on_before_graph_selection_change(self) -> None:
-        if not self._animfsm_undo_enabled():
-            return
-        self._pending_selection_undo_before = self._undo_snapshot()
-
     def _on_node_selected(self, uid: str):
-        before = self._pending_selection_undo_before or self._last_selection_undo_snapshot
         self._selected_uid = uid
         self._clear_external_selection()
-        if before is not None:
-            after = self._undo_snapshot()
-            self._try_record_undo(
-                "Graph selection",
-                before,
-                after,
-            )
-            self._last_selection_undo_snapshot = after
-        self._pending_selection_undo_before = None
 
     def _clear_external_selection(self):
         """Clear hierarchy / scene selection only; keep Project panel file selection."""
@@ -2071,6 +2394,7 @@ class AnimFSMEditorPanel(EditorPanel):
             picker_asset_items=_picker,
             on_pick=lambda path, _st=state, _nd=node: self._assign_timeline_to_state(_st, path, _nd),
             on_clear=lambda _st=state, _nd=node: self._clear_timeline_from_state(_st, _nd),
+            semantic_id="animfsm.state.timeline",
         )
 
     # ── Helpers ───────────────────────────────────────────────────────
@@ -2189,48 +2513,57 @@ class AnimFSMEditorPanel(EditorPanel):
         else:
             self._show_save_as_dialog()
 
+    def handle_save_command(self, save_as: bool = False) -> bool:
+        if save_as:
+            if self._fsm is not None:
+                self._show_save_as_dialog()
+        else:
+            self._do_save()
+        return True
+
     def _show_save_as_dialog(self):
-        from Infernux.engine.project_context import get_project_root
-        root = get_project_root()
-        initial_dir = os.path.join(root, "Assets") if root else "."
         safe_name = (self._fsm.name or "NewStateMachine").replace(" ", "_")
         # Timeline-mode FSMs save as .timelinefsm (so TimelineAction can pick them up).
         if self._is_timeline_mode():
-            ext, label = "timelinefsm", "TimelineFSM"
+            ext = "timelinefsm"
             title = "Save Timeline State Machine"
         else:
-            ext, label = "animfsm", "AnimFSM"
+            ext = "animfsm"
             title = "Save Animation State Machine"
-        default_filename = f"{safe_name}.{ext}"
-        result = None
-        try:
-            from ._dialogs import save_file_dialog
+        if not self._save_as_dialog.request(
+            title=title,
+            extension=ext,
+            default_name=safe_name,
+            current_path=self._file_path,
+        ):
+            Debug.log_warning("[AnimFSM] No project root set - cannot save state machine.")
 
-            result = save_file_dialog(
-                title=title,
-                win32_filter=f"{label} files (*.{ext})\0*.{ext}\0All files (*.*)\0*.*\0\0",
-                initial_dir=initial_dir,
-                default_filename=default_filename,
-                default_ext=ext,
-                tk_filetypes=[(label, f"*.{ext}"), ("All Files", "*.*")],
-            )
-        except Exception as exc:
-            Debug.log_warning(f"[AnimFSM] Save dialog error: {exc}")
-        if result:
-            self._execute_save(result)
-
-    def _execute_save(self, target: str):
+    def _execute_save(self, target: str) -> bool:
         fsm = self._fsm
         if fsm is None:
-            return
+            return False
         if fsm.save(target):
             self._file_path = target
             self._dirty = False
             self._sync_project_dirty_flag()
             Debug.log(f"Saved animfsm: {target}")
             self._hot_reload_animators(target)
+            if self._mode_switch_waiting_for_save and self._pending_mode_switch:
+                self._commit_mode_switch(self._pending_mode_switch)
+            return True
         else:
             Debug.log_error(f"Failed to save animfsm: {target}")
+            return False
+
+    def _discard_unsaved_changes(self) -> bool:
+        target = self._file_path or (self._fsm.file_path if self._fsm is not None else "")
+        if target:
+            self._open_animfsm(target)
+            return not self._dirty
+        self._new_fsm()
+        self._dirty = False
+        self._sync_project_dirty_flag()
+        return True
 
     def _hot_reload_animators(self, fsm_path: str):
         """Reload running 2D/3D animators that reference this FSM."""

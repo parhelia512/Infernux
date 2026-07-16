@@ -129,31 +129,31 @@ inline glm::vec2 Slerp(const glm::vec2 &a, const glm::vec2 &b, float t)
 {
     return SlerpUnclamped(a, b, std::clamp(t, 0.f, 1.f));
 }
-inline float SanitizeFloat(float v)
+inline float RequireFiniteFloat(float value)
 {
-    return std::isfinite(v) ? v : 0.0f;
+    if (!std::isfinite(value))
+        throw std::invalid_argument("Vector2 components must be finite");
+    return value;
 }
 
-inline glm::vec2 SanitizeVec2(const glm::vec2 &v)
+inline void RequireFiniteVec2(const glm::vec2 &value, const char *name)
 {
-    return glm::vec2(SanitizeFloat(v.x), SanitizeFloat(v.y));
+    if (!std::isfinite(value.x) || !std::isfinite(value.y))
+        throw std::invalid_argument(std::string(name) + " must contain finite values");
 }
 
 inline glm::vec2 SmoothDamp(glm::vec2 current, glm::vec2 target, glm::vec2 &currentVelocity, float smoothTime,
                             float maxSpeed, float deltaTime)
 {
-    current = SanitizeVec2(current);
-    target = SanitizeVec2(target);
-    currentVelocity = SanitizeVec2(currentVelocity);
-
-    if (smoothTime < 1e-4f)
-        smoothTime = 1e-4f;
+    RequireFiniteVec2(current, "current");
+    RequireFiniteVec2(target, "target");
+    RequireFiniteVec2(currentVelocity, "current_velocity");
+    if (!std::isfinite(smoothTime) || smoothTime <= 0.0f)
+        throw std::invalid_argument("smooth_time must be finite and positive");
     if (!std::isfinite(deltaTime) || deltaTime <= 0.0f)
-        return current;
-    if (!std::isfinite(maxSpeed))
-        maxSpeed = std::numeric_limits<float>::infinity();
-    else if (maxSpeed < 0.0f)
-        maxSpeed = 0.0f;
+        throw std::invalid_argument("delta_time must be finite and positive");
+    if (std::isnan(maxSpeed) || maxSpeed < 0.0f)
+        throw std::invalid_argument("max_speed must be non-negative");
 
     float omega = 2.f / smoothTime;
     float x = omega * deltaTime;
@@ -180,8 +180,7 @@ inline glm::vec2 SmoothDamp(glm::vec2 current, glm::vec2 target, glm::vec2 &curr
     }
 
     if (!std::isfinite(result.x) || !std::isfinite(result.y)) {
-        currentVelocity = glm::vec2(0.0f);
-        return originalTarget;
+        throw std::overflow_error("Vector2.smooth_damp produced a non-finite result");
     }
     return result;
 }
@@ -193,8 +192,9 @@ void RegisterVector2Bindings(py::module_ &m)
     using Vec = glm::vec2;
     py::class_<Vec>(m, "Vector2")
         .def(py::init<>())
-        .def(py::init(
-                 [](float x, float y) { return glm::vec2(vec2_util::SanitizeFloat(x), vec2_util::SanitizeFloat(y)); }),
+        .def(py::init([](float x, float y) {
+                 return glm::vec2(vec2_util::RequireFiniteFloat(x), vec2_util::RequireFiniteFloat(y));
+             }),
              "Construct vec2", py::arg("x"), py::arg("y"))
         .def("__getitem__",
              [](const Vec &v, int i) -> float {
@@ -206,7 +206,7 @@ void RegisterVector2Bindings(py::module_ &m)
              [](Vec &v, int i, float value) {
                  if (i < 0 || i >= 2)
                      throw std::out_of_range("index out of range");
-                 v[i] = vec2_util::SanitizeFloat(value);
+                 v[i] = vec2_util::RequireFiniteFloat(value);
              })
         .def("__add__", [](const Vec &a, const Vec &b) { return Vec(a + b); })
         .def("__add__",
@@ -293,13 +293,13 @@ void RegisterVector2Bindings(py::module_ &m)
         .def("__ne__",
              [](const Vec &a, const Vec &b) { return std::fabs(a.x - b.x) > 1e-6f || std::fabs(a.y - b.y) > 1e-6f; })
         .def_property(
-            "x", [](const Vec &v) { return v.x; }, [](Vec &v, float val) { v.x = vec2_util::SanitizeFloat(val); })
+            "x", [](const Vec &v) { return v.x; }, [](Vec &v, float val) { v.x = vec2_util::RequireFiniteFloat(val); })
         .def_property(
-            "y", [](const Vec &v) { return v.y; }, [](Vec &v, float val) { v.y = vec2_util::SanitizeFloat(val); })
+            "y", [](const Vec &v) { return v.y; }, [](Vec &v, float val) { v.y = vec2_util::RequireFiniteFloat(val); })
         .def_property(
-            "r", [](const Vec &v) { return v.x; }, [](Vec &v, float val) { v.x = vec2_util::SanitizeFloat(val); })
+            "r", [](const Vec &v) { return v.x; }, [](Vec &v, float val) { v.x = vec2_util::RequireFiniteFloat(val); })
         .def_property(
-            "g", [](const Vec &v) { return v.y; }, [](Vec &v, float val) { v.y = vec2_util::SanitizeFloat(val); })
+            "g", [](const Vec &v) { return v.y; }, [](Vec &v, float val) { v.y = vec2_util::RequireFiniteFloat(val); })
         .def("__repr__",
              [](const Vec &v) { return "Vector2(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ")"; })
         .def("__str__", [](const Vec &v) { return "(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ")"; })

@@ -302,15 +302,12 @@ class ShaderProgramCache
     bool HasProgram(const std::string &shaderId) const;
 
     /**
-     * @brief Remove a program from cache
+     * @brief Transfer ownership of all programs using the specified shader.
+     * @param shaderName Simple
+     * shader name (e.g., "123", not full path)
      */
-    void RemoveProgram(const std::string &shaderId);
-
-    /**
-     * @brief Remove all programs containing the specified shader name
-     * @param shaderName Simple shader name (e.g., "123", not full path)
-     */
-    void RemoveProgramsContainingShader(const std::string &shaderName);
+    [[nodiscard]] std::vector<std::unique_ptr<ShaderProgram>>
+    TakeProgramsContainingShader(const std::string &shaderName);
 
     /**
      * @brief Clear all cached programs

@@ -1,8 +1,16 @@
 """Tests for native ProjectPanel."""
 import os
+import json
 import tempfile
+from pathlib import Path
 import pytest
-from Infernux.lib import ProjectPanel
+from Infernux.lib import AssetMutationResult, ProjectPanel
+from Infernux.engine.ui.project_file_ops import (
+    create_material,
+    create_physic_material,
+    create_prefab_from_gameobject,
+    create_vfxsystem,
+)
 
 
 class TestProjectPanelCreation:
@@ -23,6 +31,126 @@ class TestProjectPanelCreation:
     def test_default_open(self):
         pp = ProjectPanel()
         assert pp.is_open()
+
+    def test_create_physic_material_writes_strict_document_and_imports(self, tmp_path):
+        class RecordingAssetDatabase:
+            def __init__(self):
+                self.paths = []
+
+            def import_asset(self, path):
+                self.paths.append(path)
+                result = AssetMutationResult()
+                result.succeeded = True
+                result.database_committed = True
+                result.changed = True
+                result.guid = "physic-material-guid"
+                return result
+
+        database = RecordingAssetDatabase()
+        ok, error = create_physic_material(str(tmp_path), "Ice", database)
+
+        assert ok is True, error
+        path = tmp_path / "Ice.physicMaterial"
+        assert database.paths == [str(path)]
+        assert json.loads(path.read_text(encoding="utf-8")) == {
+            "schema_version": 1,
+            "friction": 0.4,
+            "bounciness": 0.0,
+            "friction_combine": 0,
+            "bounce_combine": 0,
+        }
+
+    def test_create_vfxsystem_writes_loadable_strict_document(self, tmp_path):
+        from Infernux.core.vfx_system import VfxSystem
+
+        ok, error = create_vfxsystem(str(tmp_path), "Fire")
+
+        assert ok is True, error
+        system = VfxSystem.load(str(tmp_path / "Fire.vfxsystem"))
+        assert system.name == "Fire"
+        assert system.emitters[0].graph.graph_kind == "vfx"
+
+    def test_create_material_writes_schema_v3_document(self, tmp_path, engine):
+        from Infernux.lib import InxMaterial
+
+        class RecordingAssetDatabase:
+            def __init__(self):
+                self.paths = []
+
+            def import_asset(self, path):
+                self.paths.append(path)
+                result = AssetMutationResult()
+                result.succeeded = True
+                result.database_committed = True
+                result.changed = True
+                result.guid = "material-guid"
+                return result
+
+        database = RecordingAssetDatabase()
+        ok, error = create_material(str(tmp_path), "NewMaterial", database)
+
+        assert ok is True, error
+        path = tmp_path / "NewMaterial.mat"
+        assert database.paths == [str(path)]
+        document = json.loads(path.read_text(encoding="utf-8"))
+        assert document["material_version"] == 3
+        assert document["name"] == "NewMaterial"
+        assert document["builtin"] is False
+        material = InxMaterial()
+        assert material.deserialize(json.dumps(document)) is True
+        assert material.name == "NewMaterial"
+
+    def test_new_material_import_primes_native_preview(self, tmp_path, monkeypatch):
+        from Infernux.core.assets import AssetManager
+
+        path = tmp_path / "Fresh.mat"
+        path.write_text('{"material_version":3}', encoding="utf-8")
+
+        class Native:
+            def __init__(self):
+                self.queries = []
+                self.full_speed_requests = 0
+
+            def query_or_schedule_material_preview(self, *args):
+                self.queries.append(args)
+                return 0
+
+            def request_full_speed_frame(self):
+                self.full_speed_requests += 1
+
+        native = Native()
+        monkeypatch.setattr(AssetManager, "_native_engine", classmethod(lambda cls: native))
+
+        AssetManager._prime_material_preview(str(path))
+
+        normalized = os.path.normpath(str(path))
+        assert native.queries == [(f"mat|{normalized}", normalized, "", path.stat().st_mtime_ns)]
+        assert native.full_speed_requests == 1
+
+        native.queries.clear()
+        AssetManager._prime_material_preview(str(path), '{"material_version":3}')
+        assert native.queries == [(
+            f"matedit|{normalized}", normalized, '{"material_version":3}', 0,
+        )]
+
+    def test_create_prefab_links_the_saved_source(self, tmp_path, monkeypatch):
+        from Infernux.engine import prefab_manager
+
+        source = type("GameObject", (), {"name": "CheckpointGate"})()
+        linked = []
+        monkeypatch.setattr(prefab_manager, "save_prefab", lambda *args, **kwargs: True)
+        monkeypatch.setattr(
+            prefab_manager,
+            "_link_created_prefab_source",
+            lambda game_object, path, database: linked.append((game_object, path, database)) or True,
+        )
+        database = object()
+
+        ok, path = create_prefab_from_gameobject(source, str(tmp_path), database)
+
+        assert ok is True
+        assert path == str(tmp_path / "CheckpointGate.prefab")
+        assert linked == [(source, path, database)]
 
 
 class TestProjectPanelPaths:
@@ -104,11 +232,27 @@ class TestProjectPanelCallbacks:
         ok, err = pp.create_material("/path", "MyMat")
         assert ok is True
 
+    def test_create_physic_material_callback(self):
+        pp = ProjectPanel()
+        pp.create_physic_material = lambda cur, name: (True, "")
+        ok, err = pp.create_physic_material("/path", "Ice")
+        assert ok is True
+
     def test_create_scene_callback(self):
         pp = ProjectPanel()
         pp.create_scene = lambda cur, name: (True, "")
         ok, err = pp.create_scene("/path", "Main")
         assert ok is True
+
+    def test_vfx_system_callbacks(self):
+        pp = ProjectPanel()
+        pp.create_vfxsystem = lambda cur, name: (True, "")
+        opened = []
+        pp.open_vfx_system = lambda path: opened.append(path)
+
+        assert pp.create_vfxsystem("/path", "Fire") == (True, "")
+        pp.open_vfx_system("/path/Fire.vfxsystem")
+        assert opened == ["/path/Fire.vfxsystem"]
 
     def test_delete_items_callback(self):
         pp = ProjectPanel()
@@ -122,6 +266,55 @@ class TestProjectPanelCallbacks:
         pp.do_rename = lambda old, new_name: f"/dir/{new_name}"
         result = pp.do_rename("/dir/old.txt", "new.txt")
         assert result == "/dir/new.txt"
+
+    def test_project_asset_operations_publish_stable_semantics(self):
+        source = Path("cpp/infernux/function/editor/ProjectPanel.cpp").read_text(encoding="utf-8")
+        assert '"project.context.rename"' in source
+        assert '"project.context.delete"' in source
+        assert '"project.rename.input"' in source
+        assert 'itemSemanticId + ".expand"' in source
+        assert '"project_model_expand"' in source
+
+    def test_project_asset_selection_waits_for_non_drag_release(self):
+        source = Path("cpp/infernux/function/editor/ProjectPanel.cpp").read_text(encoding="utf-8")
+        icon_render = source[source.index("// ── Render icon"):source.index("// ── Drag-drop source")]
+
+        assert icon_render.count("ImGui::IsMouseReleased(ImGuiMouseButton_Left)") == 2
+        assert "const bool thumbClicked = ImGui::IsItemClicked(0)" not in icon_render
+
+    def test_empty_prefab_drop_area_is_an_actual_drag_drop_target(self):
+        source = Path("cpp/infernux/function/editor/ProjectPanel.cpp").read_text(encoding="utf-8")
+        drop_area = source.index('ctx->InvisibleButton("##drop_prefab_area"')
+        drop_target = source.index("ctx->BeginDragDropTarget()", drop_area)
+        accept_payload = source.index("ctx->AcceptDragDropPayload(DRAG_TYPE_HIERARCHY_GO", drop_target)
+        create_prefab = source.index("createPrefabFromHierarchy(objId, m_currentPath)", accept_payload)
+        click_handler = source.index("ctx->IsItemClicked(0)", create_prefab)
+
+        assert drop_area < drop_target < accept_payload < create_prefab < click_handler
+
+    def test_file_grid_background_semantic_survives_a_vertically_filled_grid(self):
+        source = Path("cpp/infernux/function/editor/ProjectPanel.cpp").read_text(encoding="utf-8")
+        gutter_capture = source.index("const float gutterWidth = cellW - iconSize")
+        bottom_area = source.index('ctx->InvisibleButton("##drop_prefab_area"')
+        fallback = source.index("} else if (captureSemantics && semanticBackgroundMax.x", bottom_area)
+
+        assert '"project.file_grid.background"' in source
+        assert source.count('"project.file_grid.background"') == 2
+        assert gutter_capture < bottom_area < fallback
+        assert source.count('ctx->RecordSemanticRect("project_background", "File Grid Background"') == 2
+
+    def test_project_preview_rendering_uses_catalog_stamps_without_ui_thread_polling(self):
+        source = Path("cpp/infernux/function/editor/ProjectPanel.cpp").read_text(encoding="utf-8")
+        snapshot_cache = source[source.index("ProjectPanel::DirSnapshot *ProjectPanel::GetDirSnapshot"):
+                                source.index("ProjectPanel::DirTreeMeta *ProjectPanel::GetDirTreeMeta")]
+        grid_preview = source[source.index("// ── Resolve display texture"):
+                              source.index("// ── Render icon")]
+
+        assert "if (catalog || (m_frameTimeNow - it->second.lastValidatedAt) < DIR_CACHE_TTL)" in snapshot_cache
+        assert "GetMaterialThumbnail(item.path, item.mtimeNs)" in grid_preview
+        assert "GetModelThumbnail(item.path, item.mtimeNs)" in grid_preview
+        assert "IsUiPrefabFile(item.path, item.mtimeNs)" in grid_preview
+        assert grid_preview.count("IsUiPrefabFile(") == 1
 
     def test_get_unique_name_callback(self):
         pp = ProjectPanel()

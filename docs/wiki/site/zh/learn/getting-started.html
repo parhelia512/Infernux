@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="安装 Infernux 预览版，创建或打开项目，理解主要编辑器面板，保存场景并进入 Play 模式。">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>快速开始 - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/zh/learn/getting-started.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="快速开始 - Infernux Documentation">
+    <meta property="og:description" content="安装 Infernux 预览版，创建或打开项目，理解主要编辑器面板，保存场景并进入 Play 模式。">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/zh/learn/getting-started.html">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="学习">
+    <meta property="article:tag" content="入门"><meta property="article:tag" content="编辑器"><meta property="article:tag" content="安装">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="快速开始 - Infernux Documentation">
+    <meta name="twitter:description" content="安装 Infernux 预览版，创建或打开项目，理解主要编辑器面板，保存场景并进入 Play 模式。">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "LearningResource",
+          "@id": "https://infernux-engine.com/wiki/site/zh/learn/getting-started.html#document",
+          "headline": "\u5feb\u901f\u5f00\u59cb",
+          "name": "\u5feb\u901f\u5f00\u59cb",
+          "description": "\u5b89\u88c5 Infernux \u9884\u89c8\u7248\uff0c\u521b\u5efa\u6216\u6253\u5f00\u9879\u76ee\uff0c\u7406\u89e3\u4e3b\u8981\u7f16\u8f91\u5668\u9762\u677f\uff0c\u4fdd\u5b58\u573a\u666f\u5e76\u8fdb\u5165 Play \u6a21\u5f0f\u3002",
+          "url": "https://infernux-engine.com/wiki/site/zh/learn/getting-started.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/zh/learn/getting-started.html"
+          },
+          "inLanguage": "zh-CN",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Tutorial",
+          "articleSection": "\u5b66\u4e60",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": "Infernux NASA Punk \u4efb\u52a1\u5361\uff0c\u5305\u542b\u7f16\u8f91\u5668\u3001\u7194\u7089\u6807\u5fd7\u548c\u6280\u672f\u9884\u89c8\u72b6\u6001\u3002"
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["\u5165\u95e8", "\u7f16\u8f91\u5668", "\u5b89\u88c5"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/zh/learn/getting-started.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "\u6587\u6863",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "\u5b66\u4e60",
+              "item": "https://infernux-engine.com/wiki.html#start-here"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "\u5feb\u901f\u5f00\u59cb",
+              "item": "https://infernux-engine.com/wiki/site/zh/learn/getting-started.html"
+            }
+            
+          ]
+        }
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/learn/getting-started.html">
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/learn/getting-started.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/learn/getting-started.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
+    <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
+</head>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <!-- Top Navigation -->
+    <nav class="navbar" aria-label="主导航">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/zh/learn/getting-started.html" class="nav-priority active" aria-current="page">开始使用</a>
+                <a href="/wiki.html#start-here">学习</a>
+                <a href="/wiki.html?layer=manual#written-guides">手册</a>
+                <a href="/wiki/site/zh/api/index.html">API</a>
+                <a href="/roadmap.html">路线图</a>
+                <a href="/community.html" class="nav-priority">社区</a>
+                <a href="/download.html">下载</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="复制版本、来源和权威链接" aria-label="复制供 Agent 使用的页面上下文">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>复制给 Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>搜索文档</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell article-page-shell" id="main-content">
+        <div class="container article-page-container">
+            <div class="api-main article-page-content">
+                
+    <nav class="doc-breadcrumb" aria-label="面包屑">
+        <a href="/wiki.html">文档</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html#start-here">学习</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">快速开始</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="文档版本与来源" data-status="preview" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">preview</strong>
+                        <span class="doc-provenance-item"><span>始于</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>已验证</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>读者</span> new-user, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">文档清单</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/en/learn/getting-started.html" lang="en">Read in English</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>源码证据 · 3</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/README-zh.md" target="_blank" rel="noopener">README-zh.md</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/tree/master/packaging" target="_blank" rel="noopener">packaging</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/tree/master/python/Infernux/engine/ui" target="_blank" rel="noopener">python/Infernux/engine/ui</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>本页目录</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>收起章节</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="本页章节"></nav>
+    </aside>
+    
+                <h1 id="_1">快速开始<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>这份指南帮助你从一台新机器走到可运行的 Infernux 场景，当前针对 Windows 上的 <strong>0.2.1 预览版</strong>。预览版迭代很快；排查行为差异前，请先确认 Hub 或 Release 页面显示的实际版本。</p>
+<p><strong>预计时间：</strong> 预览版下载完成后 5–10 分钟。</p>
+<h2 id="_2">你将完成什么<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>完成后，你应该能够：</p>
+<ul>
+<li>安装或启动 Infernux；</li>
+<li>创建或打开项目；</li>
+<li>理解 Scene、Game、Hierarchy、Inspector、Project 与 Console 面板的职责；</li>
+<li>保存场景并进入 Play 模式。</li>
+</ul>
+<h2 id="1">1. 获取引擎<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>请选择一种受支持的入口：</p>
+<ol>
+<li>从 <a href="https://github.com/ChenlizheMe/Infernux/releases">Infernux Releases</a> 获取最新预览版。</li>
+<li>按该版本包内的说明安装或解压。</li>
+<li>学习阶段建议把 Hub、编辑器和项目放在本地可写磁盘中。</li>
+</ol>
+<p>如果你的目标是开发引擎本身，请使用仓库里的源码构建说明，不要把源码构建与打包预览版混在同一套目录中。</p>
+<h2 id="2">2. 创建或打开项目<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<p>启动 Hub 或编辑器并选择项目位置。一个健康的项目应该能正常打开，在 Project 面板中显示文件，并且 Console 不会持续刷出同一个异常。</p>
+<p>不要把引擎生成文件塞进无关源码仓库。独立项目目录会让资源发现、导入和故障排查简单很多。</p>
+<h2 id="3">3. 理解编辑器布局<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>区域</th>
+<th>作用</th>
+<th>第一次检查什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Scene</td>
+<td>编辑世界并可视化选择对象</td>
+<td>能否环绕或聚焦场景？</td>
+</tr>
+<tr>
+<td>Game</td>
+<td>预览当前相机输出</td>
+<td>进入 Play 后是否更新？</td>
+</tr>
+<tr>
+<td>Hierarchy</td>
+<td>查看当前场景对象</td>
+<td>能否按名字选中对象？</td>
+</tr>
+<tr>
+<td>Inspector</td>
+<td>编辑选中对象及组件</td>
+<td>切换选择时是否同步更新？</td>
+</tr>
+<tr>
+<td>Project</td>
+<td>浏览项目资源和脚本</td>
+<td>能否找到项目资源文件？</td>
+</tr>
+<tr>
+<td>Console</td>
+<td>查看日志、警告和错误</td>
+<td>是否存在反复出现的异常？</td>
+</tr>
+</tbody>
+</table>
+<p>不同版本的停靠布局可能变化。稳定的心智模型是“面板名称和职责”，而不是某张截图中的固定位置。</p>
+<h2 id="4">4. 保存并运行场景<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
+<ol>
+<li>打开或创建一个场景。</li>
+<li>添加或选择一个可见对象。</li>
+<li>进入 Play 模式前保存场景。</li>
+<li>启动 Play，观察 Game 面板和 Console。</li>
+<li>对场景做需要保留的结构修改前，先退出 Play。</li>
+</ol>
+<h3 id="_3">预期结果<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>编辑器能够干净地进入和退出 Play，Game 视图会更新，Console 不会每帧重复累积同一错误。</p>
+<h2 id="_4">常见问题<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<h3 id="_5">编辑器无法启动<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>确认下载包与 Windows 架构匹配。</li>
+<li>使用 Release 包提供的启动入口，不要单独移动其中的二进制文件。</li>
+<li>检查安全软件是否隔离了运行时依赖。</li>
+</ul>
+<h3 id="_6">项目能打开但资源缺失<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>确认打开的是项目根目录，而不是其中的资源子目录。</li>
+<li>编辑器导入资源时，不要同时在外部批量移动文件。</li>
+<li>优先阅读 Console 的第一条错误；后续错误可能只是连锁反应。</li>
+</ul>
+<h3 id="play-game">Play 后 Game 视图为空<a class="headerlink" href="#play-game" title="Permanent link">&para;</a></h3>
+<ul>
+<li>确认场景存在且启用了 Camera。</li>
+<li>确认实际运行的就是刚才编辑的场景。</li>
+<li>检查 Console 是否有脚本或资源加载错误。</li>
+</ul>
+<h2 id="_7">下一步<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p>继续阅读<a href="first-component.html">第一个组件</a>，为对象添加 Python 玩法逻辑。想按系统查资料时，前往<a href="../manual/engine-map.html">引擎地图</a>。</p>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="文档连续阅读与反馈">
+        <a class="doc-trail-fallback" href="/wiki.html">返回文档中心</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="文档发布证据">
+        <span class="doc-build-label">发布证据</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">正在读取发布版本与来源…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">机器清单 JSON</a>
+    </section>
+    
+    
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">搜索 Infernux 文档</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="关闭文档搜索"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API 符号、系统、工作流…">
+            </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="文档搜索筛选器"></div>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </dialog>
+
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
+</body>
+</html>

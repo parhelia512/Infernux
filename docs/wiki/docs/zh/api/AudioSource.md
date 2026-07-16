@@ -11,7 +11,9 @@
 音频源组件。在场景中播放声音的扬声器。
 
 <!-- USER CONTENT START --> description
+**状态：** Preview · **验证版本：** 0.2.1
 
+AudioSource 拥有 1–16 个 Track，`play_on_awake` 只启动 Track 0。瞬时效果使用池化 One-shot，并在播放仍可能引用时保持 AudioClip 已加载。
 <!-- USER CONTENT END -->
 
 ## 属性
@@ -66,12 +68,25 @@
 
 <!-- USER CONTENT START --> example
 ```python
-# TODO: Add example for AudioSource
+from Infernux import AudioSource, GameObject
+from Infernux.core.audio_clip import AudioClip
+
+audio_object = GameObject.find("Ambience")
+clip = AudioClip.load("Assets/Audio/ambience.wav")
+if audio_object is not None and clip is not None:
+    source = audio_object.get_component(AudioSource)
+    if source is not None:
+        source.set_track_clip(0, clip)
+        source.loop = True
+        source.play(0)
 ```
 <!-- USER CONTENT END -->
 
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-
+- [音频工作流](../learn/audio-workflow.md)
+- [AudioClip](AudioClip.md)
+- [AudioListener](AudioListener.md)
+- [输入与时间](../manual/input-and-time.md)
 <!-- USER CONTENT END -->

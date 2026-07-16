@@ -21,6 +21,7 @@ class DemoEnum(IntEnum):
 class DemoCpp:
     """Minimal stand-in for a C++ component (needed for CppProperty __set_name__)."""
     def __init__(self):
+        self.component_id = 42
         self.mode = 2
         self.raw = 11
         self.locked = 5
@@ -46,12 +47,13 @@ class LazyEnumBuiltin(BuiltinComponent):
 # CppProperty descriptor
 # ══════════════════════════════════════════════════════════════════════
 
-class TestCppPropertyDefaults:
-    def test_returns_default_without_cpp(self):
+class TestCppPropertyBinding:
+    def test_unbound_access_is_rejected(self):
         demo = DemoBuiltin()
-        assert demo.mode is DemoEnum.A
-        assert demo.raw == 7
-        assert demo.intensity == 1.0
+        with pytest.raises(ReferenceError):
+            _ = demo.mode
+        with pytest.raises(ReferenceError):
+            demo.raw = 7
 
     def test_set_name_assigns_metadata_name(self):
         desc = DemoBuiltin.__dict__["raw"]
@@ -98,14 +100,18 @@ class TestCppPropertyEdgeCases:
         desc = DemoBuiltin.mode
         assert isinstance(desc, CppProperty)
 
-    def test_runtime_error_falls_to_default(self):
+    def test_runtime_error_invalidates_binding_and_raises(self):
         class BadCpp:
+            component_id = 42
+
             @property
             def raw(self):
                 raise RuntimeError("dead")
         demo = DemoBuiltin()
         demo._cpp_component = BadCpp()
-        assert demo.raw == 7
+        with pytest.raises(ReferenceError):
+            _ = demo.raw
+        assert demo._cpp_component is None
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -143,7 +149,53 @@ class TestBuiltinComponent:
         r = repr(demo)
         assert "bound=True" in r
 
+    def test_native_wrapper_does_not_enter_script_instance_registry(self):
+        from Infernux.components.component import InxComponent
+
+        previous = {
+            game_object_id: list(components)
+            for game_object_id, components in InxComponent._active_instances.items()
+        }
+        InxComponent._active_instances.clear()
+        try:
+            demo = DemoBuiltin()
+            demo._bind_cpp(DemoCpp(), type("FakeGO", (), {"id": 1})())
+            assert InxComponent._active_instances == {}
+            assert demo._cds_slot is None
+            assert demo._cds_class_id is None
+        finally:
+            InxComponent._active_instances.clear()
+            InxComponent._active_instances.update(previous)
+
     def test_clear_cache(self):
         BuiltinComponent._wrapper_cache.clear()
         BuiltinComponent._clear_cache()
         assert len(BuiltinComponent._wrapper_cache) == 0
+
+    def test_sprite_renderer_invalidation_releases_event_and_material_refs(self):
+        import gc
+        import weakref
+
+        from Infernux.components.builtin.sprite_renderer import SpriteRenderer
+        from Infernux.engine.ui.event_bus import EditorEvent, EditorEventBus
+
+        bus = EditorEventBus.instance()
+        baseline = bus.subscriber_count(EditorEvent.ASSET_CHANGED)
+        wrapper = SpriteRenderer()
+        wrapper._sprite_material = object()
+        wrapper._material_ready = True
+        wrapper._sprite_frames = [{"name": "frame"}]
+        wrapper._subscribe_asset_events()
+        wrapper_ref = weakref.ref(wrapper)
+
+        assert bus.subscriber_count(EditorEvent.ASSET_CHANGED) == baseline + 1
+
+        wrapper._invalidate_native_binding()
+        assert bus.subscriber_count(EditorEvent.ASSET_CHANGED) == baseline
+        assert wrapper._sprite_material is None
+        assert wrapper._material_ready is False
+        assert wrapper._sprite_frames == []
+
+        del wrapper
+        gc.collect()
+        assert wrapper_ref() is None

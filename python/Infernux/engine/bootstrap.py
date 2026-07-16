@@ -13,7 +13,6 @@ import os
 import pathlib
 from typing import Optional
 
-from Infernux.lib import TagLayerManager
 import Infernux.resources as _resources
 from Infernux.debug import Debug
 from Infernux.engine.engine import Engine, LogLevel
@@ -21,7 +20,6 @@ from Infernux.engine.resources_manager import ResourcesManager
 from Infernux.engine.play_mode import PlayModeManager, PlayModeState
 from Infernux.engine.scene_manager import SceneFileManager
 from Infernux.engine.ui import (
-    FrameSchedulerPanel,
     SceneViewPanel,
     GameViewPanel,
     WindowManager,
@@ -40,7 +38,7 @@ from Infernux.engine.ui import panel_state as _panel_state
 _log = logging.getLogger("Infernux.bootstrap")
 
 _LAYOUT_VERSION = 5
-_TOTAL_STEPS = 13
+_TOTAL_STEPS = 12
 
 
 def _signal_progress(current_step: int, total: int, message: str) -> None:
@@ -80,7 +78,6 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
         self.event_bus: Optional[EditorEventBus] = None
 
         # Panels
-        self.frame_scheduler = None
         self.menu_bar = None
         self.toolbar = None
         self.hierarchy = None
@@ -113,9 +110,6 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
 
         self._report_progress("Initializing renderer\u2026")
         self._init_engine()
-
-        self._report_progress("Loading tag/layer settings\u2026")
-        self._load_tag_layer_settings()
 
         self._report_progress("Creating managers\u2026")
         self._create_managers()
@@ -161,7 +155,9 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
     def _start_mcp_http_server(self):
         try:
             from Infernux.mcp import start_server
-            start_server(self.project_path)
+            host = os.environ.get("INFERNUX_MCP_HOST", "127.0.0.1").strip() or "127.0.0.1"
+            port = int(os.environ.get("INFERNUX_MCP_PORT", "9713"))
+            start_server(self.project_path, host=host, port=port)
         except Exception as exc:
             Debug.log_warning(f"Failed to start Infernux MCP HTTP server: {exc}")
 
@@ -182,11 +178,6 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             width=1600, height=900, project_path=self.project_path
         )
         self.engine.set_gui_font(_resources.engine_font_path, 15)
-
-    def _load_tag_layer_settings(self):
-        path = os.path.join(self.project_path, "ProjectSettings", "TagLayerSettings.json")
-        if os.path.isfile(path):
-            TagLayerManager.instance().load_from_file(path)
 
     def _prewarm_material_previews(self):
         """Prewarm material preview textures once at startup.
@@ -255,16 +246,6 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
                 continue
 
         Debug.log_internal(f"Material preview prewarm: {warmed}/{len(material_paths)}")
-
-        # Synchronously flush the entire request queue now, before the main
-        # loop starts.  PumpPreviewTasks() is frame-budgeted (2/frame), so
-        # without this flush N materials would take ~⌈N/2⌉ frames to appear.
-        if hasattr(native, "flush_all_material_previews"):
-            try:
-                native.flush_all_material_previews()
-                Debug.log_internal("Material preview prewarm: flush complete")
-            except Exception as exc:
-                Debug.log_suppressed("EditorBootstrap.material_preview_prewarm.flush_all", exc)
 
     def _create_managers(self):
         from Infernux.engine.undo import UndoManager
@@ -376,7 +357,9 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             if not cam:
                 return tb.get_camera_settings()
             return {
+                "orthographic": bool(cam.orthographic),
                 "fov": float(cam.fov),
+                "orthographic_size": float(cam.orthographic_size),
                 "rotation_speed": float(cam.rotation_speed),
                 "pan_speed": float(cam.pan_speed),
                 "zoom_speed": float(cam.zoom_speed),
@@ -387,7 +370,9 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             cam = engine.editor_camera if engine else None
             if not cam:
                 return
+            cam.orthographic = settings["orthographic"]
             cam.fov = settings["fov"]
+            cam.orthographic_size = settings["orthographic_size"]
             cam.rotation_speed = settings["rotation_speed"]
             cam.pan_speed = settings["pan_speed"]
             cam.zoom_speed = settings["zoom_speed"]
@@ -484,7 +469,7 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             with open(layout_ver_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(str(_LAYOUT_VERSION))
 
-    def _persist_editor_state(self):
+    def _persist_editor_state(self, *, include_scene_draft: bool = False):
         if bool(getattr(self, "_suspend_persist_state", False)):
             return
         if self.console is None or self.project_panel is None or self.window_manager is None:
@@ -505,6 +490,14 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
             })
         _panel_state.put("project", {"current_path": self.project_panel.get_current_path()})
         _panel_state.put("window_manager", self.window_manager.save_state())
+        if include_scene_draft and self.scene_file_manager:
+            scene_state = self.scene_file_manager.save_session_state()
+            if scene_state.get("dirty"):
+                _panel_state.put("scene_session", scene_state)
+            else:
+                _panel_state.delete("scene_session")
+        elif self.scene_file_manager and not self.scene_file_manager.is_dirty:
+            _panel_state.delete("scene_session")
         # Scene/Game views are runtime-driven and must not persist panel payloads.
         _panel_state.delete("panel:scene_view")
         _panel_state.delete("panel:game_view")
@@ -536,3 +529,4 @@ class EditorBootstrap(BootstrapPanelsMixin, BootstrapSelectionMixin, BootstrapWi
     def _load_initial_scene(self):
         import Infernux.renderstack  # noqa: F401 — ensure RenderStack is discoverable
         self.scene_file_manager.load_last_scene_or_default()
+        self.scene_file_manager.restore_session_state(_panel_state.get("scene_session"))

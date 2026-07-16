@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="description" content="创建 InxComponent Python 脚本，暴露可序列化速度字段，把它挂到 GameObject，并在 Play 模式验证生命周期。">
+    
+    <meta name="theme-color" content="#0a0c11">
+    <meta name="color-scheme" content="dark light">
+    <title>第一个组件 - Infernux Documentation</title>
+    
+    <link rel="canonical" href="https://infernux-engine.com/wiki/site/zh/learn/first-component.html">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Infernux Engine">
+    <meta property="og:title" content="第一个组件 - Infernux Documentation">
+    <meta property="og:description" content="创建 InxComponent Python 脚本，暴露可序列化速度字段，把它挂到 GameObject，并在 Play 模式验证生命周期。">
+    <meta property="og:url" content="https://infernux-engine.com/wiki/site/zh/learn/first-component.html">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:section" content="学习">
+    <meta property="article:tag" content="入门"><meta property="article:tag" content="python"><meta property="article:tag" content="组件"><meta property="article:tag" content="inspector">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="第一个组件 - Infernux Documentation">
+    <meta name="twitter:description" content="创建 InxComponent Python 脚本，暴露可序列化速度字段，把它挂到 GameObject，并在 Play 模式验证生命周期。">
+    <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
+    <meta name="twitter:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "LearningResource",
+          "@id": "https://infernux-engine.com/wiki/site/zh/learn/first-component.html#document",
+          "headline": "\u7b2c\u4e00\u4e2a\u7ec4\u4ef6",
+          "name": "\u7b2c\u4e00\u4e2a\u7ec4\u4ef6",
+          "description": "\u521b\u5efa InxComponent Python \u811a\u672c\uff0c\u66b4\u9732\u53ef\u5e8f\u5217\u5316\u901f\u5ea6\u5b57\u6bb5\uff0c\u628a\u5b83\u6302\u5230 GameObject\uff0c\u5e76\u5728 Play \u6a21\u5f0f\u9a8c\u8bc1\u751f\u547d\u5468\u671f\u3002",
+          "url": "https://infernux-engine.com/wiki/site/zh/learn/first-component.html",
+          "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https://infernux-engine.com/wiki/site/zh/learn/first-component.html"
+          },
+          "inLanguage": "zh-CN",
+          "isAccessibleForFree": true,
+          "learningResourceType": "Tutorial",
+          "articleSection": "\u5b66\u4e60",
+          "image": {
+            "@type": "ImageObject",
+            "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
+            "width": 1200,
+            "height": 630,
+            "caption": "Infernux NASA Punk \u4efb\u52a1\u5361\uff0c\u5305\u542b\u7f16\u8f91\u5668\u3001\u7194\u7089\u6807\u5fd7\u548c\u6280\u672f\u9884\u89c8\u72b6\u6001\u3002"
+          },
+          "author": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/"
+          },
+          "publisher": {
+            "@type": "Organization",
+            "name": "Infernux Engine",
+            "url": "https://infernux-engine.com/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://infernux-engine.com/assets/logo.png"
+            }
+          },
+          "isPartOf": { "@id": "https://infernux-engine.com/#website" },
+          "about": { "@id": "https://infernux-engine.com/#software" },
+          "dateModified": "2026-07-15",
+          "keywords": ["\u5165\u95e8", "python", "\u7ec4\u4ef6", "inspector"]
+        },
+        {
+          "@type": "BreadcrumbList",
+          "@id": "https://infernux-engine.com/wiki/site/zh/learn/first-component.html#breadcrumb",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "\u6587\u6863",
+              "item": "https://infernux-engine.com/wiki.html"
+            },
+            
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "\u5b66\u4e60",
+              "item": "https://infernux-engine.com/wiki.html#start-here"
+            },
+            {
+              "@type": "ListItem",
+              "position": 3,
+              "name": "\u7b2c\u4e00\u4e2a\u7ec4\u4ef6",
+              "item": "https://infernux-engine.com/wiki/site/zh/learn/first-component.html"
+            }
+            
+          ]
+        }
+      ]
+    }
+    </script>
+    
+    
+    <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/learn/first-component.html">
+    <link rel="alternate" hreflang="en" href="https://infernux-engine.com/wiki/site/en/learn/first-component.html">
+    <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/learn/first-component.html">
+    
+    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
+    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="icon" type="image/png" href="/assets/logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
+    <link rel="stylesheet" href="/css/fonts.css?v=1">
+    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
+    <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
+</head>
+<body class="guide-page">
+    
+    
+    
+    
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <!-- Top Navigation -->
+    <nav class="navbar" aria-label="主导航">
+        <div class="nav-container">
+            <a href="/index.html" class="nav-logo">
+                <span class="logo-icon"><img src="/assets/logo.png" width="256" height="256" alt="Infernux logo"></span>
+                <span class="logo-text">Infernux</span>
+            </a>
+            <div class="nav-links" id="primary-navigation">
+                <a href="/wiki/site/zh/learn/getting-started.html" class="nav-priority">开始使用</a>
+                <a href="/wiki.html#start-here" class="active" aria-current="page">学习</a>
+                <a href="/wiki.html?layer=manual#written-guides">手册</a>
+                <a href="/wiki/site/zh/api/index.html">API</a>
+                <a href="/roadmap.html">路线图</a>
+                <a href="/community.html" class="nav-priority">社区</a>
+                <a href="/download.html">下载</a>
+                <a href="https://github.com/ChenlizheMe/Infernux" target="_blank" rel="noopener">
+                    <i class="fab fa-github" aria-hidden="true"></i> GitHub
+                </a>
+            </div>
+            <div class="nav-right">
+                <button type="button" class="docs-context-trigger" data-doc-context-trigger title="复制版本、来源和权威链接" aria-label="复制供 Agent 使用的页面上下文">
+                    <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>复制给 Agent</span>
+                </button>
+                <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>搜索文档</span><kbd aria-hidden="true">/</kbd>
+                </button>
+                <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
+                    <i class="fas fa-moon" id="theme-icon"></i>
+                </button>
+                <button type="button" class="mobile-menu-btn" data-site-action="menu" aria-label="Open navigation menu" aria-controls="primary-navigation" aria-expanded="false">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    
+    <!-- Article Layout (No Sidebar) -->
+    <main class="page-shell article-page-shell" id="main-content">
+        <div class="container article-page-container">
+            <div class="api-main article-page-content">
+                
+    <nav class="doc-breadcrumb" aria-label="面包屑">
+        <a href="/wiki.html">文档</a>
+        <span aria-hidden="true">/</span>
+        
+        <a href="/wiki.html#start-here">学习</a>
+        <span aria-hidden="true">/</span>
+        
+        <span aria-current="page">第一个组件</span>
+    </nav>
+    
+                
+                <section class="doc-provenance" aria-label="文档版本与来源" data-status="preview" data-last-verified="2026-07-15">
+                    <div class="doc-provenance-primary">
+                        <strong class="doc-status">preview</strong>
+                        <span class="doc-provenance-item"><span>始于</span> 0.2.1</span>
+                        <span class="doc-provenance-item"><span>已验证</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>读者</span> new-user, agent</span>
+                        <a class="doc-provenance-item" href="/docs-manifest.json">文档清单</a>
+                        
+                        <a class="doc-language-link" href="/wiki/site/en/learn/first-component.html" lang="en">Read in English</a>
+                        
+                    </div>
+                    
+                    <details class="doc-sources">
+                        <summary>源码证据 · 2</summary>
+                        <ul>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/tree/master/python/Infernux/components" target="_blank" rel="noopener">python/Infernux/components</a></li>
+                            
+                            
+                            <li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/python/Infernux/__init__.pyi" target="_blank" rel="noopener">python/Infernux/__init__.pyi</a></li>
+                            
+                        </ul>
+                    </details>
+                    
+                </section>
+                
+                
+    <aside class="doc-outline" data-doc-outline hidden>
+        <div class="doc-outline-head">
+            <strong>本页目录</strong>
+            <button type="button" class="doc-outline-toggle" aria-controls="doc-outline-links" aria-expanded="true">
+                <span>收起章节</span>
+                <span class="doc-outline-toggle-mark" aria-hidden="true">⌄</span>
+            </button>
+        </div>
+        <nav class="doc-outline-links" id="doc-outline-links" aria-label="本页章节"></nav>
+    </aside>
+    
+                <h1 id="_1">第一个组件<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>Infernux 的玩法脚本是继承 <code>InxComponent</code> 的 Python 类。本教程会制作一个持续旋转所属对象的组件，并把旋转速度暴露到 Inspector。</p>
+<p><strong>预计时间：</strong> 10 分钟。</p>
+<h2 id="_2">开始之前<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>先完成<a href="getting-started.html">快速开始</a>，打开一个已保存且包含可见 GameObject 的场景。测试期间保持 Console 可见。</p>
+<h2 id="1">1. 创建脚本<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>在项目的脚本或资源区域创建 <code>SpinComponent.py</code>：</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux</span><span class="w"> </span><span class="kn">import</span> <span class="n">Debug</span><span class="p">,</span> <span class="n">InxComponent</span><span class="p">,</span> <span class="n">Vector3</span><span class="p">,</span> <span class="n">serialized_field</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">class</span><span class="w"> </span><span class="nc">SpinComponent</span><span class="p">(</span><span class="n">InxComponent</span><span class="p">):</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">speed</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">serialized_field</span><span class="p">(</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        <span class="n">default</span><span class="o">=</span><span class="mf">45.0</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">360.0</span><span class="p">),</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>        <span class="n">tooltip</span><span class="o">=</span><span class="s2">&quot;每秒旋转角度&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="p">)</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        <span class="n">Debug</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="s2">&quot;SpinComponent started&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">game_object</span><span class="p">)</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">delta_time</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">rotate</span><span class="p">(</span><span class="n">Vector3</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">speed</span> <span class="o">*</span> <span class="n">delta_time</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span>
+</code></pre></div>
+<p>代码含义：</p>
+<ul>
+<li><code>InxComponent</code> 把 Python 类接入引擎组件生命周期。</li>
+<li><code>serialized_field</code> 让 <code>speed</code> 能在 Inspector 中编辑并随场景序列化。</li>
+<li><code>start()</code> 在组件激活后的第一次帧更新前执行。</li>
+<li><code>update(delta_time)</code> 每帧执行；乘以 <code>delta_time</code> 能避免速度依赖帧率。</li>
+<li><code>self.transform</code> 是所属 GameObject 的 Transform 快捷入口。</li>
+</ul>
+<h2 id="2">2. 挂到对象上<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<ol>
+<li>保存脚本，等待编辑器发现或重新加载它。</li>
+<li>在 Hierarchy 中选择可见的 GameObject。</li>
+<li>在 Inspector 中添加 <code>SpinComponent</code> 脚本组件。</li>
+<li>把 <strong>Speed</strong> 设置成容易观察的值，例如 <code>90</code>。</li>
+<li>保存场景。</li>
+</ol>
+<p>如果组件没有出现，请查看 Console 的第一条错误。语法错误、无效导入或类没有继承 <code>InxComponent</code> 都会阻止脚本被发现。</p>
+<h2 id="3">3. 验证行为<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<p>进入 Play 模式。</p>
+<h3 id="_3">预期结果<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>对象绕 Y 轴旋转。</li>
+<li>Console 只输出一次 <code>SpinComponent started</code>。</li>
+<li>Play 前修改 <strong>Speed</strong> 会改变旋转速度。</li>
+<li>停止 Play 后更新循环结束，Console 不反复报错。</li>
+</ul>
+<h2 id="_4">如何选择生命周期<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>适合处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>awake()</code></td>
+<td>组件创建时的一次性内部初始化</td>
+</tr>
+<tr>
+<td><code>start()</code></td>
+<td>依赖活动场景或其他已初始化组件的设置</td>
+</tr>
+<tr>
+<td><code>update(delta_time)</code></td>
+<td>每帧玩法与输入</td>
+</tr>
+<tr>
+<td><code>fixed_update(fixed_delta_time)</code></td>
+<td>固定步长的物理决策</td>
+</tr>
+<tr>
+<td><code>late_update(delta_time)</code></td>
+<td>普通更新之后的跟随工作，例如相机跟随</td>
+</tr>
+<tr>
+<td><code>on_destroy()</code></td>
+<td>释放资源或取消回调注册</td>
+</tr>
+</tbody>
+</table>
+<p>完整生命周期与组件辅助方法见 <a href="../api/InxComponent.html">InxComponent API</a>。</p>
+<h2 id="_5">常见错误<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<h3 id="update"><code>update</code> 从不执行<a class="headerlink" href="#update" title="Permanent link">&para;</a></h3>
+<ul>
+<li>确认方法参数包含 <code>self</code> 和 <code>delta_time</code>。</li>
+<li>确认组件及其 GameObject 已启用。</li>
+<li>确认编辑器挂载的类来自你刚编辑的文件。</li>
+</ul>
+<h3 id="inspector-speed">Inspector 不显示 <code>speed</code><a class="headerlink" href="#inspector-speed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>保留 <code>speed: float</code> 类型标注。</li>
+<li>在类作用域调用 <code>serialized_field(...)</code>，不要写进 <code>start()</code>。</li>
+<li>先解决脚本重载错误，再重新添加组件。</li>
+</ul>
+<h3 id="_6">不同机器的旋转速度不同<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p>使用 <code>speed * delta_time</code>，不要每帧增加固定角度。</p>
+<h2 id="_7">完成标准<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p>当 <code>SpinComponent</code> 能出现在 Inspector 中并暴露 <strong>Speed</strong>、在 Play 模式旋转所属 GameObject、只记录一次启动日志，并且停止时 Console 没有重复错误，就完成了本步骤。</p>
+<h2 id="_8">下一步<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<p>打开<a href="../manual/engine-map.html">引擎地图</a>，选择输入、物理、场景、UI、协程或渲染等下一个系统，再进入对应的精确 API 页面。</p>
+                
+    <nav class="doc-trail" data-doc-trail aria-label="文档连续阅读与反馈">
+        <a class="doc-trail-fallback" href="/wiki.html">返回文档中心</a>
+    </nav>
+    
+                
+    
+    <section class="doc-build-provenance" data-doc-build-provenance data-state="loading" aria-label="文档发布证据">
+        <span class="doc-build-label">发布证据</span>
+        <div class="doc-build-facts" data-doc-build-facts aria-live="polite">
+            <span class="doc-build-loading">正在读取发布版本与来源…</span>
+        </div>
+        <a class="doc-build-manifest" href="/docs-manifest.json">机器清单 JSON</a>
+    </section>
+    
+    
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024-2026 Infernux Engine. MIT License.</p>
+            </div>
+        </div>
+    </footer>
+    
+
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+        <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
+        <div class="docs-search-panel">
+            <div class="docs-search-head">
+                <h2 id="docs-search-title">搜索 Infernux 文档</h2>
+                <button type="button" class="docs-search-close" data-docs-search-close aria-label="关闭文档搜索"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+            </div>
+            <label class="docs-search-field" for="docs-search-input">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API 符号、系统、工作流…">
+            </label>
+            <div class="docs-search-filters" id="docs-search-filters" aria-label="文档搜索筛选器"></div>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
+            <div class="docs-search-results" id="docs-search-results" role="list"></div>
+        </div>
+    </dialog>
+
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
+</body>
+</html>

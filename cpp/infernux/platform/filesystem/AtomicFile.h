@@ -1,0 +1,24 @@
+#pragma once
+
+#include <string>
+#include <string_view>
+
+namespace infernux
+{
+
+struct AtomicWriteOptions
+{
+    bool createBackup = false;
+};
+
+/// Write UTF-8 text through a unique same-directory temporary file and atomically replace the target.
+/// When createBackup is enabled and the target exists, the previous complete target is first
+/// durably published as `<target>.bak`.
+bool WriteTextFileAtomically(const std::string &path, std::string_view content, std::string &error,
+                             AtomicWriteOptions options = {});
+
+/// Remove a file and persist the directory update where the platform exposes directory fsync.
+/// Missing files are treated as already removed.
+bool RemoveFileDurably(const std::string &path, std::string &error);
+
+} // namespace infernux

@@ -3,7 +3,7 @@ Base class for closable editor panels.
 """
 
 from Infernux.lib import InxGUIRenderable, InxGUIContext
-from typing import Optional, Callable, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .window_manager import WindowManager
@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 _HOVERED_CHILD_WINDOWS = 1  # ImGuiHoveredFlags_ChildWindows
 _HOVERED_NO_POPUP_HIERARCHY = 8  # ImGuiHoveredFlags_NoPopupHierarchy
 _PANEL_ACTIVATION_HOVER_FLAGS = _HOVERED_CHILD_WINDOWS | _HOVERED_NO_POPUP_HIERARCHY
+_FOCUSED_ROOT_AND_CHILD_WINDOWS = 3  # ImGuiFocusedFlags_RootAndChildWindows
 
 
 class ClosablePanel(InxGUIRenderable):
@@ -26,7 +27,6 @@ class ClosablePanel(InxGUIRenderable):
 
     # ── Class-level focus tracking ──
     _active_panel_id: Optional[str] = None
-    _on_panel_focus_changed: Optional[Callable[[str, str], None]] = None
     
     def __init__(self, title: str, window_id: Optional[str] = None):
         super().__init__()
@@ -36,6 +36,8 @@ class ClosablePanel(InxGUIRenderable):
         self._is_open = True
         self._window_manager: Optional['WindowManager'] = None
         self._panel_was_focused: bool = False
+        self._dirty_close_approved: bool = False
+        self._dirty_registry_snapshot = None
     
     @property
     def window_id(self) -> str:
@@ -54,10 +56,26 @@ class ClosablePanel(InxGUIRenderable):
         self._is_open = True
 
     def close(self):
-        """Close this panel and notify the window manager."""
+        """Request a close while preserving dirty-panel confirmation."""
+        if not self.request_close():
+            return
         self._is_open = False
         if self._window_manager:
             self._window_manager.set_window_open(self._window_id, False)
+
+    def request_close(self) -> bool:
+        """Return True when the panel may close immediately.
+
+        Dirty panels remain visible while the shared Editor modal resolves the
+        request asynchronously.
+        """
+        self._sync_dirty_registry()
+        from Infernux.engine.project_context import is_panel_dirty
+
+        if not is_panel_dirty(self._window_id):
+            return True
+        self._request_dirty_panel_close()
+        return False
 
     def can_close(self, ctx: InxGUIContext) -> bool:
         """Return whether the panel can close when the titlebar X is clicked."""
@@ -81,6 +99,7 @@ class ClosablePanel(InxGUIRenderable):
                     save_fn()
                 except Exception:
                     return False
+                self._sync_dirty_registry()
                 # If panels expose _dirty, require it to be cleared after save.
                 if hasattr(self, "_dirty"):
                     try:
@@ -102,6 +121,7 @@ class ClosablePanel(InxGUIRenderable):
                     save_clip_fn(clip)
                 except Exception:
                     return False
+                self._sync_dirty_registry()
                 if hasattr(self, "_dirty"):
                     try:
                         return not bool(getattr(self, "_dirty"))
@@ -118,55 +138,83 @@ class ClosablePanel(InxGUIRenderable):
             from Infernux.engine.project_context import set_panel_dirty
 
             dirty = bool(getattr(self, "_dirty", False))
+            title = self._resolve_panel_display_title()
+            save_kind = (
+                "save"
+                if callable(getattr(self, "_do_save", None))
+                else "clip"
+                if callable(getattr(self, "_save_clip", None))
+                else ""
+            )
+            dialog = getattr(self, "_save_as_dialog", None)
+            has_save_pending = dialog is not None and hasattr(dialog, "is_open")
+            discard_fn = getattr(self, "_discard_unsaved_changes", None)
+            has_discard = hasattr(self, "_dirty")
+            snapshot = (
+                dirty,
+                title,
+                save_kind,
+                id(dialog) if has_save_pending else 0,
+                id(getattr(discard_fn, "__func__", discard_fn)) if callable(discard_fn) else 0,
+                has_discard,
+            )
+            if snapshot == self._dirty_registry_snapshot:
+                return
+
             set_panel_dirty(
                 self._window_id,
                 dirty,
-                title=self._resolve_panel_display_title(),
+                title=title,
                 save_handler=self._resolve_panel_save_handler(),
+                save_pending_handler=self._resolve_panel_save_pending_handler(),
+                discard_handler=self._resolve_panel_discard_handler(),
             )
+            self._dirty_registry_snapshot = snapshot
         except Exception:
             pass
 
-    def _confirm_close_with_dirty_registry(self) -> bool:
-        try:
-            from Infernux.engine.project_context import is_panel_dirty, set_panel_dirty
-            from ._dialogs import ask_save_discard_cancel
+    def _resolve_panel_save_pending_handler(self):
+        dialog = getattr(self, "_save_as_dialog", None)
+        if dialog is None or not hasattr(dialog, "is_open"):
+            return None
+        return lambda: bool(dialog.is_open)
 
-            if not is_panel_dirty(self._window_id):
-                return True
+    def _resolve_panel_discard_handler(self):
+        if not hasattr(self, "_dirty"):
+            return None
 
-            title = self._resolve_panel_display_title()
-            choice = ask_save_discard_cancel(
-                title=f"Unsaved {title}",
-                message=f"{title} has unsaved changes. Save before closing?",
-            )
-            if choice == "cancel":
-                return False
-            if choice == "discard":
-                if hasattr(self, "_dirty"):
-                    try:
-                        setattr(self, "_dirty", False)
-                    except Exception:
-                        pass
-                set_panel_dirty(
-                    self._window_id,
-                    False,
-                    title=title,
-                    save_handler=self._resolve_panel_save_handler(),
-                )
-                return True
+        discard_fn = getattr(self, "_discard_unsaved_changes", None)
 
-            # save
-            save_handler = self._resolve_panel_save_handler()
-            if not callable(save_handler):
-                return False
-            ok = bool(save_handler())
-            if not ok:
-                return False
+        def _discard() -> None:
+            if callable(discard_fn):
+                discarded = discard_fn()
+                if discarded is False:
+                    return
+            else:
+                setattr(self, "_dirty", False)
             self._sync_dirty_registry()
-            return not bool(getattr(self, "_dirty", False))
-        except Exception:
-            return True
+
+        return _discard
+
+    def _request_dirty_panel_close(self) -> bool:
+        from Infernux.engine.project_context import is_panel_dirty
+
+        if not is_panel_dirty(self._window_id):
+            return False
+        from .dirty_panel_confirmation import DirtyPanelConfirmationCoordinator
+
+        return DirtyPanelConfirmationCoordinator.instance().request_panel_close(
+            self._window_id,
+            on_complete=lambda: setattr(self, "_dirty_close_approved", True),
+            on_cancel=self._restore_after_cancelled_close,
+        )
+
+    def _restore_after_cancelled_close(self) -> None:
+        """Restore the dock tab consumed by ImGui's titlebar close request."""
+        self._is_open = True
+        ClosablePanel.focus_panel_by_id(self._window_id)
+        if self._window_manager is not None:
+            self._window_manager.set_window_open(self._window_id, True)
 
     def request_focus(self, ctx: InxGUIContext):
         """Programmatically focus this panel on the next frame."""
@@ -176,33 +224,18 @@ class ClosablePanel(InxGUIRenderable):
         if focus_window:
             ctx.set_window_focus()
 
-        old_id = ClosablePanel._active_panel_id or ""
-        if old_id == self._window_id:
+        if ClosablePanel._active_panel_id == self._window_id:
             return
 
         ClosablePanel._active_panel_id = self._window_id
 
-        # Canonical channel: EditorEventBus.PANEL_FOCUSED.
-        # The legacy class-level callback is kept for now so existing
-        # bootstrap wiring keeps working, but new subscribers should prefer
-        # EditorEventBus to avoid the dual-channel split that previously
-        # left PANEL_FOCUSED defined-but-never-emitted.
-        try:
-            from .event_bus import EditorEvent, EditorEventBus
-            EditorEventBus.instance().emit(EditorEvent.PANEL_FOCUSED, self._window_id)
-        except Exception:
-            # Event bus unavailable during bootstrap import — fall through to the
-            # legacy callback so the focus signal is never silently lost.
-            pass
+        from .event_bus import EditorEvent, EditorEventBus
+        EditorEventBus.instance().emit(EditorEvent.PANEL_FOCUSED, self._window_id)
 
-        cb = ClosablePanel._on_panel_focus_changed
-        if cb is not None:
-            cb(old_id, self._window_id)
-
-    @classmethod
-    def set_on_panel_focus_changed(cls, callback: Optional[Callable[[str, str], None]]):
-        """Set a class-level callback ``(old_panel_id, new_panel_id)`` fired on focus changes."""
-        cls._on_panel_focus_changed = callback
+    @staticmethod
+    def _is_window_or_child_focused(ctx: InxGUIContext) -> bool:
+        """Treat focused child regions as part of their owning editor panel."""
+        return bool(ctx.is_window_focused(_FOCUSED_ROOT_AND_CHILD_WINDOWS))
 
     @classmethod
     def get_active_panel_id(cls) -> Optional[str]:
@@ -245,15 +278,31 @@ class ClosablePanel(InxGUIRenderable):
         # displayed title so docking layout survives locale changes.
         safe_title = f"{safe_title}###{self._window_id}"
         visible, self._is_open = ctx.begin_window_closable(safe_title, self._is_open, flags)
+
+        if self._dirty_close_approved:
+            self._dirty_close_approved = False
+            self._is_open = False
+            if self._window_manager:
+                self._window_manager.set_window_open(self._window_id, False)
         
         # If the titlebar close button was pressed, let the panel veto close
         # (for example, unsaved-change confirmation popups).
-        if not self._is_open:
-            if self._confirm_close_with_dirty_registry() and self.can_close(ctx):
-                if self._window_manager:
-                    self._window_manager.set_window_open(self._window_id, False)
+        elif not self._is_open:
+            if not self.can_close(ctx):
+                self._is_open = True
             else:
                 self._is_open = True
+                if not self.request_close():
+                    self._is_open = True
+                    # ImGui has already selected a neighbouring dock tab by the
+                    # time p_open becomes false. Restore this editor immediately;
+                    # the confirmation modal owns focus when it is rendered.
+                    ctx.set_window_focus()
+                    self._activate_panel(ctx)
+                else:
+                    self._is_open = False
+                if not self._is_open and self._window_manager:
+                    self._window_manager.set_window_open(self._window_id, False)
 
         # ── Focus tracking ──
         if visible and self._is_open:
@@ -263,7 +312,7 @@ class ClosablePanel(InxGUIRenderable):
             if pointer_activated:
                 self._activate_panel(ctx, focus_window=True)
 
-            focused = ctx.is_window_focused(0)
+            focused = self._is_window_or_child_focused(ctx)
             if focused and not self._panel_was_focused:
                 self._activate_panel(ctx)
             # Focus lost

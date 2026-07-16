@@ -5,14 +5,50 @@ from __future__ import annotations
 import copy
 import json
 import os
+import tempfile
 from typing import Any
 
 
 CONFIG_REL_PATH = os.path.join("ProjectSettings", "mcp_capabilities.json")
 
+
+# Profiles are intentionally narrow. Legacy ``research_full`` remains available
+# for existing projects, while new remote sessions opt into a constrained mode.
+PROFILE_TOOL_GROUPS: dict[str, frozenset[str] | None] = {
+    "research_full": None,
+    "developer_assist": frozenset({
+        "docs",
+        "api",
+        "project",
+        "editor",
+        "scene",
+        "hierarchy",
+        "asset",
+        "material",
+        "renderstack",
+        "console",
+        "camera",
+        "ui",
+        "transactions",
+        "session",
+        "capture",
+    }),
+    # Global validation may observe engine state, but it must mutate the
+    # editor only through the real input route exposed by input/editor_ui.
+    "global_validation": frozenset({"docs", "api", "project", "console", "runtime", "session", "input", "ui_semantics", "capture", "player_validation"}),
+}
+
+PROFILE_DISABLED_TOOLS: dict[str, frozenset[str]] = {
+    "research_full": frozenset(),
+    "developer_assist": frozenset(),
+    # Validation observes state but never uses direct editor/scene mutation
+    # shortcuts. Interactions must travel through synthetic SDL input.
+    "global_validation": frozenset({"editor_select", "mcp_batch"}),
+}
+
 DEFAULT_CAPABILITY_CONFIG: dict[str, Any] = {
     "enabled": True,
-    "profile": "research_full",
+    "profile": "developer_assist",
     "write_default_config_on_bootstrap": True,
     "features": {
         "self_description": True,
@@ -27,6 +63,13 @@ DEFAULT_CAPABILITY_CONFIG: dict[str, Any] = {
         "semantic_workflows": True,
         "safety_validation": True,
         "discovery_files": True,
+        "session_modes": True,
+        "blocker_reports": True,
+        "public_api_validation": True,
+        "input_injection": True,
+        "semantic_ui_capture": True,
+        "engine_capture": True,
+        "player_validation": True,
     },
     "tool_groups": {
         "docs": True,
@@ -46,12 +89,27 @@ DEFAULT_CAPABILITY_CONFIG: dict[str, Any] = {
         "project_defined_tools": True,
         "research": True,
         "transactions": True,
+        "session": True,
+        "input": True,
+        "ui_semantics": True,
+        "capture": True,
+        "player_validation": True,
     },
     "disabled_tools": [],
+    "session": {
+        "build_profile": "debug_feedback",
+        "recording_enabled": False,
+        "cmake_configure_preset": "",
+        "cmake_build_preset": "",
+        "allowed_project_roots": [],
+        "whl_readonly_source": [],
+        "workaround_allowlist": [],
+    },
     "limits": {
         "main_thread_timeout_ms": 30000,
         "project_tool_timeout_ms": 60000,
         "trace_argument_max_string": 240,
+        "trace_result_max_string": 480,
         "session_log_result_max_string": 480,
         "batch_max_steps": 100,
         "transaction_max_tracked_paths": 1000,
@@ -120,10 +178,7 @@ def write_default_config(project_path: str | None = None) -> str:
         return ""
     if os.path.isfile(path):
         return path
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(DEFAULT_CAPABILITY_CONFIG, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    _write_json_atomically(path, DEFAULT_CAPABILITY_CONFIG)
     return path
 
 
@@ -132,11 +187,27 @@ def save_config(config: dict[str, Any] | None = None, project_path: str | None =
     if config is not None:
         _CURRENT_CONFIG = _normalized_config(config)
     path = config_path(project_path)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(_CURRENT_CONFIG, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    _write_json_atomically(path, _CURRENT_CONFIG)
     return path
+
+
+def _write_json_atomically(path: str, value: dict[str, Any]) -> None:
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(prefix=".mcp-capabilities-", suffix=".tmp", dir=directory, text=True)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(value, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary_path, path)
+    except Exception:
+        try:
+            os.remove(temporary_path)
+        except OSError:
+            pass
+        raise
 
 
 def is_enabled() -> bool:
@@ -148,11 +219,28 @@ def feature_enabled(name: str) -> bool:
 
 
 def tool_group_enabled(name: str) -> bool:
+    allowed_groups = PROFILE_TOOL_GROUPS.get(profile_name())
+    if allowed_groups is not None and str(name) not in allowed_groups:
+        return False
     return bool((_CURRENT_CONFIG.get("tool_groups") or {}).get(name, True))
 
 
 def tool_enabled(name: str) -> bool:
-    return str(name) not in set(str(item) for item in _CURRENT_CONFIG.get("disabled_tools", []))
+    disabled = set(str(item) for item in _CURRENT_CONFIG.get("disabled_tools", []))
+    disabled.update(PROFILE_DISABLED_TOOLS.get(profile_name(), frozenset()))
+    return str(name) not in disabled
+
+
+def profile_name() -> str:
+    """Return the active MCP mode/profile, preserving legacy configs."""
+    profile = str(_CURRENT_CONFIG.get("profile", "developer_assist") or "developer_assist")
+    return profile if profile in PROFILE_TOOL_GROUPS else "developer_assist"
+
+
+def session_config() -> dict[str, Any]:
+    """Return the project-local remote-session policy block."""
+    value = _CURRENT_CONFIG.get("session") or {}
+    return copy.deepcopy(value if isinstance(value, dict) else {})
 
 
 def limit(name: str, default: Any = None) -> Any:

@@ -12,6 +12,7 @@
 #include "core/types/InxContiguousPool.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -19,7 +20,27 @@ namespace infernux
 {
 
 class Collider;
+class GameObject;
 class Rigidbody;
+
+struct PhysicsActorData
+{
+    GameObject *owner = nullptr;
+    Collider *primaryCollider = nullptr;
+    Rigidbody *rigidbody = nullptr;
+    uint32_t bodyId = 0xFFFFFFFF;
+    uint32_t colliderCount = 0;
+    bool bodyInBroadphase = false;
+    glm::vec3 lastSyncedPos{0.0f};
+    glm::quat lastSyncedRot{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec3 lastScale{1.0f};
+    uint64_t shapeRevision = 0;
+    uint64_t transformRevision = 0;
+    bool transformDirtyQueued = false;
+};
+
+using PhysicsActorPool = InxContiguousPool<PhysicsActorData>;
+using PhysicsActorHandle = PhysicsActorPool::Handle;
 
 // ============================================================================
 // Pooled Collider data (hot path — touched every SyncCollidersToPhysics)
@@ -30,24 +51,14 @@ struct ColliderECSData
     // ---- Identity ----
     Collider *owner = nullptr;
 
-    // ---- Jolt body ----
-    uint32_t bodyId = 0xFFFFFFFF;
-    bool bodyInBroadphase = false;
+    PhysicsActorHandle actorHandle;
 
     // ---- Properties ----
     bool isTrigger = false;
     glm::vec3 center{0.0f};
-    float friction = 0.4f;   ///< Dynamic friction [0..1] (Jolt default 0.2, Unity default 0.4)
-    float bounciness = 0.0f; ///< Restitution / bounciness [0..1]
-
-    // ---- Cached sync state (avoids per-frame Jolt reads) ----
-    glm::vec3 lastSyncedPos{0.0f};
-    glm::quat lastSyncedRot{1.0f, 0.0f, 0.0f, 0.0f};
-    glm::vec3 lastScale{1.0f};
 
     // ---- Misc ----
     bool deserialized = false;
-    Rigidbody *cachedRigidbody = nullptr;
 };
 
 // ============================================================================
@@ -66,11 +77,16 @@ struct RigidbodyECSData
     bool useGravity = true;
     bool isKinematic = false;
     int constraints = 0;
-    int collisionDetectionMode = 2;
-    int interpolation = 0;
+    int collisionDetectionMode = 0;
+    int interpolation = 1;
     float maxAngularVelocity = 7.0f;
     float maxLinearVelocity = 500.0f;
-    float maxDepenetrationVelocity = 1e10f;
+
+    // ---- Runtime velocity state (also survives deferred body creation) ----
+    glm::vec3 linearVelocity{0.0f};
+    glm::vec3 angularVelocity{0.0f};
+    bool hasLinearVelocity = false;
+    bool hasAngularVelocity = false;
 
     // ---- Sync cache (external-move detection) ----
     glm::vec3 lastSyncedPosition{0.0f};
@@ -83,6 +99,7 @@ struct RigidbodyECSData
     glm::vec3 currentPhysicsPosition{0.0f};
     glm::quat currentPhysicsRotation{1.0f, 0.0f, 0.0f, 0.0f};
     bool hasPhysicsPose = false;
+    bool wasSleeping = false;
 };
 
 // ============================================================================
@@ -94,8 +111,20 @@ class PhysicsECSStore
   public:
     using ColliderHandle = InxContiguousPool<ColliderECSData>::Handle;
     using RigidbodyHandle = InxContiguousPool<RigidbodyECSData>::Handle;
+    using ActorHandle = PhysicsActorHandle;
 
     static PhysicsECSStore &Instance();
+
+    // ---- Physics actor pool (one slot per GameObject with colliders) ----
+    ActorHandle AcquireActor(GameObject *owner, Collider *collider);
+    void ReleaseActor(ActorHandle handle, Collider *collider);
+    [[nodiscard]] bool IsValid(ActorHandle handle) const;
+    PhysicsActorData &GetActor(ActorHandle handle);
+    const PhysicsActorData &GetActor(ActorHandle handle) const;
+    [[nodiscard]] size_t GetAliveActorCount() const
+    {
+        return m_actorPool.AliveCount();
+    }
 
     // ---- Collider pool ----
     ColliderHandle AllocateCollider(Collider *owner);
@@ -125,14 +154,20 @@ class PhysicsECSStore
     /// Mark a collider as needing transform→physics sync before the next physics step.
     void MarkColliderDirty(ColliderHandle handle);
 
+    /// Mark the single shared physics actor owned by a GameObject dirty.
+    /// Avoids allocating/scanning a temporary component list from Transform observers.
+    void MarkGameObjectDirty(GameObject *owner);
+
     /// Consume the dirty set.  Returns handles that were dirty (moved since last flush).
     /// Clears the internal set atomically.
-    std::vector<ColliderHandle> ConsumeDirtyColliders();
+    /// Consume dirty actor primaries into retained scratch storage.
+    /// The returned reference remains valid until the next call.
+    const std::vector<ColliderHandle> &ConsumeDirtyColliders();
 
     /// True if any collider has been marked dirty since last consume.
     [[nodiscard]] bool HasDirtyColliders() const
     {
-        return !m_dirtyColliderSet.empty();
+        return !m_dirtyActorList.empty();
     }
 
     /// Mark all alive colliders dirty (used for force-sync scenarios).
@@ -173,6 +208,7 @@ class PhysicsECSStore
     void ReserveForBulkCreation(size_t count)
     {
         m_colliderPool.Reserve(m_colliderPool.Capacity() + count);
+        m_actorPool.Reserve(m_actorPool.Capacity() + count);
         m_pendingBodyCreationList.reserve(m_pendingBodyCreationList.size() + count);
         m_pendingBodyCreationSet.reserve(m_pendingBodyCreationSet.size() + count);
         m_pendingBroadphaseAdds.reserve(m_pendingBroadphaseAdds.size() + count);
@@ -194,11 +230,13 @@ class PhysicsECSStore
     {
         return m_rigidbodyPool.GetAliveHandles();
     }
+    [[nodiscard]] size_t GetAliveRigidbodyCount() const
+    {
+        return m_rigidbodyPool.AliveCount();
+    }
 
-    /// Null out cachedRigidbody on every alive collider that references *dying*.
-    /// Idempotent and safe to call with a Rigidbody* that no other collider
-    /// references — used both as part of ReleaseRigidbody and as a public hook
-    /// for paths that need to invalidate caches before a Rigidbody is destroyed.
+    /// Null out the Rigidbody pointer on every actor that references *dying*.
+    /// Idempotent and safe when no actor references the component.
     void ScrubCachedRigidbody(Rigidbody *dying);
 
     /// Zero-allocation iteration over all alive rigidbodies.
@@ -216,15 +254,17 @@ class PhysicsECSStore
     PhysicsECSStore() = default;
 
     InxContiguousPool<ColliderECSData> m_colliderPool;
+    PhysicsActorPool m_actorPool;
     InxContiguousPool<RigidbodyECSData> m_rigidbodyPool;
+    std::unordered_map<GameObject *, ActorHandle> m_actorByOwner;
 
     // Dirty collider tracking — colliders whose Transform changed and need physics sync.
-    std::vector<ColliderHandle> m_dirtyColliderList;
-    std::unordered_set<uint32_t> m_dirtyColliderSet; // index dedup
+    std::vector<ActorHandle> m_dirtyActorList;
+    std::vector<ColliderHandle> m_dirtyColliderScratch;
 
     // Pending body creation queue — colliders that deferred RegisterBody.
     std::vector<ColliderHandle> m_pendingBodyCreationList;
-    std::unordered_set<uint32_t> m_pendingBodyCreationSet; // index dedup
+    std::unordered_set<uint64_t> m_pendingBodyCreationSet; // generation-aware handle dedup
 
     // Pending broadphase add queue — (bodyId, isStatic) pairs.
     std::vector<std::pair<uint32_t, bool>> m_pendingBroadphaseAdds;

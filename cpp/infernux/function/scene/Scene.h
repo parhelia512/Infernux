@@ -2,6 +2,7 @@
 
 #include "Camera.h"
 #include "GameObject.h"
+#include "ObjectHandle.h"
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -11,6 +12,8 @@
 
 namespace infernux
 {
+
+class SceneCommitToken;
 
 /**
  * @brief Scene container that holds all GameObjects.
@@ -80,6 +83,9 @@ class Scene
     /// @return The root GameObject, or nullptr on failure
     GameObject *InstantiateFromJson(const std::string &jsonStr, GameObject *parent = nullptr);
 
+    /// @brief Instantiate directly from a parsed document. Fresh IDs are assigned.
+    GameObject *InstantiateFromDocument(const nlohmann::json &document, GameObject *parent = nullptr);
+
     /// @brief Internal: Unregister object ID from lookup (called from GameObject dtor)
     void UnregisterGameObject(uint64_t id);
 
@@ -116,6 +122,17 @@ class Scene
 
     /// @brief Find a GameObject by ID
     [[nodiscard]] GameObject *FindByID(uint64_t id) const;
+
+    /// @brief Resolve a GameObject handle only when world, ID, and lifetime match.
+    [[nodiscard]] GameObject *ResolveGameObject(const ObjectHandle &handle) const;
+
+    /// @brief Resolve a Component handle only when world, ID, and lifetime match.
+    [[nodiscard]] Component *ResolveComponent(const ObjectHandle &handle) const;
+
+    [[nodiscard]] uint64_t GetWorldId() const
+    {
+        return m_worldId;
+    }
 
     /// @brief Find all GameObjects with a specific component type
     template <typename T> [[nodiscard]] std::vector<GameObject *> FindObjectsWithComponent() const;
@@ -229,42 +246,35 @@ class Scene
     /// @return JSON string representation of the scene
     [[nodiscard]] std::string Serialize() const;
 
-    /// @brief Deserialize scene from JSON string and rebuild the entire scene graph.
-    ///
-    /// **Scene Rebuild Contract** (canonical reference for all deserialize paths):
-    ///
-    ///   1. Caller MUST clear any Python/RenderStack singleton state that holds
-    ///      raw pointers into the old scene BEFORE calling Deserialize() — see
-    ///      `Infernux.engine.play_mode._rebuild_active_scene` for the editor
-    ///      precedent (it nils `RenderStack._active_instance`).
-    ///   2. Deserialize() then invokes `SceneManager::ClearComponentRegistries()`
-    ///      so MeshRenderer/Light/PhysicsECS pending queues do not retain stale
-    ///      pointers into the about-to-be-destroyed GameObjects.
-    ///   3. Old root objects are dropped (their destructors run with empty
-    ///      registries — safe no-op unregisters).
-    ///   4. New GameObjects are built from JSON with `preserveIds=true`, then
-    ///      registered via `RegisterObjectSubtree`.
-    ///   5. `AwakeObject()` runs over every new root: this is a NATIVE-only pass
-    ///      and never touches Python lifecycle methods. PyComponentProxy
-    ///      instances are NOT in `m_rootObjects` yet — they live in
-    ///      `m_pendingPyComponents` and are restored by Python via
-    ///      `restore_pending_py_components()` AFTER this call returns.
-    ///   6. `m_structureVersion` is bumped, invalidating any caches keyed on it.
-    ///
-    /// @param jsonStr JSON string to deserialize from
-    /// @return true if successful, false on JSON parse / schema errors
-    ///         (errors are logged via INXLOG_ERROR; check the log when this
-    ///         returns false).
-    bool Deserialize(const std::string &jsonStr);
+    /// @brief Build the structured current-schema document without text conversion.
+    [[nodiscard]] nlohmann::json SerializeDocument() const;
 
-    /// @brief Save scene to file (writes Serialize() output to *path*).
+    /// @brief Commit an already parsed and cross-language-preflighted scene document.
+    ///
+    /// **Transactional Scene Rebuild Contract**:
+    ///
+    ///   1. The complete native graph is built in an isolated staging Scene with
+    ///      temporary object/component IDs. Schema, factory, hierarchy, ID and
+    ///      main-camera validation complete while the active graph remains live.
+    ///   2. A validation failure destroys only staging allocations and leaves the
+    ///      active scene, registries, pending queues and lifecycle state unchanged.
+    ///   3. Commit clears renderer/physics registries, destroys the old graph,
+    ///      adopts staging roots, restores document IDs and registers the new graph.
+    ///   4. `AwakeObject()` is a native-only pass. Python component descriptors
+    ///      remain pending for Python-side reconstruction after this call returns.
+    ///   5. `m_structureVersion` is bumped only after a successful commit.
+    ///
+    /// @brief Rebuild the scene from an already parsed current-schema document.
+    bool DeserializeDocument(const nlohmann::json &document);
+
+    /// Commit a validated candidate while retaining the current native world.
+    /// The returned token must be finalized after cross-language publish or
+    /// rolled back to restore the exact previous GameObject/Component instances.
+    [[nodiscard]] std::shared_ptr<SceneCommitToken> CommitDocumentRetainingCurrentWorld(const nlohmann::json &document);
+
+    /// @brief Atomically save the scene to *path* through a same-directory temporary file.
     /// @return true on success; logs INXLOG_ERROR on failure.
     bool SaveToFile(const std::string &path) const;
-
-    /// @brief Load scene from file by reading *path* and calling Deserialize().
-    /// See Deserialize() for the rebuild contract that runs after the read.
-    /// @return true on success; logs INXLOG_ERROR on failure.
-    bool LoadFromFile(const std::string &path);
 
     // ========================================================================
     // Pending Python Components (for deserialization)
@@ -280,8 +290,11 @@ class Scene
         uint64_t gameObjectId = 0; // Which GameObject this belongs to
         std::string typeName;      // Python class name
         std::string scriptGuid;    // GUID for the script asset
-        std::string fieldsJson;    // Serialized field values as JSON
+        std::string typeGuid;      // GUID for the concrete class within the script
+        nlohmann::json fieldsDocument = nlohmann::json::object();
         bool enabled = true;
+        int executionOrder = 0;
+        size_t componentIndex = 0;
     };
 
     /// @brief Get pending Python components to be restored (and clear the list)
@@ -290,6 +303,12 @@ class Scene
         std::vector<PendingPyComponent> result;
         result.swap(m_pendingPyComponents);
         return result;
+    }
+
+    /// @brief Read pending Python component descriptors without consuming them.
+    [[nodiscard]] const std::vector<PendingPyComponent> &GetPendingPyComponents() const
+    {
+        return m_pendingPyComponents;
     }
 
     /// @brief Check if there are pending Python components
@@ -310,6 +329,9 @@ class Scene
     void AwakeObject(GameObject *obj);
 
   private:
+    friend class GameObject;
+    friend class SceneCommitToken;
+
     void CollectAllObjects(GameObject *obj, std::vector<GameObject *> &result) const;
     void QueueStartObject(GameObject *obj);
     void StartObject(GameObject *obj);
@@ -330,12 +352,22 @@ class Scene
     std::unique_ptr<GameObject> BuildGameObjectFromJson(const std::string &jsonStr, bool preserveIds);
 
     /// @brief Internal overload operating on an already-parsed JSON value.
-    std::unique_ptr<GameObject> BuildGameObjectFromJsonImpl(const nlohmann::json &objJson, bool preserveIds);
+    struct ComponentPrototype
+    {
+        const nlohmann::json *record = nullptr;
+        Component *component = nullptr;
+    };
+    using ComponentPrototypeCache = std::unordered_map<size_t, std::vector<ComponentPrototype>>;
+    std::unique_ptr<GameObject> BuildGameObjectFromJsonImpl(const nlohmann::json &objJson, bool preserveIds,
+                                                            ComponentPrototypeCache *prototypeCache = nullptr);
 
     /// @brief Recursively register all objects in a subtree with Scene's lookup map.
     void RegisterObjectSubtree(GameObject *root);
 
+    static uint64_t GenerateWorldId();
+
     std::string m_name = "Untitled Scene";
+    uint64_t m_worldId = GenerateWorldId();
 
     // Root-level game objects (objects without parents)
     std::vector<std::unique_ptr<GameObject>> m_rootObjects;
@@ -364,6 +396,26 @@ class Scene
 
     // Structure version counter (bumped on add/remove/reparent)
     uint64_t m_structureVersion = 0;
+};
+
+class SceneCommitToken final
+{
+  public:
+    ~SceneCommitToken();
+
+    SceneCommitToken(const SceneCommitToken &) = delete;
+    SceneCommitToken &operator=(const SceneCommitToken &) = delete;
+
+    [[nodiscard]] bool IsActive() const noexcept;
+    bool Rollback();
+    void Finalize();
+
+  private:
+    friend class Scene;
+    struct Impl;
+
+    explicit SceneCommitToken(Scene &scene);
+    std::unique_ptr<Impl> m_impl;
 };
 
 // ============================================================================

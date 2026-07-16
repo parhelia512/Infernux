@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "project": "Infernux",
+  "canonical_origin": "https://infernux-engine.com",
+  "repository": "https://github.com/ChenlizheMe/Infernux",
+  "documented_release": "0.2.1",
+  "release_status": "preview",
+  "last_verified": "2026-07-15",
+  "build": {
+    "status": "unstamped",
+    "source_commit": null,
+    "source_url": null,
+    "generated_at": null,
+    "timestamp_source": "source-commit"
+  },
+  "languages": [
+    "en",
+    "zh-CN"
+  ],
+  "indexes": {
+    "llms": "/llms.txt",
+    "llms_full": "/llms-full.txt",
+    "curated_docs": "/docs-index.json",
+    "learning_paths": "/learning-paths.json",
+    "docs_health": "/docs-health.json",
+    "api": "/api-index.json",
+    "api_changes": "/api-changes.json",
+    "release": "/release.json",
+    "release_notes": "/release-notes.json",
+    "wiki_catalog": "/assets/wiki-docs.json",
+    "sitemap": "/sitemap.xml",
+    "community": "/community.html"
+  },
+  "documentation_layers": {
+    "learn": "Task-oriented, curated workflows",
+    "manual": "Concept and system ownership explanations",
+    "api": "Generated signatures from current bindings and stubs",
+    "architecture": "Design rationale, research, and experimental direction"
+  },
+  "trust_rules": [
+    "Compare since and last_verified metadata with the installed engine version.",
+    "Use generated API pages as the authority for current signatures.",
+    "Use api-changes.json only for recorded release-to-release structural differences; absence of a prior snapshot means compatibility is unknown.",
+    "Use Learn and Manual pages as the authority for recommended workflows.",
+    "Do not treat experimental architecture directions as shipped features without corroboration."
+  ]
+}

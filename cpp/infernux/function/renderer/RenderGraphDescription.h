@@ -15,10 +15,11 @@
 
 #pragma once
 
+#include "rhi/RhiTypes.h"
+
 #include <string>
 #include <utility>
 #include <vector>
-#include <vulkan/vulkan.h>
 
 namespace infernux
 {
@@ -50,13 +51,13 @@ enum class GraphPassActionType
  */
 struct GraphTextureDesc
 {
-    std::string name;                           ///< Unique resource name
-    VkFormat format = VK_FORMAT_R8G8B8A8_UNORM; ///< Vulkan format
-    bool isBackbuffer = false;                  ///< If true, refers to the scene's main MSAA color target
-    bool isDepth = false;                       ///< If true, this is a depth/stencil texture
-    uint32_t width = 0;                         ///< Custom width (0 = use scene target size)
-    uint32_t height = 0;                        ///< Custom height (0 = use scene target size)
-    uint32_t sizeDivisor = 0;                   ///< >0: actual = scene_size / divisor
+    std::string name;                                       ///< Unique resource name
+    rhi::PixelFormat format = rhi::PixelFormat::RGBA8UNorm; ///< Backend-neutral pixel format
+    bool isBackbuffer = false;                              ///< If true, refers to the scene's main MSAA color target
+    bool isDepth = false;                                   ///< If true, this is a depth/stencil texture
+    uint32_t width = 0;                                     ///< Custom width (0 = use scene target size)
+    uint32_t height = 0;                                    ///< Custom height (0 = use scene target size)
+    uint32_t sizeDivisor = 0;                               ///< >0: actual = scene_size / divisor
 };
 
 // ============================================================================

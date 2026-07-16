@@ -71,7 +71,6 @@ def _skinned_mismatch_message(
     db,
     clip: AnimationClip3D,
     source_model_guid: str,
-    source_model_path: str,
 ) -> str:
     """
     If clip and renderer are definitely different model assets, return a warning string.
@@ -79,17 +78,15 @@ def _skinned_mismatch_message(
     """
     p_clip = (getattr(clip, "source_model_path", "") or "").strip()
     g_clip = (getattr(clip, "source_model_guid", "") or "").strip()
-    p_rend = (source_model_path or "").strip()
     g_rend = (source_model_guid or "").strip()
 
     k_clip, _ = _model_keys_for_source(db, g_clip, p_clip)
-    k_rend, _ = _model_keys_for_source(db, g_rend, p_rend)
+    k_rend = _normalize_guid_key(g_rend)
 
     if k_clip and k_rend and k_clip != k_rend:
         return (
             f"[SkeletalAnimator] Clip source model does not match SkinnedMeshRenderer "
-            f"(clip guid≈{g_clip!r} path='{p_clip}' vs "
-            f"renderer guid≈{g_rend!r} path='{p_rend}')."
+            f"(clip guid≈{g_clip!r} path='{p_clip}' vs renderer guid≈{g_rend!r})."
         )
     if k_clip and k_rend:
         return ""
@@ -97,13 +94,9 @@ def _skinned_mismatch_message(
     if k_clip or k_rend:
         return ""
 
-    p_clip_n = os.path.normcase(os.path.normpath(p_clip)) if p_clip else ""
-    p_rend_n = os.path.normcase(os.path.normpath(p_rend)) if p_rend else ""
-    if p_clip and p_rend and p_clip_n and p_rend_n and p_clip_n != p_rend_n:
-        return (
-            f"[SkeletalAnimator] Clip source path does not match renderer source, and "
-            f"neither could be resolved to a GUID. clip='{p_clip}' vs renderer='{p_rend}'"
-        )
+    # SkinnedMeshRenderer intentionally exposes only the source-model GUID. If
+    # neither side can provide a GUID, there is no renderer path to compare and
+    # therefore no definite mismatch to report.
     return ""
 
 
@@ -729,9 +722,8 @@ class SkeletalAnimator(InxComponent):
 
             r = self._skinned_renderer
             renderer_guid = str(getattr(r, "source_model_guid", "") or "")
-            renderer_path = str(getattr(r, "source_model_path", "") or "")
             db = _get_asset_database()
-            msg = _skinned_mismatch_message(db, clip, renderer_guid, renderer_path)
+            msg = _skinned_mismatch_message(db, clip, renderer_guid)
             if msg:
                 Debug.log_warning(msg)
 

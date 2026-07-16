@@ -43,12 +43,12 @@ class TimelineAction(InxComponent):
 
     # ── Private runtime state ───────────────────────────────────────────
     _runtime: Optional[TimelineFSMRuntime] = None
-    _cached_transform = None  # resolved once; avoids per-frame game_object→transform pybind chain
+    _cached_transform_handle = None
 
     # ── Lifecycle ───────────────────────────────────────────────────────
     def awake(self):
         self._runtime = TimelineFSMRuntime()
-        self._cached_transform = None
+        self._cached_transform_handle = None
 
     def start(self):
         self._load_controller()
@@ -59,7 +59,7 @@ class TimelineAction(InxComponent):
     def on_after_deserialize(self):
         if getattr(self, "_runtime", None) is None:
             self._runtime = TimelineFSMRuntime()
-        self._cached_transform = None
+        self._cached_transform_handle = None
         self._load_controller()
 
     def update(self, delta_time: float):
@@ -67,10 +67,7 @@ class TimelineAction(InxComponent):
         if rt is None:
             return
         rt.playback_speed = self.playback_speed
-        tr = self._cached_transform
-        if tr is None:
-            tr = self._cached_transform = self._transform()
-        rt.update(delta_time, tr)
+        rt.update(delta_time, self._transform())
 
     # ── Public API ──────────────────────────────────────────────────────
     def reload_controller(self):
@@ -140,11 +137,19 @@ class TimelineAction(InxComponent):
 
     # ── Internals ───────────────────────────────────────────────────────
     def _transform(self):
-        tr = self._cached_transform
-        if tr is not None:
-            return tr
+        handle = self._cached_transform_handle
+        scene = getattr(self, "_native_scene", None)
+        if handle is not None and scene is not None:
+            try:
+                transform = scene.resolve_component(handle)
+            except (RuntimeError, AttributeError):
+                transform = None
+            if transform is not None:
+                return transform
+            self._cached_transform_handle = None
+
         tr = self._try_get_transform()
-        self._cached_transform = tr
+        self._cached_transform_handle = getattr(tr, "handle", None) if tr is not None else None
         return tr
 
     def _load_controller(self):

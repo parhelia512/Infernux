@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "version": "0.2.1",
+  "tag": "v0.2.1",
+  "name": "Infernux v0.2.1",
+  "channel": "technical-preview",
+  "published_at": "2026-07-10T15:33:55Z",
+  "platforms": ["Windows 10/11 x64"],
+  "python_abi": "CPython 3.12 x64",
+  "release_url": "https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.1",
+  "verification": {
+    "checksum_algorithm": "SHA-256",
+    "publisher_signature": "not-declared",
+    "authority": "GitHub Releases"
+  },
+  "assets": [
+    {
+      "kind": "hub-installer",
+      "name": "InfernuxHubInstaller.exe",
+      "size_bytes": 284507432,
+      "sha256": "31d03e77358a80441658f82c0012f352e23b917d7ae210c2d7a55c7a953231b4",
+      "url": "https://github.com/ChenlizheMe/Infernux/releases/download/v0.2.1/InfernuxHubInstaller.exe"
+    },
+    {
+      "kind": "python-wheel",
+      "name": "infernux-0.2.1-cp312-cp312-win_amd64.whl",
+      "size_bytes": 20657224,
+      "sha256": "1873fb30a3b95c1aceb68e814b140526fcedbaaf72da4ca07d43837338670533",
+      "url": "https://github.com/ChenlizheMe/Infernux/releases/download/v0.2.1/infernux-0.2.1-cp312-cp312-win_amd64.whl"
+    }
+  ]
+}

@@ -8,6 +8,7 @@
 #include "vk/VkResourceManager.h"
 #include <cassert>
 #include <core/log/InxLog.h>
+#include <stdexcept>
 
 namespace infernux
 {
@@ -49,6 +50,7 @@ void TransientResourcePool::Shutdown()
 
     m_entries.clear();
     m_freeList.clear();
+    m_residentBytes = 0;
     m_deviceContext = nullptr;
     m_resourceManager = nullptr;
 }
@@ -187,7 +189,9 @@ uint32_t TransientResourcePool::CreateEntry(int width, int height, VkFormat form
 
     VkImage image = VK_NULL_HANDLE;
     VmaAllocation allocation = VK_NULL_HANDLE;
-    VkResult allocResult = vmaCreateImage(allocator, &imageInfo, &vmaAllocCreateInfo, &image, &allocation, nullptr);
+    VmaAllocationInfo allocationInfo{};
+    VkResult allocResult =
+        vmaCreateImage(allocator, &imageInfo, &vmaAllocCreateInfo, &image, &allocation, &allocationInfo);
     if (allocResult != VK_SUCCESS) {
         INXLOG_ERROR("TransientResourcePool: Failed to create VkImage (", width, "x", height, ")");
         return UINT32_MAX;
@@ -218,6 +222,7 @@ uint32_t TransientResourcePool::CreateEntry(int width, int height, VkFormat form
     entry.image = image;
     entry.view = view;
     entry.allocation = allocation;
+    entry.allocationBytes = allocationInfo.size;
     entry.width = width;
     entry.height = height;
     entry.format = format;
@@ -226,6 +231,7 @@ uint32_t TransientResourcePool::CreateEntry(int width, int height, VkFormat form
     entry.pendingRelease = false;
 
     m_entries.push_back(entry);
+    m_residentBytes += entry.allocationBytes;
     return slotId;
 }
 
@@ -243,9 +249,13 @@ void TransientResourcePool::DestroyEntry(RTEntry &entry)
         entry.view = VK_NULL_HANDLE;
     }
     if (entry.image != VK_NULL_HANDLE) {
+        if (entry.allocationBytes > m_residentBytes)
+            throw std::logic_error("Transient render-target residency byte counter underflow");
+        m_residentBytes -= entry.allocationBytes;
         vmaDestroyImage(m_deviceContext->GetVmaAllocator(), entry.image, entry.allocation);
         entry.image = VK_NULL_HANDLE;
         entry.allocation = VK_NULL_HANDLE;
+        entry.allocationBytes = 0;
     }
 }
 

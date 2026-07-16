@@ -807,6 +807,7 @@ class Theme:
         *,
         active_items: Optional[Iterable[str]] = None,
         height: float = 0.0,
+        semantic_base: str = "",
     ):
         """
         Render a row of evenly sized buttons. Returns clicked item id."""
@@ -829,6 +830,9 @@ class Theme:
                 clicked[0] = iid
 
             ctx.button(f"{label}##{row_id}_{item_id}", _on_click, width=button_w, height=button_h)
+            recorder = getattr(ctx, "record_semantic_item", None)
+            if semantic_base and callable(recorder):
+                recorder("inline_button", label, True, f"{semantic_base}.{item_id}")
             ctx.pop_style_color(color_count)
             if idx + 1 < len(entries):
                 ctx.same_line(0, spacing)

@@ -5,6 +5,7 @@
 #include "vk/VkRenderUtils.h"
 #include <algorithm>
 #include <core/log/InxLog.h>
+#include <stdexcept>
 
 namespace infernux
 {
@@ -117,7 +118,7 @@ bool MaterialPipelineManager::IsPipelineSharedByOthers(const std::string &exclud
     return false;
 }
 
-void MaterialPipelineManager::DestroyNonForwardPipelines(InxMaterial *material)
+void MaterialPipelineManager::DestroyNonForwardPipelines(InxMaterial *material, bool deferred)
 {
     for (int i = 1; i < static_cast<int>(ShaderCompileTarget::Count); ++i) {
         const auto pass = static_cast<ShaderCompileTarget>(i);
@@ -131,7 +132,12 @@ void MaterialPipelineManager::DestroyNonForwardPipelines(InxMaterial *material)
         }
         VkPipeline pp = material->GetPassPipeline(pass);
         if (pp != VK_NULL_HANDLE) {
-            vkDestroyPipeline(m_device, pp, nullptr);
+            if (deferred && m_deletionQueue) {
+                const VkDevice device = m_device;
+                m_deletionQueue->Push([device, pp] { vkDestroyPipeline(device, pp, nullptr); });
+            } else {
+                vkDestroyPipeline(m_device, pp, nullptr);
+            }
             material->SetPassPipeline(pass, VK_NULL_HANDLE);
         }
         material->SetPassPipelineLayout(pass, VK_NULL_HANDLE);
@@ -150,11 +156,13 @@ void MaterialPipelineManager::Initialize(VmaAllocator allocator, VkDevice device
                                          bool descriptorIndexingEnabled)
 {
     m_device = device;
+    m_allocator = allocator;
     m_physicalDevice = physicalDevice;
     m_colorFormat = colorFormat;
     m_depthFormat = depthFormat;
     m_sampleCount = sampleCount;
     m_shaderProgramCache = &shaderProgramCache;
+    m_deletionQueue = deletionQueue;
 
     // Create internal compatible render pass for pipeline creation
     CreateInternalRenderPass();
@@ -218,6 +226,7 @@ void MaterialPipelineManager::Shutdown(bool skipWaitIdle)
             continue;
         }
         DestroyNonForwardPipelines(data->material.get());
+        data->material->CleanupUBO(m_device);
         data->material->ClearAllPassPipelines();
     }
 
@@ -249,7 +258,9 @@ void MaterialPipelineManager::Shutdown(bool skipWaitIdle)
 
     m_defaultRenderData = nullptr;
     m_device = VK_NULL_HANDLE;
+    m_allocator = VK_NULL_HANDLE;
     m_physicalDevice = VK_NULL_HANDLE;
+    m_deletionQueue = nullptr;
 }
 
 VkShaderModule MaterialPipelineManager::CreateShaderModule(const std::vector<char> &code)
@@ -696,9 +707,7 @@ void MaterialPipelineManager::InvalidateMaterialsUsingShader(const std::string &
 
 uint32_t MaterialPipelineManager::InvalidateMaterialsUsingTexture(const std::string &textureGuid)
 {
-    // GUID-only contract: material Texture2D property values are always GUIDs
-    // (enforced by InxMaterial::SetTextureGuid normalization), so a simple
-    // equality match is sufficient.
+    // Texture2D properties hold validated GUIDs or builtin tokens, so equality is sufficient.
     if (textureGuid.empty()) {
         return 0;
     }
@@ -770,7 +779,8 @@ void MaterialPipelineManager::RemoveRenderData(const std::string &materialName)
     if (data) {
         if (data->material) {
             ClearForwardPassHandles(data->material.get());
-            DestroyNonForwardPipelines(data->material.get());
+            DestroyNonForwardPipelines(data->material.get(), true);
+            RetireMaterialUBO(data->material->DetachUBO());
         }
 
         // Only destroy the pipeline if no other render data shares it.
@@ -783,13 +793,77 @@ void MaterialPipelineManager::RemoveRenderData(const std::string &materialName)
                         ++pipeIt;
                     }
                 }
-                vkDestroyPipeline(m_device, data->pipeline, nullptr);
+                if (m_deletionQueue) {
+                    const VkDevice device = m_device;
+                    const VkPipeline pipeline = data->pipeline;
+                    m_deletionQueue->Push([device, pipeline] { vkDestroyPipeline(device, pipeline, nullptr); });
+                } else {
+                    vkDestroyPipeline(m_device, data->pipeline, nullptr);
+                }
             }
         }
     }
 
     m_renderDataMap.erase(it);
     INXLOG_DEBUG("Removed render data for material: ", materialName);
+}
+
+void MaterialPipelineManager::RetireMaterialUBO(InxMaterial::DetachedUBO resource)
+{
+    if (resource.buffer == VK_NULL_HANDLE)
+        return;
+    if (resource.allocator == VK_NULL_HANDLE || resource.allocation == VK_NULL_HANDLE)
+        throw std::logic_error("Material UBO has incomplete VMA ownership");
+    if (m_deletionQueue) {
+        m_deletionQueue->Push(
+            [resource] { vmaDestroyBuffer(resource.allocator, resource.buffer, resource.allocation); });
+        return;
+    }
+    vmaDestroyBuffer(resource.allocator, resource.buffer, resource.allocation);
+}
+
+size_t MaterialPipelineManager::CollectUnusedRenderData()
+{
+    std::vector<std::string> unused;
+    unused.reserve(m_renderDataMap.size());
+    for (const auto &[name, data] : m_renderDataMap) {
+        if (!data || !data->material || data.get() == m_defaultRenderData)
+            continue;
+        // Registry-owned builtins naturally have another strong owner. Do not
+        // use IsBuiltin() as a lifetime signal: runtime materials created from
+        // a built-in shader carry that flag too and still need reclamation.
+        if (data->material.use_count() == 1)
+            unused.push_back(name);
+    }
+    for (const auto &name : unused)
+        RemoveRenderData(name);
+    return unused.size();
+}
+
+MaterialGpuResidencySnapshot MaterialPipelineManager::GetResidencySnapshot() const
+{
+    MaterialGpuResidencySnapshot snapshot;
+    snapshot.renderDataCount = m_renderDataMap.size();
+    snapshot.pipelineCount = m_pipelineCache.size();
+    snapshot.descriptorSetCount = m_descriptorManager.GetDescriptorSetCount();
+    snapshot.retiredDescriptorSetCount = m_descriptorManager.GetRetiredDescriptorSetCount();
+    snapshot.descriptorPoolCount = m_descriptorManager.GetDescriptorPoolCount();
+    for (const auto &[key, data] : m_renderDataMap) {
+        (void)key;
+        if (!data || !data->material)
+            continue;
+        if (data->material->GetGuid().empty())
+            ++snapshot.runtimeMaterialCount;
+        else
+            ++snapshot.assetMaterialCount;
+        const VmaAllocation allocation = data->material->GetUBOAllocation();
+        if (allocation == VK_NULL_HANDLE)
+            continue;
+        VmaAllocationInfo info{};
+        vmaGetAllocationInfo(m_allocator, allocation, &info);
+        snapshot.uboBytes += info.size;
+    }
+    return snapshot;
 }
 
 } // namespace infernux

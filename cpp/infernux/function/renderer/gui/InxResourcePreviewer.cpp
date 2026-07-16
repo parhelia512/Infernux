@@ -241,7 +241,7 @@ std::vector<std::string> ImagePreviewer::GetSupportedExtensions() const
 
 bool ImagePreviewer::Load(const std::string &filePath)
 {
-    if (m_loadedPath == filePath && m_textureId != 0) {
+    if (m_loadedPath == filePath) {
         return true; // Already loaded
     }
 
@@ -268,10 +268,6 @@ bool ImagePreviewer::Load(const std::string &filePath)
 
     m_loadedPath = filePath;
     ApplyPreviewSettings();
-    if (m_textureId == 0) {
-        INXLOG_ERROR("Failed to upload texture to ImGui: ", filePath);
-        return false;
-    }
 
     INXLOG_INFO("Loaded image preview: ", filePath, " (", m_width, "x", m_height, ")");
     return true;
@@ -279,6 +275,7 @@ bool ImagePreviewer::Load(const std::string &filePath)
 
 void ImagePreviewer::Render(InxGUIContext *ctx, float availWidth, float availHeight)
 {
+    m_textureId = m_gui->GetImGuiTextureId(m_textureName);
     if (m_textureId == 0)
         return;
 
@@ -311,14 +308,10 @@ void ImagePreviewer::Render(InxGUIContext *ctx, float availWidth, float availHei
 
 void ImagePreviewer::Unload()
 {
-    if (m_textureId != 0) {
-        if (m_gui && !m_loadedPath.empty()) {
-            std::string texName = m_loadedPath + "::prev_" + std::to_string(static_cast<int>(m_displayMode)) + "_" +
-                                  std::to_string(m_maxSize) + "_" + (m_srgb ? "1" : "0");
-            m_gui->RemoveImGuiTexture(texName);
-        }
-        m_textureId = 0;
-    }
+    if (m_gui && !m_textureName.empty())
+        m_gui->RemoveImGuiTexture(m_textureName);
+    m_textureId = 0;
+    m_textureName.clear();
     m_loadedPath.clear();
     m_width = 0;
     m_height = 0;
@@ -443,9 +436,13 @@ void ImagePreviewer::ApplyPreviewSettings()
     }
 
     // --- Upload to ImGui ---
-    std::string texName = m_loadedPath + "::prev_" + std::to_string(static_cast<int>(m_displayMode)) + "_" +
-                          std::to_string(m_maxSize) + "_" + (m_srgb ? "1" : "0");
-    m_textureId = m_gui->UploadTextureForImGui(texName, processed.data(), procW, procH);
+    const std::string textureName = m_loadedPath + "::prev_" + std::to_string(static_cast<int>(m_displayMode)) + "_" +
+                                    std::to_string(m_maxSize) + "_" + (m_srgb ? "1" : "0");
+    if (!m_textureName.empty() && m_textureName != textureName)
+        m_gui->RemoveImGuiTexture(m_textureName);
+    m_textureName = textureName;
+    (void)m_gui->SubmitTextureForImGui(m_textureName, processed.data(), processed.size(), procW, procH);
+    m_textureId = m_gui->GetImGuiTextureId(m_textureName);
 }
 
 std::vector<std::pair<std::string, std::string>> ImagePreviewer::GetMetadata() const
@@ -756,7 +753,7 @@ std::vector<std::string> MaterialPreviewer::GetSupportedExtensions() const
 
 bool MaterialPreviewer::Load(const std::string &filePath)
 {
-    if (m_loadedPath == filePath && m_textureId != 0) {
+    if (m_loadedPath == filePath) {
         return true; // Already loaded
     }
 
@@ -785,20 +782,17 @@ bool MaterialPreviewer::Load(const std::string &filePath)
     MaterialPreviewRenderer::RenderPreview(material, m_previewSize, pixels);
 
     // Upload to ImGui
-    std::string texName = filePath + "::mat_preview";
-    m_textureId = m_gui->UploadTextureForImGui(texName, pixels.data(), m_previewSize, m_previewSize);
-    if (m_textureId == 0) {
-        INXLOG_ERROR("MaterialPreviewer: failed to upload texture for '", filePath, "'");
-        return false;
-    }
-
     m_loadedPath = filePath;
+    m_textureName = filePath + "::mat_preview";
+    (void)m_gui->SubmitTextureForImGui(m_textureName, pixels.data(), pixels.size(), m_previewSize, m_previewSize);
+    m_textureId = m_gui->GetImGuiTextureId(m_textureName);
     INXLOG_INFO("MaterialPreviewer: loaded '", filePath, "'");
     return true;
 }
 
 void MaterialPreviewer::Render(InxGUIContext *ctx, float availWidth, float availHeight)
 {
+    m_textureId = m_gui->GetImGuiTextureId(m_textureName);
     if (m_textureId == 0)
         return;
 
@@ -817,13 +811,10 @@ void MaterialPreviewer::Render(InxGUIContext *ctx, float availWidth, float avail
 
 void MaterialPreviewer::Unload()
 {
-    if (m_textureId != 0) {
-        if (m_gui && !m_loadedPath.empty()) {
-            std::string texName = m_loadedPath + "::mat_preview";
-            m_gui->RemoveImGuiTexture(texName);
-        }
-        m_textureId = 0;
-    }
+    if (m_gui && !m_textureName.empty())
+        m_gui->RemoveImGuiTexture(m_textureName);
+    m_textureId = 0;
+    m_textureName.clear();
     m_loadedPath.clear();
     m_materialName.clear();
     m_shaderName.clear();
@@ -840,80 +831,69 @@ std::vector<std::pair<std::string, std::string>> MaterialPreviewer::GetMetadata(
     return result;
 }
 
-bool MaterialPreviewer::RenderToPixels(const std::string &matFilePath, int size, std::vector<unsigned char> &outPixels,
-                                       AssetDatabase *adb, InxRenderer *renderer)
+std::shared_ptr<InxMaterial> MaterialPreviewer::BuildPreviewMaterialFromFile(const std::string &matFilePath,
+                                                                             AssetDatabase *adb)
 {
     std::ifstream file(ToFsPath(matFilePath));
     if (!file.is_open())
-        return false;
+        return nullptr;
 
     std::string jsonStr((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    file.close();
-
-    return RenderFromJson(jsonStr, size, outPixels, adb, renderer);
+    return BuildPreviewMaterialFromJson(jsonStr, adb);
 }
 
-bool MaterialPreviewer::RenderFromJson(const std::string &materialJson, int size, std::vector<unsigned char> &outPixels,
-                                       AssetDatabase *adb, InxRenderer *renderer)
+std::shared_ptr<InxMaterial> MaterialPreviewer::BuildPreviewMaterialFromJson(const std::string &materialJson,
+                                                                             AssetDatabase *adb)
 {
     if (materialJson.empty())
-        return false;
+        return nullptr;
 
     auto sourceMaterial = std::make_shared<InxMaterial>();
     if (!sourceMaterial->Deserialize(materialJson))
-        return false;
+        return nullptr;
     ClearMissingTextureBindings(sourceMaterial.get(), adb);
+    return sourceMaterial->Clone();
+}
 
-    // Preview rendering must not reuse the asset material's GUID-backed cache key,
-    // otherwise GPU preview pipeline/descriptor recreation can invalidate the live
-    // material currently used by the scene.
-    auto material = sourceMaterial->Clone();
-
-    // Try GPU rendering first (uses real shaders)
-    if (renderer) {
-        if (renderer->RenderMaterialPreviewGPU(material, size, outPixels))
-            return true;
-        INXLOG_DEBUG("GPU material preview failed, falling back to CPU");
+void MaterialPreviewer::RenderCpuPreview(const std::shared_ptr<InxMaterial> &material, int size,
+                                         std::vector<unsigned char> &outPixels, AssetDatabase *adb)
+{
+    if (!material || size <= 0) {
+        outPixels.clear();
+        return;
     }
-
-    // CPU fallback
     PreviewTextureResolver resolver = MakeTextureResolver(adb);
-
-    // Get shader preview mapping (parsed from surface() function)
     std::string fragId = material->GetFragShaderName();
     ShaderPreviewMapping mapping = GetShaderPreviewMapping(fragId, adb);
     const ShaderPreviewMapping *pMapping = mapping.IsEmpty() ? nullptr : &mapping;
-
     MaterialPreviewRenderer::RenderPreview(*material, size, outPixels, resolver, pMapping);
-    return true;
 }
 
-bool MaterialPreviewer::RenderModelEmbeddedMaterialToPixels(const std::string &modelPath, uint32_t slotIndex, int size,
-                                                            std::vector<unsigned char> &outPixels, AssetDatabase *adb,
-                                                            InxRenderer *renderer)
+std::shared_ptr<InxMaterial> MaterialPreviewer::BuildEmbeddedPreviewMaterial(const std::string &modelPath,
+                                                                             uint32_t slotIndex)
 {
     if (modelPath.empty())
-        return false;
+        return nullptr;
 
     auto mesh = AssetRegistry::Instance().LoadAssetByPath<InxMesh>(modelPath, ResourceType::Mesh);
     if (!mesh)
-        return false;
+        return nullptr;
 
     const auto &slotDataVec = mesh->GetMaterialSlotData();
     if (slotIndex >= static_cast<uint32_t>(slotDataVec.size()))
-        return false;
+        return nullptr;
 
     const auto &sd = slotDataVec[slotIndex];
     auto defaultMat = AssetRegistry::Instance().GetBuiltinMaterial("DefaultLit");
     auto mat = defaultMat ? defaultMat->Clone() : InxMaterial::CreateDefaultLit();
     if (!mat)
-        return false;
+        return nullptr;
     mat->SetColor("baseColor", sd.baseColor);
     mat->SetColor("emissionColor", sd.emissionColor);
     mat->SetFloat("metallic", sd.metallic);
     mat->SetFloat("smoothness", sd.smoothness);
 
-    return RenderFromJson(mat->Serialize(), size, outPixels, adb, renderer);
+    return mat;
 }
 
 } // namespace infernux

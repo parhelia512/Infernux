@@ -145,6 +145,89 @@ def register_ui_tools(mcp) -> None:
 
         return main_thread("ui_find_by_text", _find)
 
+    @mcp.tool(name="ui_bind_click")
+    def ui_bind_click(
+        button_id: int,
+        target_id: int,
+        component_name: str,
+        method_name: str,
+        replace: bool = True,
+    ) -> dict:
+        """Bind UIButton to GameObject -> attached component -> public method.
+
+        The persistent event stores a scene-object reference. It never stores
+        or invokes a script asset path directly.
+        """
+
+        def _bind():
+            button_obj = _find_game_object(button_id)
+            button = _find_named_component(button_obj, {"UIButton"})
+            if button is None:
+                raise FileNotFoundError(f"GameObject {button_id} has no UIButton component.")
+
+            target_obj = _find_game_object(target_id)
+            target_component = _find_named_component(target_obj, {str(component_name)})
+            if target_component is None:
+                raise FileNotFoundError(
+                    f"Component '{component_name}' was not found on GameObject {target_id}."
+                )
+
+            from Infernux.ui.ui_event_entry import (
+                UIEventEntry,
+                get_callable_methods,
+                get_method_parameter_specs,
+                normalize_event_arguments,
+            )
+
+            method = str(method_name or "").strip()
+            if method not in get_callable_methods(target_component):
+                raise ValueError(
+                    f"Method '{method}' is not a public persistent-event method on "
+                    f"component '{component_name}'."
+                )
+
+            from Infernux.components import GameObjectRef
+
+            entry = UIEventEntry(
+                target=GameObjectRef(target_obj),
+                component_name=type(target_component).__name__,
+                method_name=method,
+                arguments=normalize_event_arguments(
+                    [], get_method_parameter_specs(target_component, method)
+                ),
+            )
+            old_entries = list(button.on_click_entries or [])
+            new_entries = [entry] if replace else [*old_entries, entry]
+            from Infernux.engine.ui._inspector_undo import _record_property
+
+            _record_property(
+                button,
+                "on_click_entries",
+                old_entries,
+                new_entries,
+                "Bind UIButton on_click",
+            )
+            if hasattr(button, "_call_on_validate"):
+                button._call_on_validate()
+            _mark_ui_dirty()
+            return {
+                "button": _ui_snapshot(button_obj, button),
+                "binding": _event_entry_snapshot(entry),
+                "binding_count": len(new_entries),
+            }
+
+        return main_thread(
+            "ui_bind_click",
+            _bind,
+            arguments={
+                "button_id": button_id,
+                "target_id": target_id,
+                "component_name": component_name,
+                "method_name": method_name,
+                "replace": replace,
+            },
+        )
+
 
 def _create_ui_object(kind: str, name: str, parent_id: int):
     from Infernux.lib import SceneManager
@@ -201,6 +284,18 @@ def _ui_snapshot(obj, comp) -> dict[str, Any]:
         if hasattr(comp, key):
             data["fields"][key] = serialize_value(getattr(comp, key))
     return data
+
+
+def _event_entry_snapshot(entry) -> dict[str, Any]:
+    from Infernux.ui.ui_event_entry import _get_serializable_raw_field
+
+    target = _get_serializable_raw_field(entry, "target")
+    return {
+        "target_id": int(getattr(target, "persistent_id", 0) or 0),
+        "component_name": str(getattr(entry, "component_name", "") or ""),
+        "method_name": str(getattr(entry, "method_name", "") or ""),
+        "argument_count": len(getattr(entry, "arguments", None) or []),
+    }
 
 
 def _find_game_object(object_id: int):
@@ -269,5 +364,26 @@ def _register_metadata() -> None:
         "ui_set_text": "Set text/label on a UI element.",
         "ui_inspect": "Inspect UI elements.",
         "ui_find_by_text": "Find UI elements by visible text.",
+        "ui_bind_click": "Bind a persistent UIButton click event.",
     }.items():
         register_tool_metadata(name, summary=summary)
+    register_tool_metadata(
+        "ui_bind_click",
+        summary="Bind a persistent UIButton click through an attached component.",
+        concepts={
+            "Persistent Click": (
+                "A binding is GameObject -> component attached to that GameObject "
+                "-> public method, matching the Unity Inspector interaction model."
+            ),
+            "Script Asset": (
+                "Script files are component definitions, not click targets; this tool "
+                "does not accept or persist a script path."
+            ),
+        },
+        invariants=[
+            "The target component must already be attached to target_id.",
+            "The selected method must be public and excluded from lifecycle callbacks.",
+            "No script asset path is stored in on_click_entries.",
+        ],
+        side_effects=["Updates UIButton.on_click_entries and marks the active scene dirty."],
+    )

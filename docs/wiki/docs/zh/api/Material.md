@@ -52,6 +52,8 @@
 
 | 方法 | 描述 |
 |------|------|
+| `to_dict() → dict` | 将材质序列化为字典。 |
+| `apply_dict(document: dict) → bool` | Transactionally apply a material document. |
 | `dispose() → None` | 释放底层原生材质资源。 |
 | `clone() → Material` | Create a deep copy of this material, including shader state and properties. |
 | `set_shader(shader_name: str) → None` | 设置材质使用的着色器。 |
@@ -73,7 +75,6 @@
 | `has_property(name: str) → bool` | 检查着色器属性是否存在。 |
 | `get_property(name: str) → Any` | 按名称获取着色器属性值。 |
 | `get_all_properties() → dict` | 获取所有着色器属性的字典。 |
-| `to_dict() → dict` | 将材质序列化为字典。 |
 | `save(file_path: str) → bool` | 将材质保存到文件。 |
 | `set_param(name: str, value: Any) → None` | Set a non-texture material property using type/shape dispatch. |
 | `set_texture(name: str, value: Any) → None` | Set a texture property from GUID, path, Texture, or None. |
@@ -113,9 +114,7 @@
 ## 示例
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for Material
-```
+> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。
 <!-- USER CONTENT END -->
 
 ## 另请参阅

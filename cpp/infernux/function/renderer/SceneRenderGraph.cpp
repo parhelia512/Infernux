@@ -11,6 +11,7 @@
 #include "InxVkCoreModular.h"
 #include "SceneRenderTarget.h"
 #include "gui/InxScreenUIRenderer.h"
+#include "vk/RhiVulkanTypes.h"
 #include "vk/VkDeviceContext.h"
 #include "vk/VkPipelineManager.h"
 #include "vk/VkRenderUtils.h"
@@ -100,6 +101,15 @@ bool ValidatePythonGraphDescription(const RenderGraphDescription &desc)
         if (tex.isBackbuffer && tex.isDepth) {
             INXLOG_ERROR("SceneRenderGraph::ApplyPythonGraph: texture '", tex.name,
                          "' cannot be both backbuffer and depth");
+            return false;
+        }
+        if (!tex.isBackbuffer && !rhi::IsValidPixelFormat(tex.format)) {
+            INXLOG_ERROR("SceneRenderGraph::ApplyPythonGraph: texture '", tex.name, "' has an undefined pixel format");
+            return false;
+        }
+        if (!tex.isBackbuffer && tex.isDepth != rhi::IsDepthFormat(tex.format)) {
+            INXLOG_ERROR("SceneRenderGraph::ApplyPythonGraph: texture '", tex.name,
+                         "' depth flag does not match its pixel format");
             return false;
         }
     }
@@ -199,6 +209,11 @@ SceneRenderGraph::SceneRenderGraph() : m_renderGraph(std::make_unique<vk::Render
 SceneRenderGraph::~SceneRenderGraph()
 {
     Destroy();
+}
+
+uint64_t SceneRenderGraph::GetTransientResidentBytes() const
+{
+    return m_renderGraph ? m_renderGraph->GetTransientResidentBytes() : 0;
 }
 
 // ============================================================================
@@ -518,6 +533,8 @@ void SceneRenderGraph::Execute(VkCommandBuffer commandBuffer)
         m_fullscreenRenderer.ResetPool();
 
         m_renderGraph->Execute(commandBuffer);
+        ++m_executionCount;
+        m_lastExecutedBuildRevision = m_graphBuildRevision;
 
         // Non-MSAA scene/game targets are sampled by ImGui after the render
         // graph finishes. The graph leaves offscreen color outputs in
@@ -724,8 +741,8 @@ void SceneRenderGraph::RegisterTransientTextures(uint32_t width, uint32_t height
                 texW = std::max(1u, width / tex.sizeDivisor);
                 texH = std::max(1u, height / tex.sizeDivisor);
             }
-            vk::ResourceHandle handle =
-                m_renderGraph->RegisterTransientTexture(tex.name, texW, texH, tex.format, VK_SAMPLE_COUNT_1_BIT, true);
+            vk::ResourceHandle handle = m_renderGraph->RegisterTransientTexture(
+                tex.name, texW, texH, rhi::ToVkFormat(tex.format), VK_SAMPLE_COUNT_1_BIT, true);
             customRTHandles[tex.name] = handle;
         }
     }
@@ -734,7 +751,7 @@ void SceneRenderGraph::RegisterTransientTextures(uint32_t width, uint32_t height
     for (const auto &tex : m_pythonGraphDesc.textures) {
         if (tex.isDepth && tex.width > 0 && tex.height > 0) {
             vk::ResourceHandle handle = m_renderGraph->RegisterTransientTexture(
-                tex.name, tex.width, tex.height, tex.format, VK_SAMPLE_COUNT_1_BIT, true);
+                tex.name, tex.width, tex.height, rhi::ToVkFormat(tex.format), VK_SAMPLE_COUNT_1_BIT, true);
             customRTHandles[tex.name] = handle;
         }
     }
@@ -1153,8 +1170,8 @@ void SceneRenderGraph::BuildRenderGraph()
                             if (texIt->second->isBackbuffer && msaaSamples > VK_SAMPLE_COUNT_1_BIT) {
                                 fsSamples = msaaSamples;
                             }
-                            if (!texIt->second->isBackbuffer && texIt->second->format != VK_FORMAT_UNDEFINED) {
-                                fsColorFormat = texIt->second->format;
+                            if (!texIt->second->isBackbuffer && texIt->second->format != rhi::PixelFormat::Undefined) {
+                                fsColorFormat = rhi::ToVkFormat(texIt->second->format);
                             }
                         }
                     }
@@ -1292,8 +1309,9 @@ void SceneRenderGraph::BuildRenderGraph()
                     } else {
                         // Fallback: create inline
                         auto depthTexIt = texDescMap.find(passDesc.writeDepth);
-                        VkFormat shadowDepthFmt =
-                            depthTexIt != texDescMap.end() ? depthTexIt->second->format : VK_FORMAT_D32_SFLOAT;
+                        VkFormat shadowDepthFmt = depthTexIt != texDescMap.end()
+                                                      ? rhi::ToVkFormat(depthTexIt->second->format)
+                                                      : VK_FORMAT_D32_SFLOAT;
                         depth = builder.CreateDepthStencil(passDesc.writeDepth, passWidth, passHeight, shadowDepthFmt,
                                                            VK_SAMPLE_COUNT_1_BIT);
                         builder.WriteDepth(depth);
@@ -1363,7 +1381,7 @@ void SceneRenderGraph::BuildRenderGraph()
                     for (const auto &[slot, texName] : passDesc.writeColors) {
                         auto texIt = texDescMap.find(texName);
                         if (texIt != texDescMap.end()) {
-                            mrtColorFormats.push_back(texIt->second->format);
+                            mrtColorFormats.push_back(rhi::ToVkFormat(texIt->second->format));
                         }
                     }
                 }
@@ -1428,6 +1446,7 @@ void SceneRenderGraph::BuildRenderGraph()
                  "Output: ",
                  m_pythonGraphDesc.outputTexture.empty() ? "(backbuffer)" : m_pythonGraphDesc.outputTexture);
 
+    ++m_graphBuildRevision;
     m_graphBuilt = true;
 }
 

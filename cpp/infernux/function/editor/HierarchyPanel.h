@@ -49,7 +49,12 @@ class HierarchyPanel : public EditorPanel
     void ClearSearch();
     void ClearSelectionAndNotify();
     void SetSelectedObjectById(uint64_t id, bool clearSearch = false);
+    void SetSelectionSnapshot(const std::vector<uint64_t> &ids, uint64_t primary);
+    void SetRuntimeHiddenIds(const std::unordered_set<uint64_t> &ids);
+    void SetSceneHeaderSnapshot(const std::string &sceneDisplayName, bool prefabMode,
+                                const std::string &prefabDisplayName);
     void ExpandToObject(uint64_t objId);
+    void InvalidateSceneStructureCache();
 
     /// Allow external panels (UIEditorPanel) to queue an auto-expand.
     void SetPendingExpandId(uint64_t id)
@@ -156,7 +161,7 @@ class HierarchyPanel : public EditorPanel
 
   protected:
     void OnRenderContent(InxGUIContext *ctx) override;
-    void PreRender(InxGUIContext *ctx) override;
+    void VisiblePreRender(InxGUIContext *ctx) override;
 
   private:
     // ── Translation cache ────────────────────────────────────────────
@@ -166,11 +171,23 @@ class HierarchyPanel : public EditorPanel
     // ── Cached selection state (synced once per frame) ───────────────
     void SyncSelectionCache();
     std::unordered_set<uint64_t> m_selIds;
+    std::vector<uint64_t> m_selOrderedIds;
     uint64_t m_selPrimary = 0;
     int m_selCount = 0;
+    bool m_selectionPushMode = false;
 
     // ── Runtime hidden IDs ───────────────────────────────────────────
     std::unordered_set<uint64_t> m_hiddenIds;
+    bool m_runtimeHiddenPushMode = false;
+
+    // ── Scene header state ───────────────────────────────────────────
+    bool IsPrefabModeActive() const;
+    std::string SceneDisplayName() const;
+    std::string PrefabDisplayName() const;
+    std::string m_sceneDisplayName;
+    std::string m_prefabDisplayName;
+    bool m_cachedPrefabMode = false;
+    bool m_sceneHeaderPushMode = false;
 
     // ── Root-object cache ────────────────────────────────────────────
     std::string m_cachedSceneKey;

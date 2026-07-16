@@ -1,8 +1,7 @@
-"""RenderStack snapshot/restore and backward-compatibility command shims."""
+"""RenderStack document snapshots and undo commands."""
 
 from __future__ import annotations
 
-import json as _json
 from typing import Any, Optional
 
 from Infernux.debug import Debug
@@ -31,7 +30,7 @@ def _serialize_simple(val: Any) -> Any:
     return str(val)
 
 
-def snapshot_renderstack(stack: Any) -> str:
+def snapshot_renderstack(stack: Any) -> dict:
     from Infernux.components.serialized_field import get_serialized_fields
 
     data: dict = {
@@ -56,13 +55,11 @@ def snapshot_renderstack(stack: Any) -> str:
             ed["params"] = entry.render_pass.get_params_dict()
         data["pass_entries"].append(ed)
 
-    return _json.dumps(data, sort_keys=True)
+    return data
 
 
-def restore_renderstack(stack: Any, json_str: str) -> None:
+def restore_renderstack(stack: Any, data: dict) -> None:
     from Infernux.components.serialized_field import get_serialized_fields
-
-    data = _json.loads(json_str)
 
     new_pipeline_name = data.get("pipeline_class_name", "")
     if (stack.pipeline_class_name or "") != new_pipeline_name:
@@ -109,7 +106,7 @@ def restore_renderstack(stack: Any, json_str: str) -> None:
     stack.invalidate_graph()
 
 
-# -- Backward-compat command shims --
+# -- Commands --
 
 class RenderStackFieldCommand(SetPropertyCommand):
     def __init__(self, stack: Any, target: Any, field_name: str,
@@ -160,7 +157,7 @@ class RenderStackAddPassCommand(UndoCommand):
         self._stack = stack
         self._effect_cls = effect_cls
         self._pass_name: str = getattr(effect_cls, "name", effect_cls.__name__)
-        self._snapshot: Optional[str] = None
+        self._snapshot: Optional[dict] = None
 
     def execute(self) -> None:
         self._snapshot = snapshot_renderstack(self._stack)
@@ -234,7 +231,7 @@ class RenderStackRemovePassCommand(UndoCommand):
         super().__init__(description)
         self._stack = stack
         self._pass_name = pass_name
-        self._snapshot: Optional[str] = None
+        self._snapshot: Optional[dict] = None
 
     def execute(self) -> None:
         self._snapshot = snapshot_renderstack(self._stack)

@@ -20,8 +20,7 @@ Base class for all collider components.
 |------|------|------|
 | center | `Any` | The center of the collider in local space. |
 | is_trigger | `bool` | Whether the collider is a trigger (non-physical). |
-| friction | `float` | The friction coefficient of the collider surface. |
-| bounciness | `float` | The bounciness of the collider surface. |
+| physic_material | `PhysicMaterialRef` |  |
 
 <!-- USER CONTENT START --> properties
 
@@ -30,9 +29,7 @@ Base class for all collider components.
 ## Example
 
 <!-- USER CONTENT START --> example
-```python
-# TODO: Add example for Collider
-```
+> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
 <!-- USER CONTENT END -->
 
 ## See Also

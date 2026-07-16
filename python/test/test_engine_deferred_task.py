@@ -18,12 +18,12 @@ def _stub_engine_status(monkeypatch):
         _progress = 0.0
 
         @classmethod
-        def set(cls, label, progress):
+        def set(cls, label, progress, **_kwargs):
             cls._label = label
             cls._progress = progress
 
         @classmethod
-        def clear(cls):
+        def clear(cls, **_kwargs):
             cls._label = ""
             cls._progress = 0.0
 

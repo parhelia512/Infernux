@@ -1,0 +1,666 @@
+from __future__ import annotations
+
+from pathlib import Path
+import json
+import shutil
+import time
+import threading
+
+import pytest
+
+from Infernux.lib import AssetDependencyGraph, AssetMutationErrorCode, ResourceType
+
+
+def test_audio_import_repairs_legacy_default_text_metadata(engine, tmp_path: Path):
+    asset_db = engine.get_asset_database()
+    source = tmp_path / "legacy_audio.wav"
+    source.write_bytes(b"RIFF\x00\x00\x00\x00WAVE")
+    meta_path = Path(f"{source}.meta")
+    legacy_guid = "a" * 32
+    meta_path.write_text(
+        json.dumps({
+            "meta_version": 2,
+            "metadata": {
+                "guid": {"type": "string", "value": legacy_guid},
+                "resource_type": {
+                    "type": "enum infernux::ResourceType",
+                    "value": "DefaultText",
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    try:
+        result = asset_db.import_asset(str(source))
+
+        assert result
+        assert result.guid == legacy_guid
+        assert result.resource_type == ResourceType.Audio
+        assert asset_db.get_meta_by_path(str(source)).get_resource_type() == ResourceType.Audio
+        persisted = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert persisted["metadata"]["resource_type"]["value"] == "Audio"
+    finally:
+        if asset_db.contains_path(str(source)):
+            asset_db.delete_asset(str(source))
+
+
+def test_asset_database_never_indexes_python_bytecode_or_cache_paths(engine):
+    asset_db = engine.get_asset_database()
+    fixture = Path(asset_db.assets_root) / "python-bytecode-ignore-fixture"
+    cache = fixture / "__pycache__"
+    similarly_named = fixture / "my__pycache__data"
+    cache.mkdir(parents=True, exist_ok=True)
+    similarly_named.mkdir(parents=True, exist_ok=True)
+    cached_bytecode = cache / "Controller.cpython-312.pyc"
+    top_level_bytecode = fixture / "Legacy.PYC"
+    control = similarly_named / "control.txt"
+    cached_bytecode.write_bytes(b"not real bytecode")
+    top_level_bytecode.write_bytes(b"not real bytecode")
+    control.write_text("import me", encoding="utf-8")
+
+    try:
+        asset_db.refresh()
+
+        assert asset_db.contains_path(str(cached_bytecode)) is False
+        assert asset_db.contains_path(str(top_level_bytecode)) is False
+        assert asset_db.get_guid_from_path(str(cached_bytecode)) == ""
+        assert asset_db.get_guid_from_path(str(top_level_bytecode)) == ""
+        assert not Path(f"{cached_bytecode}.meta").exists()
+        assert not Path(f"{top_level_bytecode}.meta").exists()
+        assert cached_bytecode not in {Path(path) for path in asset_db.last_refresh_imported_paths}
+        assert top_level_bytecode not in {Path(path) for path in asset_db.last_refresh_imported_paths}
+
+        assert asset_db.contains_path(str(control)) is True
+        assert asset_db.get_guid_from_path(str(control))
+
+        explicit = asset_db.import_asset(str(top_level_bytecode))
+        assert not explicit
+        assert explicit.error_code == AssetMutationErrorCode.UNSUPPORTED_TYPE
+        assert not Path(f"{top_level_bytecode}.meta").exists()
+    finally:
+        if asset_db.contains_path(str(control)):
+            asset_db.delete_asset(str(control))
+        shutil.rmtree(fixture, ignore_errors=True)
+        asset_db.refresh()
+
+
+def test_dependency_graph_separates_asset_and_runtime_domains():
+    graph = AssetDependencyGraph.instance()
+    asset_user = "test-asset-user"
+    runtime_user = "test-runtime-user"
+    dependency = "test-shared-dependency"
+    generation = graph.asset_generation
+
+    for legacy_name in ("add_dependency", "remove_dependency", "clear_dependencies_of", "set_dependencies"):
+        assert not hasattr(graph, legacy_name)
+
+    try:
+        graph.add_asset_dependency(asset_user, dependency)
+        assert graph.asset_generation == generation + 1
+        graph.add_runtime_dependency(runtime_user, dependency)
+        assert graph.has_dependency(asset_user, dependency)
+        assert graph.has_dependency(runtime_user, dependency)
+        assert {asset_user, runtime_user} <= set(graph.get_dependents(dependency))
+
+        graph.clear_asset_dependencies_of(asset_user)
+        assert not graph.has_dependency(asset_user, dependency)
+        assert graph.has_dependency(runtime_user, dependency)
+        assert set(graph.get_dependents(dependency)) == {runtime_user}
+
+        with pytest.raises(ValueError, match="cannot depend on itself"):
+            graph.add_runtime_dependency(runtime_user, runtime_user)
+    finally:
+        graph.clear_asset_dependencies_of(asset_user)
+        graph.clear_runtime_dependencies_of(runtime_user)
+
+
+def test_asset_database_canonical_crud_preserves_guid(engine, tmp_path: Path):
+    asset_db = engine.get_asset_database()
+    source = tmp_path / "canonical_asset.txt"
+    source.write_text("first", encoding="utf-8")
+
+    import_result = asset_db.import_asset(str(source))
+    assert import_result
+    guid = import_result.guid
+    assert asset_db.get_guid_from_path(str(source)) == guid
+    assert Path(asset_db.get_path_from_guid(guid)).resolve() == source.resolve()
+    assert asset_db.get_meta_by_path(str(source)).get_guid() == guid
+    catalog = asset_db.get_directory_catalog(str(tmp_path))
+    catalog_entry = next(entry for entry in catalog if entry["guid"] == guid)
+    assert Path(catalog_entry["path"]).resolve() == source.resolve()
+    assert catalog_entry["name"] == source.name
+    assert catalog_entry["size"] == len("first")
+    assert asset_db.catalog_generation == asset_db.query_generation
+
+    moved = tmp_path / "canonical_asset_moved.txt"
+    source.replace(moved)
+    assert asset_db.move_asset(str(source), str(moved))
+    assert asset_db.get_guid_from_path(str(moved)) == guid
+    assert not asset_db.contains_path(str(source))
+    moved_catalog = asset_db.get_directory_catalog(str(tmp_path))
+    assert next(entry for entry in moved_catalog if entry["guid"] == guid)["name"] == moved.name
+
+    moved.unlink()
+    assert asset_db.delete_asset(str(moved))
+    assert not asset_db.contains_guid(guid)
+    assert not Path(f"{moved}.meta").exists()
+    assert all(entry["guid"] != guid for entry in asset_db.get_directory_catalog(str(tmp_path)))
+
+
+def test_asset_database_does_not_expose_legacy_resource_crud(engine):
+    asset_db = engine.get_asset_database()
+    for name in (
+        "register_resource",
+        "modify_resource",
+        "delete_resource",
+        "move_resource",
+        "get_all_resource_guids",
+        "on_asset_created",
+        "on_asset_modified",
+        "on_asset_deleted",
+        "on_asset_moved",
+    ):
+        assert not hasattr(asset_db, name)
+
+
+def test_metadata_creation_uses_the_submitted_source_bytes(engine, tmp_path: Path):
+    asset_db = engine.get_asset_database()
+    text = tmp_path / "metadata-source.txt"
+    texture = tmp_path / "metadata-source.ppm"
+    text_bytes = b"first\r\nsecond\r\n"
+    texture_bytes = b"P6\n2 1\n255\n" + bytes((255, 0, 0, 0, 255, 0))
+    text.write_bytes(text_bytes)
+    texture.write_bytes(texture_bytes)
+
+    try:
+        text_guid = asset_db.import_asset(str(text)).guid
+        texture_guid = asset_db.import_asset(str(texture)).guid
+        assert text_guid and texture_guid
+
+        text_meta = asset_db.get_meta_by_guid(text_guid)
+        texture_meta = asset_db.get_meta_by_guid(texture_guid)
+        text_document = text_meta.serialize_document()
+        texture_document = texture_meta.serialize_document()
+        assert text_document["metadata"]["file_size"] == {
+            "type": "size_t",
+            "value": len(text_bytes),
+        }
+        assert texture_document["metadata"]["file_size"] == {
+            "type": "size_t",
+            "value": len(texture_bytes),
+        }
+        assert texture_meta.get_int("width") == 2
+        assert texture_meta.get_int("height") == 1
+        assert texture_meta.get_int("channels") == 3
+    finally:
+        for path in (text, texture):
+            if asset_db.contains_path(str(path)):
+                asset_db.delete_asset(str(path))
+            path.unlink(missing_ok=True)
+            Path(f"{path}.meta").unlink(missing_ok=True)
+
+
+def test_material_import_artifact_commits_metadata_and_dependencies_atomically(
+    engine, tmp_path: Path
+):
+    asset_db = engine.get_asset_database()
+    graph = AssetDependencyGraph.instance()
+    vertex = tmp_path / "artifact.vert"
+    fragment = tmp_path / "artifact.frag"
+    material = tmp_path / "artifact.mat"
+    vertex.write_text("void main() {}", encoding="utf-8")
+    fragment.write_text("void main() {}", encoding="utf-8")
+    vertex_guid = asset_db.import_asset(str(vertex)).guid
+    fragment_guid = asset_db.import_asset(str(fragment)).guid
+    assert vertex_guid and fragment_guid
+
+    def write_material(shader_paths: list[Path]) -> None:
+        shaders = {
+            "vertex": str(shader_paths[0]) if shader_paths else "",
+            "fragment": str(shader_paths[1]) if len(shader_paths) > 1 else "",
+        }
+        material.write_text(
+            json.dumps({"shaders": shaders, "properties": {}}),
+            encoding="utf-8",
+        )
+
+    try:
+        material.write_text("{ invalid first import", encoding="utf-8")
+        failed_import = asset_db.import_asset(str(material))
+        assert not failed_import
+        assert failed_import.error_code == AssetMutationErrorCode.IMPORT_FAILED
+        assert failed_import.database_committed is False
+        assert failed_import.error
+        assert not asset_db.contains_path(str(material))
+
+        write_material([vertex, fragment])
+        material_guid = asset_db.import_asset(str(material)).guid
+        assert material_guid
+        assert set(graph.get_dependencies(material_guid)) == {
+            vertex_guid,
+            fragment_guid,
+        }
+        metadata_before = asset_db.get_meta_by_guid(material_guid).serialize_document()
+        generation_before = asset_db.query_generation
+
+        material.write_text("{ invalid material", encoding="utf-8")
+        assert not asset_db.reimport_asset(str(material))
+        assert asset_db.query_generation == generation_before
+        assert set(graph.get_dependencies(material_guid)) == {
+            vertex_guid,
+            fragment_guid,
+        }
+        assert (
+            asset_db.get_meta_by_guid(material_guid).serialize_document()
+            == metadata_before
+        )
+
+        write_material([vertex])
+        assert asset_db.reimport_asset(str(material))
+        assert set(graph.get_dependencies(material_guid)) == {vertex_guid}
+    finally:
+        if asset_db.contains_path(str(material)):
+            asset_db.delete_asset(str(material))
+        asset_db.delete_asset(str(vertex))
+        asset_db.delete_asset(str(fragment))
+
+
+def test_asset_database_explicit_reimport_preserves_guid(engine, tmp_path: Path):
+    asset_db = engine.get_asset_database()
+    source = tmp_path / "reimport.txt"
+    source.write_text("first", encoding="utf-8")
+    guid = asset_db.import_asset(str(source)).guid
+
+    source.write_text("second", encoding="utf-8")
+    assert asset_db.reimport_asset(str(source))
+    assert asset_db.get_guid_from_path(str(source)) == guid
+
+    unregistered = tmp_path / "unregistered.txt"
+    unregistered.write_text("content", encoding="utf-8")
+    missing = asset_db.reimport_asset(str(unregistered))
+    assert not missing
+    assert missing.error_code == AssetMutationErrorCode.NOT_FOUND
+    assert missing.error
+
+
+def test_asset_database_rejects_worker_thread_mutation(engine, tmp_path: Path):
+    asset_db = engine.get_asset_database()
+    source = tmp_path / "worker.txt"
+    source.write_text("content", encoding="utf-8")
+    errors = []
+
+    def mutate():
+        try:
+            asset_db.import_asset(str(source))
+        except RuntimeError as exc:
+            errors.append(str(exc))
+
+    worker = threading.Thread(target=mutate)
+    worker.start()
+    worker.join()
+
+    assert len(errors) == 1
+    assert "owner thread" in errors[0]
+    assert not asset_db.contains_path(str(source))
+
+
+def test_asset_database_publishes_concurrent_reader_snapshots(engine, tmp_path: Path):
+    asset_db = engine.get_asset_database()
+    stable_path = tmp_path / "stable-reader.txt"
+    stable_path.write_text("stable", encoding="utf-8")
+    stable_guid = asset_db.import_asset(str(stable_path)).guid
+    initial_generation = asset_db.query_generation
+
+    start = threading.Event()
+    stop = threading.Event()
+    errors: list[str] = []
+
+    def read_snapshots():
+        start.wait()
+        try:
+            while not stop.is_set():
+                assert asset_db.contains_guid(stable_guid)
+                assert asset_db.contains_path(str(stable_path))
+                assert asset_db.get_guid_from_path(str(stable_path)) == stable_guid
+                assert asset_db.get_path_from_guid(stable_guid)
+                meta = asset_db.get_meta_by_guid(stable_guid)
+                assert meta is not None and meta.get_guid() == stable_guid
+                assert stable_guid in asset_db.get_all_guids()
+                assert any(
+                    entry["guid"] == stable_guid
+                    for entry in asset_db.get_directory_catalog(str(tmp_path))
+                )
+                assert asset_db.asset_count >= 1
+        except BaseException as exc:
+            errors.append(repr(exc))
+            stop.set()
+
+    readers = [threading.Thread(target=read_snapshots) for _ in range(4)]
+    for reader in readers:
+        reader.start()
+
+    start.set()
+    for index in range(32):
+        transient = tmp_path / f"transient-{index}.txt"
+        transient.write_text(str(index), encoding="utf-8")
+        transient_guid = asset_db.import_asset(str(transient)).guid
+        assert transient_guid
+        assert asset_db.delete_asset(str(transient))
+        transient.unlink()
+
+    stop.set()
+    for reader in readers:
+        reader.join(timeout=5)
+        assert not reader.is_alive()
+
+    assert errors == []
+    assert asset_db.query_generation >= initial_generation + 64
+    assert asset_db.asset_count == len(asset_db.get_all_guids())
+
+    retained_meta = asset_db.get_meta_by_guid(stable_guid)
+    assert retained_meta is not None
+    assert asset_db.delete_asset(str(stable_path))
+    assert asset_db.get_meta_by_guid(stable_guid) is None
+    assert retained_meta.get_guid() == stable_guid
+
+
+def test_refresh_builds_import_artifacts_only_on_workers(engine):
+    asset_db = engine.get_asset_database()
+    graph = AssetDependencyGraph.instance()
+    fixture = Path(asset_db.assets_root) / "worker-import-artifact-fixture"
+    fixture.mkdir(parents=True, exist_ok=True)
+    vertex = fixture / "worker.vert"
+    fragment = fixture / "worker.frag"
+    material = fixture / "worker.mat"
+    model = fixture / "worker.obj"
+    vertex.write_text("void main() {}", encoding="utf-8")
+    fragment.write_text("void main() {}", encoding="utf-8")
+    material.write_text(
+        json.dumps(
+            {
+                "shaders": {"vertex": str(vertex), "fragment": str(fragment)},
+                "properties": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    model.write_text(
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        encoding="ascii",
+    )
+
+    paths = (vertex, fragment, material, model)
+    try:
+        asset_db.refresh()
+        assert asset_db.last_refresh_metadata_task_count >= len(paths)
+        assert (
+            asset_db.last_refresh_worker_metadata_count
+            == asset_db.last_refresh_metadata_task_count
+        )
+        assert asset_db.last_refresh_index_build_on_worker is True
+        assert asset_db.last_refresh_importer_task_count >= len(paths)
+        assert (
+            asset_db.last_refresh_worker_importer_count
+            == asset_db.last_refresh_importer_task_count
+        )
+        assert set(paths).issubset(
+            {Path(path) for path in asset_db.last_refresh_imported_paths}
+        )
+
+        vertex_guid = asset_db.get_guid_from_path(str(vertex))
+        fragment_guid = asset_db.get_guid_from_path(str(fragment))
+        material_guid = asset_db.get_guid_from_path(str(material))
+        assert set(graph.get_dependencies(material_guid)) == {
+            vertex_guid,
+            fragment_guid,
+        }
+        model_meta = asset_db.get_meta_by_path(str(model))
+        assert model_meta.get_int("mesh_count") == 1
+        assert model_meta.get_int("vertex_count") == 3
+        assert model_meta.get_int("index_count") == 3
+        assert model_meta.get_int("material_slot_count") == 1
+        assert model_meta.get_int("bone_count") == 0
+        assert model_meta.get_int("animation_count") == 0
+        assert model_meta.get_int("importer_version") == 2
+    finally:
+        for path in paths:
+            if asset_db.contains_path(str(path)):
+                asset_db.delete_asset(str(path))
+            path.unlink(missing_ok=True)
+            Path(f"{path}.meta").unlink(missing_ok=True)
+        fixture.rmdir()
+        asset_db.refresh()
+
+
+def test_asset_index_reuses_unchanged_assets_and_recovers_from_corruption(engine):
+    asset_db = engine.get_asset_database()
+    assert Path(asset_db.assets_root).name == "Assets"
+    assert Path(asset_db.assets_root).parent.resolve() == Path(asset_db.project_root).resolve()
+    fixture_root = Path(asset_db.assets_root) / "asset-index-fixture"
+    fixture_root.mkdir(parents=True, exist_ok=True)
+    paths = [fixture_root / f"asset-{index}.txt" for index in range(16)]
+    for index, path in enumerate(paths):
+        path.write_text(f"initial-{index}", encoding="utf-8")
+
+    try:
+        asset_db.refresh()
+        assert asset_db.last_refresh_scan_on_worker is True
+        assert asset_db.last_refresh_query_build_on_worker is True
+        assert asset_db.last_refresh_query_build_ms >= 0.0
+        assert asset_db.last_refresh_owner_merge_slice_count >= 3
+        assert asset_db.last_refresh_owner_merge_max_slice_ms >= 0.0
+        assert asset_db.last_refresh_scanned_count >= len(paths)
+        assert asset_db.last_refresh_scan_ms >= 0.0
+        assert asset_db.last_refresh_commit_ms >= 0.0
+        original_guids = {path: asset_db.get_guid_from_path(str(path)) for path in paths}
+        assert all(original_guids.values())
+        assert asset_db.last_refresh_imported_count >= len(paths)
+
+        index_path = Path(asset_db.asset_index_path)
+        index_document = json.loads(index_path.read_text(encoding="utf-8"))
+        assert set(index_document) == {"schema_version", "project_root", "entries"}
+        assert index_document["schema_version"] == 1
+
+        query_generation = asset_db.query_generation
+        catalog_generation = asset_db.catalog_generation
+        asset_db.refresh()
+        assert asset_db.last_refresh_reused_count >= len(paths)
+        assert asset_db.last_refresh_imported_paths == []
+        assert asset_db.query_generation == query_generation
+        assert asset_db.catalog_generation == catalog_generation
+        assert asset_db.last_refresh_restore_ms == 0.0
+        assert asset_db.last_refresh_import_ms == 0.0
+        assert asset_db.last_refresh_index_build_ms == 0.0
+        assert asset_db.last_refresh_index_save_ms == 0.0
+        assert asset_db.last_refresh_publish_ms == 0.0
+        assert {path: asset_db.get_guid_from_path(str(path)) for path in paths} == original_guids
+
+        changed_meta = Path(f"{paths[3]}.meta")
+        changed_meta.write_text(
+            changed_meta.read_text(encoding="utf-8") + "\n ",
+            encoding="utf-8",
+        )
+        asset_db.refresh()
+        assert asset_db.last_refresh_imported_count >= 1
+        assert asset_db.last_refresh_reused_count >= len(paths) - 1
+        assert asset_db.get_guid_from_path(str(paths[3])) == original_guids[paths[3]]
+
+        paths[5].write_text("changed-content-with-a-different-size", encoding="utf-8")
+        asset_db.refresh()
+        assert asset_db.last_refresh_imported_count >= 1
+        assert asset_db.last_refresh_reused_count >= len(paths) - 1
+        assert asset_db.get_guid_from_path(str(paths[5])) == original_guids[paths[5]]
+
+        index_path.write_text('{"schema_version": 999}', encoding="utf-8")
+        asset_db.refresh()
+        assert asset_db.last_refresh_imported_count >= len(paths)
+        assert {path: asset_db.get_guid_from_path(str(path)) for path in paths} == original_guids
+        rebuilt = json.loads(index_path.read_text(encoding="utf-8"))
+        assert rebuilt["schema_version"] == 1
+    finally:
+        for path in paths:
+            path.unlink(missing_ok=True)
+            Path(f"{path}.meta").unlink(missing_ok=True)
+        fixture_root.rmdir()
+        asset_db.refresh()
+
+
+def test_asset_database_async_refresh_commits_worker_artifact(engine):
+    asset_db = engine.get_asset_database()
+    asset_db.begin_refresh()
+    assert asset_db.refresh_pending is True
+    with pytest.raises(RuntimeError, match="already pending"):
+        asset_db.begin_refresh()
+
+    deadline = time.monotonic() + 10.0
+    committed = False
+    while time.monotonic() < deadline:
+        if asset_db.try_commit_refresh():
+            committed = True
+            break
+        time.sleep(0.001)
+
+    assert committed is True
+    assert asset_db.refresh_pending is False
+    assert asset_db.last_refresh_scan_on_worker is True
+    if asset_db.last_refresh_imported_count:
+        assert asset_db.last_refresh_query_build_on_worker is True
+
+
+def test_async_refresh_hides_prepared_state_until_worker_import_finalize(
+    engine, tmp_path: Path
+):
+    asset_db = engine.get_asset_database()
+    asset_db.refresh()
+    fixture = Path(asset_db.assets_root) / "pending-import-visibility"
+    fixture.mkdir(parents=True, exist_ok=True)
+    model = fixture / "pending.obj"
+    model.write_text(
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        encoding="ascii",
+    )
+    blocked_mutation = tmp_path / "blocked-during-import.txt"
+    blocked_mutation.write_text("blocked", encoding="utf-8")
+    generation_before = asset_db.query_generation
+    count_before = asset_db.asset_count
+
+    try:
+        asset_db.begin_refresh()
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            assert asset_db.try_commit_refresh() is False
+            if asset_db.last_refresh_importer_task_count > 0:
+                break
+            time.sleep(0.001)
+        else:
+            pytest.fail("refresh never entered its worker importer phase")
+
+        assert asset_db.refresh_pending is True
+        assert asset_db.query_generation == generation_before
+        assert asset_db.asset_count == count_before
+        assert asset_db.contains_path(str(model)) is False
+        assert asset_db.get_meta_by_path(str(model)) is None
+        assert Path(f"{model}.meta").exists() is False
+        with pytest.raises(RuntimeError, match="refresh commit is pending"):
+            asset_db.import_asset(str(blocked_mutation))
+
+        while time.monotonic() < deadline:
+            if asset_db.try_commit_refresh():
+                break
+            time.sleep(0.001)
+        else:
+            pytest.fail("worker importer phase did not finalize")
+
+        assert asset_db.refresh_pending is False
+        assert asset_db.query_generation > generation_before
+        assert asset_db.asset_count == count_before + 1
+        assert asset_db.contains_path(str(model)) is True
+        assert asset_db.get_meta_by_path(str(model)).get_int("mesh_count") == 1
+        assert Path(f"{model}.meta").is_file()
+    finally:
+        if asset_db.refresh_pending:
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline and not asset_db.try_commit_refresh():
+                time.sleep(0.001)
+        if asset_db.contains_path(str(model)):
+            asset_db.delete_asset(str(model))
+        model.unlink(missing_ok=True)
+        Path(f"{model}.meta").unlink(missing_ok=True)
+        fixture.rmdir()
+        asset_db.refresh()
+
+
+def test_asset_database_rejects_stale_async_scan(engine, tmp_path: Path):
+    asset_db = engine.get_asset_database()
+    asset_db.begin_refresh()
+
+    mutation = tmp_path / "mutation-during-scan.txt"
+    mutation.write_text("newer owner state", encoding="utf-8")
+    guid = asset_db.import_asset(str(mutation)).guid
+    assert guid
+
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        try:
+            completed = asset_db.try_commit_refresh()
+        except RuntimeError as error:
+            assert "stale" in str(error)
+            break
+        if completed:
+            pytest.fail("stale scan artifact replaced a newer AssetDatabase generation")
+        time.sleep(0.001)
+    else:
+        pytest.fail("asynchronous AssetDatabase scan did not finish")
+
+    assert asset_db.refresh_pending is False
+    assert asset_db.get_guid_from_path(str(mutation)) == guid
+
+
+def test_refresh_prepare_failure_restores_previous_working_set(engine):
+    asset_db = engine.get_asset_database()
+    fixture = Path(asset_db.assets_root) / "prepare-rollback-fixture"
+    fixture.mkdir(parents=True, exist_ok=True)
+    source = fixture / "rollback.txt"
+    source.write_text("stable", encoding="utf-8")
+
+    try:
+        asset_db.refresh()
+        guid = asset_db.get_guid_from_path(str(source))
+        metadata_before = asset_db.get_meta_by_guid(guid).serialize_document()
+        generation_before = asset_db.query_generation
+        meta_path = Path(f"{source}.meta")
+        valid_meta = meta_path.read_text(encoding="utf-8")
+        meta_path.write_text("{ broken metadata", encoding="utf-8")
+
+        asset_db.begin_refresh()
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            try:
+                asset_db.try_commit_refresh()
+            except RuntimeError as error:
+                assert "Invalid metadata file" in str(error)
+                break
+            time.sleep(0.001)
+        else:
+            pytest.fail("invalid metadata did not fail refresh prepare")
+
+        assert asset_db.refresh_pending is False
+        assert asset_db.query_generation == generation_before
+        assert asset_db.get_guid_from_path(str(source)) == guid
+        assert asset_db.get_meta_by_guid(guid).serialize_document() == metadata_before
+
+        meta_path.write_text(valid_meta, encoding="utf-8")
+        asset_db.refresh()
+        assert asset_db.get_guid_from_path(str(source)) == guid
+    finally:
+        if asset_db.refresh_pending:
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline and not asset_db.try_commit_refresh():
+                time.sleep(0.001)
+        if asset_db.contains_path(str(source)):
+            asset_db.delete_asset(str(source))
+        source.unlink(missing_ok=True)
+        Path(f"{source}.meta").unlink(missing_ok=True)
+        fixture.rmdir()
+        asset_db.refresh()

@@ -139,6 +139,8 @@ class SceneRenderTarget
     /// @brief Get depth format
     VkFormat GetDepthFormat() const;
 
+    [[nodiscard]] uint64_t GetResidentBytes() const;
+
     // ========================================================================
     // Outline Mask Render Target (for post-process selection outline)
     // ========================================================================

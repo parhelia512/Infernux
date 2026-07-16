@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar, Token
 import json
 import os
 import time
@@ -13,13 +14,37 @@ _active_trace: dict[str, Any] | None = None
 _last_trace: dict[str, Any] | None = None
 _session_project_path = ""
 _session_log_path = ""
+_public_tool_trace_depth: ContextVar[int] = ContextVar("infernux_mcp_public_tool_trace_depth", default=0)
+
+
+def begin_public_tool_trace() -> Token[int]:
+    """Mark a top-level MCP tool invocation so nested helper calls stay silent."""
+    return _public_tool_trace_depth.set(_public_tool_trace_depth.get() + 1)
+
+
+def end_public_tool_trace(token: Token[int]) -> None:
+    """Restore the nested-tool tracing state for the current MCP invocation."""
+    _public_tool_trace_depth.reset(token)
+
+
+def public_tool_trace_active() -> bool:
+    """Return whether an outer MCP tool wrapper owns the current trace entry."""
+    return _public_tool_trace_depth.get() > 0
+
+
+def set_session_project_path(project_path: str) -> dict[str, Any]:
+    """Bind trace output to a project without creating a log file yet."""
+    global _session_project_path, _session_log_path
+    _session_project_path = os.path.abspath(project_path or "") if project_path else ""
+    _session_log_path = _session_log_file(_session_project_path)
+    return session_log_info(_session_project_path)
 
 
 def start_session_log(project_path: str) -> dict[str, Any]:
     """Clear and initialize the per-editor-session MCP call log."""
-    global _session_project_path, _session_log_path
-    _session_project_path = os.path.abspath(project_path or "")
-    _session_log_path = _session_log_file(_session_project_path)
+    set_session_project_path(project_path)
+    if not _session_log_path:
+        return session_log_info(project_path)
     os.makedirs(os.path.dirname(_session_log_path), exist_ok=True)
     with open(_session_log_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps({
@@ -63,14 +88,23 @@ def read_session_log(project_path: str | None = None, limit: int = 200) -> dict[
     return {"entries": entries[-max(int(limit), 1):], **session_log_info(project_path)}
 
 
-def start_trace(project_path: str, task: str = "") -> dict[str, Any]:
+def start_trace(
+    project_path: str,
+    task: str = "",
+    *,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Start a trace, optionally attaching immutable attempt/session context."""
     global _active_trace
     _active_trace = {
+        "schema_version": 1,
         "trace_id": f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}",
         "task": str(task or ""),
         "started_at": time.time(),
         "steps": [],
     }
+    if context:
+        _active_trace["context"] = _jsonable_summary(context)
     return current_trace()
 
 
@@ -106,6 +140,8 @@ def record_tool_call(
     result: Any = None,
     error: str = "",
 ) -> None:
+    if public_tool_trace_active():
+        return
     if _active_trace is None:
         _record_session_tool_call(name, ok=ok, elapsed_ms=elapsed_ms, arguments=arguments, result=result, error=error)
         return
@@ -123,6 +159,12 @@ def record_tool_call(
     }
     if arguments:
         step["arguments"] = _jsonable_summary(arguments)
+    if result is not None:
+        step["result"] = _jsonable_summary(
+            result,
+            max_string=_trace_result_max_string(),
+            limit_name="trace_result_max_string",
+        )
     if error:
         step["error"] = str(error)
     _active_trace["steps"].append(step)
@@ -139,6 +181,8 @@ def record_tool_result(
     error: str = "",
 ) -> None:
     """Record a call with compact result data in the session log."""
+    if public_tool_trace_active():
+        return
     _record_session_tool_call(
         name,
         ok=ok,
@@ -183,7 +227,10 @@ def _trace_dir(project_path: str) -> str:
 
 
 def _session_log_file(project_path: str) -> str:
-    return os.path.join(os.path.abspath(project_path or "."), "Logs", "mcp_session.jsonl")
+    root = str(project_path or "").strip()
+    if not root:
+        return ""
+    return os.path.join(os.path.abspath(root), "Logs", "mcp_session.jsonl")
 
 
 def _record_session_tool_call(
@@ -212,7 +259,11 @@ def _record_session_tool_call(
         if arguments:
             entry["arguments"] = _jsonable_summary(arguments)
         if result is not None:
-            entry["result"] = _jsonable_summary(result, max_string=_session_result_max_string())
+            entry["result"] = _jsonable_summary(
+                result,
+                max_string=_session_result_max_string(),
+                limit_name="session_log_result_max_string",
+            )
         if error:
             entry["error"] = str(error)
         with open(path, "a", encoding="utf-8", newline="\n") as f:
@@ -237,6 +288,14 @@ def _session_result_max_string() -> int:
         return 480
 
 
+def _trace_result_max_string() -> int:
+    try:
+        from Infernux.mcp.capabilities import limit
+        return int(limit("trace_result_max_string", 480) or 480)
+    except Exception:
+        return 480
+
+
 def _rel(project_path: str, path: str) -> str:
     if not project_path or not path:
         return path
@@ -246,21 +305,33 @@ def _rel(project_path: str, path: str) -> str:
         return path
 
 
-def _jsonable_summary(value: Any, *, max_string: int = 240) -> Any:
-    try:
-        from Infernux.mcp.capabilities import limit
-        max_string = int(limit("trace_argument_max_string", max_string) or max_string)
-    except Exception:
-        pass
+def _jsonable_summary(
+    value: Any,
+    *,
+    max_string: int = 240,
+    limit_name: str = "trace_argument_max_string",
+) -> Any:
+    if limit_name:
+        try:
+            from Infernux.mcp.capabilities import limit
+            max_string = int(limit(limit_name, max_string) or max_string)
+        except Exception:
+            pass
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, str):
         return value if len(value) <= max_string else value[:max_string] + "...<truncated>"
     if isinstance(value, dict):
-        return {str(k): _jsonable_summary(v, max_string=max_string) for k, v in list(value.items())[:40]}
+        return {
+            str(k): _jsonable_summary(v, max_string=max_string, limit_name=limit_name)
+            for k, v in list(value.items())[:40]
+        }
     if isinstance(value, (list, tuple)):
         items = list(value)
-        summarized = [_jsonable_summary(v, max_string=max_string) for v in items[:40]]
+        summarized = [
+            _jsonable_summary(v, max_string=max_string, limit_name=limit_name)
+            for v in items[:40]
+        ]
         if len(items) > 40:
             summarized.append(f"...<{len(items) - 40} more>")
         return summarized

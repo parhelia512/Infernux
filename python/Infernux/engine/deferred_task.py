@@ -13,7 +13,7 @@ Usage::
         ("重建场景...",  0.6, rebuild_fn),
     ], on_done=lambda ok: EngineStatus.flash("Done", 1.0))
 
-The runner is ticked once per frame by ``FrameSchedulerPanel``.
+The runner is ticked once per frame by the engine's pre-GUI callback.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ class DeferredTaskRunner:
         if self._steps:
             label, progress, _ = self._steps[0]
             from Infernux.engine.ui.engine_status import EngineStatus
-            EngineStatus.set(label, progress)
+            EngineStatus.set(label, progress, source="deferred", priority=10)
         return True
 
     def tick(self) -> None:
@@ -81,7 +81,7 @@ class DeferredTaskRunner:
 
         # Update status bar *before* executing (visible this frame)
         from Infernux.engine.ui.engine_status import EngineStatus
-        EngineStatus.set(label, progress)
+        EngineStatus.set(label, progress, source="deferred", priority=10)
 
         # Execute the step
         if fn is not None and not self._failed:
@@ -101,7 +101,7 @@ class DeferredTaskRunner:
         self._steps.clear()
         self._index = 0
         from Infernux.engine.ui.engine_status import EngineStatus
-        EngineStatus.clear()
+        EngineStatus.clear(source="deferred")
 
     # ── internals ─────────────────────────────────────────────────────
 
@@ -113,6 +113,8 @@ class DeferredTaskRunner:
         self._on_done = None
         self._failed = False
         self._task_name = ""
+        from Infernux.engine.ui.engine_status import EngineStatus
+        EngineStatus.clear(source="deferred")
         if on_done:
             try:
                 on_done(ok)

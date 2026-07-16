@@ -23,22 +23,24 @@ Example::
 from __future__ import annotations
 
 import copy
-import logging
 from typing import Any, Dict, Optional, Type, TYPE_CHECKING
-from Infernux.debug import Debug
 
 if TYPE_CHECKING:
     from .serialized_field import FieldMetadata
 
-_log = logging.getLogger("Infernux.serialize")
-
-# Global registry: qualname → class.  Populated by __init_subclass__.
+# Global registry: module:qualname → class. Populated by __init_subclass__.
 _SERIALIZABLE_REGISTRY: Dict[str, Type["SerializableObject"]] = {}
 
 
-def get_serializable_class(qualname: str) -> Optional[Type["SerializableObject"]]:
-    """Look up a registered SerializableObject subclass by qualname."""
-    return _SERIALIZABLE_REGISTRY.get(qualname)
+def get_serializable_type_id(value: type | "SerializableObject") -> str:
+    """Return the stable current-format identity for a serializable type."""
+    value_type = value if isinstance(value, type) else type(value)
+    return f"{value_type.__module__}:{value_type.__qualname__}"
+
+
+def get_serializable_class(type_id: str) -> Optional[Type["SerializableObject"]]:
+    """Look up a registered SerializableObject subclass by module:qualname."""
+    return _SERIALIZABLE_REGISTRY.get(type_id)
 
 
 class SerializableObject:
@@ -49,8 +51,8 @@ class SerializableObject:
 
     * Field declarations follow the same syntax as InxComponent
       (``serialized_field()``, plain values, type annotations).
-    * Instances are stored/restored as plain dicts with a
-      ``__serializable_type__`` tag for polymorphic deserialization.
+    * Instances use the current typed value-document identity for
+      polymorphic deserialization.
     * **No undo/dirty tracking** — that is handled at the InxComponent level.
     """
 
@@ -64,7 +66,7 @@ class SerializableObject:
         super().__init_subclass__(**kwargs)
 
         cls._serialized_fields_ = {}
-        _SERIALIZABLE_REGISTRY[cls.__qualname__] = cls
+        _SERIALIZABLE_REGISTRY[get_serializable_type_id(cls)] = cls
 
         own_annotations = cls.__dict__.get('__annotations__', {})
 
@@ -170,41 +172,76 @@ class SerializableObject:
         """Serialize this object to a JSON-friendly dict."""
         from .serialized_field import get_serialized_fields
 
-        data: Dict[str, Any] = {"__serializable_type__": self.__class__.__qualname__}
+        fields_document: Dict[str, Any] = {}
         fields = get_serialized_fields(self.__class__)
         from .serialized_field import get_raw_field_value
         for name, meta in fields.items():
             value = get_raw_field_value(self, name)
-            data[name] = _serialize_so_value(value)
-        return data
+            fields_document[name] = _serialize_so_value(
+                value, f"{get_serializable_type_id(self)}.{name}"
+            )
+        from .value_document import make_serializable_object
+        return make_serializable_object(get_serializable_type_id(self), fields_document)
+
+    @classmethod
+    def _validate_document(cls, data: dict, path: str = "SerializableObject"):
+        """Validate a complete object graph without constructing an instance."""
+        from .serialized_field import get_serialized_fields
+
+        if not isinstance(data, dict):
+            raise TypeError(f"{path}: SerializableObject document must be an object")
+        from .value_document import TYPE_KEY, VERSION_KEY, SCHEMA_VERSION, SERIALIZABLE_OBJECT
+        expected_keys = {TYPE_KEY, VERSION_KEY, "type_id", "fields"}
+        if set(data) != expected_keys or data.get(TYPE_KEY) != SERIALIZABLE_OBJECT:
+            raise ValueError(f"{path}: invalid SerializableObject typed document")
+        if data.get(VERSION_KEY) != SCHEMA_VERSION:
+            raise ValueError(f"{path}: SerializableObject requires value schema {SCHEMA_VERSION}")
+        type_id = data.get("type_id")
+        if not isinstance(type_id, str) or not type_id:
+            raise ValueError(f"{path}: SerializableObject document requires type_id")
+        actual_cls = _SERIALIZABLE_REGISTRY.get(type_id)
+        if actual_cls is None:
+            raise ValueError(f"{path}: unknown SerializableObject type_id {type_id!r}")
+
+        fields = get_serialized_fields(actual_cls)
+        fields_document = data.get("fields")
+        if not isinstance(fields_document, dict):
+            raise TypeError(f"{path}: SerializableObject fields must be an object")
+        document_fields = set(fields_document)
+        expected_fields = set(fields)
+        unknown = sorted(document_fields - expected_fields)
+        if unknown:
+            raise ValueError(
+                f"{path}: {type_id} field schema mismatch: unknown={unknown}"
+            )
+
+        from .value_codec import VALUE_CODECS
+        for name, meta in fields.items():
+            if name in fields_document:
+                VALUE_CODECS.validate(fields_document[name], meta, f"{path}.{name}")
+        return actual_cls, fields
 
     @classmethod
     def _deserialize(cls, data: dict) -> "SerializableObject":
-        """Create an instance from a serialized dict.
+        """Validate, decode, and construct one current-schema object."""
+        actual_cls, fields = cls._validate_document(data)
 
-        Uses ``__serializable_type__`` to resolve the concrete class from
-        the global registry, falling back to *cls* when the tag is missing.
-        """
-        from .serialized_field import get_serialized_fields
+        from .serialized_field import copy_serialized_field_default
 
-        type_name = data.get("__serializable_type__", cls.__qualname__)
-        actual_cls = _SERIALIZABLE_REGISTRY.get(type_name, cls)
-
+        fields_document = data["fields"]
+        decoded = {
+            name: (
+                _deserialize_so_value(
+                    fields_document[name], meta, f"{get_serializable_type_id(actual_cls)}.{name}"
+                )
+                if name in fields_document
+                else copy_serialized_field_default(meta)
+            )
+            for name, meta in fields.items()
+        }
         instance = actual_cls.__new__(actual_cls)
-        # Initialize defaults first
-        fields = get_serialized_fields(actual_cls)
-        for name, meta in fields.items():
-            try:
-                setattr(instance, name, copy.deepcopy(meta.default))
-            except Exception:
-                setattr(instance, name, meta.default)
-
-        # Apply stored values
-        for name, value in data.items():
-            if name.startswith("__"):
-                continue
-            if name in fields:
-                setattr(instance, name, _deserialize_so_value(value, fields[name]))
+        for name, value in decoded.items():
+            setattr(instance, name, value)
         return instance
 
     # ------------------------------------------------------------------
@@ -242,140 +279,17 @@ class SerializableObject:
         return result
 
 
-# ======================================================================
-# Private serialization helpers (mirror InxComponent._serialize_value
-# but without the heavy InxComponent-specific imports)
-# ======================================================================
+def _serialize_so_value(value: Any, path: str = "SerializableObject.value") -> Any:
+    """Encode a SerializableObject field with the shared strict registry."""
+    from .value_codec import VALUE_CODECS
 
-def _serialize_so_value(value: Any) -> Any:
-    """Recursively serialize a value owned by a SerializableObject."""
-    if isinstance(value, (bool, int, float, str, type(None))):
-        return value
-
-    if isinstance(value, list):
-        return [_serialize_so_value(item) for item in value]
-    if isinstance(value, dict):
-        return {k: _serialize_so_value(v) for k, v in value.items()}
-
-    # Nested SerializableObject
-    if isinstance(value, SerializableObject):
-        return value._serialize()
-
-    # Enum
-    from enum import Enum as _Enum
-    if isinstance(value, _Enum):
-        return {"__enum__": type(value).__qualname__, "name": value.name}
-
-    # GameObjectRef / PrefabRef / MaterialRef
-    from .ref_wrappers import GameObjectRef, MaterialRef, PrefabRef
-    if isinstance(value, GameObjectRef):
-        return {"__game_object__": value.persistent_id}
-    if isinstance(value, PrefabRef):
-        return value._serialize()
-    if isinstance(value, MaterialRef):
-        d: dict = {"__material_ref__": value.guid}
-        if value._path_hint:
-            d["__path_hint__"] = value._path_hint
-        return d
-
-    # Asset refs (TextureRef, ShaderRef, AudioClipRef) — shared helper
-    from ._serialize_helpers import _serialize_asset_ref
-    ref_dict = _serialize_asset_ref(value)
-    if ref_dict is not None:
-        return ref_dict
-
-    # ComponentRef
-    from .ref_wrappers import ComponentRef
-    if isinstance(value, ComponentRef):
-        return value._serialize()
-
-    # Vec types — shared helper
-    from ._serialize_helpers import serialize_vec
-    vec_list = serialize_vec(value)
-    if vec_list is not None:
-        return vec_list
-
-    _log.warning(
-        "Cannot serialize SO value of type %s — returning None.",
-        type(value).__name__,
-    )
-    return None
+    return VALUE_CODECS.encode(value, path)
 
 
-def _deserialize_so_value(value: Any, field_meta) -> Any:
-    """Recursively deserialize a value for a SerializableObject field."""
-    from .serialized_field import FieldType
-    from ._serialize_helpers import make_null_ref, deserialize_dict_ref
-    from Infernux.math import Vector2, Vector3, vec4f
+def _deserialize_so_value(
+    value: Any, field_meta: Any, path: str = "SerializableObject.value"
+) -> Any:
+    """Decode a SerializableObject field with the shared strict registry."""
+    from .value_codec import VALUE_CODECS
 
-    if hasattr(field_meta, "field_type"):
-        field_type = field_meta.field_type
-        element_type = getattr(field_meta, "element_type", None)
-    else:
-        field_type = field_meta
-        element_type = None
-
-    # Null values for ref types → return a null ref wrapper (not raw None)
-    if value is None:
-        return make_null_ref(field_type, field_meta)
-
-    if field_type == FieldType.SERIALIZABLE_OBJECT:
-        if isinstance(value, dict) and "__serializable_type__" in value:
-            return SerializableObject._deserialize(value)
-        so_cls = getattr(field_meta, "serializable_class", None)
-        if so_cls and isinstance(value, dict):
-            return so_cls._deserialize(value)
-        return value
-
-    if field_type == FieldType.COMPONENT:
-        if isinstance(value, dict) and "__component_ref__" in value:
-            from .ref_wrappers import ComponentRef
-            return ComponentRef._from_dict(value["__component_ref__"])
-        return value
-
-    if field_type == FieldType.LIST:
-        if not isinstance(value, list):
-            return []
-        if element_type == FieldType.SERIALIZABLE_OBJECT:
-            elem_cls = getattr(field_meta, "element_class", None)
-            result = []
-            for item in value:
-                if isinstance(item, dict):
-                    if "__serializable_type__" in item:
-                        result.append(SerializableObject._deserialize(item))
-                    elif elem_cls:
-                        result.append(elem_cls._deserialize(item))
-                    else:
-                        result.append(item)
-                else:
-                    result.append(item)
-            return result
-        return [_deserialize_so_value(item, element_type or FieldType.UNKNOWN) for item in value]
-
-    if field_type == FieldType.VEC2:
-        if isinstance(value, (list, tuple)) and len(value) >= 2:
-            return Vector2(float(value[0]), float(value[1]))
-        return value
-    if field_type == FieldType.VEC3:
-        if isinstance(value, (list, tuple)) and len(value) >= 3:
-            return Vector3(float(value[0]), float(value[1]), float(value[2]))
-        return value
-    if field_type == FieldType.VEC4:
-        if isinstance(value, (list, tuple)) and len(value) >= 4:
-            return vec4f(float(value[0]), float(value[1]), float(value[2]), float(value[3]))
-        return value
-
-    if field_type == FieldType.ENUM and isinstance(value, dict) and "__enum__" in value:
-        enum_cls = getattr(field_meta, "enum_type", None)
-        if enum_cls is not None and hasattr(enum_cls, "__getitem__"):
-            try:
-                return enum_cls[value["name"]]
-            except KeyError as _exc:
-                Debug.log(f"[Suppressed] {type(_exc).__name__}: {_exc}")
-                pass
-        return value
-
-    if isinstance(value, dict):
-        return deserialize_dict_ref(value)
-
-    return value
+    return VALUE_CODECS.decode(value, field_meta, path)

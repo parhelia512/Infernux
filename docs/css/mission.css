@@ -7,7 +7,7 @@
 .mission-ribbon {
     position: relative;
     background:
-        linear-gradient(90deg, var(--accent) 0%, var(--accent-deep) 60%, var(--accent) 100%);
+        linear-gradient(90deg, var(--accent-fill) 0%, var(--accent-fill-hover) 60%, var(--accent-fill) 100%);
     overflow: hidden;
 }
 
@@ -45,15 +45,15 @@
 }
 
 .mission-name .mission-accent {
-    color: #fff8ef;
+    color: var(--on-accent);
     text-shadow:
         0 0 4px rgba(255, 248, 239, 0.7),
         0 0 14px rgba(255, 207, 184, 0.45);
 }
 
 .mission-sub {
-    color: rgba(253, 243, 240, 0.78);
-    border-left: 1px solid rgba(253, 243, 240, 0.4);
+    color: var(--on-accent);
+    border-left: 1px solid color-mix(in srgb, var(--on-accent) 62%, transparent);
     padding-left: 14px;
 }
 

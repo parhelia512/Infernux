@@ -7,8 +7,10 @@ import shutil
 import glob
 import zipfile
 import sysconfig
+import uuid
 
-from hub_utils import is_frozen, is_project_open, merge_child_env_utf8
+from hub_utils import is_frozen, merge_child_env_utf8
+from project_paths import inspect_existing_project, new_project_target
 from python_runtime import PythonRuntimeError, PythonRuntimeManager
 import logging
 
@@ -351,79 +353,101 @@ class ProjectModel:
         self.version_manager = version_manager
         self.runtime_manager = runtime_manager or PythonRuntimeManager()
 
-    def add_project(self, name, path):
-        return self.db.add_project(name, path)
+    def add_project(self, name: str, project_dir: str):
+        """Register a fully initialized project directory in the Hub."""
+        if self.db is None:
+            return None
+        return self.db.add_project(name, project_dir)
 
-    def delete_project(self, name):
-        base_path = self.db.get_project_path(name)
-        project_dir = os.path.join(base_path, name) if base_path else ""
+    def register_existing_project(self, project_dir: str):
+        """Validate and register an existing project without modifying it."""
+        info = inspect_existing_project(project_dir)
+        if self.db is None:
+            raise RuntimeError("Project registry is not available.")
+        if self.db.find_project_by_path(info.path) is not None:
+            raise RuntimeError(f"This project is already in Infernux Hub:\n{info.path}")
+        record = self.db.add_project(info.name, info.path)
+        if record is None:
+            raise RuntimeError(f"Failed to add the project to Infernux Hub:\n{info.path}")
+        return record, info
 
-        if project_dir and is_project_open(project_dir):
-            raise RuntimeError(
-                f"The project is currently open in Infernux and cannot be deleted:\n{project_dir}"
-            )
+    def remove_project(self, project_id: str) -> bool:
+        """Remove only the Hub registry entry; project files are untouched."""
+        return bool(self.db is not None and self.db.remove_project(project_id))
 
-        if project_dir and os.path.exists(project_dir):
-            try:
-                shutil.rmtree(project_dir)
-            except OSError as exc:
-                raise RuntimeError(
-                    f"Failed to remove the project folder:\n{project_dir}\n{exc}"
-                ) from exc
+    def relocate_project(self, project_id: str, project_dir: str):
+        """Point an existing registry entry at a validated project directory."""
+        if self.db is None or self.db.get_project(project_id) is None:
+            raise RuntimeError("The selected project is no longer registered in Hub.")
 
-        self.db.delete_project(name)
+        info = inspect_existing_project(project_dir)
+        existing = self.db.find_project_by_path(info.path)
+        if existing is not None and existing.project_id != project_id:
+            raise RuntimeError(f"This project is already in Infernux Hub:\n{info.path}")
 
-    
+        record = self.db.relocate_project(project_id, info.name, info.path)
+        if record is None:
+            raise RuntimeError(f"Failed to relocate the project in Infernux Hub:\n{info.path}")
+        return record, info
+
+    def delete_project(self, project_id: str) -> bool:
+        """Compatibility alias for old callers; never deletes project files."""
+        return self.remove_project(project_id)
+
     def init_project_folder(self, project_name: str, project_path: str,
-                            engine_version: str = "", on_status=None):
+                            engine_version: str = "", on_status=None) -> str:
+        """Create a project transactionally and return its final directory."""
+        parent_dir, final_dir = new_project_target(project_path, project_name)
+        if os.path.exists(final_dir):
+            raise RuntimeError(f"Project directory already exists:\n{final_dir}")
+
+        staging_dir = os.path.join(parent_dir, f".infernux-create-{uuid.uuid4().hex}")
         if on_status:
             on_status("Creating project folders...")
-        project_dir = os.path.join(project_path, project_name)
-        os.makedirs(project_dir, exist_ok=True)
+        os.makedirs(staging_dir)
+        committed = False
 
-        # Create subdirectories
-        for subdir in ("ProjectSettings", "Logs", "Library", "Assets"):
-            os.makedirs(os.path.join(project_dir, subdir), exist_ok=True)
+        try:
+            for subdir in ("ProjectSettings", "Logs", "Library", "Assets"):
+                os.makedirs(os.path.join(staging_dir, subdir))
 
-        # Create a README file in assets
-        readme_path = os.path.join(project_dir, "Assets", "README.md")
-        with open(readme_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write("# Project Assets\n\nThis folder contains all the assets for the project.\n")
+            readme_path = os.path.join(staging_dir, "Assets", "README.md")
+            with open(readme_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write("# Project Assets\n\nThis folder contains all the assets for the project.\n")
 
-        # Create default project requirements
-        req_path = os.path.join(project_dir, "ProjectSettings", "requirements.txt")
-        if not os.path.isfile(req_path):
+            req_path = os.path.join(staging_dir, "ProjectSettings", "requirements.txt")
             self._copy_bundled_requirements(req_path, engine_version)
 
-        # Create .ini file in project path
-        ini_path = os.path.join(project_dir, f"{project_name}.ini")
-        now = datetime.datetime.now()
-        with open(ini_path, "w", encoding="utf-8") as f:
-            f.write("[Project]\n")
-            f.write(f"name = {project_name}\n")
-            f.write(f"path = {project_dir}\n")
-            f.write(f"created_at = {now}\n")
-            f.write(f"changed_at = {now}\n")
+            ini_path = os.path.join(staging_dir, f"{project_name}.ini")
+            now = datetime.datetime.now()
+            with open(ini_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write("[Project]\n")
+                f.write(f"name = {project_name}\n")
+                f.write(f"path = {final_dir}\n")
+                f.write(f"created_at = {now}\n")
+                f.write(f"changed_at = {now}\n")
 
-        # ── Pin engine version ──────────────────────────────────────────
-        if engine_version:
-            from version_manager import VersionManager
-            VersionManager.write_project_version(project_dir, engine_version)
+            if engine_version:
+                from version_manager import VersionManager
+                VersionManager.write_project_version(staging_dir, engine_version)
 
-        # ── Create project Python runtime and install Infernux ────────
-        runtime_path = os.path.join(project_dir, ".runtime", "python312")
-        try:
-            self._create_project_runtime(project_dir, on_status=on_status)
-            self._install_infernux_in_runtime(project_dir, engine_version, on_status=on_status)
+            if on_status:
+                on_status("Finalizing project...")
+            os.replace(staging_dir, final_dir)
+            committed = True
+
+            # Virtual environments can contain absolute paths and must be
+            # created at their final location instead of being moved there.
+            self._create_project_runtime(final_dir, on_status=on_status)
+            self._install_infernux_in_runtime(final_dir, engine_version, on_status=on_status)
+
+            if on_status:
+                on_status("Writing project editor settings...")
+            self._create_vscode_workspace(final_dir)
+            return final_dir
         except Exception:
-            shutil.rmtree(os.path.join(project_dir, ".runtime"), ignore_errors=True)
-            shutil.rmtree(os.path.join(project_dir, ".venv"), ignore_errors=True)
+            _remove_tree(final_dir if committed else staging_dir)
             raise
-
-        # ── Create VS Code workspace configuration ─────────────────────
-        if on_status:
-            on_status("Writing project editor settings...")
-        self._create_vscode_workspace(project_dir)
 
     # -----------------------------------------------------------------
     # Private helpers
