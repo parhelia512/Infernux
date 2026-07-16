@@ -11,7 +11,7 @@ const routeKeys = {
     index: "home.hero.title",
     wiki: "wiki.hero.title",
     roadmap: "roadmap.hero.title",
-    community: "community.hero.title",
+    community: "community.forum.title",
     download: "downloadPage.hero.title",
 };
 

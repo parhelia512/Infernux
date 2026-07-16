@@ -65,7 +65,7 @@ const templateStyles = await read(`css/${hashedTemplateStyles[0]}`);
 
 for (const breakpoint of [1180, 1080, 820, 520]) assertBreakpoint(styles.shared, breakpoint, "Shared shell");
 for (const breakpoint of [1200, 1080, 820]) assertBreakpoint(styles.wiki, breakpoint, "Wiki hub");
-for (const breakpoint of [1080, 820, 520]) assertBreakpoint(styles.community, breakpoint, "Community");
+for (const breakpoint of [1000, 760, 520]) assertBreakpoint(styles.community, breakpoint, "Community");
 for (const breakpoint of [900, 640]) assertBreakpoint(styles.download, breakpoint, "Download");
 for (const breakpoint of [1080, 820]) assertBreakpoint(styles.roadmap, breakpoint, "Roadmap");
 assertBreakpoint(styles.search, 720, "Documentation search");
@@ -109,7 +109,7 @@ assert.match(styles.search, /@media\s*\(max-width:\s*720px\)[\s\S]*?\.docs-searc
 assert.match(styles.home, /\.code-copy-action\s*\{[\s\S]*?min-height:\s*44px;/, "home starter copy must retain a 44px minimum touch target");
 assert.match(styles.home, /@media\s*\(max-width:\s*520px\)[\s\S]*?\.code-copy-action\s*\{[^}]*width:\s*44px;[^}]*min-width:\s*44px;[\s\S]*?\.code-copy-action span\s*\{[^}]*clip:/, "phone starter copy must collapse its visual label without removing the accessible name");
 assert.match(styles.community, /\.topic-action\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px;/, "forum topic sharing must retain a 44px touch target");
-assert.match(styles.community, /@media\s*\(max-width:\s*820px\)[\s\S]*?\.topic-row\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto;[\s\S]*?\.topic-main\s*\{[^}]*grid-template-columns:\s*1fr;/, "mobile forum topics must reserve a fixed copy action beside a collapsible primary link");
+assert.match(styles.community, /@media\s*\(max-width:\s*520px\)[\s\S]*?\.topic-row\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 44px;[\s\S]*?\.topic-main\s*\{[^}]*grid-template-columns:\s*1fr;/, "mobile forum topics must reserve a fixed copy action beside a collapsible primary link");
 assert.match(styles.generated, /@media\s*\(max-width:\s*768px\)[\s\S]*?\.doc-outline-link\s*\{\s*min-height:\s*44px;/, "mobile document outlines must retain 44px links");
 assert.match(templateStyles, /\.api-main\s*\{[^}]*min-width:\s*0;/, "generated document content must be allowed to shrink inside its layout");
 assert.match(templateStyles, /@media\s*\(max-width:\s*768px\)[\s\S]*?\.api-main td,[\s\S]*?overflow-wrap:\s*anywhere;/, "API tables must wrap long symbols on narrow screens");

@@ -179,6 +179,25 @@
         return true;
     }
 
+    function open(config) {
+        const host = document.querySelector(".giscus");
+        const term = String(config?.term || "").trim().slice(0, 120);
+        const category = String(config?.category || "").trim().slice(0, 80);
+        const categoryId = String(config?.categoryId || "").trim();
+        if (!host || term.length < 4 || !category || !/^DIC_[A-Za-z0-9_-]+$/.test(categoryId)) {
+            render("error");
+            return false;
+        }
+
+        host.dataset.term = term;
+        host.dataset.category = category;
+        host.dataset.categoryId = categoryId;
+        document.getElementById(GISCUS_SCRIPT_ID)?.remove();
+        host.replaceChildren();
+        render("standby");
+        return load();
+    }
+
     function syncConfig() {
         const frame = document.querySelector("iframe.giscus-frame");
         if (!frame?.contentWindow) return;
@@ -192,7 +211,7 @@
         }, GISCUS_ORIGIN);
     }
 
-    const controller = Object.freeze({ load, syncCopy, syncConfig, state: () => readinessState });
+    const controller = Object.freeze({ load, open, syncCopy, syncConfig, state: () => readinessState });
     globalThis.InfernuxGiscus = controller;
     window.addEventListener("message", handleMessage);
     const host = document.querySelector(".giscus");

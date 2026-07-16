@@ -32,7 +32,7 @@
     <link rel="stylesheet" href="css/style.css?v=17">
     <link rel="stylesheet" href="css/docs-search.css?v=3">
     <link rel="stylesheet" href="css/mission.css?v=2">
-    <link rel="stylesheet" href="css/community.css?v=10">
+    <link rel="stylesheet" href="css/community.css?v=12">
     <link rel="stylesheet" href="css/fontawesome-subset.css?v=6.4.0">
 </head>
 <body>
@@ -72,170 +72,74 @@
 
     <main class="page-shell community-layout" id="main-content">
         <div class="container">
-            <section class="subpage-hero community-hero">
-                <div class="hero-codename">
-                    <span class="badge" data-i18n="community.hero.badge">COMMUNITY UPLINK · GITHUB-BACKED</span>
-                    <span data-i18n="community.hero.kicker">Talk · ask · propose · report</span>
+            <header class="forum-header">
+                <div class="forum-heading">
+                    <p class="forum-eyebrow" data-i18n="community.forum.eyebrow">INFERNUX COMMUNITY</p>
+                    <h1 data-i18n="community.forum.title">Community forum</h1>
+                    <p data-i18n="community.forum.subtitle">Ask a question, report a problem, share a project, or propose an idea.</p>
                 </div>
-                <h1 data-i18n="community.hero.title">A small forum without a shadow database.</h1>
-                <p data-i18n="community.hero.description">Topics, replies, moderation, and identity remain on GitHub. The website provides a focused doorway; Discussions stores conversations and Issues stores reproducible work.</p>
-                <div class="hub-actions">
-                    <a class="btn btn-primary" href="https://github.com/ChenlizheMe/Infernux/discussions/new/choose" target="_blank" rel="noopener"><i class="fas fa-message"></i><span data-i18n="community.hero.primary">Start a discussion</span></a>
-                    <a class="btn btn-secondary" href="https://github.com/ChenlizheMe/Infernux/issues/new/choose" target="_blank" rel="noopener"><i class="fas fa-bug"></i><span data-i18n="community.hero.secondary">Report an issue</span></a>
+                <div class="forum-account" aria-label="Community account controls">
+                    <div class="forum-account-copy">
+                        <i class="fab fa-github" aria-hidden="true"></i>
+                        <span data-i18n="community.forum.account">Read publicly. Sign in with GitHub inside the editor to post or reply.</span>
+                    </div>
+                    <div class="forum-account-actions">
+                        <button type="button" class="forum-button forum-button-secondary" id="community-auth" aria-controls="community-compose" aria-expanded="false">
+                            <i class="fas fa-unlock" aria-hidden="true"></i>
+                            <span data-i18n="community.forum.signIn">Sign in / reply</span>
+                        </button>
+                        <button type="button" class="forum-button forum-button-primary" id="community-new-topic" aria-controls="community-compose" aria-expanded="false">
+                            <i class="fas fa-message" aria-hidden="true"></i>
+                            <span data-i18n="community.forum.newTopic">New topic</span>
+                        </button>
+                    </div>
                 </div>
-                <p class="identity-note"><i class="fab fa-github" aria-hidden="true"></i> <span data-i18n="community.identity">Reading is public. Posting and replying require GitHub sign-in; the website never receives your GitHub password.</span></p>
-            </section>
+            </header>
 
-            <section class="section" aria-labelledby="channels-title">
-                <div class="section-head">
-                    <div>
-                        <div class="section-kicker" data-i18n="community.channels.kicker">Choose a channel</div>
-                        <h2 class="section-title" id="channels-title" data-i18n="community.channels.title">Put the conversation where future readers will look for it.</h2>
-                    </div>
-                    <p class="section-intro" data-i18n="community.channels.intro">Discussions are for conversation and support. Issues are for reproducible defects and accepted implementation work.</p>
-                </div>
-                <div class="community-channel-grid">
-                    <article class="channel-card" aria-labelledby="channel-general-title">
-                        <span class="channel-code">COM-01</span><i class="fas fa-comments" aria-hidden="true"></i>
-                        <h3 id="channel-general-title" data-i18n="community.channel.general.title">General</h3>
-                        <p data-i18n="community.channel.general.body">Open-ended engine and project conversation.</p>
-                        <div class="channel-actions"><a href="https://github.com/ChenlizheMe/Infernux/discussions/categories/general" target="_blank" rel="noopener" data-i18n="community.channel.browse">Browse</a><a class="channel-create" href="https://github.com/ChenlizheMe/Infernux/discussions/new?category=general" target="_blank" rel="noopener" data-i18n="community.channel.post">New post</a></div>
-                    </article>
-                    <article class="channel-card" aria-labelledby="channel-qa-title">
-                        <span class="channel-code">COM-02</span><i class="fas fa-circle-question" aria-hidden="true"></i>
-                        <h3 id="channel-qa-title" data-i18n="community.channel.qa.title">Q&amp;A</h3>
-                        <p data-i18n="community.channel.qa.body">Ask a focused question and mark the answer that solved it.</p>
-                        <div class="channel-actions"><a href="https://github.com/ChenlizheMe/Infernux/discussions/categories/q-a" target="_blank" rel="noopener" data-i18n="community.channel.browse">Browse</a><a class="channel-create" href="https://github.com/ChenlizheMe/Infernux/discussions/new?category=q-a" target="_blank" rel="noopener" data-i18n="community.channel.post">New post</a></div>
-                    </article>
-                    <article class="channel-card" aria-labelledby="channel-ideas-title">
-                        <span class="channel-code">COM-03</span><i class="fas fa-lightbulb" aria-hidden="true"></i>
-                        <h3 id="channel-ideas-title" data-i18n="community.channel.ideas.title">Ideas</h3>
-                        <p data-i18n="community.channel.ideas.body">Explore proposals before they become roadmap work.</p>
-                        <div class="channel-actions"><a href="https://github.com/ChenlizheMe/Infernux/discussions/categories/ideas" target="_blank" rel="noopener" data-i18n="community.channel.browse">Browse</a><a class="channel-create" href="https://github.com/ChenlizheMe/Infernux/discussions/new?category=ideas" target="_blank" rel="noopener" data-i18n="community.channel.post">New post</a></div>
-                    </article>
-                    <article class="channel-card" aria-labelledby="channel-show-title">
-                        <span class="channel-code">COM-04</span><i class="fas fa-satellite-dish" aria-hidden="true"></i>
-                        <h3 id="channel-show-title" data-i18n="community.channel.show.title">Show and tell</h3>
-                        <p data-i18n="community.channel.show.body">Share scenes, tools, experiments, and lessons learned.</p>
-                        <div class="channel-actions"><a href="https://github.com/ChenlizheMe/Infernux/discussions/categories/show-and-tell" target="_blank" rel="noopener" data-i18n="community.channel.browse">Browse</a><a class="channel-create" href="https://github.com/ChenlizheMe/Infernux/discussions/new?category=show-and-tell" target="_blank" rel="noopener" data-i18n="community.channel.post">New post</a></div>
-                    </article>
-                </div>
-            </section>
+            <nav class="forum-category-bar" aria-label="Discussion categories">
+                <button type="button" class="forum-category is-active" data-forum-category="" aria-pressed="true"><i class="fas fa-layer-group" aria-hidden="true"></i><span data-i18n="community.category.all">All topics</span></button>
+                <button type="button" class="forum-category" data-forum-category="general" aria-pressed="false"><i class="fas fa-comments" aria-hidden="true"></i><span data-i18n="community.channel.general.title">General</span></button>
+                <button type="button" class="forum-category" data-forum-category="q-a" aria-pressed="false"><i class="fas fa-circle-question" aria-hidden="true"></i><span data-i18n="community.channel.qa.title">Q&amp;A</span></button>
+                <button type="button" class="forum-category" data-forum-category="ideas" aria-pressed="false"><i class="fas fa-lightbulb" aria-hidden="true"></i><span data-i18n="community.channel.ideas.title">Ideas</span></button>
+                <button type="button" class="forum-category" data-forum-category="show-and-tell" aria-pressed="false"><i class="fas fa-cubes" aria-hidden="true"></i><span data-i18n="community.channel.show.title">Show and tell</span></button>
+            </nav>
 
-            <section class="section" aria-labelledby="issue-routing-title">
-                <div class="section-head">
+            <section class="forum-compose" id="community-compose" aria-labelledby="community-compose-title" hidden>
+                <div class="forum-compose-heading">
                     <div>
-                        <div class="section-kicker" data-i18n="community.issues.kicker">Engineering queue</div>
-                        <h2 class="section-title" id="issue-routing-title" data-i18n="community.issues.title">Turn reproducible work into a trackable GitHub Issue.</h2>
+                        <h2 id="community-compose-title" data-i18n="community.compose.title">Write a topic</h2>
+                        <p data-i18n="community.compose.intro">Choose a category and title, then write the body in the embedded editor below.</p>
                     </div>
-                    <p class="section-intro" data-i18n="community.issues.intro">Use a structured form when the outcome needs reproduction steps, implementation scope, or a durable resolution. Open-ended conversation belongs in Discussions.</p>
+                    <button type="button" class="forum-icon-button" id="community-compose-close" aria-label="Close editor" title="Close editor"><i class="fas fa-xmark" aria-hidden="true"></i></button>
                 </div>
-                <div class="community-channel-grid">
-                    <article class="channel-card" aria-labelledby="issue-bug-title">
-                        <span class="channel-code">ISSUE-01</span><i class="fas fa-bug" aria-hidden="true"></i>
-                        <h3 id="issue-bug-title" data-i18n="community.issue.bug.title">Bug report</h3>
-                        <p data-i18n="community.issue.bug.body">Capture a reproducible engine, tooling, packaging, or documentation defect.</p>
-                        <div class="channel-actions"><a href="https://github.com/ChenlizheMe/Infernux/issues?q=is%3Aissue%20is%3Aopen%20label%3Abug" target="_blank" rel="noopener" data-i18n="community.issue.browse">Browse queue</a><a class="channel-create" href="https://github.com/ChenlizheMe/Infernux/issues/new?template=bug_report.yml" target="_blank" rel="noopener" data-i18n="community.issue.open">Open form</a></div>
-                    </article>
-                    <article class="channel-card" aria-labelledby="issue-feature-title">
-                        <span class="channel-code">ISSUE-02</span><i class="fas fa-lightbulb" aria-hidden="true"></i>
-                        <h3 id="issue-feature-title" data-i18n="community.issue.feature.title">Feature request</h3>
-                        <p data-i18n="community.issue.feature.body">Tie a proposed capability or workflow improvement to a concrete user problem.</p>
-                        <div class="channel-actions"><a href="https://github.com/ChenlizheMe/Infernux/issues?q=is%3Aissue%20is%3Aopen%20label%3Aenhancement" target="_blank" rel="noopener" data-i18n="community.issue.browse">Browse queue</a><a class="channel-create" href="https://github.com/ChenlizheMe/Infernux/issues/new?template=feature_request.yml" target="_blank" rel="noopener" data-i18n="community.issue.open">Open form</a></div>
-                    </article>
-                    <article class="channel-card" aria-labelledby="issue-question-title">
-                        <span class="channel-code">ISSUE-03</span><i class="fas fa-circle-question" aria-hidden="true"></i>
-                        <h3 id="issue-question-title" data-i18n="community.issue.question.title">Tracked question</h3>
-                        <p data-i18n="community.issue.question.body">Use this when a usage question needs an answer that can be resolved and referenced as engineering work.</p>
-                        <div class="channel-actions"><a href="https://github.com/ChenlizheMe/Infernux/issues?q=is%3Aissue%20is%3Aopen%20label%3Aquestion" target="_blank" rel="noopener" data-i18n="community.issue.browse">Browse queue</a><a class="channel-create" href="https://github.com/ChenlizheMe/Infernux/issues/new?template=question.yml" target="_blank" rel="noopener" data-i18n="community.issue.open">Open form</a></div>
-                    </article>
-                </div>
-            </section>
-
-            <section class="section forum-feed" aria-labelledby="latest-topics-title">
-                <div class="section-head">
-                    <div>
-                        <div class="section-kicker" data-i18n="community.feed.kicker">Live relay</div>
-                        <h2 class="section-title" id="latest-topics-title" data-i18n="community.feed.title">Latest public discussions.</h2>
-                    </div>
-                    <p class="section-intro" data-i18n="community.feed.intro">Loaded from GitHub's public API and cached in this tab for five minutes. No access token or private profile data is stored.</p>
-                </div>
-                <form class="forum-controls" id="community-filters" role="search" aria-labelledby="community-filters-title">
-                    <span class="visually-hidden" id="community-filters-title" data-i18n="community.feed.filtersTitle">Filter public discussions</span>
-                    <div class="forum-field forum-search-field">
-                        <label for="community-search" data-i18n="community.feed.searchLabel">Search topics</label>
-                        <div class="forum-input-shell">
-                            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-                            <input id="community-search" name="q" type="search" autocomplete="off" data-i18n="community.feed.searchPlaceholder" placeholder="Title, author, or category">
-                        </div>
-                    </div>
-                    <div class="forum-field forum-category-field">
-                        <label for="community-category" data-i18n="community.feed.categoryLabel">Category</label>
-                        <select id="community-category" name="category">
-                            <option value="" data-i18n="community.feed.allCategories">All categories</option>
+                <form class="forum-compose-form" id="community-compose-form">
+                    <div class="forum-field">
+                        <label for="community-compose-category" data-i18n="community.compose.category">Category</label>
+                        <select id="community-compose-category" name="compose-category">
+                            <option value="general" data-i18n="community.channel.general.title">General</option>
+                            <option value="q-a" data-i18n="community.channel.qa.title">Q&amp;A</option>
+                            <option value="ideas" data-i18n="community.channel.ideas.title">Ideas</option>
+                            <option value="show-and-tell" data-i18n="community.channel.show.title">Show and tell</option>
                         </select>
                     </div>
-                    <div class="forum-field forum-state-field">
-                        <label for="community-state" data-community-copy="stateLabel">Topic state</label>
-                        <select id="community-state" name="state">
-                            <option value="" data-community-copy="stateAll">All topics</option>
-                            <option value="unanswered" data-community-copy="stateUnanswered">Open questions</option>
-                            <option value="answered" data-community-copy="stateAnswered">Answered Q&amp;A</option>
-                            <option value="locked" data-community-copy="stateLocked">Locked topics</option>
-                        </select>
+                    <div class="forum-field forum-compose-title-field">
+                        <label for="community-compose-topic" data-i18n="community.compose.topicTitle">Topic title</label>
+                        <input id="community-compose-topic" name="topic-title" type="text" minlength="4" maxlength="120" autocomplete="off" data-i18n="community.compose.placeholder" placeholder="What do you want to discuss?" required>
                     </div>
-                    <div class="forum-field forum-sort-field">
-                        <label for="community-sort" data-community-copy="sortLabel">Sort loaded topics</label>
-                        <select id="community-sort" name="sort">
-                            <option value="updated" data-community-copy="sortUpdated">Recent activity</option>
-                            <option value="newest" data-community-copy="sortNewest">Newest topics</option>
-                            <option value="replies" data-community-copy="sortReplies">Most replies</option>
-                            <option value="reactions" data-community-copy="sortReactions">Most reactions</option>
-                        </select>
-                    </div>
-                    <button class="forum-control-button" id="community-refresh" type="button" aria-controls="community-feed">
-                        <i class="fas fa-rotate" aria-hidden="true"></i>
-                        <span data-i18n="community.feed.refresh">Refresh</span>
+                    <button type="submit" class="forum-button forum-button-primary" id="community-compose-open">
+                        <i class="fas fa-comments" aria-hidden="true"></i>
+                        <span data-i18n="community.compose.openEditor">Open editor</span>
                     </button>
                 </form>
-                <div class="forum-feedback">
-                    <p id="community-filter-status" role="status" aria-live="polite" data-i18n="community.feed.loading">Contacting the GitHub relay…</p>
-                    <button id="community-reset" type="button" hidden data-i18n="community.feed.clearFilters">Clear filters</button>
-                </div>
-                <p class="visually-hidden" id="community-share-status" role="status" aria-live="polite" aria-atomic="true"></p>
-                <div id="community-feed" class="topic-list" aria-live="polite" aria-busy="true">
-                    <div class="topic-status" data-i18n="community.feed.loading">Contacting the GitHub relay…</div>
-                </div>
-                <div class="forum-pagination" aria-label="Discussion feed navigation">
-                    <button class="forum-load-more" id="community-load-more" type="button" aria-controls="community-feed" hidden>
-                        <i class="fas fa-chevron-down" aria-hidden="true"></i>
-                        <span>Load older topics</span>
-                    </button>
-                    <a class="forum-browse-all" id="community-browse-all" href="https://github.com/ChenlizheMe/Infernux/discussions" target="_blank" rel="noopener">
-                        <span>Browse all on GitHub</span>
-                        <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i>
-                    </a>
-                </div>
-                <noscript><p class="topic-status">JavaScript is disabled. <a href="https://github.com/ChenlizheMe/Infernux/discussions">Open Discussions on GitHub</a>.</p></noscript>
-            </section>
-
-            <section class="section community-wall" aria-labelledby="community-wall-title">
-                <div class="section-head">
-                    <div>
-                        <div class="section-kicker" data-i18n="community.wall.kicker">Community wall</div>
-                        <h2 class="section-title" id="community-wall-title" data-i18n="community.wall.title">Leave a short note without leaving the site.</h2>
-                    </div>
-                    <p class="section-intro" data-i18n="community.wall.intro">Embedded replies stay off until you choose to load them. Sign-in and moderation remain on GitHub.</p>
-                </div>
+                <p class="forum-compose-status" id="community-compose-status" role="status" aria-live="polite"></p>
                 <div class="giscus-shell">
                     <div class="giscus-readiness" id="giscus-readiness" data-state="standby">
-                        <span class="giscus-readiness-code" aria-hidden="true">ON-DEMAND</span>
                         <div class="giscus-readiness-copy" role="status" aria-live="polite" aria-atomic="true">
-                            <strong id="giscus-readiness-title">Replies load only when you ask.</strong>
-                            <p id="giscus-readiness-detail">Loading this panel contacts giscus.app and enables GitHub sign-in inside its frame.</p>
+                            <strong id="giscus-readiness-title">The editor is ready when you are.</strong>
+                            <p id="giscus-readiness-detail">Your GitHub sign-in happens inside the editor. Infernux never receives your password.</p>
                         </div>
                         <div class="giscus-readiness-actions">
-                            <button type="button" class="giscus-load-action" id="giscus-load" aria-controls="giscus-thread"><i class="fas fa-comments" aria-hidden="true"></i><span>Load replies</span></button>
+                            <button type="button" class="giscus-load-action" id="giscus-load" aria-controls="giscus-thread"><i class="fas fa-comments" aria-hidden="true"></i><span>Load editor</span></button>
                             <a href="https://github.com/login?return_to=%2FChenlizheMe%2FInfernux%2Fdiscussions" target="_blank" rel="noopener" class="giscus-sign-in-action" id="giscus-sign-in"><i class="fab fa-github" aria-hidden="true"></i><span data-i18n="community.auth.signIn">Sign in on GitHub</span></a>
                             <a href="https://github.com/ChenlizheMe/Infernux/discussions" target="_blank" rel="noopener" id="giscus-open-discussions"><span>Open Discussions</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
                             <a href="https://github.com/apps/giscus/installations/new" target="_blank" rel="noopener" class="giscus-install-action" id="giscus-install"><span>Install Giscus</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
@@ -247,67 +151,99 @@
                          data-category="General"
                          data-category-id="DIC_kwDOO_wV3M4C5oaC"
                          data-mapping="specific"
-                         data-term="Infernux Community Wall"
+                         data-term="Infernux Community Lobby"
                          data-strict="1"
                          data-reactions-enabled="1"
-                         data-emit-metadata="0"
+                         data-emit-metadata="1"
                          data-input-position="top"
                          data-loading="lazy"></div>
                 </div>
             </section>
 
-            <section class="section community-data" aria-labelledby="community-data-title">
-                <div class="section-head">
+            <section class="forum-board" aria-labelledby="latest-topics-title">
+                <div class="forum-board-heading">
                     <div>
-                        <div class="section-kicker" data-i18n="community.data.kicker">Data &amp; privacy</div>
-                        <h2 class="section-title" id="community-data-title" data-i18n="community.data.title">Know what leaves this page.</h2>
+                        <h2 id="latest-topics-title" data-i18n="community.feed.title">Topics</h2>
+                        <p id="community-filter-status" role="status" aria-live="polite" data-i18n="community.feed.loading">Loading topics…</p>
                     </div>
-                    <p class="section-intro" data-i18n="community.data.intro">Infernux has no forum account or post database. The page uses a few named external services, and GitHub remains the public record.</p>
+                    <button class="forum-icon-button" id="community-refresh" type="button" aria-controls="community-feed" aria-label="Refresh topics" title="Refresh topics">
+                        <i class="fas fa-rotate" aria-hidden="true"></i>
+                    </button>
                 </div>
-                <div class="community-data-grid">
-                    <article class="community-data-card">
-                        <span class="data-code">LOCAL-01</span>
-                        <i class="fas fa-sliders" aria-hidden="true"></i>
-                        <h3 data-i18n="community.data.local.title">Local preferences</h3>
-                        <p data-i18n="community.data.local.body">This site stores language, theme, optional learning-path progress, and up to eight recent document links in localStorage. Recent links expire after 180 days. Public topic metadata is cached for five minutes, and choosing “Load replies” is remembered only in the current tab via sessionStorage. It sets no first-party account cookie and keeps no user profile.</p>
-                    </article>
-                    <article class="community-data-card">
-                        <span class="data-code">PUBLIC-02</span>
-                        <i class="fab fa-github" aria-hidden="true"></i>
-                        <h3 data-i18n="community.data.public.title">Public GitHub content</h3>
-                        <p data-i18n="community.data.public.body">The topic relay reads public Discussion metadata from GitHub without a token. Posts, replies, Issues, authors, and timestamps remain public and are stored on GitHub.</p>
-                    </article>
-                    <article class="community-data-card">
-                        <span class="data-code">AUTH-03</span>
-                        <i class="fas fa-shield-halved" aria-hidden="true"></i>
-                        <h3 data-i18n="community.data.auth.title">Sign-in boundary</h3>
-                        <p data-i18n="community.data.auth.body">Giscus uses GitHub OAuth for comments and may keep a server-encrypted sign-in token in giscus.app localStorage. Infernux receives neither your password nor that access token.</p>
-                    </article>
-                    <article class="community-data-card">
-                        <span class="data-code">NET-04</span>
-                        <i class="fas fa-satellite-dish" aria-hidden="true"></i>
-                        <h3 data-i18n="community.data.network.title">External requests</h3>
-                        <p data-i18n="community.data.network.body">The public topic list contacts GitHub's API. giscus.app is contacted only after you choose “Load replies”; fonts and icons remain on the Infernux origin.</p>
-                    </article>
+                <form class="forum-controls" id="community-filters" role="search" aria-labelledby="community-filters-title">
+                    <span class="visually-hidden" id="community-filters-title" data-i18n="community.feed.filtersTitle">Filter public discussions</span>
+                    <div class="forum-field forum-search-field">
+                        <label class="visually-hidden" for="community-search" data-i18n="community.feed.searchLabel">Search topics</label>
+                        <div class="forum-input-shell">
+                            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                            <input id="community-search" name="q" type="search" autocomplete="off" data-i18n="community.feed.searchPlaceholder" placeholder="Search title, author, or category">
+                        </div>
+                    </div>
+                    <div class="forum-field forum-category-field">
+                        <label class="visually-hidden" for="community-category" data-i18n="community.feed.categoryLabel">Category</label>
+                        <select id="community-category" name="category">
+                            <option value="" data-i18n="community.feed.allCategories">All categories</option>
+                        </select>
+                    </div>
+                    <div class="forum-field forum-state-field">
+                        <label class="visually-hidden" for="community-state" data-community-copy="stateLabel">Topic state</label>
+                        <select id="community-state" name="state">
+                            <option value="" data-community-copy="stateAll">All topics</option>
+                            <option value="unanswered" data-community-copy="stateUnanswered">Open questions</option>
+                            <option value="answered" data-community-copy="stateAnswered">Answered Q&amp;A</option>
+                            <option value="locked" data-community-copy="stateLocked">Locked topics</option>
+                        </select>
+                    </div>
+                    <div class="forum-field forum-sort-field">
+                        <label class="visually-hidden" for="community-sort" data-community-copy="sortLabel">Sort loaded topics</label>
+                        <select id="community-sort" name="sort">
+                            <option value="updated" data-community-copy="sortUpdated">Recent activity</option>
+                            <option value="newest" data-community-copy="sortNewest">Newest topics</option>
+                            <option value="replies" data-community-copy="sortReplies">Most replies</option>
+                            <option value="reactions" data-community-copy="sortReactions">Most reactions</option>
+                        </select>
+                    </div>
+                </form>
+                <div class="forum-feedback">
+                    <button id="community-reset" type="button" hidden data-i18n="community.feed.clearFilters">Clear filters</button>
                 </div>
-                <div class="community-data-actions">
-                    <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener"><span data-i18n="community.data.githubPrivacy">GitHub privacy statement</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
-                    <a href="https://github.com/settings/applications" target="_blank" rel="noopener"><span data-i18n="community.data.manageApps">Manage authorized applications</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
-                    <a href="https://github.com/giscus/giscus/blob/main/PRIVACY-POLICY.md" target="_blank" rel="noopener"><span data-i18n="community.data.giscusPrivacy">Giscus privacy policy</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                <p class="visually-hidden" id="community-share-status" role="status" aria-live="polite" aria-atomic="true"></p>
+                <div class="topic-table-head" aria-hidden="true">
+                    <span data-i18n="community.table.topic">Topic</span>
+                    <span data-i18n="community.table.activity">Activity</span>
                 </div>
+                <div id="community-feed" class="topic-list" aria-live="polite" aria-busy="true">
+                    <div class="topic-status" data-i18n="community.feed.loading">Loading topics…</div>
+                </div>
+                <div class="forum-pagination" aria-label="Discussion feed navigation">
+                    <button class="forum-load-more" id="community-load-more" type="button" aria-controls="community-feed" hidden>
+                        <i class="fas fa-chevron-down" aria-hidden="true"></i>
+                        <span>Load older topics</span>
+                    </button>
+                    <a class="forum-browse-all" id="community-browse-all" href="https://github.com/ChenlizheMe/Infernux/discussions" target="_blank" rel="noopener">
+                        <span>GitHub fallback</span>
+                        <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                    </a>
+                </div>
+                <noscript><p class="topic-status">JavaScript is disabled. <a href="https://github.com/ChenlizheMe/Infernux/discussions">Open Discussions on GitHub</a>.</p></noscript>
             </section>
 
-            <section class="community-contract" aria-labelledby="community-contract-title" data-community-administrators="ChenlizheMe">
+            <section class="community-contract forum-data-note" aria-labelledby="community-contract-title" data-community-administrators="ChenlizheMe">
+                <i class="fas fa-shield-halved" aria-hidden="true"></i>
                 <div>
-                    <span class="mini-tag">DATA CONTRACT</span>
-                    <h2 id="community-contract-title" data-i18n="community.contract.title">One identity, one moderation surface, no duplicate content store.</h2>
+                    <h2 id="community-contract-title" data-i18n="community.contract.title">GitHub-backed, operated here.</h2>
+                    <p data-i18n="community.forum.dataNote">Topics and accounts remain on GitHub; this page provides the forum interface. Public metadata is cached for five minutes.</p>
                 </div>
-                <ul>
-                    <li data-i18n="community.contract.item1">GitHub Discussions stores topics, answers, reactions, and the embedded wall.</li>
-                    <li data-i18n="community.contract.item2">GitHub Issues stores reproducible bugs and actionable engineering tasks.</li>
-                    <li data-i18n="community.contract.item3">GitHub permissions and moderation remain the authority; the website is a presentation layer.</li>
-                    <li data-i18n="community.contract.admin">ChenlizheMe is the sole declared Infernux community administrator; effective moderation authority is still enforced by GitHub repository permissions.</li>
-                </ul>
+                <details>
+                    <summary data-i18n="community.forum.details">Data and moderation details</summary>
+                    <ul>
+                        <li data-i18n="community.contract.item1">GitHub Discussions stores topics, answers, and reactions.</li>
+                        <li data-i18n="community.contract.item2">GitHub Issues stores reproducible engineering work.</li>
+                        <li data-i18n="community.contract.item3">GitHub permissions remain the moderation authority.</li>
+                        <li data-i18n="community.contract.admin">ChenlizheMe is the sole declared Infernux community administrator.</li>
+                        <li><a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">GitHub privacy</a> · <a href="https://github.com/settings/applications" target="_blank" rel="noopener">Authorized applications</a> · <a href="https://github.com/giscus/giscus/blob/main/PRIVACY-POLICY.md" target="_blank" rel="noopener">Giscus privacy</a></li>
+                    </ul>
+                </details>
             </section>
         </div>
     </main>
@@ -328,11 +264,11 @@
         </div>
     </footer>
 
-    <script src="js/i18n-community.js?v=3"></script>
+    <script src="js/i18n-community.js?v=5"></script>
     <script src="js/i18n.js?v=18"></script>
     <script src="js/main.js?v=14"></script>
     <script src="js/docs-search.js?v=5"></script>
-    <script src="js/community.js?v=9"></script>
+    <script src="js/community.js?v=10"></script>
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",

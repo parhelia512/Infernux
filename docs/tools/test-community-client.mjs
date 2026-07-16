@@ -143,7 +143,7 @@ assert.equal(client.readGiscusOptIn(), false);
 const lazyControllerPromise = client.ensureGiscusController();
 const lazyControllerScript = appendedGiscusScript;
 assert.equal(lazyControllerScript.id, "community-giscus-controller");
-assert.equal(lazyControllerScript.src, "/js/community-giscus.js?v=1", "the consent gate may fetch only the same-origin controller before Giscus");
+assert.equal(lazyControllerScript.src, "/js/community-giscus.js?v=2", "the consent gate may fetch only the same-origin controller before Giscus");
 assert.equal(client.giscusScript(), null, "loading the local controller must not contact giscus.app");
 new vm.Script(giscusSource, { filename: "community-giscus.js" }).runInContext(sandbox);
 lazyControllerScript.listeners.get("load")();
@@ -307,6 +307,18 @@ giscusMessageListener({ origin: "https://giscus.app", source: client.giscusFrame
 assert.equal(giscus.state(), "uninstalled");
 giscusMessageListener({ origin: "https://giscus.app", source: client.giscusFrameWindow, data: { giscus: { error: "Discussion not found" } } });
 assert.equal(giscus.state(), "ready");
+
+assert.equal(giscus.open({
+    term: "Embedded forum topic",
+    category: "Ideas",
+    categoryId: "DIC_kwDOO_wV3M4C5oaE"
+}), true, "a forum topic must open through the embedded editor");
+assert.equal(giscusHost.dataset.term, "Embedded forum topic");
+assert.equal(giscusHost.dataset.category, "Ideas");
+assert.equal(giscusHost.dataset.categoryId, "DIC_kwDOO_wV3M4C5oaE");
+assert.equal(client.giscusScript().dataset.term, "Embedded forum topic");
+assert.equal(client.giscusScript().dataset.categoryId, "DIC_kwDOO_wV3M4C5oaE");
+assert.equal(giscus.open({ term: "x", category: "Ideas", categoryId: "not-a-category-id" }), false, "invalid forum targets must be rejected before loading Giscus");
 const initialScript = client.giscusScript();
 assert.equal(giscus.load(), true);
 assert.equal(giscus.state(), "checking");
@@ -337,12 +349,19 @@ for (const contract of [".topic-main", ".topic-action", "width: 44px", "height: 
 for (const contract of ["shareOrCopyCommunityTopic", "navigator?.share", "navigator?.canShare", "navigator?.clipboard?.writeText", "fallbackCommunityCopy", "document.createElement(\"time\")", "updated.dateTime = topic.updated_at", "dataset.state", "dataset.mode", "community-share-status"]) {
     assert.ok(source.includes(contract), `community.js must retain safe topic-sharing contract '${contract}'`);
 }
-for (const contract of ["GISCUS_CONTROLLER_SRC = \"/js/community-giscus.js?v=1\"", "ensureGiscusController", "loadDeferredGiscus", "if (readGiscusOptIn()) loadDeferredGiscus({ remember: false })", "document.createElement(\"script\")"]) {
+for (const contract of ["GISCUS_CONTROLLER_SRC = \"/js/community-giscus.js?v=2\"", "ensureGiscusController", "loadDeferredGiscus", "openCommunityEditor", "openCommunityTopic", "document.createElement(\"script\")"]) {
     assert.ok(source.includes(contract), `community.js must retain consent-aware lazy controller contract '${contract}'`);
 }
-for (const contract of ["globalThis.InfernuxGiscus = controller", "GISCUS_ORIGIN = \"https://giscus.app\"", "event.origin !== GISCUS_ORIGIN", "event.source !== frame.contentWindow", "document.createElement(\"script\")", "script.src = `${GISCUS_ORIGIN}/client.js`", "new MutationObserver(syncConfig)"]) {
+for (const contract of ["globalThis.InfernuxGiscus = controller", "GISCUS_ORIGIN = \"https://giscus.app\"", "event.origin !== GISCUS_ORIGIN", "event.source !== frame.contentWindow", "function open(config)", "script.src = `${GISCUS_ORIGIN}/client.js`", "new MutationObserver(syncConfig)"]) {
     assert.ok(giscusSource.includes(contract), `community-giscus.js must retain verified deferred embed contract '${contract}'`);
 }
+for (const contract of ['id="community-auth"', 'id="community-new-topic"', 'id="community-compose-form"', 'data-forum-category', 'id="community-search"']) {
+    assert.ok(communityHtml.includes(contract), `community page must expose compact forum control '${contract}'`);
+}
+for (const removedLayout of ["community-hero", "community-channel-grid", "subpage-hero"]) {
+    assert.equal(communityHtml.includes(removedLayout), false, `community page must not restore the oversized '${removedLayout}' layout`);
+}
+assert.equal(/href="[^"]*\/discussions\/new/.test(communityHtml), false, "the normal new-topic flow must stay in the embedded forum editor");
 assert.doesNotMatch(`${source}\n${giscusSource}`, /\.innerHTML\s*=|\.style(?:\.|\[|\s*=)/, "topic and reply controls must not introduce HTML or inline visual injection");
 
-console.log("Community client test passed: canonical URLs, native share with copy fallback, semantic update times, pagination, topic metadata, forum sorting/state filters, consent-aware lazy Giscus loading, bilingual GitHub sign-in fallback, and verified frame messages.");
+console.log("Community client test passed: compact BBS controls, on-site topic composition, canonical URLs, sharing, filtering, deferred Giscus loading, and verified frame messages.");

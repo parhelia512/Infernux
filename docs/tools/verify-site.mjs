@@ -272,7 +272,7 @@ async function verifyRootHtml() {
 
         if (["index.html", "wiki.html", "roadmap.html", "community.html", "download.html"].includes(pageName)) {
             const routeName = path.basename(pageName, ".html");
-            const pageBundleVersion = routeName === "community" ? 3 : routeName === "download" ? 2 : 1;
+            const pageBundleVersion = routeName === "community" ? 5 : routeName === "download" ? 2 : 1;
             const pageBundle = `js/i18n-${routeName}.js?v=${pageBundleVersion}`;
             if (!source.includes(pageBundle)) fail(`${pageName}: missing route-localized bundle '${pageBundle}'`);
             if (!source.includes("js/i18n.js?v=18")) fail(`${pageName}: shared localization runtime cache version is stale`);
@@ -968,7 +968,7 @@ async function verifyPublishingFiles() {
     if (!robots.includes("https://infernux-engine.com/sitemap.xml")) fail("robots.txt: missing root sitemap declaration");
     if ((robots.match(/^Sitemap:/gm) || []).length !== 1) fail("robots.txt: expected exactly one authoritative sitemap declaration");
     const community = await readFile(path.join(docsRoot, "community.html"), "utf8");
-    for (const token of ["R_kgDOO_wV3A", "DIC_kwDOO_wV3M4C5oaC", "Infernux Community Wall"]) {
+    for (const token of ["R_kgDOO_wV3A", "DIC_kwDOO_wV3M4C5oaC", "Infernux Community Lobby"]) {
         if (!community.includes(token)) fail(`community.html: missing Giscus configuration token '${token}'`);
     }
     if (!community.includes('data-community-administrators="ChenlizheMe"') || !community.includes('data-i18n="community.contract.admin"')) {
@@ -1003,28 +1003,24 @@ async function verifyPublishingFiles() {
         "id=\"giscus-thread\"",
         "id=\"giscus-open-discussions\"",
         "id=\"giscus-install\"",
-        "id=\"issue-routing-title\"",
-        "data-i18n=\"community.issues.title\"",
-        "data-i18n=\"community.issue.bug.title\"",
-        "data-i18n=\"community.issue.feature.title\"",
-        "data-i18n=\"community.issue.question.title\"",
+        "id=\"community-auth\"",
+        "id=\"community-new-topic\"",
+        "id=\"community-compose-form\"",
+        "id=\"community-compose-category\"",
+        "id=\"community-compose-topic\"",
+        "id=\"community-compose-open\"",
         "https://github.com/apps/giscus/installations/new",
-        "choosing “Load replies” is remembered only in the current tab via sessionStorage",
-        "giscus.app is contacted only after you choose “Load replies”",
-        "optional learning-path progress, and up to eight recent document links in localStorage",
         "data-loading=\"lazy\"",
-        "js/i18n-community.js?v=3",
-        "js/community.js?v=9",
-        "css/community.css?v=10"
+        "js/i18n-community.js?v=5",
+        "js/community.js?v=10",
+        "css/community.css?v=12"
     ]) {
         if (!community.includes(contract)) fail(`community.html: missing forum discovery contract '${contract}'`);
     }
     const discussionCategories = ["general", "q-a", "ideas", "show-and-tell"];
     for (const slug of discussionCategories) {
-        const browseUrl = `https://github.com/ChenlizheMe/Infernux/discussions/categories/${slug}`;
-        const createUrl = `https://github.com/ChenlizheMe/Infernux/discussions/new?category=${slug}`;
-        if (!community.includes(`href="${browseUrl}"`)) fail(`community.html: missing '${slug}' browse route`);
-        if (!community.includes(`href="${createUrl}"`)) fail(`community.html: missing '${slug}' structured creation route`);
+        if (!community.includes(`data-forum-category="${slug}"`)) fail(`community.html: missing '${slug}' BBS category control`);
+        if (!community.includes(`<option value="${slug}"`)) fail(`community.html: missing '${slug}' topic composer option`);
         const formFile = path.join(repoRoot, ".github", "DISCUSSION_TEMPLATE", `${slug}.yml`);
         if (!await exists(formFile)) {
             fail(`.github/DISCUSSION_TEMPLATE/${slug}.yml: missing category form`);
@@ -1050,10 +1046,6 @@ async function verifyPublishingFiles() {
         { template: "question.yml", label: "question" }
     ];
     for (const route of issueRoutes) {
-        const createUrl = `https://github.com/ChenlizheMe/Infernux/issues/new?template=${route.template}`;
-        const browseUrl = `https://github.com/ChenlizheMe/Infernux/issues?q=is%3Aissue%20is%3Aopen%20label%3A${route.label}`;
-        if (!community.includes(`href="${createUrl}"`)) fail(`community.html: missing '${route.template}' structured Issue Form route`);
-        if (!community.includes(`href="${browseUrl}"`)) fail(`community.html: missing '${route.label}' issue queue route`);
         const form = await readFile(path.join(repoRoot, ".github", "ISSUE_TEMPLATE", route.template), "utf8");
         if (!new RegExp(`^\\s+-\\s+${route.label}\\s*$`, "m").test(form)) fail(`.github/ISSUE_TEMPLATE/${route.template}: route label '${route.label}' differs from the form`);
     }
@@ -1101,12 +1093,13 @@ async function verifyPublishingFiles() {
         "[\"updated\", \"newest\", \"replies\", \"reactions\"]",
         "replaceChildren()",
         "GISCUS_OPT_IN_KEY = \"infernux-giscus-opt-in-v1\"",
-        "GISCUS_CONTROLLER_SRC = \"/js/community-giscus.js?v=1\"",
+        "GISCUS_CONTROLLER_SRC = \"/js/community-giscus.js?v=2\"",
         "readGiscusOptIn",
         "rememberGiscusOptIn",
         "ensureGiscusController",
         "loadDeferredGiscus",
-        "if (readGiscusOptIn()) loadDeferredGiscus({ remember: false })",
+        "openCommunityEditor",
+        "openCommunityTopic",
         "document.createElement(\"script\")",
         "AbortController"
     ]) {
@@ -1123,6 +1116,7 @@ async function verifyPublishingFiles() {
         "event.origin !== GISCUS_ORIGIN",
         "event.source !== frame.contentWindow",
         "payload.resizeHeight",
+        "function open(config)",
         "for (const [key, value] of Object.entries(config)) script.dataset[key] = value",
         "script.src = `${GISCUS_ORIGIN}/client.js`",
         "new MutationObserver(syncConfig)"
@@ -1146,19 +1140,19 @@ async function verifyPublishingFiles() {
         }
     }
     const communityTest = await readFile(path.join(docsRoot, "tools", "test-community-client.mjs"), "utf8");
-    for (const contract of ["only unlocked answerable topics", "default forum view should keep a clean canonical URL", "cached reaction totals should survive normalization", "forum sorting/state filters", "native share with copy fallback", "supported phones should use the operating system share surface", "native sharing must receive only the normalized title and canonical Discussion URL", "cancelling native sharing must not unexpectedly write to the clipboard", "browsers without Web Share should retain the clipboard action", "topic share feedback must use one polite live region", "consent-aware lazy Giscus loading", "same-origin controller before Giscus", "loading the local controller must not contact giscus.app", "controller loading alone must not persist visitor consent", "deferred controller must register one verified frame listener", "user-initiated GitHub sign-in fallback", "return only to this repository's Discussions", "static GitHub sign-in must not carry"]) {
+    for (const contract of ["only unlocked answerable topics", "default forum view should keep a clean canonical URL", "cached reaction totals should survive normalization", "compact BBS controls", "on-site topic composition", "supported phones should use the operating system share surface", "native sharing must receive only the normalized title and canonical Discussion URL", "cancelling native sharing must not unexpectedly write to the clipboard", "browsers without Web Share should retain the clipboard action", "topic share feedback must use one polite live region", "same-origin controller before Giscus", "loading the local controller must not contact giscus.app", "controller loading alone must not persist visitor consent", "deferred controller must register one verified frame listener", "user-initiated GitHub sign-in fallback", "return only to this repository's Discussions", "static GitHub sign-in must not carry"]) {
         if (!communityTest.includes(contract)) fail(`test-community-client.mjs: missing forum discovery assertion '${contract}'`);
     }
     const communityCss = await readFile(path.join(docsRoot, "css", "community.css"), "utf8");
-    if (!/\.forum-field input,[\s\S]*?min-height:\s*48px;/.test(communityCss)) fail("community.css: forum inputs must preserve a 48px touch target");
+    if (!/\.forum-field input,[\s\S]*?(?:height|min-height):\s*48px;/.test(communityCss)) fail("community.css: forum inputs must preserve a 48px touch target");
     if (!/@media\s*\(max-width:\s*520px\)[\s\S]*?\.forum-controls\s*\{[\s\S]*?grid-template-columns:\s*1fr;/.test(communityCss)) fail("community.css: forum controls must collapse at phone width");
     for (const contract of [".forum-pagination", ".forum-load-more", ".forum-browse-all", ".topic-signals", ".topic-metrics", ".topic-main", ".topic-action", ".community-copy-fallback", "data-state=\"success\"", "data-state=\"failure\"", "min-height: 44px"]) {
         if (!communityCss.includes(contract)) fail(`community.css: missing paginated forum contract '${contract}'`);
     }
     if (!/\.topic-action\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/.test(communityCss)) fail("community.css: topic share action must preserve a 44px square touch target");
-    if (!/\.topic-action:focus-visible\s*\{[\s\S]*?outline:\s*3px solid var\(--accent\);/.test(communityCss)) fail("community.css: topic share action must expose a visible keyboard focus ring");
-    for (const contract of [".channel-actions", ".channel-create", "grid-template-columns: repeat(2, minmax(0, 1fr))"]) {
-        if (!communityCss.includes(contract)) fail(`community.css: missing structured channel contract '${contract}'`);
+    if (!communityCss.includes(".topic-action:focus-visible") || !communityCss.includes("outline: 3px solid var(--info)")) fail("community.css: topic share action must expose a visible keyboard focus ring");
+    for (const contract of [".forum-header", ".forum-category-bar", ".forum-compose-form", ".forum-controls", ".topic-table-head"]) {
+        if (!communityCss.includes(contract)) fail(`community.css: missing compact BBS layout contract '${contract}'`);
     }
     for (const contract of [".giscus-readiness", "data-state=\"standby\"", "data-state=\"ready\"", "data-state=\"uninstalled\"", ".giscus-readiness-actions", ".giscus-load-action", ".giscus-install-action"]) {
         if (!communityCss.includes(contract)) fail(`community.css: missing embedded-reply readiness contract '${contract}'`);
