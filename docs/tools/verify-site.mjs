@@ -1433,7 +1433,10 @@ async function verifyPublishingFiles() {
             continue;
         }
         const content = await readFile(path.join(docsRoot, route.slice(1)));
-        serviceWorkerEvidence.push(`${route}\0${createHash("sha256").update(content).digest("hex")}`);
+        const canonicalContent = /\.(?:css|html|js|json|txt|webmanifest)$/i.test(route)
+            ? Buffer.from(content.toString("utf8").replace(/\r\n/g, "\n"), "utf8")
+            : content;
+        serviceWorkerEvidence.push(`${route}\0${createHash("sha256").update(canonicalContent).digest("hex")}`);
     }
     const expectedCacheVersion = createHash("sha256").update(serviceWorkerEvidence.join("\n")).digest("hex").slice(0, 16);
     if (cacheVersion !== expectedCacheVersion) fail(`sw.js: cache version '${cacheVersion}' is stale; expected '${expectedCacheVersion}'`);

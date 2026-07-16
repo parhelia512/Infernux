@@ -87,7 +87,10 @@ for (const route of precacheRoutes) {
 }
 for (const route of evidenceRoutes) {
     const content = await readFile(path.join(docsRoot, route.slice(1)));
-    evidence.push(`${route}\0${createHash("sha256").update(content).digest("hex")}`);
+    const canonicalContent = /\.(?:css|html|js|json|txt|webmanifest)$/i.test(route)
+        ? Buffer.from(content.toString("utf8").replace(/\r\n/g, "\n"), "utf8")
+        : content;
+    evidence.push(`${route}\0${createHash("sha256").update(canonicalContent).digest("hex")}`);
 }
 if (precacheBytes > maxPrecacheBytes) {
     throw new Error(`PWA precache is ${(precacheBytes / 1024).toFixed(1)} KiB; budget is ${(maxPrecacheBytes / 1024).toFixed(1)} KiB.`);
