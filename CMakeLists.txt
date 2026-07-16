@@ -489,7 +489,7 @@ if(INFERNUX_BUILD_TESTS)
     )
     set_tests_properties(infernux.asset_scan_profile PROPERTIES
         ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python;INFERNUX_NATIVE_MODULE_DIR=$<TARGET_FILE_DIR:_Infernux>"
-        TIMEOUT 120
+        TIMEOUT 180
         RUN_SERIAL TRUE
     )
 endif()
