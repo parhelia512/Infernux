@@ -154,20 +154,21 @@ struct UniformBufferObject
  * and per-object mesh buffer references.
  *
  * Each DrawCall keeps its material alive while carrying non-owning pointers
- * to the object's vertex/index data. The renderer creates persistent
+ * to the object's vertex/index data. The
+ * renderer creates persistent
  * per-object GPU buffers, eliminating the per-frame combined-buffer copy.
  */
 struct DrawCall
 {
-    uint32_t indexStart = 0;         // Offset into index buffer
-    uint32_t indexCount = 0;         // Number of indices to draw
-    int32_t vertexStart = 0;         // Base vertex offset (for submesh rendering)
-    glm::mat4 worldMatrix{1.0f};     // Object's world transform matrix
+    uint32_t indexStart = 0;               // Offset into index buffer
+    uint32_t indexCount = 0;               // Number of indices to draw
+    int32_t vertexStart = 0;               // Base vertex offset (for submesh rendering)
+    glm::mat4 worldMatrix{1.0f};           // Object's world transform matrix
     std::shared_ptr<InxMaterial> material; // Owns the material for the lifetime of cached/render-thread draw calls
-    uint64_t objectId = 0;           // GameObject ID for buffer lookup
-    bool frustumVisible = true;      // Whether object passed main-camera frustum culling
-    bool castsShadows = true;        // Whether the source renderer participates in shadow passes
-    AABB worldBounds;                // World-space bounding box for shadow cascade culling
+    uint64_t objectId = 0;                 // GameObject ID for buffer lookup
+    bool frustumVisible = true;            // Whether object passed main-camera frustum culling
+    bool castsShadows = true;              // Whether the source renderer participates in shadow passes
+    AABB worldBounds;                      // World-space bounding box for shadow cascade culling
 
     // Per-object mesh data pointers
     // Non-owning references to MeshRenderer's persistent vertex/index data.

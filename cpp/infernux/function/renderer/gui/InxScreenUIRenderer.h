@@ -89,7 +89,8 @@ class InxScreenUIRenderer
 
     /**
      * @brief Reuse the previous draw lists when UI content is unchanged.
-     * @return true when cached commands were retained; false when callers
+     * @return true when cached
+     * commands were retained; false when callers
      *         must submit the frame's Add* commands again.
      */
     bool BeginFrameCached(uint32_t width, uint32_t height, uint64_t contentRevision);

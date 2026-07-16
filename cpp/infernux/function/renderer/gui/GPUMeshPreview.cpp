@@ -767,7 +767,6 @@ void GPUMeshPreview::CreateFramebuffer(int size)
         m_framebuffer = VK_NULL_HANDLE;
         return;
     }
-
 }
 
 void GPUMeshPreview::DestroyFramebuffer()

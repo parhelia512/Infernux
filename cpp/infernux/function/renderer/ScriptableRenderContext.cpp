@@ -365,8 +365,7 @@ void ScriptableRenderContext::SubmitCulling(CullingResults &culling)
 
     const size_t bufferIdentityDrawCallCount = m_orderedDrawCalls.size() + (shadowSource ? shadowSource->size() : 0);
     const bool reuseObjectBuffers =
-        !hasForcedBufferUpdate &&
-        m_vkCore->CanReuseObjectBufferBindings(bufferIdentity, bufferIdentityDrawCallCount);
+        !hasForcedBufferUpdate && m_vkCore->CanReuseObjectBufferBindings(bufferIdentity, bufferIdentityDrawCallCount);
 
     // Ensure per-object GPU buffers
 #if INFERNUX_FRAME_PROFILE

@@ -920,7 +920,6 @@ void GPUMaterialPreview::CreateFramebuffer(int size)
         m_framebuffer = VK_NULL_HANDLE;
         return;
     }
-
 }
 
 void GPUMaterialPreview::DestroyFramebuffer()

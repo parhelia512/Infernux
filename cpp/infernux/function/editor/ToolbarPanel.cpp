@@ -297,38 +297,38 @@ void ToolbarPanel::PopupCamera(InxGUIContext *ctx)
     };
 
     auto renderParams = [&](CamParam *params, size_t count) {
-      for (size_t index = 0; index < count; ++index) {
-        auto &p = params[index];
-        if (p.headerKey) {
-            ImGui::TextUnformatted(T(p.headerKey).c_str());
-            ImGui::Separator();
+        for (size_t index = 0; index < count; ++index) {
+            auto &p = params[index];
+            if (p.headerKey) {
+                ImGui::TextUnformatted(T(p.headerKey).c_str());
+                ImGui::Separator();
+                ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            }
+
+            ImGui::TextUnformatted(T(p.key).c_str());
+            ImGui::SameLine(145.0f);
+
+            char sliderId[64];
+            snprintf(sliderId, sizeof(sliderId), "##%s_slider", p.key);
+            ImGui::SetNextItemWidth(120.0f);
+            float prev = *p.value;
+            ImGui::SliderFloat(sliderId, p.value, p.mn, p.mx);
+
+            ImGui::SameLine(0.0f, 6.0f);
+
+            char inputId[64];
+            snprintf(inputId, sizeof(inputId), "##%s_input", p.key);
+            ImGui::SetNextItemWidth(72.0f);
+            ImGui::InputFloat(inputId, p.value, p.step, p.stepFast, "%.3f");
+
+            // Clamp
+            *p.value = (std::min)((std::max)(*p.value, p.mn), p.mx);
+
+            if (*p.value != prev)
+                changed = true;
+
             ImGui::Dummy(ImVec2(0.0f, 4.0f));
         }
-
-        ImGui::TextUnformatted(T(p.key).c_str());
-        ImGui::SameLine(145.0f);
-
-        char sliderId[64];
-        snprintf(sliderId, sizeof(sliderId), "##%s_slider", p.key);
-        ImGui::SetNextItemWidth(120.0f);
-        float prev = *p.value;
-        ImGui::SliderFloat(sliderId, p.value, p.mn, p.mx);
-
-        ImGui::SameLine(0.0f, 6.0f);
-
-        char inputId[64];
-        snprintf(inputId, sizeof(inputId), "##%s_input", p.key);
-        ImGui::SetNextItemWidth(72.0f);
-        ImGui::InputFloat(inputId, p.value, p.step, p.stepFast, "%.3f");
-
-        // Clamp
-        *p.value = (std::min)((std::max)(*p.value, p.mn), p.mx);
-
-        if (*p.value != prev)
-            changed = true;
-
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
-      }
     };
 
     if (m_cameraSettings.orthographic)
