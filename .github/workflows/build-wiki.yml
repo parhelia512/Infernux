@@ -105,8 +105,8 @@ jobs:
       - name: Generate unified sitemap
         run: node docs/tools/build-sitemap.mjs
 
-      - name: Verify route-localized bundles
-        run: node docs/tools/build-i18n.mjs --check
+      - name: Generate route-localized bundles
+        run: node docs/tools/build-i18n.mjs
 
       - name: Generate deterministic Service Worker
         run: node docs/tools/build-service-worker.mjs
@@ -191,7 +191,7 @@ jobs:
         run: |
           git add docs/wiki/docs docs/wiki/site docs/wiki/mkdocs.yml docs/wiki/mkdocs_api_nav.yml docs/assets/wiki-docs*.json docs/docs-manifest.json docs/docs-index.json docs/docs-health.json docs/api-index.json docs/release-notes.json docs/llms.txt docs/llms-full.txt docs/wiki.html
           git add -A -- ':(glob)docs/css/wiki-template.*.css'
-          git add docs/sw.js docs/sitemap.xml
+          git add docs/sw.js docs/sitemap.xml docs/js/i18n*.js
 
           if git diff --cached --quiet; then
             echo "No generated wiki changes to commit."

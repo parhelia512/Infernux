@@ -54,9 +54,27 @@ jobs:
           fi
           echo "version=$NEW_VER" >> "$GITHUB_OUTPUT"
           RELEASE_EXISTS=false
-          if gh release view "v$NEW_VER" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            RELEASE_EXISTS=true
+          set +e
+          HTTP_STATUS=$(curl --silent --show-error --output /tmp/infernux-release.json --write-out "%{http_code}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/v$NEW_VER")
+          CURL_EXIT=$?
+          set -e
+          if [ "$CURL_EXIT" -ne 0 ]; then
+            echo "::error::Could not verify whether Release v$NEW_VER exists; refusing to rebuild an unverified version."
+            exit "$CURL_EXIT"
           fi
+          case "$HTTP_STATUS" in
+            200) RELEASE_EXISTS=true ;;
+            404) RELEASE_EXISTS=false ;;
+            *)
+              echo "::error::GitHub returned HTTP $HTTP_STATUS while checking Release v$NEW_VER; refusing to rebuild an unverified version."
+              cat /tmp/infernux-release.json
+              exit 1
+              ;;
+          esac
           FORCE_REBUILD="${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}"
 
           if [ "$RELEASE_EXISTS" = "true" ] && [ "$FORCE_REBUILD" != "true" ]; then
@@ -93,7 +111,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\VulkanSDK\${{ env.VULKAN_SDK_VERSION }}
-          key: vulkan-sdk-${{ env.VULKAN_SDK_VERSION }}-windows
+          # The cached SDK must include a private copy of vulkan-1.dll. The
+          # installer normally places it in System32, which is not persistent
+          # between hosted runners.
+          key: vulkan-sdk-${{ env.VULKAN_SDK_VERSION }}-windows-loader-v1
 
       - name: Install Vulkan SDK (silent, with SPIRV-Cross)
         if: steps.cache-vulkan.outputs.cache-hit != 'true'
@@ -103,6 +124,21 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile vulkan_sdk.exe
           Start-Process -Wait -FilePath .\vulkan_sdk.exe -ArgumentList `
             "--accept-licenses","--default-answer","--confirm-command","install"
+
+      - name: Stage Vulkan loader for headless build tools
+        shell: pwsh
+        run: |
+          $sdk = "C:\VulkanSDK\$env:VULKAN_SDK_VERSION"
+          $loader = Join-Path $env:WINDIR "System32\vulkan-1.dll"
+          $sdkLoader = Join-Path $sdk "Bin\vulkan-1.dll"
+          if (!(Test-Path $sdkLoader)) {
+            if (!(Test-Path $loader)) {
+              throw "Vulkan SDK installation did not provide the 64-bit Vulkan loader: $loader"
+            }
+            Copy-Item $loader $sdkLoader -Force
+          }
+          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          (Join-Path $sdk "Bin") | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install Python build dependencies
         run: python -m pip install -r requirements.txt nuitka ordered-set zstandard
@@ -183,6 +219,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.detect-version-change.outputs.version }}
+      FORCE_REBUILD: ${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}
     steps:
       - uses: actions/checkout@v4
 
@@ -225,7 +262,11 @@ jobs:
           mapfile -t files < <(find release-dist -type f | sort)
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $tag already exists; uploading assets with --clobber."
+            if [ "$FORCE_REBUILD" != "true" ]; then
+              echo "Release $tag was created after version detection; leaving its existing assets untouched."
+              exit 0
+            fi
+            echo "Explicit force rebuild requested for $tag; replacing release assets."
             gh release upload "$tag" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
             gh release edit "$tag" --notes-file UpdateLog.md --latest --repo "$GITHUB_REPOSITORY"
           else

@@ -204,7 +204,7 @@ async function verifyRootHtml() {
     const i18n = await readFile(path.join(docsRoot, "tools", "i18n-source.json"), "utf8");
     const sharedStyle = await readFile(path.join(docsRoot, "css", "style.css"), "utf8");
     const noScriptWikiStyle = await readFile(path.join(docsRoot, "css", "wiki-noscript.css"), "utf8");
-    if (noScriptWikiStyle.trim() !== ".docs-static-language {\n    display: grid !important;\n}") {
+    if (noScriptWikiStyle.replace(/\r\n/g, "\n").trim() !== ".docs-static-language {\n    display: grid !important;\n}") {
         fail("wiki-noscript.css: no-script fallback must only reveal both static language directories");
     }
     for (const contract of ["text-size-adjust: 100%", "@media (prefers-contrast: more)", "@media (forced-colors: active)", "outline: 3px solid Highlight", "overflow-wrap: anywhere", "background: CanvasText"]) {
@@ -471,7 +471,7 @@ async function verifyBuiltWikiExperience() {
         fail(`docs/css: expected only '${expectedStyleName}', found ${hashedTemplateStyles.join(", ") || "none"}`);
     } else {
         const sharedStyle = await readFile(path.join(docsRoot, "css", expectedStyleName), "utf8");
-        if (sharedStyle !== normalizedTemplateCss) fail(`${expectedStyleName}: content differs from the template style block`);
+        if (sharedStyle.replace(/\r\n/g, "\n") !== normalizedTemplateCss) fail(`${expectedStyleName}: content differs from the template style block`);
     }
     for (const legacyToken of ["--primary", "--primary-light", "--text-primary", "--text-secondary", "--bg-hover"]) {
         if (template.includes(`var(${legacyToken})`)) fail(`wiki/theme/main.html: references undefined legacy token '${legacyToken}'`);
@@ -923,6 +923,9 @@ async function verifyIndexes() {
 }
 
 async function verifyPublishingFiles() {
+    if (!await exists(path.join(docsRoot, ".nojekyll"))) {
+        fail(".nojekyll: static GitHub Pages publishing must bypass the redundant Jekyll build");
+    }
     const wikiRequirements = await readFile(path.join(docsRoot, "wiki", "requirements.txt"), "utf8");
     for (const requirement of ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "pymdown-extensions>=10.8,<12"]) {
         if (!wikiRequirements.split(/\r?\n/).includes(requirement)) fail(`wiki/requirements.txt: missing compatibility bound '${requirement}'`);

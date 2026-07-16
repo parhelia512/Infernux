@@ -25,7 +25,19 @@ assert.equal(model.examplePercent, 18);
 assert.equal(model.relationshipEdges, 112);
 assert.equal(model.ageDays, 0);
 assert.equal(model.needsReview, false);
-assert.equal(model.buildStatus, "unstamped");
+assert.equal(model.buildStatus, health.build.status);
+
+const unstampedHealth = {
+    ...health,
+    build: {
+        status: "unstamped",
+        source_commit: null,
+        source_url: null,
+        generated_at: null,
+        timestamp_source: "source-commit"
+    }
+};
+assert.equal(normalize(unstampedHealth, new Date("2026-07-15T12:00:00Z")).buildStatus, "unstamped");
 
 const stale = normalize(health, new Date("2027-01-01T00:00:00Z"));
 assert.equal(stale.needsReview, true);

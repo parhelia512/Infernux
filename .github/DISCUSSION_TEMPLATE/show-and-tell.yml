@@ -27,4 +27,4 @@ body:
     id: version
     attributes:
       label: Infernux version / Infernux 版本
-      placeholder: v0.2.1 or commit SHA
+      placeholder: v0.2.9 or commit SHA

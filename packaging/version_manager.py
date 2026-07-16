@@ -4,8 +4,8 @@ Layout on disk::
 
     ~/.infernux/
         versions/
-            0.2.1/
-                infernux-0.2.1-cp312-cp312-win_amd64.whl
+            0.2.9/
+                infernux-0.2.9-cp312-cp312-win_amd64.whl
             0.3.0/
                 infernux-0.3.0-cp312-cp312-win_amd64.whl
 """

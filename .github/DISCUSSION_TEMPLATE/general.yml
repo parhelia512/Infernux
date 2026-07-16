@@ -19,7 +19,7 @@ body:
     attributes:
       label: Relevant version / 相关版本
       description: Add an engine release or commit when the topic depends on a specific build. / 如果话题依赖特定构建，请填写引擎版本或提交。
-      placeholder: v0.2.1 or commit SHA
+      placeholder: v0.2.9 or commit SHA
   - type: textarea
     id: references
     attributes:
