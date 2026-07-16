@@ -14,9 +14,9 @@ Font license texts are preserved in `vendor-licenses/`. When any asset changes, 
 
 ## Project-authored visual assets
 
-`infernux-social-card-0.2.1.jpg` is the reviewed 1200×630 Open Graph/X card for release 0.2.1. It is an AI-assisted raster composition made on 2026-07-16 from the repository-owned `logo.png` and the real `demo.png` editor capture. The card is presentation artwork, not benchmark evidence; the original capture remains the evidence-linked screenshot used on the homepage. Its SHA-256 is `8c3a0500bf39b50c53e0ab97c1937c6a3bb61657b328bef18f420b962fae7594`. The site verifier locks its format, dimensions, release-scoped filename, and reviewed content hash.
+`infernux-social-card-0.2.1.jpg` is the reviewed 1200×630 Open Graph/X card for release 0.2.1. It is an AI-assisted raster composition made on 2026-07-16 from the repository-owned `logo.png` and the real `demo.png` editor capture. The card is presentation artwork, not benchmark evidence; the homepage uses a byte-verified lossless WebP encoding of that capture as its evidence-linked screenshot. Its SHA-256 is `8c3a0500bf39b50c53e0ab97c1937c6a3bb61657b328bef18f420b962fae7594`. The site verifier locks its format, dimensions, release-scoped filename, and reviewed content hash.
 
-The homepage runtime evidence keeps `demo.png` as the canonical, structured-data and legacy-browser source, and offers two release-scoped delivery variants through `<picture>`:
+The repository keeps `demo.png` as the canonical review source used by both README files. The GitHub Pages homepage does not reference or deliver that PNG: it offers the release-scoped AVIF first and uses the byte-equivalent, lossless WebP as the `<img>` fallback and structured-data screenshot. This explicitly targets current Chrome, Edge, Firefox, and Safari rather than preserving a 354 KiB fallback for historical browsers.
 
 | Local file | Encoding and review evidence | Bytes | SHA-256 |
 |---|---|---:|---|
@@ -24,7 +24,7 @@ The homepage runtime evidence keeps `demo.png` as the canonical, structured-data
 | `demo-0.2.1.webp` | Sharp 0.34.5 / WebP 1.6.0 lossless; decoded MAE and maximum channel error are both zero | 193,060 | `bf5cdbc260331e75ccf1519b1cc582cb4764ae101ccdbda27feb3082d71b66df` |
 | `demo-0.2.1.avif` | Sharp 0.34.5 / AOM 3.13.1, quality 80, 4:4:4; decoded PSNR 47.03 dB, MAE 0.3971 and maximum channel error 20; visually reviewed against the PNG | 53,764 | `cf88c7f49c3da599003066d6059249de02a6c92cf288cd7bee2f07316a63e82d` |
 
-AVIF is preferred, lossless WebP is the modern fallback, and PNG remains last. The image gate locks the byte content and dimensions, requires at least 80% AVIF and 40% WebP savings, verifies source ordering and preserves lazy loading. The performance budget counts the largest mutually exclusive representation, so adding fallback formats cannot hide a heavier delivered path or falsely charge one visitor for all three files.
+AVIF is preferred and lossless WebP is the final website fallback. The image gate still locks all three files so the optimized encodings remain provably tied to the original capture; it also verifies that both README files retain the PNG while the homepage contains no PNG reference. The performance budget counts the largest browser-delivered representation and separately excludes the repository-only review source, so neither hidden fallback weight nor unused evidence files distort the site budget.
 
 ### Install and touch icons
 

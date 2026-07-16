@@ -140,10 +140,10 @@
     <link rel="icon" type="image/png" href="/assets/logo.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
     <link rel="stylesheet" href="/css/fonts.css?v=1">
-    <link rel="stylesheet" href="/css/style.css?v=16">
+    <link rel="stylesheet" href="/css/style.css?v=17">
     <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
-    <link rel="stylesheet" href="/css/docs-search.css?v=2">
-    <link rel="stylesheet" href="/css/wiki-generated.css?v=5">
+    <link rel="stylesheet" href="/css/docs-search.css?v=3">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
     <link rel="stylesheet" href="/css/wiki-template.887c9f5039d80bba.css">
 </head>
 <body class="api-reference-page">
@@ -176,7 +176,7 @@
                     <i class="fas fa-copy" aria-hidden="true"></i><span data-doc-context-label>复制给 Agent</span>
                 </button>
                 <button type="button" class="docs-search-trigger" data-docs-search-trigger aria-haspopup="dialog" aria-controls="docs-search-dialog" aria-expanded="false">
-                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span>搜索文档</span><kbd aria-hidden="true">/</kbd>
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i><span data-docs-search-trigger-label>搜索文档</span><kbd aria-hidden="true">/</kbd>
                 </button>
                 <button type="button" class="theme-toggle" data-site-action="theme" title="Toggle theme" aria-label="Toggle theme" aria-pressed="false">
                     <i class="fas fa-moon" id="theme-icon"></i>
@@ -461,7 +461,7 @@
     </footer>
     
 
-    <section class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title" hidden>
+    <dialog class="docs-search-dialog" id="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
         <button type="button" class="docs-search-backdrop" data-docs-search-close tabindex="-1" aria-hidden="true"></button>
         <div class="docs-search-panel">
             <div class="docs-search-head">
@@ -470,16 +470,17 @@
             </div>
             <label class="docs-search-field" for="docs-search-input">
                 <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="API 符号、系统、工作流…">
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API 符号、系统、工作流…">
             </label>
             <div class="docs-search-filters" id="docs-search-filters" aria-label="文档搜索筛选器"></div>
-            <p class="docs-search-status" id="docs-search-status" aria-live="polite"></p>
+            <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
             <div class="docs-search-results" id="docs-search-results" role="list"></div>
         </div>
-    </section>
+    </dialog>
 
-    <script src="/js/main.js?v=12"></script>
-    <script src="/js/docs-search.js?v=2"></script>
-    <script src="/js/wiki-generated.js?v=8"></script>
+    <script src="/js/main.js?v=14"></script>
+    <script src="/js/docs-search.js?v=5"></script>
+    <script src="/js/docs-recent.js?v=1"></script>
+    <script src="/js/wiki-generated.js?v=14"></script>
 </body>
 </html>

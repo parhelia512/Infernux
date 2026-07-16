@@ -6,6 +6,12 @@ import { inflateSync } from "node:zlib";
 const docsRoot = path.resolve("docs");
 const failures = [];
 let maskableRadiusEvidence = null;
+const expectedShortcuts = [
+  { short_name: "Start", url: "/wiki/site/en/learn/getting-started.html" },
+  { short_name: "Docs", url: "/wiki.html" },
+  { short_name: "Community", url: "/community.html" },
+  { short_name: "Download", url: "/download.html" },
+];
 
 const assets = [
   {
@@ -212,10 +218,35 @@ if (manifest) {
     fail("site.webmanifest: icon sources must be unique");
   }
 
-  for (const shortcut of manifest.shortcuts || []) {
+  const shortcuts = Array.isArray(manifest.shortcuts) ? manifest.shortcuts : [];
+  if (shortcuts.length !== expectedShortcuts.length) {
+    fail(`site.webmanifest: expected ${expectedShortcuts.length} task shortcuts, found ${shortcuts.length}`);
+  }
+  for (const [index, expected] of expectedShortcuts.entries()) {
+    const shortcut = shortcuts[index];
+    if (!shortcut) continue;
+    if (shortcut.short_name !== expected.short_name || shortcut.url !== expected.url) {
+      fail(`site.webmanifest: shortcut ${index + 1} must remain '${expected.short_name}' -> '${expected.url}'`);
+    }
+    if (!String(shortcut.name || "").trim() || !String(shortcut.description || "").trim()) {
+      fail(`site.webmanifest: shortcut '${expected.short_name}' requires a full name and description`);
+    }
+  }
+  if (new Set(shortcuts.map((shortcut) => shortcut.url)).size !== shortcuts.length) {
+    fail("site.webmanifest: shortcut URLs must be unique");
+  }
+  if (new Set(shortcuts.map((shortcut) => shortcut.short_name)).size !== shortcuts.length) {
+    fail("site.webmanifest: shortcut short names must be unique");
+  }
+  for (const shortcut of shortcuts) {
     if (!String(shortcut.url || "").startsWith("/")) fail(`site.webmanifest: shortcut '${shortcut.name}' must stay in root scope`);
     if (!shortcut.icons?.some((icon) => icon.src === "/assets/infernux-icon-192.png" && icon.sizes === "192x192")) {
       fail(`site.webmanifest: shortcut '${shortcut.name}' must use the reviewed 192px icon`);
+    }
+    try {
+      await readFile(path.join(docsRoot, shortcut.url.slice(1)));
+    } catch {
+      fail(`site.webmanifest: shortcut '${shortcut.name}' targets a missing published route '${shortcut.url}'`);
     }
   }
 }
@@ -277,4 +308,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`PWA asset check passed: Chromium icon sizes, Apple touch icon, manifest metadata, provenance, and platform-managed loading are locked; maskable foreground radius ${maskableRadiusEvidence.actualRadius.toFixed(2)}px / ${maskableRadiusEvidence.safeRadius.toFixed(2)}px safe zone.`);
+console.log(`PWA asset check passed: Chromium icon sizes, four task shortcuts, Apple touch icon, manifest metadata, provenance, and platform-managed loading are locked; maskable foreground radius ${maskableRadiusEvidence.actualRadius.toFixed(2)}px / ${maskableRadiusEvidence.safeRadius.toFixed(2)}px safe zone.`);

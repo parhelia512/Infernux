@@ -392,11 +392,13 @@
 }
 
 .doc-trail-actions {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     align-items: center;
     justify-content: center;
     grid-column: 2;
+    width: min(420px, 100%);
 }
 
 .doc-trail-action,
@@ -406,10 +408,13 @@
     align-items: center;
     justify-content: center;
     padding: 0 13px;
+    min-width: 0;
     font: inherit;
     font-size: 0.76rem;
     cursor: pointer;
 }
+
+.doc-trail-action span { overflow-wrap: anywhere; }
 
 .doc-trail-fallback {
     grid-column: 1 / -1;
@@ -421,6 +426,16 @@
 .doc-trail-fallback:hover {
     border-color: var(--accent);
     color: var(--text);
+}
+
+.doc-trail-action:disabled { cursor: progress; }
+.doc-trail-action[data-state="success"] {
+    border-color: var(--signal);
+    color: var(--signal);
+}
+.doc-trail-action[data-state="failure"] {
+    border-color: var(--hazard);
+    color: var(--hazard);
 }
 
 .doc-trail-link:focus-visible,
@@ -610,7 +625,8 @@
         text-align: left;
     }
     .doc-trail-actions { justify-content: stretch; }
-    .doc-trail-action { flex: 1; }
+    .doc-trail-actions { grid-template-columns: 1fr; }
+    .doc-trail-action { width: 100%; }
     .doc-outline-list { grid-template-columns: 1fr; }
     .doc-outline-link { min-height: 44px; }
     .doc-build-provenance { grid-template-columns: 1fr; }
@@ -638,4 +654,158 @@
     height: 1px;
     opacity: 0;
     pointer-events: none;
+}
+
+@media print {
+    @page {
+        margin: 14mm 13mm 16mm;
+    }
+
+    html,
+    body,
+    .api-layout,
+    .article-page-shell,
+    .article-page-container,
+    .api-main,
+    .api-main.article-page-content {
+        width: auto !important;
+        max-width: none !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: var(--print-paper) !important;
+        color: var(--print-ink) !important;
+        box-shadow: none !important;
+    }
+
+    body {
+        font-size: 10.5pt;
+        line-height: 1.5;
+    }
+
+    body::before,
+    body::after,
+    .site-header,
+    .api-sidebar,
+    .api-sidebar-toggle,
+    .api-ft,
+    .doc-outline,
+    .doc-trail,
+    .docs-search-dialog,
+    .doc-code-copy,
+    .learning-complete-toggle,
+    .clipboard-fallback {
+        display: none !important;
+    }
+
+    .api-main h1,
+    .api-main h2,
+    .api-main h3,
+    .api-main h4 {
+        break-after: avoid-page;
+        color: var(--print-ink) !important;
+    }
+
+    .api-main h2,
+    .api-main h3 {
+        border-color: var(--print-rule) !important;
+    }
+
+    .api-main p,
+    .api-main li,
+    .api-main td,
+    .api-main th,
+    .api-main blockquote,
+    .api-main small,
+    .api-main strong,
+    .api-main a {
+        color: var(--print-ink) !important;
+    }
+
+    .api-main a {
+        text-decoration: underline !important;
+        text-decoration-thickness: 0.5pt !important;
+    }
+
+    .api-main pre,
+    .api-main table,
+    .api-main blockquote,
+    .doc-provenance,
+    .doc-build-provenance,
+    .doc-diagram,
+    .learning-track,
+    .learning-track-step {
+        break-inside: avoid-page;
+        box-shadow: none !important;
+    }
+
+    .api-main pre,
+    .api-main blockquote,
+    .doc-provenance,
+    .doc-build-provenance,
+    .doc-diagram,
+    .learning-track {
+        border-color: var(--print-rule) !important;
+        background: var(--print-paper) !important;
+    }
+
+    .api-main pre,
+    .api-main pre code,
+    .api-main .doc-diagram pre,
+    .api-main .doc-diagram code {
+        min-width: 0 !important;
+        overflow: visible !important;
+        white-space: pre-wrap !important;
+        overflow-wrap: anywhere !important;
+        color: var(--print-ink) !important;
+        background: var(--print-paper) !important;
+    }
+
+    .api-main table {
+        display: table !important;
+        width: 100% !important;
+        overflow: visible !important;
+        border-collapse: collapse !important;
+        font-size: 9pt;
+    }
+
+    .api-main thead,
+    .api-reference-page .api-main thead {
+        display: table-header-group !important;
+    }
+
+    .api-main tr {
+        break-inside: avoid-page;
+        border-color: var(--print-grid) !important;
+    }
+
+    .api-main td,
+    .api-main th {
+        min-width: 0 !important;
+        padding: 5pt 6pt !important;
+        border: 0.5pt solid var(--print-grid) !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .doc-breadcrumb,
+    .doc-provenance,
+    .doc-build-provenance {
+        break-inside: avoid-page;
+    }
+
+    .doc-build-manifest {
+        color: var(--print-ink) !important;
+    }
+
+    .learning-track-steps {
+        grid-template-columns: 1fr !important;
+    }
+
+    .learning-track-marker,
+    .learning-track-milestone,
+    .learning-track-kicker,
+    .doc-diagram figcaption span {
+        color: var(--print-ink) !important;
+        border-color: #777 !important;
+    }
 }

@@ -21,6 +21,7 @@ if (hashedWikiCatalogs.length !== 1) throw new Error(`Expected one content-hashe
 
 const shellPages = [
     "/offline.html",
+    "/404.html",
     "/index.html",
     "/wiki.html",
     "/roadmap.html",
@@ -48,14 +49,20 @@ const precacheRoutes = [
     ...shellPages,
     "/site.webmanifest",
     "/assets/logo.png",
+    "/docs-index.json",
+    "/learning-paths.json",
     ...await shellRuntimeRoutes(shellPages),
     ...await namedRoutes("assets/fonts", /\.woff2$/),
 ].filter((route, index, values) => values.indexOf(route) === index).sort();
 
 // These files participate in the worker version without being fetched during
 // installation. A data/runtime change can still announce a new site version,
-// while large indexes and route-specific generated-page assets remain on
-// demand and are cached only after the visitor requests them.
+// while the larger API index and route-specific generated-page assets remain
+// on demand and are cached only after the visitor requests them. The compact
+// curated-guide index stays in the core so offline search can degrade to useful
+// Learn/Manual/Architecture results instead of failing as a whole. The small
+// learning-path model also stays in core so device-local progress can resolve
+// its next step on a first offline launch.
 const evidenceRoutes = [
     ...precacheRoutes,
     "/docs-index.json",
@@ -184,11 +191,17 @@ async function migrateLegacyCache(cacheName) {
     }
 }
 
+async function pruneRuntimeCoreEntries() {
+    const runtime = await caches.open(RUNTIME_CACHE_NAME);
+    await Promise.all(PRECACHE_URLS.map((route) => runtime.delete(route, { ignoreSearch: true })));
+}
+
 async function activateManagedCaches() {
     const keys = await caches.keys();
     const obsolete = keys.filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME && key !== RUNTIME_CACHE_NAME);
     for (const key of obsolete) await migrateLegacyCache(key);
     await Promise.all(obsolete.map((key) => caches.delete(key)));
+    await pruneRuntimeCoreEntries();
     await self.clients.claim();
 }
 

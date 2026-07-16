@@ -2,7 +2,7 @@
   "name": "Infernux · 熔炉",
   "short_name": "Infernux",
   "id": "/",
-  "description": "Open-source C++17/Vulkan game engine with a Python production layer.",
+  "description": "Documentation, learning paths, releases, and community access for the Infernux game engine.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -34,15 +34,31 @@
   ],
   "shortcuts": [
     {
-      "name": "Download Infernux",
-      "short_name": "Download",
-      "url": "/download.html",
+      "name": "Start learning Infernux",
+      "short_name": "Start",
+      "description": "Open the first guided Infernux project.",
+      "url": "/wiki/site/en/learn/getting-started.html",
       "icons": [{ "src": "/assets/infernux-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
       "name": "Infernux Documentation",
       "short_name": "Docs",
+      "description": "Search guides, manuals, architecture notes, and API symbols.",
       "url": "/wiki.html",
+      "icons": [{ "src": "/assets/infernux-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Infernux Community",
+      "short_name": "Community",
+      "description": "Browse GitHub Discussions, support channels, and engineering queues.",
+      "url": "/community.html",
+      "icons": [{ "src": "/assets/infernux-icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Download Infernux",
+      "short_name": "Download",
+      "description": "Open verified release artifacts and installation guidance.",
+      "url": "/download.html",
       "icons": [{ "src": "/assets/infernux-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]

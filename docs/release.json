@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "version": "0.2.1",
   "tag": "v0.2.1",
   "name": "Infernux v0.2.1",
@@ -8,6 +8,11 @@
   "platforms": ["Windows 10/11 x64"],
   "python_abi": "CPython 3.12 x64",
   "release_url": "https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.1",
+  "verification": {
+    "checksum_algorithm": "SHA-256",
+    "publisher_signature": "not-declared",
+    "authority": "GitHub Releases"
+  },
   "assets": [
     {
       "kind": "hub-installer",

@@ -10,7 +10,11 @@ const source = await readFile(path.join(docsRoot, "sw.js"), "utf8");
 const handlers = new Map();
 const runtimeCacheName = "infernux-pwa-runtime-v1";
 const cacheStores = new Map([
-    [runtimeCacheName, new Map([["/persisted-across-update.html", new Response("persisted", { status: 200 })]])],
+    [runtimeCacheName, new Map([
+        ["/persisted-across-update.html", new Response("persisted", { status: 200 })],
+        ["/docs-index.json", new Response("old-runtime-index", { status: 200 })],
+        ["/learning-paths.json", new Response("old-runtime-learning-paths", { status: 200 })]
+    ])],
     ["infernux-pwa-obsolete", new Map([
         ["/index.html", new Response("old-core-home", { status: 200 })],
         ["/legacy-read.html", new Response("legacy-read", { status: 200 })]
@@ -105,6 +109,7 @@ assert.ok(precacheMatch, "generated worker should expose one deterministic core-
 const precacheRoutes = JSON.parse(precacheMatch[1]);
 for (const route of [
     "/offline.html",
+    "/404.html",
     "/index.html",
     "/wiki.html",
     "/roadmap.html",
@@ -112,8 +117,11 @@ for (const route of [
     "/download.html",
     "/site.webmanifest",
     "/assets/logo.png",
+    "/docs-index.json",
+    "/learning-paths.json",
     "/css/fonts.css",
     "/css/style.css",
+    "/css/home.css",
     "/css/mission.css",
     "/css/fontawesome-subset.css",
     "/css/wiki.css",
@@ -121,8 +129,18 @@ for (const route of [
     "/css/roadmap.css",
     "/css/community.css",
     "/css/download.css",
+    "/css/docs-search.css",
     "/js/i18n.js",
+    "/js/i18n-404.js",
+    "/js/i18n-index.js",
+    "/js/i18n-wiki.js",
+    "/js/i18n-roadmap.js",
+    "/js/i18n-community.js",
+    "/js/i18n-download.js",
     "/js/main.js",
+    "/js/home.js",
+    "/js/docs-search.js",
+    "/js/docs-recent.js",
     "/js/wiki.js",
     "/js/docs-health.js",
     "/js/community.js",
@@ -132,9 +150,7 @@ for (const route of [
     assert.ok(precacheRoutes.includes(route), `core shell is missing '${route}'`);
 }
 for (const route of [
-    "/docs-index.json",
     "/docs-health.json",
-    "/learning-paths.json",
     "/api-index.json",
     "/docs-manifest.json",
     "/release.json",
@@ -146,8 +162,7 @@ for (const route of [
     "/assets/infernux-apple-touch-icon.png",
     "/css/wiki-generated.css",
     "/js/wiki-generated.js",
-    "/css/docs-search.css",
-    "/js/docs-search.js",
+    "/js/community-giscus.js",
 ]) {
     assert.ok(!precacheRoutes.includes(route), `on-demand resource '${route}' must not consume install bandwidth`);
 }
@@ -163,6 +178,7 @@ const coreStored = cacheStores.get(coreCacheName);
 const runtimeStored = cacheStores.get(runtimeCacheName);
 assert.equal(skipWaitingCalls, 0, "replacement workers must wait for explicit user consent");
 assert.ok(coreStored.has("/offline.html"));
+assert.ok(coreStored.has("/404.html"));
 
 await dispatchLifetime("activate");
 assert.deepEqual(deletedCaches, ["infernux-pwa-obsolete"]);
@@ -170,6 +186,8 @@ assert.ok(cacheStores.has(runtimeCacheName), "runtime cache should survive core-
 assert.equal(await runtimeStored.get("/persisted-across-update.html").clone().text(), "persisted");
 assert.equal(await runtimeStored.get("/legacy-read.html").clone().text(), "legacy-read", "previously visited content should migrate before an obsolete cache is removed");
 assert.equal(runtimeStored.has("/index.html"), false, "versioned core entries should not be copied into persistent runtime storage");
+assert.equal(runtimeStored.has("/docs-index.json"), false, "a newly precached guide index should be pruned from persistent runtime storage");
+assert.equal(runtimeStored.has("/learning-paths.json"), false, "newly precached learning paths should be pruned from persistent runtime storage");
 assert.equal(claimCalls, 1);
 
 fetchImplementation = async () => { throw new Error("offline"); };
@@ -203,7 +221,6 @@ const onlineCommunity = await dispatchFetch({
 assert.equal(await onlineCommunity.text(), "online-community");
 assert.equal(runtimeStored.has("/community.html"), false, "versioned core resources must not be duplicated in persistent runtime storage");
 
-runtimeStored.set("/docs-index.json", new Response("old", { status: 200 }));
 fetchImplementation = async () => new Response("fresh", { status: 200 });
 const freshIndex = await dispatchFetch({
     method: "GET",
@@ -211,7 +228,20 @@ const freshIndex = await dispatchFetch({
     url: "https://infernux-engine.com/docs-index.json"
 });
 assert.equal(await freshIndex.text(), "fresh");
-assert.equal(await runtimeStored.get("/docs-index.json").text(), "fresh");
+assert.equal(runtimeStored.has("/docs-index.json"), false, "the precached guide index must not be duplicated after revalidation");
+fetchImplementation = async () => { throw new Error("offline"); };
+const offlineGuideIndex = await dispatchFetch({
+    method: "GET",
+    mode: "cors",
+    url: "https://infernux-engine.com/docs-index.json"
+});
+assert.equal(await offlineGuideIndex.text(), "precached:/docs-index.json", "curated guide search should survive a first offline launch");
+const offlineLearningPaths = await dispatchFetch({
+    method: "GET",
+    mode: "cors",
+    url: "https://infernux-engine.com/learning-paths.json"
+});
+assert.equal(await offlineLearningPaths.text(), "precached:/learning-paths.json", "learning progress should resolve its next step on a first offline launch");
 
 const hashedStyle = "/css/wiki-template.0123456789abcdef.css";
 assert.equal(runtimeStored.has(hashedStyle), false, "generated-page assets should start outside the core shell");

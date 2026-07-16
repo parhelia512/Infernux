@@ -3,6 +3,57 @@ function formatAssetSize(bytes) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
+const RELEASE_REPOSITORY = "https://github.com/ChenlizheMe/Infernux";
+const RELEASE_KINDS = new Set(["hub-installer", "python-wheel"]);
+
+function releaseContract(condition, message) {
+    if (!condition) throw new TypeError(`Invalid release manifest: ${message}`);
+}
+
+function normalizeReleaseManifest(input) {
+    releaseContract(input && typeof input === "object" && !Array.isArray(input), "root must be an object");
+    releaseContract(input.schema_version === 2, "unsupported schema");
+    releaseContract(typeof input.version === "string" && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(input.version), "invalid version");
+    releaseContract(input.tag === `v${input.version}`, "tag must match version");
+    releaseContract(input.release_url === `${RELEASE_REPOSITORY}/releases/tag/${input.tag}`, "release URL must match the canonical repository tag");
+    releaseContract(Number.isFinite(Date.parse(input.published_at)), "invalid publication date");
+    releaseContract(input.verification?.checksum_algorithm === "SHA-256", "checksum algorithm must be SHA-256");
+    releaseContract(input.verification?.publisher_signature === "not-declared", "publisher-signature status must be explicit");
+    releaseContract(input.verification?.authority === "GitHub Releases", "verification authority must be GitHub Releases");
+    releaseContract(Array.isArray(input.assets) && input.assets.length === RELEASE_KINDS.size, "expected installer and wheel assets");
+
+    const kinds = new Set();
+    const assets = input.assets.map((asset) => {
+        releaseContract(asset && typeof asset === "object" && !Array.isArray(asset), "asset must be an object");
+        releaseContract(RELEASE_KINDS.has(asset.kind) && !kinds.has(asset.kind), "asset kind is missing, unknown, or duplicated");
+        kinds.add(asset.kind);
+        releaseContract(typeof asset.name === "string" && /^[A-Za-z0-9._-]+$/.test(asset.name), "unsafe asset name");
+        releaseContract(Number.isSafeInteger(asset.size_bytes) && asset.size_bytes > 0, "invalid asset size");
+        releaseContract(typeof asset.sha256 === "string" && /^[a-f0-9]{64}$/.test(asset.sha256), "invalid asset checksum");
+        releaseContract(asset.url === `${RELEASE_REPOSITORY}/releases/download/${input.tag}/${asset.name}`, "asset URL must match the canonical release tag and filename");
+        return {
+            kind: asset.kind,
+            name: asset.name,
+            size_bytes: asset.size_bytes,
+            sha256: asset.sha256,
+            url: asset.url
+        };
+    });
+
+    return {
+        version: input.version,
+        tag: input.tag,
+        published_at: input.published_at,
+        release_url: input.release_url,
+        verification: {
+            checksum_algorithm: input.verification.checksum_algorithm,
+            publisher_signature: input.verification.publisher_signature,
+            authority: input.verification.authority
+        },
+        assets
+    };
+}
+
 function renderRelease(release) {
     document.getElementById("release-version").textContent = release.version;
     document.getElementById("release-date").textContent = new Intl.DateTimeFormat(
@@ -31,7 +82,7 @@ function renderReleaseNotes(notes) {
     const status = document.getElementById("release-notes-status");
     if (!summary || !grid || !status) return;
     summary.textContent = notes.summary;
-    grid.innerHTML = "";
+    grid.replaceChildren();
     notes.sections.forEach((section) => {
         const article = document.createElement("article");
         article.className = `release-note-section release-note-section-${section.kind}`;
@@ -70,6 +121,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (!response.ok) throw new Error(`release manifest ${response.status}`);
             return response.json();
         })
+        .then(normalizeReleaseManifest)
         .then(renderRelease)
         .catch((error) => {
             console.warn(error);
@@ -103,3 +155,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 });
+
+if (globalThis.__INFERNUX_DOWNLOAD_TEST__) {
+    globalThis.InfernuxDownloadTest = { normalizeReleaseManifest };
+}

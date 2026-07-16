@@ -45,8 +45,16 @@ const runtimeFiles = [
     ...(await readdir(path.join(docsRoot, "js"))).filter((name) => name.endsWith(".js")).map((name) => path.join(docsRoot, "js", name)),
 ].map(path.normalize);
 
+for (const file of runtimeFiles.filter((runtimeFile) => runtimeFile.endsWith(".js"))) {
+    const source = await readFile(file, "utf8");
+    for (const match of source.matchAll(/["'`](\/(?:[^"'`]+\/)*[^"'`]+\.js(?:\?[^"'`]*)?)["'`]/g)) {
+        const target = runtimeReference(file, match[1]);
+        if (target) referencedRuntime.add(target);
+    }
+}
+
 for (const file of runtimeFiles) {
-    if (!referencedRuntime.has(file)) fail(`${path.relative(repoRoot, file)}: unreferenced production runtime is still shipped and precached`);
+    if (!referencedRuntime.has(file)) fail(`${path.relative(repoRoot, file)}: runtime is neither referenced by HTML nor declared as a same-origin lazy dependency`);
 }
 
 const forbiddenVisualMutation = [
@@ -98,4 +106,4 @@ if (failures.length) {
     process.exit(1);
 }
 
-console.log(`Runtime asset audit passed: ${runtimeFiles.length} CSS/JS assets are referenced, local scripts use class/data-state styling, and obsolete roadmap code stays removed.`);
+console.log(`Runtime asset audit passed: ${runtimeFiles.length} CSS/JS assets are referenced or explicitly lazy-loaded, local scripts use class/data-state styling, and obsolete roadmap code stays removed.`);

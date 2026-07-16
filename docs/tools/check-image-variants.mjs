@@ -91,12 +91,13 @@ if (!picture) {
     fail("index.html: runtime evidence must use a picture element");
 } else {
     const avifSource = '<source srcset="assets/demo-0.2.1.avif" type="image/avif">';
-    const webpSource = '<source srcset="assets/demo-0.2.1.webp" type="image/webp">';
-    const fallback = '<img src="assets/demo.png" width="1245" height="653" alt="Infernux 0.2.1 editor running the 10,000-cube ocean FFT reference workload" loading="lazy" decoding="async">';
-    for (const token of [avifSource, webpSource, fallback]) if (!picture.includes(token)) fail(`index.html: picture is missing '${token}'`);
-    if (!(picture.indexOf(avifSource) < picture.indexOf(webpSource) && picture.indexOf(webpSource) < picture.indexOf(fallback))) fail("index.html: picture sources must prefer AVIF, then WebP, then PNG");
+    const fallback = '<img src="assets/demo-0.2.1.webp" width="1245" height="653" alt="Infernux 0.2.1 editor running the 10,000-cube ocean FFT reference workload" loading="lazy" decoding="async">';
+    for (const token of [avifSource, fallback]) if (!picture.includes(token)) fail(`index.html: picture is missing '${token}'`);
+    if (picture.includes('<source srcset="assets/demo-0.2.1.webp"')) fail("index.html: WebP should be the img fallback, not a redundant source candidate");
+    if (!(picture.indexOf(avifSource) < picture.indexOf(fallback))) fail("index.html: picture sources must prefer AVIF and fall back to lossless WebP");
 }
-if (!homepage.includes('"screenshot": "https://infernux-engine.com/assets/demo.png"')) fail("index.html: structured evidence must keep the canonical PNG screenshot");
+if (!homepage.includes('"screenshot": "https://infernux-engine.com/assets/demo-0.2.1.webp"')) fail("index.html: structured evidence must use the delivered lossless WebP screenshot");
+if (homepage.includes("assets/demo.png")) fail("index.html: the repository-only PNG evidence source must not be part of website delivery");
 if (/<link\b[^>]*rel=["']preload["'][^>]*demo-/i.test(homepage)) fail("index.html: below-the-fold runtime evidence must not compete with first-view content via preload");
 
 const sharedCss = await readFile(path.join(docsRoot, "css", "style.css"), "utf8");
@@ -107,6 +108,12 @@ for (const contract of [".demo-frame picture", "aspect-ratio: 1245 / 653", "widt
 const budget = await readFile(path.join(docsRoot, "tools", "check-static-budget.mjs"), "utf8");
 for (const name of Object.keys(expected)) if (!budget.includes(`"${name}"`)) fail(`check-static-budget.mjs: responsive delivery set omits '${name}'`);
 if (!budget.includes("Math.max(...imageSet")) fail("check-static-budget.mjs: responsive alternatives must count the worst delivered representation, not every mutually exclusive file");
+if (!budget.includes("evidenceOnlyImages")) fail("check-static-budget.mjs: the retained PNG source must be separated from website delivery");
+
+for (const readmeName of ["README.md", "README-zh.md"]) {
+    const readme = await readFile(path.join(repoRoot, readmeName), "utf8");
+    if (!readme.includes('src="docs/assets/demo.png"')) fail(`${readmeName}: repository evidence should retain the original PNG source`);
+}
 
 const provenance = await readFile(path.join(docsRoot, "assets", "VENDOR_ASSETS.md"), "utf8");
 for (const contract of ["demo-0.2.1.webp", "demo-0.2.1.avif", "PSNR 47.03 dB", "MAE 0.3971", "lossless"]) {
@@ -127,7 +134,7 @@ if (failures.length) {
 const savings = (bytes) => ((1 - bytes / pngBytes) * 100).toFixed(1);
 console.log(
     `Responsive image audit passed: ${width}x${height}; `
-    + `PNG ${(pngBytes / 1024).toFixed(1)} KiB; `
-    + `lossless WebP ${(webpBytes / 1024).toFixed(1)} KiB (-${savings(webpBytes)}%); `
-    + `AVIF ${(avifBytes / 1024).toFixed(1)} KiB (-${savings(avifBytes)}%).`
+    + `source PNG ${(pngBytes / 1024).toFixed(1)} KiB retained for repository evidence; `
+    + `website lossless WebP fallback ${(webpBytes / 1024).toFixed(1)} KiB (-${savings(webpBytes)}%); `
+    + `preferred AVIF ${(avifBytes / 1024).toFixed(1)} KiB (-${savings(avifBytes)}%).`
 );

@@ -29,7 +29,8 @@
     <link rel="apple-touch-icon" sizes="180x180" href="assets/infernux-apple-touch-icon.png">
     <link rel="manifest" href="site.webmanifest">
     <link rel="stylesheet" href="css/fonts.css?v=1">
-    <link rel="stylesheet" href="css/style.css?v=16">
+    <link rel="stylesheet" href="css/style.css?v=17">
+    <link rel="stylesheet" href="css/docs-search.css?v=3">
     <link rel="stylesheet" href="css/mission.css?v=2">
     <link rel="stylesheet" href="css/download.css?v=2">
     <link rel="stylesheet" href="css/fontawesome-subset.css?v=6.4.0">
@@ -77,8 +78,9 @@
                     <span><small data-i18n="downloadPage.channel">Channel</small><strong data-i18n="downloadPage.preview">Technical preview</strong></span>
                     <span><small data-i18n="downloadPage.platform">Platform</small><strong>Windows 10/11 · x64</strong></span>
                     <span><small data-i18n="downloadPage.published">Published</small><strong id="release-date">2026-07-10</strong></span>
+                    <span><small data-i18n="downloadPage.signature">Publisher signature</small><strong data-i18n="downloadPage.signature.none">Not declared</strong></span>
                 </div>
-                <p class="release-source" id="release-status" data-i18n="downloadPage.loading">Reading the signed release manifest…</p>
+                <p class="release-source" id="release-status" data-i18n="downloadPage.loading">Reading the release manifest…</p>
             </section>
 
             <section class="section" aria-labelledby="downloads-title">
@@ -129,7 +131,7 @@
             </section>
 
             <section class="download-protocol" aria-labelledby="verify-title">
-                <div><span class="mini-tag">SHA-256 · POWERSHELL</span><h2 id="verify-title" data-i18n="downloadPage.verify.title">Verify the file before running it.</h2><p data-i18n="downloadPage.verify.body">Compare the command output with the checksum shown on the artifact card.</p></div>
+                <div><span class="mini-tag">SHA-256 · POWERSHELL</span><h2 id="verify-title" data-i18n="downloadPage.verify.title">Verify the file before running it.</h2><p data-i18n="downloadPage.verify.body">Compare the command output with the checksum shown on the artifact card.</p><p class="verification-boundary" data-i18n="downloadPage.verify.boundary">SHA-256 detects whether the downloaded bytes differ from the reviewed GitHub asset. It is not proof of publisher identity, and this release manifest declares no separate signature. Download only from the canonical GitHub Releases links on this page.</p></div>
                 <pre><code>Get-FileHash .\InfernuxHubInstaller.exe -Algorithm SHA256</code></pre>
             </section>
 
@@ -151,16 +153,18 @@
                     <article><h3 data-i18n="downloadPage.requirements.preview">Preview status</h3><p data-i18n="downloadPage.requirements.previewBody">APIs and project formats are still evolving. Keep projects in version control and read the Roadmap before production commitments.</p></article>
                     <article><h3 data-i18n="downloadPage.requirements.help">Recovery</h3><p data-i18n="downloadPage.requirements.helpBody">If verification or installation fails, retain the filename, checksum, Windows version, GPU driver, and exact error before opening an Issue.</p></article>
                 </div>
-                <div class="hub-actions"><a class="btn btn-secondary" href="wiki/site/en/learn/getting-started.html" data-i18n="downloadPage.start">Installation guide</a><a class="btn btn-secondary" id="release-notes-link" href="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.1" target="_blank" rel="noopener" data-i18n="downloadPage.notes">Release notes on GitHub</a></div>
+                <div class="hub-actions"><a class="btn btn-secondary" href="wiki/site/en/learn/getting-started.html" data-i18n="downloadPage.start">Installation guide</a><a class="btn btn-secondary" id="release-notes-link" href="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.1" target="_blank" rel="noopener" data-i18n="downloadPage.notes">Release notes on GitHub</a><a class="btn btn-secondary" id="all-releases-link" href="https://github.com/ChenlizheMe/Infernux/releases" target="_blank" rel="noopener" data-i18n="downloadPage.archive">All releases / older versions</a></div>
             </section>
         </div>
     </main>
 
     <footer class="footer"><div class="container"><div class="footer-bottom">© 2024–2026 Lizhe Chen · MIT License · 熔炉 · INFERNUX</div></div></footer>
-    <script src="js/i18n.js?v=14"></script>
-    <script src="js/main.js?v=12"></script>
+    <script src="js/i18n-download.js?v=2"></script>
+    <script src="js/i18n.js?v=18"></script>
+    <script src="js/main.js?v=14"></script>
+    <script src="js/docs-search.js?v=5"></script>
     <script src="js/pwa-install.js?v=1"></script>
-    <script src="js/download.js?v=1"></script>
+    <script src="js/download.js?v=2"></script>
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",

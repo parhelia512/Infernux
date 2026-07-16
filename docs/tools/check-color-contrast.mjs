@@ -163,6 +163,9 @@ for (const [themeName, tokens] of Object.entries(themes)) {
     for (const surface of surfaces) requireRatio(themeName, tokens, "border-strong", surface, 3, "ui");
 }
 
+requireRatio("print", rootTokens, "print-ink", "print-paper", 7, "text");
+for (const rule of ["print-rule", "print-grid"]) requireRatio("print", rootTokens, rule, "print-paper", 3, "ui");
+
 const offlineSource = await readFile(path.join(docsRoot, "offline.html"), "utf8");
 const offlineTokens = tokenBlock(offlineSource, ":root", "offline-page");
 const offlineSurfaces = ["offline-bg", "offline-panel", "offline-elevated"];

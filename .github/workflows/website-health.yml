@@ -45,5 +45,4 @@ jobs:
       - name: Audit GitHub community readiness
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        # Remove --allow-uninstalled after the repository administrator installs Giscus.
-        run: node docs/tools/check-community-readiness.mjs --allow-uninstalled
+        run: node docs/tools/check-community-readiness.mjs

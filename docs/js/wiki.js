@@ -35,6 +35,52 @@ const wikiUiText = {
     },
 };
 
+const WIKI_LEARNING_PROGRESS_KEY = "infernux-learning-progress-v1";
+const wikiLearningText = {
+    en: {
+        kicker: "Mission memory · this device",
+        ready: "{path} is ready",
+        continue: "Continue {path}",
+        complete: "{path} complete",
+        status: "{done}/{total} complete · Next: {step}",
+        completeStatus: "{done}/{total} complete · Mission accomplished",
+        privacy: "Stored only in this browser. No account sync.",
+        progress: "{path} progress",
+        beginAction: "Begin {path}",
+        continueAction: "Continue with step {position}",
+        reviewAction: "Review final step"
+    },
+    zh: {
+        kicker: "任务记忆 · 当前设备",
+        ready: "{path}已就绪",
+        continue: "继续{path}",
+        complete: "{path}已完成",
+        status: "已完成 {done}/{total} · 下一步：{step}",
+        completeStatus: "已完成 {done}/{total} · 任务达成",
+        privacy: "进度仅保存在本浏览器，不会同步账号。",
+        progress: "{path}进度",
+        beginAction: "开始{path}",
+        continueAction: "继续第 {position} 步",
+        reviewAction: "复盘最后一步"
+    }
+};
+const wikiRecentText = {
+    en: {
+        kicker: "Mission history · this device",
+        title: "Continue from a recently viewed document.",
+        clear: "Clear history",
+        privacy: "Up to eight document links are stored only in this browser for 180 days. Page content, searches, and account data are not recorded.",
+        justNow: "just now"
+    },
+    zh: {
+        kicker: "任务记录 · 当前设备",
+        title: "继续阅读最近查看的文档。",
+        clear: "清除记录",
+        privacy: "本浏览器最多保存八条文档链接，保留 180 天；不会记录页面正文、搜索词或账号数据。",
+        justNow: "刚刚"
+    }
+};
+
 let wikiDocsManifestPromise = null;
 let allDocs = [];
 let apiDocs = [];
@@ -43,6 +89,179 @@ let currentSelectedLayer = null;
 let currentSelectedStatus = null;
 let currentSelectedCategory = null;
 let currentSelectedTag = null;
+let wikiLearningPathsPromise = null;
+let wikiUrlStateRestored = false;
+
+function formatWikiLearningText(template, values) {
+    return Object.entries(values).reduce((text, [key, value]) => text.replaceAll(`{${key}}`, String(value)), template);
+}
+
+function localizedWikiLearningValue(value, language) {
+    if (!value || typeof value !== "object") return "";
+    return String(value[language] || value.en || Object.values(value)[0] || "").replace(/\s+/g, " ").trim();
+}
+
+function parseWikiLearningProgress(rawValue) {
+    try {
+        const parsed = typeof rawValue === "string" ? JSON.parse(rawValue || "[]") : rawValue;
+        return new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : []);
+    } catch {
+        return new Set();
+    }
+}
+
+function deriveWikiLearningResume(data, progress, language = "en") {
+    const learningPath = Array.isArray(data?.paths) ? data.paths[0] : null;
+    const steps = Array.isArray(learningPath?.steps) ? learningPath.steps : [];
+    if (!learningPath || !steps.length) return null;
+
+    const keys = steps.map((step) => `${learningPath.id}:${step.id}`);
+    const completedCount = keys.filter((key) => progress.has(key)).length;
+    const nextIndex = keys.findIndex((key) => !progress.has(key));
+    const complete = nextIndex === -1;
+    const targetIndex = complete ? steps.length - 1 : nextIndex;
+    const targetStep = steps[targetIndex];
+    const locale = language === "zh-CN" ? "zh-CN" : "en";
+    return {
+        state: complete ? "complete" : completedCount ? "continue" : "start",
+        learningPath,
+        targetStep,
+        targetIndex,
+        completedCount,
+        totalSteps: steps.length,
+        pathTitle: localizedWikiLearningValue(learningPath.title, locale),
+        stepTitle: localizedWikiLearningValue(targetStep.title, locale),
+        url: targetStep.documents?.[locale] || targetStep.documents?.en || ""
+    };
+}
+
+function readWikiLearningProgress() {
+    try {
+        return parseWikiLearningProgress(window.localStorage.getItem(WIKI_LEARNING_PROGRESS_KEY));
+    } catch {
+        return new Set();
+    }
+}
+
+function loadWikiLearningPaths() {
+    if (!wikiLearningPathsPromise) {
+        wikiLearningPathsPromise = fetch("learning-paths.json", { headers: { Accept: "application/json" } })
+            .then((response) => {
+                if (!response.ok) throw new Error(`Learning paths HTTP ${response.status}`);
+                return response.json();
+            })
+            .catch((error) => {
+                wikiLearningPathsPromise = null;
+                throw error;
+            });
+    }
+    return wikiLearningPathsPromise;
+}
+
+function renderWikiLearningResume(data) {
+    const host = document.querySelector("[data-learning-resume]");
+    if (!host) return;
+    const language = getWikiLang() === "zh" ? "zh-CN" : "en";
+    const copy = wikiLearningText[getWikiLang()];
+    const model = deriveWikiLearningResume(data, readWikiLearningProgress(), language);
+    if (!model) return;
+
+    const values = { path: model.pathTitle, step: model.stepTitle, done: model.completedCount, total: model.totalSteps, position: model.targetIndex + 1 };
+    const titleTemplate = model.state === "complete" ? copy.complete : model.state === "continue" ? copy.continue : copy.ready;
+    const statusTemplate = model.state === "complete" ? copy.completeStatus : copy.status;
+    const actionTemplate = model.state === "complete" ? copy.reviewAction : model.state === "continue" ? copy.continueAction : copy.beginAction;
+
+    host.dataset.state = model.state;
+    document.getElementById("learning-resume-kicker").textContent = copy.kicker;
+    document.getElementById("learning-resume-title").textContent = formatWikiLearningText(titleTemplate, values);
+    document.getElementById("learning-resume-status").textContent = formatWikiLearningText(statusTemplate, values);
+    document.getElementById("learning-resume-privacy").textContent = copy.privacy;
+    document.getElementById("learning-resume-meter-label").textContent = formatWikiLearningText(copy.progress, values);
+    const meter = document.getElementById("learning-resume-meter");
+    meter.max = model.totalSteps;
+    meter.value = model.completedCount;
+    meter.textContent = `${model.completedCount} of ${model.totalSteps}`;
+    const link = document.getElementById("learning-resume-link");
+    link.href = model.url;
+    link.textContent = formatWikiLearningText(actionTemplate, values);
+}
+
+function refreshWikiLearningResume() {
+    loadWikiLearningPaths().then(renderWikiLearningResume).catch((error) => {
+        console.warn("Infernux learning resume could not be loaded.", error);
+    });
+}
+
+function selectWikiRecentDocuments(documents, language) {
+    return (Array.isArray(documents) ? documents : []).filter((item) => item.language === language).slice(0, 4);
+}
+
+function formatRecentDocumentVisit(timestamp, now = Date.now(), language = getWikiLang()) {
+    const normalizedLanguage = language === "zh" || language === "zh-CN" ? "zh" : "en";
+    const deltaSeconds = Math.round((Number(timestamp) - now) / 1000);
+    if (!Number.isFinite(deltaSeconds) || Math.abs(deltaSeconds) < 60) return wikiRecentText[normalizedLanguage].justNow;
+    const ranges = [
+        [60 * 60 * 24 * 30, "month"],
+        [60 * 60 * 24, "day"],
+        [60 * 60, "hour"],
+        [60, "minute"]
+    ];
+    const [seconds, unit] = ranges.find(([threshold]) => Math.abs(deltaSeconds) >= threshold) || ranges.at(-1);
+    return new Intl.RelativeTimeFormat(normalizedLanguage === "zh" ? "zh-CN" : "en", { numeric: "auto" })
+        .format(Math.round(deltaSeconds / seconds), unit);
+}
+
+function renderWikiRecentDocuments() {
+    const store = globalThis.InfernuxRecentDocuments;
+    const host = document.getElementById("recent-documents");
+    const list = document.getElementById("recent-documents-list");
+    if (!store?.read || !host || !list) return;
+    const language = getWikiLang() === "zh" ? "zh-CN" : "en";
+    const documents = selectWikiRecentDocuments(store.read(), language);
+    list.replaceChildren();
+    if (!documents.length) {
+        host.hidden = true;
+        return;
+    }
+
+    const copy = wikiRecentText[getWikiLang()];
+    document.getElementById("recent-documents-kicker").textContent = copy.kicker;
+    document.getElementById("recent-documents-title").textContent = copy.title;
+    document.getElementById("recent-documents-clear").textContent = copy.clear;
+    document.getElementById("recent-documents-privacy").textContent = copy.privacy;
+    for (const item of documents) {
+        const card = document.createElement("a");
+        card.className = "recent-document-card";
+        card.href = item.url;
+        card.setAttribute("role", "listitem");
+        const layer = document.createElement("span");
+        layer.className = "recent-document-layer";
+        layer.textContent = getWikiGroupTitle(item.layer, item.layer);
+        const title = document.createElement("strong");
+        title.className = "recent-document-title";
+        title.textContent = item.title;
+        const meta = document.createElement("span");
+        meta.className = "recent-document-meta";
+        const status = item.status ? `${getWikiStatusLabel(item.status)} · ` : "";
+        meta.textContent = `${status}${formatRecentDocumentVisit(item.visited_at)}`;
+        card.append(layer, title, meta);
+        list.appendChild(card);
+    }
+    host.hidden = false;
+}
+
+function clearWikiRecentDocuments() {
+    const store = globalThis.InfernuxRecentDocuments;
+    if (!store?.clear) return;
+    const focusTarget = document.getElementById("start-here-title");
+    if (focusTarget) {
+        focusTarget.tabIndex = -1;
+        focusTarget.focus({ preventScroll: true });
+        focusTarget.addEventListener("blur", () => focusTarget.removeAttribute("tabindex"), { once: true });
+    }
+    store.clear();
+    renderWikiRecentDocuments();
+}
 
 function getWikiLang() {
     return document.documentElement.lang && document.documentElement.lang.toLowerCase().startsWith("zh") ? "zh" : "en";
@@ -66,6 +285,17 @@ function getWikiStatusLabel(status) {
         zh: { stable: "稳定", preview: "预览", experimental: "实验性", deprecated: "已弃用" }
     };
     return labels[getWikiLang()][status] || status;
+}
+
+if (globalThis.__INFERNUX_WIKI_PROGRESS_TEST__) {
+    globalThis.__infernuxWikiProgress = {
+        WIKI_LEARNING_PROGRESS_KEY,
+        deriveWikiLearningResume,
+        localizedWikiLearningValue,
+        parseWikiLearningProgress,
+        formatRecentDocumentVisit,
+        selectWikiRecentDocuments
+    };
 }
 
 function loadWikiDocsManifest() {
@@ -170,6 +400,12 @@ function renderTagsFilter() {
             }
         }
     });
+    if (apiDocs.length) {
+        layers.add("api");
+        apiDocs.forEach((doc) => {
+            if (doc.meta?.status) statuses.add(doc.meta.status);
+        });
+    }
 
     if (layers.size === 0 && statuses.size === 0 && categories.size === 0 && tags.size === 0) return;
 
@@ -321,7 +557,7 @@ function searchScore(doc, rawQuery) {
 }
 
 function applyFilters() {
-    const candidates = currentSearchQuery ? [...allDocs, ...apiDocs] : allDocs;
+    const candidates = currentSearchQuery || currentSelectedLayer === "api" ? [...allDocs, ...apiDocs] : allDocs;
     return candidates.map((doc) => ({ doc, score: searchScore(doc, currentSearchQuery) })).filter(({ doc, score }) => {
         if (currentSearchQuery && score < 0) return false;
         if (currentSelectedLayer && doc.groupKey !== currentSelectedLayer) return false;
@@ -410,8 +646,8 @@ function renderWikiDocsCatalog() {
 
             const validCategories = new Set(allDocs.map((doc) => doc.meta?.category).filter(Boolean));
             const validTags = new Set(allDocs.flatMap((doc) => doc.meta?.tags || []));
-            const validLayers = new Set(allDocs.map((doc) => doc.groupKey).filter(Boolean));
-            const validStatuses = new Set(allDocs.map((doc) => doc.meta?.status).filter(Boolean));
+            const validLayers = new Set([...allDocs, ...apiDocs].map((doc) => doc.groupKey).filter(Boolean));
+            const validStatuses = new Set([...allDocs, ...apiDocs].map((doc) => doc.meta?.status).filter(Boolean));
             if (currentSelectedLayer && !validLayers.has(currentSelectedLayer)) currentSelectedLayer = null;
             if (currentSelectedStatus && !validStatuses.has(currentSelectedStatus)) currentSelectedStatus = null;
             if (currentSelectedCategory && !validCategories.has(currentSelectedCategory)) currentSelectedCategory = null;
@@ -487,6 +723,7 @@ function renderWikiDocsCatalog() {
 
 document.addEventListener("DOMContentLoaded", () => {
     restoreWikiUrlState();
+    wikiUrlStateRestored = true;
     const searchInput = document.getElementById("wiki-search-input");
     if (searchInput) {
         searchInput.value = currentSearchQuery;
@@ -516,21 +753,32 @@ document.addEventListener("DOMContentLoaded", () => {
     const filters = document.getElementById("wiki-tags-filter");
     if (filters) filters.setAttribute("aria-label", getWikiLang() === "zh" ? "文档筛选" : "Documentation filters");
     renderWikiDocsCatalog();
+    refreshWikiLearningResume();
+    renderWikiRecentDocuments();
+    document.getElementById("recent-documents-clear")?.addEventListener("click", clearWikiRecentDocuments);
 });
 document.addEventListener("site:language-changed", () => {
-    currentSearchQuery = "";
-    currentSelectedLayer = null;
-    currentSelectedStatus = null;
+    if (!wikiUrlStateRestored) return;
     currentSelectedCategory = null;
     currentSelectedTag = null;
     const searchInput = document.getElementById("wiki-search-input");
     if (searchInput) {
-        searchInput.value = "";
+        searchInput.value = currentSearchQuery;
         searchInput.title = getWikiText("shortcut");
     }
     syncWikiUrlState();
     const filters = document.getElementById("wiki-tags-filter");
     if (filters) filters.setAttribute("aria-label", getWikiLang() === "zh" ? "文档筛选" : "Documentation filters");
     renderWikiDocsCatalog();
+    refreshWikiLearningResume();
+    renderWikiRecentDocuments();
+});
+window.addEventListener("storage", (event) => {
+    if (event.key === WIKI_LEARNING_PROGRESS_KEY || event.key === null) refreshWikiLearningResume();
+    if (event.key === globalThis.InfernuxRecentDocuments?.KEY || event.key === null) renderWikiRecentDocuments();
+});
+window.addEventListener("pageshow", () => {
+    refreshWikiLearningResume();
+    renderWikiRecentDocuments();
 });
 

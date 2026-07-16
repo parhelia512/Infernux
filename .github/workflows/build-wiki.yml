@@ -9,7 +9,6 @@ on:
       - ".github/workflows/build-wiki.yml"
       - "docs/wiki/docs/**"
       - "docs/wiki/theme/**"
-      - "docs/wiki/generate_api_docs.py"
       - "docs/wiki/mkdocs.yml"
       - "docs/wiki/requirements.txt"
       - "docs/*.html"
@@ -20,7 +19,6 @@ on:
       - "docs/docs-manifest.json"
       - "docs/learning-paths.json"
       - "UpdateLog.md"
-      - "python/Infernux/**"
   workflow_dispatch:
 
 permissions:
@@ -32,7 +30,7 @@ concurrency:
 
 jobs:
   build:
-    name: Generate and commit wiki
+    name: Build and commit website
     runs-on: ubuntu-latest
 
     steps:
@@ -41,6 +39,11 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -54,16 +57,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r docs/wiki/requirements.txt
 
-      - name: Generate API Markdown
-        env:
-          PYTHONIOENCODING: utf-8
-        run: python docs/wiki/generate_api_docs.py
+      # API Markdown is intentionally maintained only through update_api_docs.bat.
+      # Publishing consumes the checked-in result and never scans engine sources.
+      - name: Verify checked-in Wiki configuration
+        run: node docs/tools/normalize-wiki-config.mjs --check
+
+      - name: Verify checked-in curated API guidance
+        run: node docs/tools/apply-api-curation.mjs --check
 
       - name: Generate content-hashed Wiki catalog
         run: node docs/tools/build-wiki-catalog.mjs
-
-      - name: Apply curated core API guidance
-        run: node docs/tools/apply-api-curation.mjs
 
       - name: Stamp documentation build provenance
         env:
@@ -82,8 +85,11 @@ jobs:
       - name: Generate structured release notes
         run: node docs/tools/build-release-notes.mjs
 
-      - name: Generate API version comparison
-        run: node docs/tools/build-api-diff.mjs
+      - name: Generate compact Agent documentation index
+        run: node docs/tools/build-llms-index.mjs
+
+      - name: Test compact Agent documentation index
+        run: node docs/tools/test-llms-index.mjs
 
       - name: Generate full Agent documentation corpus
         run: node docs/tools/build-agent-corpus.mjs
@@ -99,6 +105,9 @@ jobs:
       - name: Generate unified sitemap
         run: node docs/tools/build-sitemap.mjs
 
+      - name: Verify route-localized bundles
+        run: node docs/tools/build-i18n.mjs --check
+
       - name: Generate deterministic Service Worker
         run: node docs/tools/build-service-worker.mjs
 
@@ -110,6 +119,15 @@ jobs:
 
       - name: Test PWA installation interaction
         run: node docs/tools/test-pwa-install.mjs
+
+      - name: Test route-localized bundles
+        run: node docs/tools/test-i18n-bundles.mjs
+
+      - name: Test download trust boundary
+        run: node docs/tools/test-download-client.mjs
+
+      - name: Test home starter interaction
+        run: node docs/tools/test-home-client.mjs
 
       - name: Audit shipped runtime assets and visual state
         run: node docs/tools/check-runtime-assets.mjs
@@ -132,8 +150,23 @@ jobs:
       - name: Test community client
         run: node docs/tools/test-community-client.mjs
 
+      - name: Test community readiness rules
+        run: node docs/tools/test-community-readiness.mjs
+
       - name: Test generated documentation context
         run: node docs/tools/test-doc-context.mjs
+
+      - name: Test bilingual section continuity
+        run: node docs/tools/test-doc-language-continuity.mjs
+
+      - name: Test Wiki learning continuity
+        run: node docs/tools/test-wiki-learning-progress.mjs
+
+      - name: Test recent-document continuity
+        run: node docs/tools/test-doc-recent.mjs
+
+      - name: Test documentation printing
+        run: node docs/tools/test-doc-print.mjs
 
       - name: Test documentation search
         run: node docs/tools/test-doc-search.mjs
@@ -150,10 +183,13 @@ jobs:
       - name: Test mobile navigation focus management
         run: node docs/tools/test-mobile-navigation.mjs
 
+      - name: Test responsive layout contracts
+        run: node docs/tools/test-responsive-contracts.mjs
+
       - name: Commit generated wiki output
         shell: bash
         run: |
-          git add docs/wiki/docs docs/wiki/site docs/wiki/mkdocs.yml docs/wiki/mkdocs_api_nav.yml docs/assets/wiki-docs*.json docs/docs-manifest.json docs/docs-index.json docs/docs-health.json docs/api-index.json docs/release-notes.json docs/llms-full.txt docs/wiki.html
+          git add docs/wiki/docs docs/wiki/site docs/wiki/mkdocs.yml docs/wiki/mkdocs_api_nav.yml docs/assets/wiki-docs*.json docs/docs-manifest.json docs/docs-index.json docs/docs-health.json docs/api-index.json docs/release-notes.json docs/llms.txt docs/llms-full.txt docs/wiki.html
           git add -A -- ':(glob)docs/css/wiki-template.*.css'
           git add docs/sw.js docs/sitemap.xml
 

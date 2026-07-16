@@ -29,7 +29,7 @@ Learn Infernux by completing a small task, look up a system in the manual, or ju
 ## Quick Links
 
 - [Project README](https://github.com/ChenlizheMe/Infernux#readme)
-- [Chinese README](https://github.com/ChenlizheMe/Infernux/blob/main/README-zh.md)
+- [Chinese README](https://github.com/ChenlizheMe/Infernux/blob/master/README-zh.md)
 - [Website](https://infernux-engine.com/)
 - [Technical Report](https://arxiv.org/pdf/2604.10263)
 - [API Reference](en/api/index.md)

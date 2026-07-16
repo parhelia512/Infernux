@@ -34,6 +34,12 @@
     --decorative-faint: #44495a;
     --text-mono: #d6cfbe;
 
+    /* ── Printed documentation ─────────────────────────────────── */
+    --print-paper: #ffffff;
+    --print-ink: #000000;
+    --print-rule: #666666;
+    --print-grid: #767676;
+
     /* ── Lines ──────────────────────────────────────────────────── */
     --border: rgba(243, 238, 226, 0.08);
     --border-strong: #687181;

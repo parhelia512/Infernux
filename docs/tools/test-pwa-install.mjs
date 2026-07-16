@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const source = await readFile(path.join(scriptDir, "..", "js", "pwa-install.js"), "utf8");
-const i18nSource = await readFile(path.join(scriptDir, "..", "js", "i18n.js"), "utf8");
+const i18nSource = await readFile(path.join(scriptDir, "i18n-source.json"), "utf8");
 
 function scenario({ userAgent = "Mozilla/5.0 Chrome/148 Safari/537.36", platform = "Win32", maxTouchPoints = 0, standalone = false } = {}) {
     const windowListeners = new Map();

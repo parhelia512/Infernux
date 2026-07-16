@@ -67,7 +67,7 @@ function hardenGeneratedHtml(html) {
   return hardened
     .replace(/\s+onclick="toggleTheme\(\)"/g, ' data-site-action="theme"')
     .replace(/\s+onclick="toggleMobileMenu\(\)"/g, ' data-site-action="menu"')
-    .replace(/\/js\/main\.js\?v=(?:9|10|11)/g, "/js/main.js?v=12");
+        .replace(/\/js\/main\.js\?v=(?:9|10|11|12|13)/g, "/js/main.js?v=14");
 }
 
 const template = await readFile(templateFile, "utf8");

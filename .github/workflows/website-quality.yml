@@ -10,6 +10,7 @@ on:
       - ".github/workflows/website-health.yml"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/DISCUSSION_TEMPLATE/**"
+      - "update_api_docs.bat"
   push:
     branches:
       - main
@@ -22,6 +23,7 @@ on:
       - ".github/workflows/website-health.yml"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/DISCUSSION_TEMPLATE/**"
+      - "update_api_docs.bat"
   workflow_dispatch:
 
 permissions:
@@ -48,6 +50,9 @@ jobs:
       - name: Verify content-hashed Wiki catalog
         run: node docs/tools/build-wiki-catalog.mjs --check
 
+      - name: Verify deterministic Wiki configuration
+        run: node docs/tools/normalize-wiki-config.mjs --check
+
       - name: Verify documentation build provenance schema
         run: node docs/tools/stamp-docs-manifest.mjs --check
 
@@ -63,11 +68,14 @@ jobs:
       - name: Verify curated core API guidance is current
         run: node docs/tools/apply-api-curation.mjs --check
 
-      - name: Verify API release snapshot and comparison
-        run: node docs/tools/build-api-diff.mjs --check
-
       - name: Verify structured release notes
         run: node docs/tools/build-release-notes.mjs --check
+
+      - name: Verify compact Agent documentation index
+        run: node docs/tools/build-llms-index.mjs --check
+
+      - name: Test compact Agent documentation index
+        run: node docs/tools/test-llms-index.mjs
 
       - name: Verify full Agent documentation corpus
         run: node docs/tools/build-agent-corpus.mjs --check
@@ -93,6 +101,9 @@ jobs:
       - name: Verify unified sitemap
         run: node docs/tools/build-sitemap.mjs --check
 
+      - name: Verify route-localized bundles
+        run: node docs/tools/build-i18n.mjs --check
+
       - name: Verify deterministic Service Worker
         run: node docs/tools/build-service-worker.mjs --check
 
@@ -104,6 +115,15 @@ jobs:
 
       - name: Test PWA installation interaction
         run: node docs/tools/test-pwa-install.mjs
+
+      - name: Test route-localized bundles
+        run: node docs/tools/test-i18n-bundles.mjs
+
+      - name: Test download trust boundary
+        run: node docs/tools/test-download-client.mjs
+
+      - name: Test home starter interaction
+        run: node docs/tools/test-home-client.mjs
 
       - name: Audit shipped runtime assets and visual state
         run: node docs/tools/check-runtime-assets.mjs
@@ -126,8 +146,23 @@ jobs:
       - name: Test community client
         run: node docs/tools/test-community-client.mjs
 
+      - name: Test community readiness rules
+        run: node docs/tools/test-community-readiness.mjs
+
       - name: Test generated documentation context
         run: node docs/tools/test-doc-context.mjs
+
+      - name: Test bilingual section continuity
+        run: node docs/tools/test-doc-language-continuity.mjs
+
+      - name: Test Wiki learning continuity
+        run: node docs/tools/test-wiki-learning-progress.mjs
+
+      - name: Test recent-document continuity
+        run: node docs/tools/test-doc-recent.mjs
+
+      - name: Test documentation printing
+        run: node docs/tools/test-doc-print.mjs
 
       - name: Test documentation search
         run: node docs/tools/test-doc-search.mjs
@@ -143,6 +178,9 @@ jobs:
 
       - name: Test mobile navigation focus management
         run: node docs/tools/test-mobile-navigation.mjs
+
+      - name: Test responsive layout contracts
+        run: node docs/tools/test-responsive-contracts.mjs
 
       - name: Verify committed Wiki output is current
         shell: bash

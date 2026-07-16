@@ -75,6 +75,128 @@
         return `${origin}${path}`;
     }
 
+    function buildSectionUrl(pageUrl, sectionId) {
+        const id = compactText(sectionId);
+        try {
+            const url = new URL(compactText(pageUrl));
+            if (!["http:", "https:"].includes(url.protocol)) return "";
+            url.hash = id;
+            return url.href;
+        } catch {
+            return "";
+        }
+    }
+
+    function resolveDocumentSectionId(trackedId, trackingReady, hashValue) {
+        return trackingReady
+            ? compactText(trackedId)
+            : decodeHash(compactText(hashValue).replace(/^#/, ""));
+    }
+
+    function currentDocumentSection() {
+        const outline = document.querySelector("[data-doc-outline]");
+        const id = resolveDocumentSectionId(
+            outline?.dataset.currentSection,
+            outline?.dataset.sectionTracking === "ready",
+            window.location.hash
+        );
+        if (!id) return null;
+        const heading = [...document.querySelectorAll(".api-main h2[id], .api-main h3[id]")]
+            .find((candidate) => candidate.id === id);
+        if (!heading) return null;
+        return {
+            id,
+            title: compactText(heading.textContent).replace(/\s*¶\s*$/, ""),
+            level: Number(heading.tagName.slice(1))
+        };
+    }
+
+    const LANGUAGE_SECTION_PARAMS = ["section", "sections", "level"];
+
+    function buildLanguageSectionUrl(targetUrl, transfer = null) {
+        try {
+            const url = new URL(compactText(targetUrl), "https://infernux-engine.com");
+            if (!["http:", "https:"].includes(url.protocol)) return "";
+            for (const key of LANGUAGE_SECTION_PARAMS) url.searchParams.delete(key);
+            url.hash = "";
+            const index = Number(transfer?.index);
+            const total = Number(transfer?.total);
+            const level = Number(transfer?.level);
+            if (Number.isInteger(index) && Number.isInteger(total) && index >= 0 && total > index && total <= 200 && [2, 3].includes(level)) {
+                url.searchParams.set("section", String(index + 1));
+                url.searchParams.set("sections", String(total));
+                url.searchParams.set("level", String(level));
+            }
+            return url.href;
+        } catch {
+            return "";
+        }
+    }
+
+    function resolveLanguageSectionUrl(currentUrl, sections) {
+        try {
+            const url = new URL(compactText(currentUrl));
+            const hadTransfer = LANGUAGE_SECTION_PARAMS.some((key) => url.searchParams.has(key));
+            if (!hadTransfer) return { hadTransfer: false, targetId: "", url: url.href };
+            const rawIndex = url.searchParams.get("section");
+            const rawTotal = url.searchParams.get("sections");
+            const rawLevel = url.searchParams.get("level");
+            for (const key of LANGUAGE_SECTION_PARAMS) url.searchParams.delete(key);
+            url.hash = "";
+            const index = /^\d+$/.test(rawIndex || "") ? Number(rawIndex) - 1 : -1;
+            const total = /^\d+$/.test(rawTotal || "") ? Number(rawTotal) : -1;
+            const level = /^\d+$/.test(rawLevel || "") ? Number(rawLevel) : -1;
+            const entries = Array.isArray(sections) ? sections : [];
+            const target = total === entries.length && total <= 200 && index >= 0 && index < total && [2, 3].includes(level) && Number(entries[index]?.level) === level
+                ? entries[index]
+                : null;
+            if (target?.id) url.hash = compactText(target.id);
+            return { hadTransfer: true, targetId: compactText(target?.id), url: url.href };
+        } catch {
+            return { hadTransfer: false, targetId: "", url: compactText(currentUrl) };
+        }
+    }
+
+    function documentSectionHeadings() {
+        return [...document.querySelectorAll(".api-main h2[id], .api-main h3[id]")].map((element) => ({
+            element,
+            id: element.id,
+            level: Number(element.tagName.slice(1))
+        }));
+    }
+
+    function restoreTransferredLanguageSection() {
+        const headings = documentSectionHeadings();
+        const resolved = resolveLanguageSectionUrl(window.location.href, headings);
+        if (!resolved.hadTransfer) return;
+        const cleanUrl = new URL(resolved.url);
+        window.history.replaceState(window.history.state, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+        const target = headings.find((heading) => heading.id === resolved.targetId)?.element;
+        if (!target) return;
+        const scroll = () => target.scrollIntoView({ block: "start" });
+        if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(scroll);
+        else scroll();
+    }
+
+    function initializeLanguageSectionLink() {
+        const link = document.querySelector('.doc-language-link, .lang-sw a:not([aria-current="page"])');
+        if (!link) return;
+        const baseHref = buildLanguageSectionUrl(link.href);
+        if (!baseHref) return;
+        const headings = documentSectionHeadings();
+        function syncLink() {
+            const current = currentDocumentSection();
+            const index = current ? headings.findIndex((heading) => heading.id === current.id) : -1;
+            link.href = buildLanguageSectionUrl(baseHref, index >= 0 ? {
+                index,
+                total: headings.length,
+                level: headings[index].level
+            } : null);
+        }
+        window.addEventListener("hashchange", syncLink);
+        syncLink();
+    }
+
     async function fetchJson(url) {
         const response = await fetch(url, { headers: { Accept: "application/json" } });
         if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
@@ -99,6 +221,19 @@
             entries.push({ id, text, level });
         }
         return entries;
+    }
+
+    function visibleDocumentSection(items, boundary = 0) {
+        const limit = Number.isFinite(Number(boundary)) ? Number(boundary) : 0;
+        let current = "";
+        for (const item of Array.isArray(items) ? items : []) {
+            const id = compactText(item?.id);
+            const top = Number(item?.top);
+            if (!id || !Number.isFinite(top)) continue;
+            if (top > limit) break;
+            current = id;
+        }
+        return current;
     }
 
     function findDocumentNeighbors(index, entry, apiPage) {
@@ -157,6 +292,26 @@
         issue.searchParams.set("title", `Docs: ${title}`);
         issue.searchParams.set("body", body);
         return issue.href;
+    }
+
+    function repositoryMarkdownPath(entry, apiPage) {
+        const source = compactText(entry?.source).replace(/\\/g, "/");
+        const language = compactText(entry?.language).toLowerCase().startsWith("zh") ? "zh" : "en";
+        const layer = apiPage ? "api" : compactText(entry?.layer).toLowerCase();
+        if (!source || !["learn", "manual", "architecture", "api"].includes(layer)) return "";
+        const expectedPrefix = `docs/wiki/docs/${language}/${layer}/`;
+        if (!source.startsWith(expectedPrefix) || !source.endsWith(".md")) return "";
+        const segments = source.split("/");
+        if (segments.some((segment) => !segment || segment === "." || segment === "..")) return "";
+        return segments.map(encodeURIComponent).join("/");
+    }
+
+    function buildContributionSourceUrl(entry, apiPage) {
+        const source = repositoryMarkdownPath(entry, apiPage);
+        if (!source) return "";
+        return apiPage
+            ? `https://github.com/ChenlizheMe/Infernux/blob/master/${source}`
+            : `https://github.com/ChenlizheMe/Infernux/edit/master/${source}`;
     }
 
     function contextIndexUrl(manifest, apiPage) {
@@ -396,16 +551,33 @@
     async function initializeDocumentTrail() {
         const trail = document.querySelector("[data-doc-trail]");
         if (!trail) return;
+        const zh = isChinesePage();
+        const labels = zh
+            ? { previous: "上一篇", next: "下一篇", copy: "复制页面链接", copied: "页面链接已复制", copySection: "复制章节链接", sectionCopied: "章节链接已复制", copyFailed: "复制失败", print: "打印 / 保存 PDF", edit: "在 GitHub 编辑本文", viewSource: "查看生成 Markdown", report: "反馈文档问题" }
+            : { previous: "Previous", next: "Next", copy: "Copy page link", copied: "Page link copied", copySection: "Copy section link", sectionCopied: "Section link copied", copyFailed: "Copy failed", print: "Print / Save PDF", edit: "Edit this page", viewSource: "View generated Markdown", report: "Report docs issue" };
+        const actions = document.createElement("div");
+        actions.className = "doc-trail-actions";
+        const print = document.createElement("button");
+        print.type = "button";
+        print.className = "doc-trail-action";
+        print.dataset.docPrint = "";
+        const printIcon = document.createElement("i");
+        printIcon.className = "fas fa-file-lines";
+        printIcon.setAttribute("aria-hidden", "true");
+        const printLabel = document.createElement("span");
+        printLabel.textContent = labels.print;
+        print.append(printIcon, printLabel);
+        print.addEventListener("click", function () {
+            window.print();
+        });
+        actions.appendChild(print);
         try {
             const model = await loadDocumentModel();
-            if (!model.entry) return;
-            const zh = isChinesePage();
-            const labels = zh
-                ? { previous: "上一篇", next: "下一篇", copy: "复制页面链接", copied: "页面链接已复制", copyFailed: "复制失败", report: "反馈文档问题" }
-                : { previous: "Previous", next: "Next", copy: "Copy page link", copied: "Page link copied", copyFailed: "Copy failed", report: "Report docs issue" };
+            if (!model.entry) {
+                trail.appendChild(actions);
+                return;
+            }
             const neighbors = findDocumentNeighbors(model.index, model.entry, model.apiPage);
-            const actions = document.createElement("div");
-            actions.className = "doc-trail-actions";
 
             const copy = document.createElement("button");
             copy.type = "button";
@@ -414,21 +586,50 @@
             copyIcon.className = "fas fa-link";
             copyIcon.setAttribute("aria-hidden", "true");
             const copyLabel = document.createElement("span");
-            copyLabel.textContent = labels.copy;
+            copyLabel.setAttribute("aria-live", "polite");
+            copyLabel.setAttribute("aria-atomic", "true");
             copy.append(copyIcon, copyLabel);
+            const canonical = buildSectionUrl(compactText(model.entry.canonical_url) || canonicalPageUrl(model.path, model.manifest), "");
+            function copyTarget() {
+                const section = currentDocumentSection();
+                return {
+                    section,
+                    url: section ? buildSectionUrl(canonical, section.id) : canonical
+                };
+            }
+            function syncCopyLabel() {
+                if (copy.dataset.state && copy.dataset.state !== "idle") return;
+                const { section } = copyTarget();
+                const text = section ? labels.copySection : labels.copy;
+                copyLabel.textContent = text;
+                copy.setAttribute("aria-label", section ? `${text}: ${section.title}` : text);
+                copy.title = section ? `${text}: ${section.title}` : text;
+            }
             copy.addEventListener("click", async function () {
+                const target = copyTarget();
+                copy.dataset.state = "loading";
+                copy.disabled = true;
                 try {
-                    await copyText(compactText(model.entry.canonical_url) || canonicalPageUrl(model.path, model.manifest));
+                    if (!target.url) throw new Error("Canonical documentation URL is unavailable.");
+                    await copyText(target.url);
                     copyIcon.className = "fas fa-check";
-                    copyLabel.textContent = labels.copied;
+                    copyLabel.textContent = target.section ? labels.sectionCopied : labels.copied;
+                    copy.dataset.state = "success";
                 } catch {
                     copyLabel.textContent = labels.copyFailed;
+                    copy.dataset.state = "failure";
                 }
                 window.setTimeout(function () {
                     copyIcon.className = "fas fa-link";
-                    copyLabel.textContent = labels.copy;
+                    copy.disabled = false;
+                    copy.dataset.state = "idle";
+                    syncCopyLabel();
                 }, 1800);
             });
+            window.addEventListener("hashchange", syncCopyLabel);
+            document.addEventListener("site:document-section-changed", syncCopyLabel);
+            copy.dataset.state = "idle";
+            syncCopyLabel();
 
             const report = document.createElement("a");
             report.className = "doc-trail-action";
@@ -441,7 +642,24 @@
             const reportLabel = document.createElement("span");
             reportLabel.textContent = labels.report;
             report.append(reportIcon, reportLabel);
-            actions.append(copy, report);
+
+            const contributionUrl = buildContributionSourceUrl(model.entry, model.apiPage);
+            if (contributionUrl) {
+                const contribution = document.createElement("a");
+                contribution.className = "doc-trail-action";
+                contribution.href = contributionUrl;
+                contribution.target = "_blank";
+                contribution.rel = "noopener";
+                const contributionIcon = document.createElement("i");
+                contributionIcon.className = "fas fa-arrow-up-right-from-square";
+                contributionIcon.setAttribute("aria-hidden", "true");
+                const contributionLabel = document.createElement("span");
+                contributionLabel.textContent = model.apiPage ? labels.viewSource : labels.edit;
+                contribution.append(contributionIcon, contributionLabel);
+                actions.append(contribution);
+            }
+            actions.prepend(copy);
+            actions.append(report);
 
             trail.replaceChildren();
             if (neighbors.previous) trail.appendChild(buildTrailLink(neighbors.previous, "previous", labels));
@@ -449,6 +667,7 @@
             if (neighbors.next) trail.appendChild(buildTrailLink(neighbors.next, "next", labels));
         } catch (error) {
             console.warn("Infernux document navigation could not be loaded.", error);
+            trail.appendChild(actions);
         }
     }
 
@@ -466,7 +685,8 @@
         const linkHost = outline?.querySelector(".doc-outline-links");
         const toggle = outline?.querySelector(".doc-outline-toggle");
         if (!outline || !linkHost || !toggle) return;
-        const headings = [...document.querySelectorAll(".api-main h2[id], .api-main h3[id]")].map((heading) => {
+        const headingElements = [...document.querySelectorAll(".api-main h2[id], .api-main h3[id]")];
+        const headings = headingElements.map((heading) => {
             const copy = heading.cloneNode(true);
             copy.querySelectorAll(".headerlink").forEach((link) => link.remove());
             return { id: heading.id, text: copy.textContent, level: Number(heading.tagName.slice(1)) };
@@ -505,12 +725,41 @@
         function syncBreakpoint() {
             if (!userToggled) setExpanded(!mobile.matches);
         }
-        function syncHash() {
-            const current = decodeHash(window.location.hash.replace(/^#/, ""));
+        function setCurrentSection(sectionId) {
+            const current = compactText(sectionId);
+            const previous = compactText(outline.dataset.currentSection);
+            outline.dataset.sectionTracking = "ready";
+            if (current) outline.dataset.currentSection = current;
+            else delete outline.dataset.currentSection;
             for (const link of links) {
                 if (decodeHash(link.hash.replace(/^#/, "")) === current && current) link.setAttribute("aria-current", "location");
                 else link.removeAttribute("aria-current");
             }
+            if (current !== previous) {
+                document.dispatchEvent(new CustomEvent("site:document-section-changed", { detail: { id: current } }));
+            }
+        }
+        function sectionBoundary() {
+            const navigationBottom = Number(document.querySelector(".navbar")?.getBoundingClientRect().bottom) || 72;
+            return Math.min(160, Math.max(72, navigationBottom) + 20);
+        }
+        function syncVisibleSection() {
+            scheduled = false;
+            setCurrentSection(visibleDocumentSection(
+                headingElements.map((heading) => ({ id: heading.id, top: heading.getBoundingClientRect().top })),
+                sectionBoundary()
+            ));
+        }
+        let scheduled = false;
+        function scheduleVisibleSection() {
+            if (scheduled) return;
+            scheduled = true;
+            window.requestAnimationFrame(syncVisibleSection);
+        }
+        function syncHash() {
+            const current = decodeHash(window.location.hash.replace(/^#/, ""));
+            if (entries.some((entry) => entry.id === current)) setCurrentSection(current);
+            scheduleVisibleSection();
         }
         toggle.addEventListener("click", function () {
             userToggled = true;
@@ -518,6 +767,9 @@
         });
         if (typeof mobile.addEventListener === "function") mobile.addEventListener("change", syncBreakpoint);
         else if (typeof mobile.addListener === "function") mobile.addListener(syncBreakpoint);
+        window.addEventListener("scroll", scheduleVisibleSection, { passive: true });
+        window.addEventListener("resize", scheduleVisibleSection);
+        window.addEventListener("pageshow", scheduleVisibleSection);
         window.addEventListener("hashchange", syncHash);
         syncBreakpoint();
         syncHash();
@@ -729,20 +981,40 @@
         syncApiSidebarBreakpoint();
     }
 
+    function recordRecentDocument() {
+        const store = globalThis.InfernuxRecentDocuments;
+        if (!store?.record) return;
+        const heading = document.querySelector(".api-main h1");
+        const fallbackTitle = String(document.title || "").replace(/\s+-\s+Infernux Documentation\s*$/, "");
+        store.record({
+            url: window.location.pathname,
+            title: heading?.textContent || fallbackTitle,
+            status: document.querySelector(".doc-provenance")?.dataset.status || ""
+        });
+    }
+
     if (globalThis.__INFERNUX_DOCS_CONTEXT_TEST__) {
         globalThis.__infernuxDocsContext = {
             buildAgentContext,
             buildProvenanceFacts,
             buildFeedbackIssueUrl,
+            buildContributionSourceUrl,
+            buildLanguageSectionUrl,
+            buildSectionUrl,
             findDocumentNeighbors,
             findLearningStep,
             findContextEntry,
             normalizeDocsPath,
-            normalizeOutlineEntries
+            normalizeOutlineEntries,
+            resolveDocumentSectionId,
+            resolveLanguageSectionUrl,
+            visibleDocumentSection
         };
     }
 
     document.addEventListener("DOMContentLoaded", function () {
+        restoreTransferredLanguageSection();
+        initializeLanguageSectionLink();
         initializeNamespaceTree();
         initializeDocumentOutline();
         initializeCodeCopy();
@@ -751,5 +1023,6 @@
         initializeBuildProvenance();
         initializeApiSidebar();
         initializeLearningTrack();
+        recordRecentDocument();
     });
 })();

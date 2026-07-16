@@ -30,15 +30,37 @@
     text-align: center;
 }
 
-.docs-search-dialog[hidden] { display: none; }
+.site-docs-search-trigger {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+}
+
+.site-docs-search-trigger span,
+.site-docs-search-trigger kbd { display: none; }
+
+.docs-search-dialog:not([open]):not([data-fallback-open="true"]) { display: none; }
 
 .docs-search-dialog {
     position: fixed;
     inset: 0;
     z-index: 1200;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    margin: 0;
     display: grid;
     place-items: start center;
     padding: max(7vh, 72px) 20px 24px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+}
+
+.docs-search-dialog::backdrop {
+    background: transparent;
 }
 
 .docs-search-backdrop {

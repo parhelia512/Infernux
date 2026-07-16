@@ -169,12 +169,20 @@ if (canRegisterOfflineShell && !globalThis.__INFERNUX_SW_UPDATE_TEST__) {
 }
 
 // ── Theme toggle ─────────────────────────────
+const SITE_THEME_COLORS = Object.freeze({ dark: "#0a0c11", light: "#f4f1e8" });
+
+function updateThemeColor(theme) {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", SITE_THEME_COLORS[theme] || SITE_THEME_COLORS.dark);
+}
+
 function toggleTheme() {
     const html = document.documentElement;
     const current = html.getAttribute('data-theme');
     const next = current === 'light' ? 'dark' : 'light';
     html.setAttribute('data-theme', next);
     localStorage.setItem('theme', next);
+    updateThemeColor(next);
     updateThemeIcon(next);
     applyNavbarBackground();
     document.dispatchEvent(new CustomEvent('site:theme-changed', { detail: { theme: next } }));
@@ -204,6 +212,7 @@ function updateThemeIcon(theme) {
     if (saved === 'light') {
         document.documentElement.setAttribute('data-theme', 'light');
     }
+    updateThemeColor(saved);
     document.addEventListener('DOMContentLoaded', function() {
         updateThemeIcon(saved);
     });
@@ -347,6 +356,7 @@ document.addEventListener('site:language-changed', () => {
     renderServiceWorkerUpdateNotice();
     setMobileMenuState(false);
 });
+document.addEventListener('site:docs-search-opened', () => setMobileMenuState(false));
 
 // Add animation classes when elements come into view
 const observerOptions = {
