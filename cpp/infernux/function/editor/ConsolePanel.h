@@ -6,8 +6,10 @@
 
 #include <imgui.h>
 
+#include <array>
 #include <atomic>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -41,15 +43,22 @@ class ConsolePanel : public EditorPanel
 
     std::unordered_map<std::string, double> ConsumeSubTimings() override;
 
-    /// Select the last visible entry and request window focus.
+    /// Select the latest entry and request window focus.
     /// Called from status bar click.
     void SelectLatestEntry();
+    void SelectEntry(uint64_t uid);
 
-    /// Last log line currently visible in the panel (respects filters), for the status bar.
-    void GetLastVisibleForStatusBar(std::string &outMsg, std::string &outLevel);
+    /// Authoritative status-bar snapshot. The latest entry and counts do not
+    /// depend on the Console window's current filters.
+    void GetStatusBarSnapshot(std::string &outMsg, std::string &outLevel, int &outInfoCount, int &outWarnCount,
+                              int &outErrorCount, uint64_t &outUid);
+    [[nodiscard]] uint64_t GetRevision() const noexcept;
+    [[nodiscard]] uint64_t GetSelectedUid() const noexcept;
 
     /// Python callback: invoked on double-click with (sourceFile, sourceLine).
     std::function<void(const std::string &, int)> onDoubleClickEntry;
+    std::function<void()> onErrorPause;
+    std::function<void()> onRequestFocus;
 
     /// Filter state — exposed for pybind11 property access.
     bool showInfo = true;
@@ -83,7 +92,8 @@ class ConsolePanel : public EditorPanel
     {
         size_t logIndex; // index into m_logs
         int count;       // collapse count
-        uint64_t uid;
+        uint64_t uid;    // stable UID of the first entry in this group
+        uint64_t latestUid;
     };
 
     // ── INXLOG sink ──
@@ -99,6 +109,7 @@ class ConsolePanel : public EditorPanel
     std::atomic<int> m_infoCount{0};
     std::atomic<int> m_warnCount{0};
     std::atomic<int> m_errorCount{0};
+    std::atomic<uint64_t> m_revision{1};
 
     // ── Filter cache ──
     bool m_cacheDirty = true;
@@ -107,15 +118,19 @@ class ConsolePanel : public EditorPanel
     bool m_prevShowWarnings = true;
     bool m_prevShowErrors = true;
     bool m_prevCollapse = false;
+    std::string m_prevSearch;
     std::vector<VisibleEntry> m_visible;
+    std::unordered_map<std::string, size_t> m_collapseLookup;
     int m_cachedInfoCount = 0;
     int m_cachedWarnCount = 0;
     int m_cachedErrorCount = 0;
 
     // ── Selection & scroll ──
-    int m_selectedIndex = -1;
-    bool m_userScrolledUp = false;
+    uint64_t m_selectedUid = 0;
+    uint64_t m_requestedUid = 0;
+    bool m_followTail = true;
     bool m_scrollToBottom = false;
+    std::array<char, 256> m_search{};
     float m_rowHeight = 22.0f;
     bool m_rowHeightMeasured = false;
     float m_detailHeight = 90.0f;
@@ -131,9 +146,12 @@ class ConsolePanel : public EditorPanel
     void EnsureCache();
     void DetectFilterChange();
     bool MatchesCurrentFilters(const LogEntry &entry) const;
+    std::string CollapseKey(const LogEntry &entry) const;
+    int FindVisibleIndexByUid(uint64_t uid) const;
+    void SelectUid(uint64_t uid, bool focusWindow);
     void RenderToolbar(InxGUIContext *ctx);
     void RenderBody(InxGUIContext *ctx);
-    void RenderRow(int visIdx, const VisibleEntry &ve);
+    void RenderRow(InxGUIContext *ctx, int visIdx, const VisibleEntry &ve, bool selected);
     const ImVec4 &LevelColor(LogLevel lv) const;
     static std::string CurrentTimestamp();
     static bool IsInternalNoise(const std::string &msg);

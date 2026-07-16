@@ -495,6 +495,29 @@ class TestInstantiate:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestSceneSerialization:
+    def test_native_play_snapshot_restores_scene_without_python_document(self, scene):
+        source = scene.create_game_object("NativeSnapshotSource")
+        source_id = source.id
+        source.transform.position = Vector3(1.0, 2.0, 3.0)
+        snapshot = scene._capture_play_mode_snapshot()
+
+        source.name = "NativeSnapshotMutated"
+        source.transform.position = Vector3(9.0, 8.0, 7.0)
+        transaction = SceneDocumentTransaction(
+            scene,
+            document=snapshot,
+            borrow_document=True,
+        )
+
+        assert transaction.run_to_completion() is True
+        restored = scene.find_by_id(source_id)
+        assert restored is not None
+        assert restored.name == "NativeSnapshotSource"
+        position = restored.transform.position
+        assert (position.x, position.y, position.z) == pytest.approx((1.0, 2.0, 3.0))
+        assert transaction.phase_timings_ms["resources"] >= 0.0
+        assert transaction.phase_timings_ms["native_commit"] >= 0.0
+
     def test_scene_document_transaction_has_explicit_owner_thread_phases(self, scene):
         existing = scene.create_game_object("TransactionPhaseSource")
         document = scene.serialize_document()

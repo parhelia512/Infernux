@@ -36,6 +36,11 @@ def dispatch(elem: Any, backend: str, **kwargs: Any) -> bool:
     """
     ...
 
+def runtime_ui_revision(
+    scene: Any, canvases: Any, width: int, height: int,
+    texture_generation: int = 0,
+) -> int: ...
+
 
 def extract_common(elem: Any) -> dict:
     """Extract shared visual attributes from any ``InxUIScreenComponent``.

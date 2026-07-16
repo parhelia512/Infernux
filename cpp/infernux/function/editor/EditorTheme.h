@@ -30,6 +30,7 @@ constexpr ImVec4 LOG_DIM{0.133f, 0.133f, 0.133f, 0.6f};
 constexpr ImVec4 SELECTION_BG{0.173f, 0.365f, 0.529f, 1.0f};
 constexpr ImVec4 ROW_ALT{0.0f, 0.0f, 0.0f, 0.06f};
 constexpr ImVec4 ROW_NONE{0.0f, 0.0f, 0.0f, 0.0f};
+constexpr ImVec4 CONSOLE_SEGMENT_ACTIVE{0.23f, 0.23f, 0.25f, 1.0f};
 
 // ── Transparent / ghost ──────────────────────────────────────────────
 constexpr ImVec4 BTN_GHOST{0.0f, 0.0f, 0.0f, 0.0f};
@@ -60,6 +61,8 @@ constexpr ImVec4 POPUP_BG{0.24f, 0.24f, 0.24f, 0.96f};
 constexpr ImVec4 STATUS_PROGRESS_CLR{235.0f / 255.0f, 87.0f / 255.0f, 87.0f / 255.0f, 1.0f};
 constexpr ImVec4 STATUS_PROGRESS_BG{0.10f, 0.10f, 0.10f, 1.0f};
 constexpr ImVec4 STATUS_PROGRESS_LABEL_CLR{0.65f, 0.65f, 0.65f, 1.0f};
+constexpr ImVec4 STATUS_ACTIVITY_BG{0.155f, 0.155f, 0.165f, 1.0f};
+constexpr ImVec4 STATUS_BAR_BORDER{0.26f, 0.26f, 0.28f, 1.0f};
 constexpr float STATUS_PROGRESS_FRACTION = 0.25f;
 
 // ── Splitter ─────────────────────────────────────────────────────────

@@ -206,36 +206,9 @@ class BootstrapWiringMixin:
         self._wire_toolbar_callbacks_on(self.toolbar, engine)
 
     def _wire_status_bar_listener(self):
-        """Wire C++ StatusBarPanel to DebugConsole listener + EngineStatus."""
+        """Wire the native status bar to the shared EngineStatus state."""
         sb = self.status_bar
-
-        # Subscribe to DebugConsole for latest message + count updates
-        from Infernux.debug import DebugConsole, LogType
         from Infernux.engine.i18n import t as _t
-        from Infernux.engine.ui.console_utils import is_internal, sanitize_text
-
-        def _on_log_entry(entry):
-            if is_internal(entry):
-                return
-            msg = sanitize_text(getattr(entry, 'message', ''))
-            level_map = {
-                LogType.LOG: "info",
-                LogType.WARNING: "warning",
-                LogType.ERROR: "error",
-                LogType.ASSERT: "error",
-                LogType.EXCEPTION: "error",
-            }
-            level = level_map.get(entry.log_type, "info")
-            sb.set_latest_message(msg, level)
-            if level == "warning":
-                sb.increment_warn_count()
-            elif level == "error":
-                sb.increment_error_count()
-
-        console = DebugConsole.instance()
-        for entry in console.get_entries():
-            _on_log_entry(entry)
-        console.add_listener(_on_log_entry)
 
         # Fold status expiry/synchronization into the existing Python frame tick.
         # A separate Python ImGui renderable would add another C++/Python virtual
@@ -249,8 +222,8 @@ class BootstrapWiringMixin:
             state = EngineStatus.get()
             if state != last_status[0]:
                 last_status[0] = state
-                text, progress = state
-                sb.set_engine_status(text, progress)
+                text, progress, kind = state
+                sb.set_engine_status(text, progress, kind)
 
             sfm = self.scene_file_manager
             prefab_mode = bool(sfm and sfm.is_prefab_mode)

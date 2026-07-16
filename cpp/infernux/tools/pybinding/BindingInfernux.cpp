@@ -281,6 +281,8 @@ PYBIND11_MODULE(_Infernux, m)
     py::class_<InxScreenUIRenderer>(m, "InxScreenUIRenderer")
         .def("begin_frame", &InxScreenUIRenderer::BeginFrame, py::arg("width"), py::arg("height"),
              "Reset draw lists for a new frame")
+        .def("begin_frame_cached", &InxScreenUIRenderer::BeginFrameCached, py::arg("width"), py::arg("height"),
+             py::arg("content_revision"), "Reuse draw lists when the UI content revision is unchanged")
         .def("add_filled_rect", &InxScreenUIRenderer::AddFilledRect, py::arg("list"), py::arg("min_x"),
              py::arg("min_y"), py::arg("max_x"), py::arg("max_y"), py::arg("r") = 1.0f, py::arg("g") = 1.0f,
              py::arg("b") = 1.0f, py::arg("a") = 1.0f, py::arg("rounding") = 0.0f,

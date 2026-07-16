@@ -79,6 +79,17 @@ class BootstrapPanelsMixin:
             title_key="panel.project",
         )
 
+        from Infernux.lib import ConsolePanel as NativeConsolePanel
+
+        wm.register_window_type(
+            type_id="console",
+            window_class=NativeConsolePanel,
+            display_name="Console",
+            factory=self._create_native_console,
+            singleton=True,
+            title_key="panel.console",
+        )
+
         # Override factories for panels that need runtime dependencies.
         # Panels with no-arg constructors use the default factory (cls()).
         _factories = {
@@ -127,6 +138,7 @@ class BootstrapPanelsMixin:
         """Create a fresh C++ ConsolePanel for WindowManager re-open."""
         from Infernux.lib import ConsolePanel as NativeConsolePanel
         panel = NativeConsolePanel()
+        panel.on_request_focus = lambda: self.window_manager.open_window("console")
         _project_path = self.project_path
         def _on_dbl(source_file, source_line):
             if not source_file:
@@ -217,6 +229,7 @@ class BootstrapPanelsMixin:
         DebugConsole.instance().set_native_console(self.console)
         engine.register_gui("console", self.console)
         wm.register_existing_window("console", self.console, "console")
+        self.console.on_request_focus = lambda: wm.open_window("console")
 
         cs = _panel_state.get("console")
         if cs:
@@ -231,11 +244,19 @@ class BootstrapPanelsMixin:
         # Wire play-mode clear-on-play
         if engine._play_mode_manager is not None:
             _native_console = self.console
+            _play_mode_manager = engine._play_mode_manager
             def _on_play_clear(event):
                 from Infernux.engine.play_mode import PlayModeState
                 if event.new_state == PlayModeState.PLAYING and _native_console.clear_on_play:
                     _native_console.clear()
             engine._play_mode_manager.add_state_change_listener(_on_play_clear)
+
+            def _on_console_error_pause():
+                from Infernux.engine.play_mode import PlayModeState
+                if _play_mode_manager.state == PlayModeState.PLAYING:
+                    _play_mode_manager.pause()
+
+            self.console.on_error_pause = _on_console_error_pause
 
         # Wire console double-click → open source file
         _console_project_path = self.project_path

@@ -253,6 +253,7 @@ try:
         _cds_batch_scatter,
         _transform_batch_read,
         _transform_batch_write,
+        _create_scene_transform_batch_handle,
     )
 except ImportError:
     pass  # graceful fallback if built without batch support

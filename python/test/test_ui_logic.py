@@ -449,6 +449,57 @@ def test_runtime_ui_packet_cache_reuses_static_text_and_tracks_mutation(monkeypa
     assert renderer.text_calls[-1][5] == "Updated"
 
 
+def test_runtime_ui_revision_is_stable_and_tracks_visual_state():
+    from Infernux.ui.ui_render_dispatch import runtime_ui_revision
+    from Infernux.ui.ui_render_revision import mark_runtime_ui_dirty
+
+    class GameObject:
+        active_in_hierarchy = True
+
+    class Element:
+        game_object = GameObject()
+        enabled = True
+        _ui_render_revision = 3
+        _current_state = "normal"
+
+    class Canvas:
+        game_object = GameObject()
+        enabled = True
+        render_mode = 1
+        sort_order = 0
+        reference_width = 1920
+        reference_height = 1080
+        ui_scale_mode = 1
+        screen_match_mode = 0
+        match_width_or_height = 0.5
+        pixel_perfect = False
+
+        def __init__(self, element):
+            self._element = element
+
+        def _get_elements(self):
+            return [self._element]
+
+    class Scene:
+        structure_version = 7
+
+    element = Element()
+    scene = Scene()
+    canvases = [Canvas(element)]
+
+    first = runtime_ui_revision(scene, canvases, 1280, 720, 2)
+    assert runtime_ui_revision(scene, canvases, 1280, 720, 2) == first
+
+    element._current_state = "hovered"
+    mark_runtime_ui_dirty()
+    assert runtime_ui_revision(scene, canvases, 1280, 720, 2) != first
+
+    element._current_state = "normal"
+    element._ui_render_revision += 1
+    mark_runtime_ui_dirty()
+    assert runtime_ui_revision(scene, canvases, 1280, 720, 2) != first
+
+
 def test_persistent_event_combo_preserves_temporarily_unresolved_method():
     from Infernux.engine.ui.inspector_ui_components import _persistent_event_combo_options
 

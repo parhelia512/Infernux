@@ -7,6 +7,7 @@ from Infernux.lib import (
     ConsolePanel,
     HierarchyPanel,
     PlayState,
+    LogLevel,
     WindowTypeInfo,
 )
 
@@ -21,37 +22,60 @@ class TestStatusBarPanel:
         sb = StatusBarPanel()
         assert sb is not None
 
-    def test_set_latest_message(self):
-        sb = StatusBarPanel()
-        sb.set_latest_message("Hello world", "info")
-        # No crash — message is rendered next frame
-
-    def test_set_latest_message_multiline(self):
-        sb = StatusBarPanel()
-        sb.set_latest_message("Line1\nLine2\nLine3", "warning")
-
-    def test_clear_counts(self):
-        sb = StatusBarPanel()
-        sb.increment_warn_count()
-        sb.increment_error_count()
-        sb.clear_counts()
-        # Can't directly read counts, but no crash
-
-    def test_increment_counts(self):
-        sb = StatusBarPanel()
-        sb.increment_warn_count()
-        sb.increment_warn_count()
-        sb.increment_error_count()
-
     def test_set_engine_status(self):
         sb = StatusBarPanel()
-        sb.set_engine_status("Loading...", 0.5)
-        sb.set_engine_status("", -1.0)  # clear
+        sb.set_engine_status("Loading...", 0.5, "progress")
+        sb.set_engine_status("Done", 1.0, "success")
+        sb.set_engine_status("", -1.0, "idle")
 
     def test_set_console_panel(self):
         sb = StatusBarPanel()
         console = ConsolePanel()
         sb.set_console_panel(console)
+
+
+class TestConsolePanel:
+
+    def test_status_snapshot_is_exact_before_panel_render(self):
+        console = ConsolePanel()
+        console.log_from_python(LogLevel.Info, "first")
+        console.log_from_python(LogLevel.Warn, "second")
+        console.log_from_python(LogLevel.Error, "latest")
+
+        message, level, info, warning, error, uid = console._get_status_snapshot()
+        assert (message, level) == ("latest", "error")
+        assert (info, warning, error) == (1, 1, 1)
+        assert uid > 0
+
+        console._select_entry(uid)
+        assert console._selected_uid == uid
+
+    def test_error_pause_callback_runs_when_error_enters_console(self):
+        console = ConsolePanel()
+        calls = []
+        console.error_pause = True
+        console.on_error_pause = lambda: calls.append("pause")
+
+        console.log_from_python(LogLevel.Error, "runtime failure")
+        console._get_status_snapshot()
+        assert calls == ["pause"]
+
+    def test_clear_resets_authoritative_summary_and_counts(self):
+        console = ConsolePanel()
+        console.log_from_python(LogLevel.Warn, "warning")
+        console._get_status_snapshot()
+        revision = console._revision
+
+        console.clear()
+        assert console._revision > revision
+        assert console._get_status_snapshot() == ("", "info", 0, 0, 0, 0)
+
+    def test_select_requests_window_manager_focus(self):
+        console = ConsolePanel()
+        calls = []
+        console.on_request_focus = lambda: calls.append("focus")
+        console.select_latest_entry()
+        assert calls == ["focus"]
 
 
 # ═══════════════════════════════════════════════════════════════════════

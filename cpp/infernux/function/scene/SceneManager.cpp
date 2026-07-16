@@ -364,38 +364,49 @@ void SceneManager::StartActiveSceneForPlay()
     if (!m_activeScene)
         return;
 
+    const auto transitionStart = ProfileClock::now();
     m_activeScene->SetPlaying(true);
 
     // A transactional runtime load publishes freshly-deserialized Transform
     // rows immediately before this call. Their world caches can still contain
     // values from recycled ECS slots. Jolt shapes consume world scale during
     // body creation, so synchronize the graph before Collider::RegisterBody.
+    auto phaseStart = ProfileClock::now();
     TransformECSStore::Instance().SyncSceneWorldMatrices(m_activeScene);
+    const double initialTransformMs = ProfileMsSince(phaseStart);
 
-    auto tStart = ProfileClock::now();
+    phaseStart = ProfileClock::now();
     m_activeScene->Start();
-    double startMs = ProfileMsSince(tStart);
+    const double startMs = ProfileMsSince(phaseStart);
 
     // Start callbacks may author transforms. Publish those edits before shape
     // creation as well, matching the transform state visible to gameplay.
+    phaseStart = ProfileClock::now();
     TransformECSStore::Instance().SyncSceneWorldMatrices(m_activeScene);
+    const double postStartTransformMs = ProfileMsSince(phaseStart);
 
-    // Force-sync resident body positions, then create and publish deferred
-    // bodies for a newly loaded Scene.
-    ForceAllBodiesToCurrentTransform();
+    // Start callbacks can author transforms. The transform observer already
+    // records exactly which physics actors changed, so avoid rewriting every
+    // resident body when entering Play Mode.
+    phaseStart = ProfileClock::now();
+    SyncCollidersToPhysics(m_fixedTimeStep);
+    const double colliderSyncMs = ProfileMsSince(phaseStart);
 
-    auto tFlush = ProfileClock::now();
+    phaseStart = ProfileClock::now();
     FlushPendingBroadphase();
-    PhysicsWorld::Instance().OptimizeBroadPhase();
-    double flushMs = ProfileMsSince(tFlush);
+    const double flushMs = ProfileMsSince(phaseStart);
 
     // Jolt bodies default to sleeping and need activation after broadphase
     // publication for gravity and forces to apply on the first fixed step.
+    phaseStart = ProfileClock::now();
     ActivateAllDynamicBodies();
+    const double activationMs = ProfileMsSince(phaseStart);
 
-    if (startMs + flushMs > 500.0) {
-        INXLOG_INFO("[Perf] StartActiveSceneForPlay(): Start=", static_cast<int>(startMs),
-                    "ms, Flush=", static_cast<int>(flushMs), "ms");
+    const double totalMs = ProfileMsSince(transitionStart);
+    if (totalMs > 25.0) {
+        INXLOG_INFO("[Perf] StartActiveSceneForPlay: total=", totalMs, "ms transform=", initialTransformMs,
+                    "ms lifecycle=", startMs, "ms postTransform=", postStartTransformMs,
+                    "ms colliderSync=", colliderSyncMs, "ms broadphase=", flushMs, "ms activate=", activationMs, "ms");
     }
 }
 

@@ -6,6 +6,8 @@
 #include "MeshRenderer.h"
 #include "SceneManager.h"
 #include "TransformECSStore.h"
+#include "core/threading/JobSystem.h"
+#include "function/resources/AssetDependencyGraph.h"
 #include "platform/filesystem/DocumentStore.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -33,6 +35,7 @@ uint64_t Scene::GenerateWorldId()
 namespace
 {
 constexpr size_t kDenseSceneObjectThreshold = 512;
+constexpr size_t kParallelSceneRootThreshold = 256;
 
 std::string DumpSceneDocument(const nlohmann::json &document, size_t objectCount)
 {
@@ -156,11 +159,20 @@ SceneCommitToken::SceneCommitToken(Scene &scene) : m_impl(std::make_unique<Impl>
     state.hasStarted = scene.m_hasStarted;
     state.structureVersion = scene.m_structureVersion;
 
+    const std::vector<GameObject *> objects = scene.GetAllObjects();
     std::vector<Component *> components;
-    for (GameObject *object : scene.GetAllObjects()) {
+    components.reserve(objects.size() * 3);
+    state.residentColliders.reserve(objects.size());
+    for (GameObject *object : objects) {
         components.push_back(object->GetTransform());
-        auto objectComponents = object->GetComponents<Component>();
-        components.insert(components.end(), objectComponents.begin(), objectComponents.end());
+        for (const auto &ownedComponent : object->GetAllComponents()) {
+            Component *component = ownedComponent.get();
+            if (!component)
+                continue;
+            components.push_back(component);
+            if (auto *collider = dynamic_cast<Collider *>(component))
+                state.residentColliders.push_back(collider);
+        }
     }
     state.componentRegistryNodes.reserve(components.size());
     auto &registry = Component::GetInstanceRegistry();
@@ -171,12 +183,8 @@ SceneCommitToken::SceneCommitToken(Scene &scene) : m_impl(std::make_unique<Impl>
         state.componentRegistryNodes.push_back(std::move(node));
     }
 
-    for (GameObject *object : scene.GetAllObjects()) {
-        for (Collider *collider : object->GetComponents<Collider>()) {
-            collider->SuspendSceneResidency();
-            state.residentColliders.push_back(collider);
-        }
-    }
+    for (Collider *collider : state.residentColliders)
+        collider->SuspendSceneResidency();
 
     state.rootObjects = std::move(scene.m_rootObjects);
     state.objectsById = std::move(scene.m_objectsById);
@@ -568,7 +576,7 @@ void Scene::AwakeObject(GameObject *obj)
     if (!obj->IsActiveInHierarchy())
         return;
 
-    std::vector<Component *> components = obj->GetComponentsInExecutionOrder();
+    const auto &components = obj->GetComponentsInExecutionOrderCached();
     for (Component *component : components) {
         if (component) {
             component->CallAwake();
@@ -588,7 +596,7 @@ void Scene::StartObject(GameObject *obj)
 
     const bool activeInHierarchy = obj->IsActiveInHierarchy();
 
-    std::vector<Component *> components = obj->GetComponentsInExecutionOrder();
+    const auto &components = obj->GetComponentsInExecutionOrderCached();
     for (Component *component : components) {
         if (component && activeInHierarchy && component->IsEnabled()) {
             component->CallStart();
@@ -698,7 +706,8 @@ void Scene::EditorUpdateObject(GameObject *obj, float deltaTime)
 // ============================================================================
 
 // Internal overload operating directly on a parsed json value.
-std::unique_ptr<GameObject> Scene::BuildGameObjectFromJsonImpl(const json &objJson, bool preserveIds)
+std::unique_ptr<GameObject> Scene::BuildGameObjectFromJsonImpl(const json &objJson, bool preserveIds,
+                                                               ComponentPrototypeCache *prototypeCache)
 {
     const size_t pendingPyStart = m_pendingPyComponents.size();
     const auto fail = [&]() -> std::unique_ptr<GameObject> {
@@ -814,19 +823,69 @@ std::unique_ptr<GameObject> Scene::BuildGameObjectFromJsonImpl(const json &objJs
             INXLOG_ERROR("Scene object '", name, "' contains Transform in its components array");
             return fail();
         }
-        std::unique_ptr<Component> comp = ComponentFactory::Create(typeName);
-        if (!comp) {
-            INXLOG_ERROR("Scene object '", name, "' references unknown component type '", typeName, "'");
-            return fail();
+        bool supportsPrototype = typeName == "BoxCollider";
+        if (typeName == "MeshRenderer") {
+            supportsPrototype = true;
+            const auto materialsIt = record.data.find("materials");
+            if (materialsIt == record.data.end() || !materialsIt->is_array())
+                supportsPrototype = false;
+            else {
+                for (const json &slot : *materialsIt) {
+                    if (!slot.is_null() && !slot.is_string()) {
+                        supportsPrototype = false;
+                        break;
+                    }
+                }
+            }
         }
-        json componentDocument = BuildNativeComponentDocument(record);
-        if (!preserveIds)
-            componentDocument.erase("component_id");
+        Component *prototype = nullptr;
+        size_t prototypeHash = 0;
+        if (prototypeCache && supportsPrototype) {
+            prototypeHash = std::hash<std::string>{}(record.typeId);
+            const auto mixHash = [&](size_t value) {
+                prototypeHash ^= value + 0x9e3779b97f4a7c15ULL + (prototypeHash << 6u) + (prototypeHash >> 2u);
+            };
+            mixHash(std::hash<int>{}(record.typeVersion));
+            mixHash(std::hash<bool>{}(record.enabled));
+            mixHash(std::hash<int>{}(record.executionOrder));
+            mixHash(std::hash<json>{}(record.data));
+            const auto cacheIt = prototypeCache->find(prototypeHash);
+            if (cacheIt != prototypeCache->end()) {
+                for (const ComponentPrototype &candidate : cacheIt->second) {
+                    const json &candidateRecord = *candidate.record;
+                    if (candidateRecord.at("type_id") == componentRecordDocument.at("type_id") &&
+                        candidateRecord.at("type_version") == componentRecordDocument.at("type_version") &&
+                        candidateRecord.at("enabled") == componentRecordDocument.at("enabled") &&
+                        candidateRecord.at("execution_order") == componentRecordDocument.at("execution_order") &&
+                        candidateRecord.at("data") == componentRecordDocument.at("data")) {
+                        prototype = candidate.component;
+                        break;
+                    }
+                }
+            }
+        }
+
+        std::unique_ptr<Component> comp;
+        if (prototype)
+            comp = prototype->Clone();
+        else {
+            comp = ComponentFactory::Create(typeName);
+            if (!comp) {
+                INXLOG_ERROR("Scene object '", name, "' references unknown component type '", typeName, "'");
+                return fail();
+            }
+            json componentDocument = BuildNativeComponentDocument(record);
+            if (!preserveIds)
+                componentDocument.erase("component_id");
+            comp->SetGameObject(obj.get());
+            if (!comp->DeserializeDocument(componentDocument)) {
+                INXLOG_ERROR("Failed to deserialize component '", typeName, "' on scene object '", name, "'");
+                return fail();
+            }
+        }
         comp->SetGameObject(obj.get());
-        if (!comp->DeserializeDocument(componentDocument)) {
-            INXLOG_ERROR("Failed to deserialize component '", typeName, "' on scene object '", name, "'");
-            return fail();
-        }
+        if (prototypeCache && supportsPrototype && !prototype)
+            (*prototypeCache)[prototypeHash].push_back({&componentRecordDocument, comp.get()});
         obj->m_components.push_back(std::move(comp));
     }
 
@@ -837,7 +896,7 @@ std::unique_ptr<GameObject> Scene::BuildGameObjectFromJsonImpl(const json &objJs
     }
     {
         for (const auto &childJson : objJson["children"]) {
-            auto child = BuildGameObjectFromJsonImpl(childJson, preserveIds);
+            auto child = BuildGameObjectFromJsonImpl(childJson, preserveIds, prototypeCache);
             if (!child)
                 return fail();
             obj->AttachChild(std::move(child));
@@ -957,7 +1016,7 @@ void Scene::QueueStartObject(GameObject *obj)
     if (!obj || !obj->IsActiveInHierarchy())
         return;
 
-    std::vector<Component *> components = obj->GetComponentsInExecutionOrder();
+    const auto &components = obj->GetComponentsInExecutionOrderCached();
     for (Component *component : components) {
         if (component && component->IsEnabled() && component->HasAwake()) {
             QueueComponentStart(component);
@@ -1076,11 +1135,49 @@ nlohmann::json Scene::SerializeDocument() const
         j["mainCameraComponentId"] = m_mainCamera->GetComponentID();
     }
 
-    // Serialize all root objects
-    json objectsArray = json::array();
-    for (const auto &obj : m_rootObjects) {
-        objectsArray.push_back(obj->SerializeDocument());
+    // Root documents are independent. Keep Python-backed roots on the caller
+    // thread, while large native-only scenes use the engine worker pool.
+    std::vector<json> rootDocuments(m_rootObjects.size());
+    std::vector<size_t> nativeRootIndices;
+    nativeRootIndices.reserve(m_rootObjects.size());
+    const auto containsPythonComponent = [&](const auto &self, const GameObject *object) -> bool {
+        if (object->m_hasPyProxy)
+            return true;
+        for (const auto &child : object->m_children) {
+            if (self(self, child.get()))
+                return true;
+        }
+        return false;
+    };
+    for (size_t index = 0; index < m_rootObjects.size(); ++index) {
+        const GameObject *root = m_rootObjects[index].get();
+        if (containsPythonComponent(containsPythonComponent, root))
+            rootDocuments[index] = root->SerializeDocument();
+        else
+            nativeRootIndices.push_back(index);
     }
+
+    if (nativeRootIndices.size() >= kParallelSceneRootThreshold && JobSystem::IsAvailable()) {
+        const uint32_t workerCount = std::max(1u, JobSystem::Get().GetWorkerCount());
+        const uint32_t jobCount =
+            static_cast<uint32_t>(std::min(nativeRootIndices.size(), static_cast<size_t>(workerCount * 4u)));
+        JobSystem::Get().ParallelFor(jobCount, [&](uint32_t jobIndex) {
+            const size_t begin = nativeRootIndices.size() * jobIndex / jobCount;
+            const size_t end = nativeRootIndices.size() * (jobIndex + 1u) / jobCount;
+            for (size_t position = begin; position < end; ++position) {
+                const size_t rootIndex = nativeRootIndices[position];
+                rootDocuments[rootIndex] = m_rootObjects[rootIndex]->SerializeDocument();
+            }
+        });
+    } else {
+        for (const size_t rootIndex : nativeRootIndices)
+            rootDocuments[rootIndex] = m_rootObjects[rootIndex]->SerializeDocument();
+    }
+    json objectsArray = json::array();
+    auto &objects = objectsArray.get_ref<json::array_t &>();
+    objects.reserve(rootDocuments.size());
+    for (json &document : rootDocuments)
+        objects.push_back(std::move(document));
     j["objects"] = objectsArray;
 
     return j;
@@ -1094,6 +1191,11 @@ std::string Scene::Serialize() const
 bool Scene::DeserializeDocument(const nlohmann::json &j)
 {
     try {
+        const uint64_t profileStart = SDL_GetPerformanceCounter();
+        const double profileFrequency = static_cast<double>(SDL_GetPerformanceFrequency());
+        const auto elapsedMs = [&](uint64_t begin, uint64_t end) {
+            return static_cast<double>(end - begin) * 1000.0 / profileFrequency;
+        };
         if (!ValidateSceneDocumentHeader(j))
             return false;
 
@@ -1103,12 +1205,15 @@ bool Scene::DeserializeDocument(const nlohmann::json &j)
         Scene staging(j["name"].get<std::string>());
         staging.m_isPlaying = j["isPlaying"].get<bool>();
         staging.m_rootObjects.reserve(j["objects"].size());
+        ComponentPrototypeCache prototypeCache;
+        prototypeCache.reserve(16);
         for (const auto &objJson : j["objects"]) {
-            auto obj = staging.BuildGameObjectFromJsonImpl(objJson, /*preserveIds=*/false);
+            auto obj = staging.BuildGameObjectFromJsonImpl(objJson, /*preserveIds=*/false, &prototypeCache);
             if (!obj)
                 throw std::invalid_argument("scene object graph validation failed");
             staging.m_rootObjects.push_back(std::move(obj));
         }
+        const uint64_t profileStaged = SDL_GetPerformanceCounter();
 
         std::unordered_set<uint64_t> objectIds;
         std::unordered_set<uint64_t> componentIds;
@@ -1116,54 +1221,119 @@ bool Scene::DeserializeDocument(const nlohmann::json &j)
         std::unordered_map<uint64_t, uint64_t> stagedToDocumentObjectId;
         std::vector<std::pair<Component *, uint64_t>> componentIdAssignments;
         std::vector<uint64_t> pythonComponentIds;
-        std::function<void(GameObject *, const json &)> collectIds;
-        collectIds = [&](GameObject *obj, const json &objJson) {
-            if (!objJson.contains("id") || !objJson["id"].is_number_unsigned())
-                throw std::invalid_argument("scene GameObject is missing an unsigned id");
-            const uint64_t objectId = objJson["id"].get<uint64_t>();
-            if (objectId == 0 || !objectIds.insert(objectId).second)
-                throw std::invalid_argument("scene contains a zero or duplicate GameObject id");
-            stagedToDocumentObjectId.emplace(obj->m_id, objectId);
-            obj->m_id = objectId;
 
-            const auto collectComponentId = [&](Component *component, const json &componentJson) {
-                if (!componentJson.contains("component_id") || !componentJson["component_id"].is_number_unsigned())
-                    throw std::invalid_argument("scene component is missing an unsigned component_id");
-                const uint64_t componentId = componentJson["component_id"].get<uint64_t>();
-                if (componentId == 0 || !componentIds.insert(componentId).second)
-                    throw std::invalid_argument("scene contains a zero or duplicate component_id");
+        struct ObjectIdAssignment
+        {
+            GameObject *object = nullptr;
+            uint64_t stagedId = 0;
+            uint64_t documentId = 0;
+        };
+        struct RootIdCollection
+        {
+            std::vector<ObjectIdAssignment> objects;
+            std::vector<std::pair<Component *, uint64_t>> components;
+            std::vector<uint64_t> pythonComponents;
+        };
+
+        const auto collectRootIds = [&](size_t rootIndex, RootIdCollection &collection) {
+            const auto collectIds = [&](const auto &self, GameObject *obj, const json &objJson) -> void {
+                if (!objJson.contains("id") || !objJson["id"].is_number_unsigned())
+                    throw std::invalid_argument("scene GameObject is missing an unsigned id");
+                const uint64_t objectId = objJson["id"].get<uint64_t>();
+                if (objectId == 0)
+                    throw std::invalid_argument("scene contains a zero GameObject id");
+                collection.objects.push_back({obj, obj->m_id, objectId});
+
+                const auto collectComponentId = [&](Component *component, const json &componentJson) {
+                    if (!componentJson.contains("component_id") || !componentJson["component_id"].is_number_unsigned())
+                        throw std::invalid_argument("scene component is missing an unsigned component_id");
+                    const uint64_t componentId = componentJson["component_id"].get<uint64_t>();
+                    if (componentId == 0)
+                        throw std::invalid_argument("scene contains a zero component_id");
+                    collection.components.emplace_back(component, componentId);
+                };
+
+                collectComponentId(&obj->m_transform, objJson.at("transform"));
+                size_t nativeComponentIndex = 0;
+                for (const auto &componentDocument : objJson.at("components")) {
+                    const DecodedComponentRecord record = DecodeComponentRecord(componentDocument);
+                    if (record.kind == ComponentRecordKind::Python) {
+                        collection.pythonComponents.push_back(record.componentId);
+                        continue;
+                    }
+                    if (nativeComponentIndex >= obj->m_components.size())
+                        throw std::invalid_argument("scene native component count changed during staging");
+                    collectComponentId(obj->m_components[nativeComponentIndex++].get(), componentDocument);
+                }
+                if (nativeComponentIndex != obj->m_components.size())
+                    throw std::invalid_argument("scene native component count changed during staging");
+
+                const auto &childDocuments = objJson.at("children");
+                if (childDocuments.size() != obj->m_children.size())
+                    throw std::invalid_argument("scene child count changed during staging");
+                for (size_t i = 0; i < obj->m_children.size(); ++i)
+                    self(self, obj->m_children[i].get(), childDocuments[i]);
+            };
+            collectIds(collectIds, staging.m_rootObjects[rootIndex].get(), j["objects"][rootIndex]);
+        };
+
+        const size_t rootCount = staging.m_rootObjects.size();
+        const uint32_t indexJobCount =
+            rootCount >= kParallelSceneRootThreshold && JobSystem::IsAvailable()
+                ? static_cast<uint32_t>(
+                      std::min(rootCount, static_cast<size_t>(std::max(1u, JobSystem::Get().GetWorkerCount()) * 4u)))
+                : 1u;
+        std::vector<RootIdCollection> rootCollections(indexJobCount);
+        const auto collectRange = [&](uint32_t jobIndex) {
+            RootIdCollection &collection = rootCollections[jobIndex];
+            const size_t begin = rootCount * jobIndex / indexJobCount;
+            const size_t end = rootCount * (jobIndex + 1u) / indexJobCount;
+            collection.objects.reserve(end - begin);
+            collection.components.reserve((end - begin) * 3u);
+            for (size_t rootIndex = begin; rootIndex < end; ++rootIndex)
+                collectRootIds(rootIndex, collection);
+        };
+        if (indexJobCount > 1u)
+            JobSystem::Get().ParallelFor(indexJobCount, collectRange);
+        else
+            collectRange(0u);
+
+        size_t totalObjectCount = 0;
+        size_t totalNativeComponentCount = 0;
+        size_t totalPythonComponentCount = 0;
+        for (const RootIdCollection &collection : rootCollections) {
+            totalObjectCount += collection.objects.size();
+            totalNativeComponentCount += collection.components.size();
+            totalPythonComponentCount += collection.pythonComponents.size();
+        }
+        objectIds.reserve(totalObjectCount);
+        componentIds.reserve(totalNativeComponentCount + totalPythonComponentCount);
+        stagedToDocumentObjectId.reserve(totalObjectCount);
+        componentIdAssignments.reserve(totalNativeComponentCount);
+        componentsByDocumentId.reserve(totalNativeComponentCount);
+        pythonComponentIds.reserve(totalPythonComponentCount);
+        staging.m_objectsById.reserve(totalObjectCount);
+        for (RootIdCollection &collection : rootCollections) {
+            for (const ObjectIdAssignment &assignment : collection.objects) {
+                if (!objectIds.insert(assignment.documentId).second)
+                    throw std::invalid_argument("scene contains a duplicate GameObject id");
+                stagedToDocumentObjectId.emplace(assignment.stagedId, assignment.documentId);
+                assignment.object->m_id = assignment.documentId;
+                staging.m_objectsById.emplace(assignment.documentId, assignment.object);
+            }
+            for (const auto &[component, componentId] : collection.components) {
+                if (!componentIds.insert(componentId).second)
+                    throw std::invalid_argument("scene contains a duplicate component_id");
                 componentIdAssignments.emplace_back(component, componentId);
                 componentsByDocumentId.emplace(componentId, component);
-            };
-
-            collectComponentId(&obj->m_transform, objJson.at("transform"));
-            size_t nativeComponentIndex = 0;
-            for (const auto &componentDocument : objJson.at("components")) {
-                const DecodedComponentRecord record = DecodeComponentRecord(componentDocument);
-                if (record.kind == ComponentRecordKind::Python) {
-                    if (!componentIds.insert(record.componentId).second)
-                        throw std::invalid_argument("scene contains a zero or duplicate component_id");
-                    pythonComponentIds.push_back(record.componentId);
-                    continue;
-                }
-                if (nativeComponentIndex >= obj->m_components.size())
-                    throw std::invalid_argument("scene native component count changed during staging");
-                collectComponentId(obj->m_components[nativeComponentIndex++].get(), componentDocument);
             }
-            if (nativeComponentIndex != obj->m_components.size())
-                throw std::invalid_argument("scene native component count changed during staging");
-
-            const auto &childDocuments = objJson.at("children");
-            if (childDocuments.size() != obj->m_children.size())
-                throw std::invalid_argument("scene child count changed during staging");
-            for (size_t i = 0; i < obj->m_children.size(); ++i)
-                collectIds(obj->m_children[i].get(), childDocuments[i]);
-        };
-        for (size_t i = 0; i < staging.m_rootObjects.size(); ++i)
-            collectIds(staging.m_rootObjects[i].get(), j["objects"][i]);
-        staging.m_objectsById.reserve(objectIds.size());
-        for (const auto &root : staging.m_rootObjects)
-            staging.RegisterObjectSubtree(root.get());
+            for (const uint64_t componentId : collection.pythonComponents) {
+                if (!componentIds.insert(componentId).second)
+                    throw std::invalid_argument("scene contains a duplicate component_id");
+                pythonComponentIds.push_back(componentId);
+            }
+        }
+        const uint64_t profileIndexed = SDL_GetPerformanceCounter();
 
         bool requiresFreshComponentIds = false;
         for (const auto &[component, componentId] : componentIdAssignments) {
@@ -1228,6 +1398,7 @@ bool Scene::DeserializeDocument(const nlohmann::json &j)
                 throw std::logic_error("staging component was not present in the instance registry");
             stagedRegistryNodes.push_back(std::move(node));
         }
+        const uint64_t profileValidated = SDL_GetPerformanceCounter();
 
         // Commit starts here. All schema/factory/component validation has completed.
         m_mainCamera = nullptr;
@@ -1245,6 +1416,17 @@ bool Scene::DeserializeDocument(const nlohmann::json &j)
         m_pendingPyComponents = std::move(staging.m_pendingPyComponents);
         for (size_t i = 0; i < componentIdAssignments.size(); ++i) {
             auto &[component, componentId] = componentIdAssignments[i];
+            if (auto *renderer = dynamic_cast<MeshRenderer *>(component)) {
+                auto &graph = AssetDependencyGraph::Instance();
+                graph.ClearRuntimeDependenciesOf(std::to_string(component->m_componentId));
+                const std::string publishedOwner = std::to_string(componentId);
+                if (renderer->GetMeshAssetRef().HasGuid())
+                    graph.AddRuntimeDependency(publishedOwner, renderer->GetMeshAssetRef().GetGuid());
+                for (const auto &reference : renderer->GetMaterialRefs()) {
+                    if (reference.HasGuid())
+                        graph.AddRuntimeDependency(publishedOwner, reference.GetGuid());
+                }
+            }
             component->m_componentId = componentId;
             Component::EnsureNextComponentID(componentId);
             auto &node = stagedRegistryNodes[i];
@@ -1263,6 +1445,7 @@ bool Scene::DeserializeDocument(const nlohmann::json &j)
         // loading can overwrite an existing ID in m_objectsById.
         for (const uint64_t objectId : objectIds)
             GameObject::EnsureNextID(objectId);
+        const uint64_t profileCommitted = SDL_GetPerformanceCounter();
 
         // ── Step 5: native Awake pass. ──
         // PyComponentProxy instances are NOT in m_rootObjects yet — they live
@@ -1273,12 +1456,25 @@ bool Scene::DeserializeDocument(const nlohmann::json &j)
         for (const auto &root : m_rootObjects) {
             AwakeObject(root.get());
         }
+        const uint64_t profileAwake = SDL_GetPerformanceCounter();
 
         // Restore main camera reference from component ID
         if (stagedMainCamera)
             m_mainCamera = static_cast<Camera *>(stagedMainCamera);
 
         ++m_structureVersion; // Scene was fully rebuilt
+
+        const uint64_t profileEnd = SDL_GetPerformanceCounter();
+        if (elapsedMs(profileStart, profileEnd) >= 20.0) {
+            INXLOG_INFO("[Perf] Scene deserialize: total=", elapsedMs(profileStart, profileEnd),
+                        "ms stage=", elapsedMs(profileStart, profileStaged),
+                        "ms index=", elapsedMs(profileStaged, profileIndexed),
+                        "ms validate=", elapsedMs(profileIndexed, profileValidated),
+                        "ms commit=", elapsedMs(profileValidated, profileCommitted),
+                        "ms awake=", elapsedMs(profileCommitted, profileAwake),
+                        "ms finish=", elapsedMs(profileAwake, profileEnd), "ms roots=", m_rootObjects.size(),
+                        " objects=", m_objectsById.size());
+        }
 
         return true;
     } catch (const std::exception &e) {

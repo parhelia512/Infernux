@@ -257,6 +257,12 @@ void GameObject::SetActive(bool active)
 
     m_active = active;
 
+    // Active state participates in hierarchy-derived render and editor caches.
+    // Invalidate those caches without requiring per-frame active-state scans.
+    if (m_scene) {
+        m_scene->BumpStructureVersion();
+    }
+
     bool isActiveInHierarchy = IsActiveInHierarchy();
     HandleActiveStateChanged(wasActiveInHierarchy, isActiveInHierarchy);
 }

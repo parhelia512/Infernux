@@ -18,7 +18,10 @@ from Infernux.lib import InxGUIRenderable, InxGUIContext
 from Infernux.input import Input, KeyCode
 from Infernux.engine.ui.viewport_utils import capture_viewport_info
 from Infernux.ui.ui_texture_cache import get_shared_cache as _get_tex_cache
-from Infernux.ui.ui_render_dispatch import dispatch as _ui_dispatch
+from Infernux.ui.ui_render_dispatch import (
+    dispatch as _ui_dispatch,
+    runtime_ui_revision as _runtime_ui_revision,
+)
 from Infernux.ui.ui_event_system import UIEventProcessor
 from Infernux.ui.ui_canvas_utils import collect_sorted_canvases
 from Infernux.ui.inx_ui_screen_component import clear_rect_cache
@@ -187,10 +190,18 @@ class PlayerGUI(InxGUIRenderable):
         if canvases:
             clear_rect_cache((id(scene), int(scene.structure_version)))
 
-        renderer.begin_frame(game_w, game_h)
+        use_overlay = not renderer.is_enabled()
+        texture_cache = _get_tex_cache()
+        if use_overlay or texture_cache.has_pending:
+            renderer.begin_frame(game_w, game_h)
+        else:
+            revision = _runtime_ui_revision(
+                scene, canvases, game_w, game_h, texture_cache.generation,
+            )
+            if renderer.begin_frame_cached(game_w, game_h, revision):
+                return
         if not canvases:
             return
-        use_overlay = not renderer.is_enabled()
 
         for canvas in canvases:
             if canvas.render_mode == RenderMode.CameraOverlay:
@@ -208,8 +219,7 @@ class PlayerGUI(InxGUIRenderable):
             scale_x = float(game_w) / ref_w
             scale_y = float(game_h) / ref_h
 
-            _tex_cache = _get_tex_cache()
-            _get_tid = lambda tp: _tex_cache.get(self._engine, tp)
+            _get_tid = texture_cache.get_bound(self._engine)
 
             for elem in canvas._get_elements():
                 ex, ey, ew, eh = elem.get_rect(ref_w, ref_h)

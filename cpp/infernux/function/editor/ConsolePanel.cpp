@@ -1,6 +1,7 @@
 #include "ConsolePanel.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <iomanip>
@@ -58,6 +59,7 @@ void ConsolePanel::OnLogMessage(LogLevel level, const char *file, int line, cons
 
     {
         std::lock_guard<std::mutex> lock(m_logMutex);
+        entry.uid = m_nextUid++;
         switch (entry.level) {
         case LOG_WARN:
             ++m_warnCount;
@@ -71,6 +73,7 @@ void ConsolePanel::OnLogMessage(LogLevel level, const char *file, int line, cons
             break;
         }
         m_pendingLogs.push_back(std::move(entry));
+        m_revision.fetch_add(1, std::memory_order_release);
     }
 }
 
@@ -94,6 +97,7 @@ void ConsolePanel::LogFromPython(LogLevel level, const std::string &message, con
 
     {
         std::lock_guard<std::mutex> lock(m_logMutex);
+        entry.uid = m_nextUid++;
         switch (entry.level) {
         case LOG_WARN:
             ++m_warnCount;
@@ -107,6 +111,7 @@ void ConsolePanel::LogFromPython(LogLevel level, const std::string &message, con
             break;
         }
         m_pendingLogs.push_back(std::move(entry));
+        m_revision.fetch_add(1, std::memory_order_release);
     }
 }
 
@@ -118,13 +123,18 @@ void ConsolePanel::Clear()
     m_infoCount = 0;
     m_warnCount = 0;
     m_errorCount = 0;
-    m_selectedIndex = -1;
+    m_selectedUid = 0;
+    m_requestedUid = 0;
+    m_followTail = true;
+    m_scrollToBottom = false;
     m_nextUid = 1;
     m_cacheDirty = true;
     m_cachedInfoCount = 0;
     m_cachedWarnCount = 0;
     m_cachedErrorCount = 0;
     m_visible.clear();
+    m_collapseLookup.clear();
+    m_revision.fetch_add(1, std::memory_order_release);
 }
 
 int ConsolePanel::GetInfoCount() const
@@ -156,23 +166,52 @@ int ConsolePanel::GetErrorCount() const
 
 void ConsolePanel::SelectLatestEntry()
 {
-    m_isOpen = true;
-    m_selectedIndex = -2; // sentinel: "select last" — resolved in RenderBody
-    ImGui::SetWindowFocus((m_title + "###" + m_windowId).c_str());
+    FlushPendingLogs();
+    if (m_logs.empty()) {
+        m_isOpen = true;
+        if (onRequestFocus)
+            onRequestFocus();
+        ImGui::SetWindowFocus((m_title + "###" + m_windowId).c_str());
+        return;
+    }
+    SelectUid(m_logs.back().uid, true);
 }
 
-void ConsolePanel::GetLastVisibleForStatusBar(std::string &outMsg, std::string &outLevel)
+void ConsolePanel::SelectEntry(uint64_t uid)
 {
+    FlushPendingLogs();
+    if (uid == 0) {
+        SelectLatestEntry();
+        return;
+    }
+    SelectUid(uid, true);
+}
+
+void ConsolePanel::GetStatusBarSnapshot(std::string &outMsg, std::string &outLevel, int &outInfoCount,
+                                        int &outWarnCount, int &outErrorCount, uint64_t &outUid)
+{
+    // The status bar is always rendered, even when the Console window is
+    // closed. Flushing here keeps the native queue bounded and gives the
+    // displayed message a stable UID that the subsequent click can select.
+    FlushPendingLogs();
     outMsg.clear();
     outLevel = "info";
-    EnsureCache();
-    if (m_visible.empty())
+    outUid = 0;
+    GetCountSnapshot(outInfoCount, outWarnCount, outErrorCount);
+    LogEntry pendingLatest;
+    bool hasPending = false;
+    {
+        std::lock_guard<std::mutex> lock(m_logMutex);
+        if (!m_pendingLogs.empty()) {
+            pendingLatest = m_pendingLogs.back();
+            hasPending = true;
+        }
+    }
+    if (!hasPending && m_logs.empty())
         return;
-    const VisibleEntry &ve = m_visible.back();
-    if (ve.logIndex >= m_logs.size())
-        return;
-    const LogEntry &log = m_logs[ve.logIndex];
+    const LogEntry &log = hasPending ? pendingLatest : m_logs.back();
     outMsg = log.firstLine;
+    outUid = log.uid;
     switch (log.level) {
     case LOG_WARN:
         outLevel = "warning";
@@ -185,6 +224,16 @@ void ConsolePanel::GetLastVisibleForStatusBar(std::string &outMsg, std::string &
         outLevel = "info";
         break;
     }
+}
+
+uint64_t ConsolePanel::GetRevision() const noexcept
+{
+    return m_revision.load(std::memory_order_acquire);
+}
+
+uint64_t ConsolePanel::GetSelectedUid() const noexcept
+{
+    return m_selectedUid;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -229,12 +278,26 @@ void ConsolePanel::FlushPendingLogs()
     }
 
     DetectFilterChange();
-    const bool appendToVisible = !m_cacheDirty && !m_filterDirty && !collapse;
+    const bool appendToVisible = !m_cacheDirty && !m_filterDirty;
+    bool receivedError = false;
     for (auto &entry : incoming) {
-        entry.uid = m_nextUid++;
         const size_t logIndex = m_logs.size();
-        if (appendToVisible && MatchesCurrentFilters(entry))
-            m_visible.push_back({logIndex, 1, entry.uid});
+        if (appendToVisible && MatchesCurrentFilters(entry)) {
+            if (collapse) {
+                const std::string key = CollapseKey(entry);
+                const auto it = m_collapseLookup.find(key);
+                if (it != m_collapseLookup.end()) {
+                    VisibleEntry &visible = m_visible[it->second];
+                    ++visible.count;
+                    visible.latestUid = entry.uid;
+                } else {
+                    m_collapseLookup.emplace(key, m_visible.size());
+                    m_visible.push_back({logIndex, 1, entry.uid, entry.uid});
+                }
+            } else {
+                m_visible.push_back({logIndex, 1, entry.uid, entry.uid});
+            }
+        }
         switch (entry.level) {
         case LOG_WARN:
             ++m_cachedWarnCount;
@@ -242,6 +305,7 @@ void ConsolePanel::FlushPendingLogs()
         case LOG_ERROR:
         case LOG_FATAL:
             ++m_cachedErrorCount;
+            receivedError = true;
             break;
         default:
             ++m_cachedInfoCount;
@@ -272,8 +336,10 @@ void ConsolePanel::FlushPendingLogs()
     // Filtering/collapse changes and deque trimming still use the full rebuild.
     if (!appendToVisible || trimmed)
         m_cacheDirty = true;
-    if (!m_userScrolledUp)
+    if (autoScroll && m_followTail)
         m_scrollToBottom = true;
+    if (receivedError && errorPause && onErrorPause)
+        onErrorPause();
 }
 
 void ConsolePanel::GetCountSnapshot(int &infoCount, int &warnCount, int &errorCount) const
@@ -289,26 +355,93 @@ void ConsolePanel::GetCountSnapshot(int &infoCount, int &warnCount, int &errorCo
 
 void ConsolePanel::DetectFilterChange()
 {
+    const std::string search = m_search.data();
     bool changed = (showInfo != m_prevShowInfo || showWarnings != m_prevShowWarnings ||
-                    showErrors != m_prevShowErrors || collapse != m_prevCollapse);
+                    showErrors != m_prevShowErrors || collapse != m_prevCollapse || search != m_prevSearch);
     if (changed) {
         m_prevShowInfo = showInfo;
         m_prevShowWarnings = showWarnings;
         m_prevShowErrors = showErrors;
         m_prevCollapse = collapse;
+        m_prevSearch = search;
         m_filterDirty = true;
     }
 }
 
 bool ConsolePanel::MatchesCurrentFilters(const LogEntry &entry) const
 {
-    if (entry.level <= LOG_INFO)
-        return showInfo;
+    bool severityMatches = showInfo;
     if (entry.level == LOG_WARN)
-        return showWarnings;
-    if (entry.level == LOG_ERROR || entry.level == LOG_FATAL)
-        return showErrors;
-    return showInfo;
+        severityMatches = showWarnings;
+    else if (entry.level == LOG_ERROR || entry.level == LOG_FATAL)
+        severityMatches = showErrors;
+    if (!severityMatches)
+        return false;
+
+    const std::string needle = m_search.data();
+    if (needle.empty())
+        return true;
+
+    auto containsCaseInsensitive = [&needle](const std::string &value) {
+        return std::search(value.begin(), value.end(), needle.begin(), needle.end(), [](char lhs, char rhs) {
+                   return std::tolower(static_cast<unsigned char>(lhs)) ==
+                          std::tolower(static_cast<unsigned char>(rhs));
+               }) != value.end();
+    };
+    return containsCaseInsensitive(entry.message) || containsCaseInsensitive(entry.stackTrace) ||
+           containsCaseInsensitive(entry.sourceFile);
+}
+
+std::string ConsolePanel::CollapseKey(const LogEntry &entry) const
+{
+    return std::to_string(static_cast<int>(entry.level)) + "|" + entry.message;
+}
+
+int ConsolePanel::FindVisibleIndexByUid(uint64_t uid) const
+{
+    if (uid == 0)
+        return -1;
+    for (int index = 0; index < static_cast<int>(m_visible.size()); ++index) {
+        const VisibleEntry &entry = m_visible[index];
+        if (entry.uid == uid || entry.latestUid == uid)
+            return index;
+    }
+    if (!collapse)
+        return -1;
+
+    const auto target =
+        std::find_if(m_logs.begin(), m_logs.end(), [uid](const LogEntry &entry) { return entry.uid == uid; });
+    if (target == m_logs.end())
+        return -1;
+    const std::string targetKey = CollapseKey(*target);
+    const auto group = m_collapseLookup.find(targetKey);
+    return group == m_collapseLookup.end() ? -1 : static_cast<int>(group->second);
+}
+
+void ConsolePanel::SelectUid(uint64_t uid, bool focusWindow)
+{
+    m_isOpen = true;
+    m_requestedUid = uid;
+    m_selectedUid = uid;
+    m_followTail = false;
+    m_scrollToBottom = false;
+    m_search[0] = '\0';
+
+    const auto target =
+        std::find_if(m_logs.begin(), m_logs.end(), [uid](const LogEntry &entry) { return entry.uid == uid; });
+    if (target != m_logs.end()) {
+        if (target->level == LOG_WARN)
+            showWarnings = true;
+        else if (target->level == LOG_ERROR || target->level == LOG_FATAL)
+            showErrors = true;
+        else
+            showInfo = true;
+    }
+    if (focusWindow) {
+        if (onRequestFocus)
+            onRequestFocus();
+        ImGui::SetWindowFocus((m_title + "###" + m_windowId).c_str());
+    }
 }
 
 void ConsolePanel::EnsureCache()
@@ -324,15 +457,9 @@ void ConsolePanel::EnsureCache()
     m_cachedWarnCount = wc;
     m_cachedErrorCount = ec;
 
-    // Remember selected entry UID so we can restore selection after rebuild
-    uint64_t selectedUid = 0;
-    if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_visible.size()))
-        selectedUid = m_visible[m_selectedIndex].uid;
-
     // Rebuild visible list
     m_visible.clear();
-    // collapse_map: key = (level, message) → index in m_visible
-    std::unordered_map<std::string, size_t> collapseMap;
+    m_collapseLookup.clear();
 
     for (size_t i = 0; i < m_logs.size(); ++i) {
         const auto &log = m_logs[i];
@@ -343,33 +470,26 @@ void ConsolePanel::EnsureCache()
 
         if (collapse) {
             // Build collapse key: level + message
-            std::string key = std::to_string(static_cast<int>(log.level)) + "|" + log.message;
-            auto it = collapseMap.find(key);
-            if (it != collapseMap.end()) {
+            const std::string key = CollapseKey(log);
+            auto it = m_collapseLookup.find(key);
+            if (it != m_collapseLookup.end()) {
                 m_visible[it->second].count++;
-                m_visible[it->second].uid = log.uid;
+                m_visible[it->second].latestUid = log.uid;
                 continue;
             }
-            collapseMap[key] = m_visible.size();
+            m_collapseLookup[key] = m_visible.size();
         }
 
         VisibleEntry ve;
         ve.logIndex = i;
         ve.count = 1;
         ve.uid = log.uid;
+        ve.latestUid = log.uid;
         m_visible.push_back(ve);
     }
 
-    // Restore selection by UID — prevents click/refresh race
-    if (selectedUid > 0) {
-        m_selectedIndex = -1;
-        for (int idx = 0; idx < static_cast<int>(m_visible.size()); ++idx) {
-            if (m_visible[idx].uid == selectedUid) {
-                m_selectedIndex = idx;
-                break;
-            }
-        }
-    }
+    if (m_selectedUid > 0 && FindVisibleIndexByUid(m_selectedUid) < 0)
+        m_selectedUid = 0;
 
     m_cacheDirty = false;
     m_filterDirty = false;
@@ -379,70 +499,95 @@ void ConsolePanel::EnsureCache()
 // Toolbar
 // ════════════════════════════════════════════════════════════════════
 
-void ConsolePanel::RenderToolbar(InxGUIContext * /*ctx*/)
+void ConsolePanel::RenderToolbar(InxGUIContext *ctx)
 {
-    // Push console toolbar compact spacing (3 style vars)
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                         ImVec2(EditorTheme::CONSOLE_FRAME_PAD_X, EditorTheme::CONSOLE_FRAME_PAD_Y));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
                         ImVec2(EditorTheme::CONSOLE_ITEM_SPC_X, EditorTheme::CONSOLE_ITEM_SPC_Y));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, EditorTheme::TOOLBAR_FRAME_BRD);
 
-    if (ImGui::Button("Clear"))
+    const float availableWidth = ImGui::GetContentRegionAvail().x;
+    const bool wrapOptions = availableWidth < 500.0f;
+
+    if (ImGui::Button("Clear", ImVec2(54.0f, 0.0f)))
         Clear();
+    ctx->RecordSemanticItem("console_action", "Clear", true, "console.clear");
 
     ImGui::SameLine();
     ImGui::Checkbox("Collapse", &collapse);
+    ctx->RecordSemanticItem("checkbox", "Collapse", true, "console.collapse", collapse);
 
-    ImGui::SameLine();
+    if (wrapOptions)
+        ImGui::NewLine();
+    else
+        ImGui::SameLine();
     ImGui::Checkbox("Clear on Play", &clearOnPlay);
+    ctx->RecordSemanticItem("checkbox", "Clear on Play", true, "console.clear_on_play", clearOnPlay);
 
     ImGui::SameLine();
     ImGui::Checkbox("Error Pause", &errorPause);
+    ctx->RecordSemanticItem("checkbox", "Error Pause", true, "console.error_pause", errorPause);
 
-    // Right-aligned filter toggles
-    float winW = ImGui::GetWindowWidth();
-    float filterW = 240.0f;
-    float leftW = 350.0f;
-    float filterX = (std::max)(winW - filterW, leftW);
-    if (winW >= leftW + filterW)
-        ImGui::SameLine(filterX);
-
-    // Info filter
-    {
-        char label[64];
-        if (m_cachedInfoCount > 0)
-            snprintf(label, sizeof(label), "Log %d###ConsoleFilterInfo", m_cachedInfoCount);
-        else
-            snprintf(label, sizeof(label), "Log###ConsoleFilterInfo");
-        ImGui::Checkbox(label, &showInfo);
-    }
-
-    // Warning filter (yellow text)
     ImGui::SameLine();
-    {
-        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::LOG_WARNING);
-        char label[64];
-        if (m_cachedWarnCount > 0)
-            snprintf(label, sizeof(label), "Warn %d###ConsoleFilterWarn", m_cachedWarnCount);
-        else
-            snprintf(label, sizeof(label), "Warn###ConsoleFilterWarn");
-        ImGui::Checkbox(label, &showWarnings);
-        ImGui::PopStyleColor();
+    bool follow = autoScroll && m_followTail;
+    if (ImGui::Checkbox("Follow", &follow)) {
+        autoScroll = follow;
+        m_followTail = follow;
+        if (follow) {
+            m_selectedUid = 0;
+            m_requestedUid = 0;
+            m_scrollToBottom = true;
+        }
     }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Keep the view pinned to incoming messages");
+    ctx->RecordSemanticItem("checkbox", "Follow", true, "console.follow", follow);
 
-    // Error filter (red text)
-    ImGui::SameLine();
-    {
-        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::LOG_ERROR);
+    // Search and severity filters use a dedicated row, matching the Console's
+    // two distinct jobs: controlling capture and inspecting messages.
+    ImGui::NewLine();
+    constexpr float segmentWidth = 78.0f;
+    constexpr float segmentGap = 3.0f;
+    constexpr float severityWidth = segmentWidth * 3.0f + segmentGap * 2.0f;
+    const bool stackSeverity = availableWidth < severityWidth + 120.0f;
+    const float searchWidth =
+        stackSeverity ? availableWidth : (std::max)(100.0f, availableWidth - severityWidth - 8.0f);
+    ImGui::SetNextItemWidth(searchWidth);
+    ImGui::InputTextWithHint("##ConsoleSearch", "Search messages, files, and stack traces", m_search.data(),
+                             m_search.size());
+    ctx->RecordSemanticItem("text_input", "Search messages, files, and stack traces", true, "console.search",
+                            std::nullopt, std::nullopt, std::string(m_search.data()));
+    if (ImGui::IsItemEdited())
+        m_followTail = false;
+
+    auto severitySegment = [&](const char *id, const char *name, int count, bool &enabled, const ImVec4 &color) {
         char label[64];
-        if (m_cachedErrorCount > 0)
-            snprintf(label, sizeof(label), "Error %d###ConsoleFilterError", m_cachedErrorCount);
+        if (count > 999)
+            snprintf(label, sizeof(label), "%s 999+###%s", name, id);
         else
-            snprintf(label, sizeof(label), "Error###ConsoleFilterError");
-        ImGui::Checkbox(label, &showErrors);
-        ImGui::PopStyleColor();
-    }
+            snprintf(label, sizeof(label), "%s %d###%s", name, count, id);
+
+        ImGui::PushStyleColor(ImGuiCol_Text, enabled ? color : EditorTheme::LOG_DIM);
+        ImGui::PushStyleColor(ImGuiCol_Button, enabled ? EditorTheme::CONSOLE_SEGMENT_ACTIVE : EditorTheme::BTN_GHOST);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, EditorTheme::BTN_GHOST_HOVERED);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, EditorTheme::BTN_GHOST_ACTIVE);
+        if (ImGui::Button(label, ImVec2(segmentWidth, 0.0f)))
+            enabled = !enabled;
+        ctx->RecordSemanticItem("console_filter", name, true, std::string("console.filter.") + id, enabled,
+                                static_cast<double>(count));
+        ImGui::PopStyleColor(4);
+    };
+
+    if (stackSeverity)
+        ImGui::NewLine();
+    else
+        ImGui::SameLine(0.0f, 6.0f);
+    severitySegment("ConsoleFilterInfo", "Log", m_cachedInfoCount, showInfo, EditorTheme::LOG_INFO);
+    ImGui::SameLine(0.0f, segmentGap);
+    severitySegment("ConsoleFilterWarn", "Warn", m_cachedWarnCount, showWarnings, EditorTheme::LOG_WARNING);
+    ImGui::SameLine(0.0f, segmentGap);
+    severitySegment("ConsoleFilterError", "Error", m_cachedErrorCount, showErrors, EditorTheme::LOG_ERROR);
 
     ImGui::PopStyleVar(3);
 }
@@ -451,25 +596,11 @@ void ConsolePanel::RenderToolbar(InxGUIContext * /*ctx*/)
 // Body (log list + detail pane)
 // ════════════════════════════════════════════════════════════════════
 
-void ConsolePanel::RenderBody(InxGUIContext * /*ctx*/)
+void ConsolePanel::RenderBody(InxGUIContext *ctx)
 {
     float availH = ImGui::GetContentRegionAvail().y;
-
-    // Sentinel -2: "select last visible entry" (from SelectLatestEntry)
-    if (m_selectedIndex == -2 && !m_visible.empty()) {
-        m_selectedIndex = static_cast<int>(m_visible.size()) - 1;
-        m_scrollToBottom = true;
-    } else if (m_selectedIndex == -2) {
-        m_selectedIndex = -1;
-    }
-
-    bool hasDetail = (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_visible.size()));
-
-    // Clamp selection
-    if (m_selectedIndex >= static_cast<int>(m_visible.size())) {
-        m_selectedIndex = -1;
-        hasDetail = false;
-    }
+    int selectedIndex = FindVisibleIndexByUid(m_selectedUid);
+    bool hasDetail = selectedIndex >= 0;
 
     float splitterH = 3.0f;
     float listH;
@@ -486,6 +617,27 @@ void ConsolePanel::RenderBody(InxGUIContext * /*ctx*/)
     // ── Log list (virtual-scrolled) ──
     ImGui::PushStyleColor(ImGuiCol_Border, EditorTheme::BORDER_TRANSPARENT);
     if (ImGui::BeginChild("##ConsoleLogList", ImVec2(0, listH), ImGuiChildFlags_Borders)) {
+        // Freeze follow on mouse-down, before Selectable resolves on release.
+        // New messages continue entering the model without moving the target
+        // row out from under the pointer.
+        if (ImGui::IsWindowHovered() &&
+            (ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::GetIO().MouseWheel != 0.0f)) {
+            m_followTail = false;
+            m_scrollToBottom = false;
+        }
+
+        if (m_requestedUid > 0) {
+            selectedIndex = FindVisibleIndexByUid(m_requestedUid);
+            if (selectedIndex >= 0) {
+                const float targetY = selectedIndex * rowH;
+                const float currentY = ImGui::GetScrollY();
+                const float viewH = ImGui::GetContentRegionAvail().y;
+                if (targetY < currentY || targetY + rowH > currentY + viewH)
+                    ImGui::SetScrollY((std::max)(0.0f, targetY - viewH * 0.35f));
+            }
+            m_requestedUid = 0;
+        }
+
         float scrollY = ImGui::GetScrollY();
         float viewportH = ImGui::GetContentRegionAvail().y;
         int firstVis = (rowH > 0.0f) ? (std::max)(static_cast<int>(scrollY / rowH), 0) : 0;
@@ -501,7 +653,7 @@ void ConsolePanel::RenderBody(InxGUIContext * /*ctx*/)
         for (int idx = (std::max)(firstVis, 0); idx <= lastVis; ++idx) {
             if (!m_rowHeightMeasured) {
                 float y0 = ImGui::GetCursorPosY();
-                RenderRow(idx, m_visible[idx]);
+                RenderRow(ctx, idx, m_visible[idx], idx == selectedIndex);
                 float y1 = ImGui::GetCursorPosY();
                 float measured = y1 - y0;
                 if (measured > 1.0f) {
@@ -510,7 +662,7 @@ void ConsolePanel::RenderBody(InxGUIContext * /*ctx*/)
                     m_rowHeightMeasured = true;
                 }
             } else {
-                RenderRow(idx, m_visible[idx]);
+                RenderRow(ctx, idx, m_visible[idx], idx == selectedIndex);
             }
         }
 
@@ -522,28 +674,35 @@ void ConsolePanel::RenderBody(InxGUIContext * /*ctx*/)
         }
 
         // Ctrl+C: copy selected entry
-        if (m_selectedIndex >= 0 && m_selectedIndex < total) {
+        selectedIndex = FindVisibleIndexByUid(m_selectedUid);
+        if (selectedIndex >= 0 && selectedIndex < total) {
             if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C)) {
-                const auto &ve = m_visible[m_selectedIndex];
+                const auto &ve = m_visible[selectedIndex];
                 const auto &log = m_logs[ve.logIndex];
                 std::string copyText = log.message;
                 if (!log.stackTrace.empty())
                     copyText += "\n" + log.stackTrace;
                 ImGui::SetClipboardText(copyText.c_str());
             }
-        }
-
-        // Smart auto-scroll
-        scrollY = ImGui::GetScrollY();
-        float scrollMax = ImGui::GetScrollMaxY();
-        if (scrollMax > 0) {
-            bool atBottom = (scrollMax - scrollY) < 20.0f;
-            m_userScrolledUp = !atBottom;
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                m_selectedUid = 0;
+                selectedIndex = -1;
+            }
         }
 
         if (m_scrollToBottom && !m_visible.empty()) {
             ImGui::SetScrollHereY(1.0f);
             m_scrollToBottom = false;
+        }
+
+        // Wheel/scrollbar interaction owns follow state. Appending messages
+        // never changes it, so selecting a row remains stable under log floods.
+        if (ImGui::IsWindowHovered() &&
+            (ImGui::GetIO().MouseWheel != 0.0f || ImGui::IsMouseDragging(ImGuiMouseButton_Left))) {
+            scrollY = ImGui::GetScrollY();
+            const float scrollMax = ImGui::GetScrollMaxY();
+            const bool atBottom = scrollMax <= 0.0f || (scrollMax - scrollY) < 20.0f;
+            m_followTail = autoScroll && atBottom && m_selectedUid == 0;
         }
     }
     ImGui::EndChild();
@@ -570,8 +729,9 @@ void ConsolePanel::RenderBody(InxGUIContext * /*ctx*/)
     }
 
     // ── Detail pane ──
-    if (hasDetail && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_visible.size())) {
-        const auto &ve = m_visible[m_selectedIndex];
+    selectedIndex = FindVisibleIndexByUid(m_selectedUid);
+    if (hasDetail && selectedIndex >= 0 && selectedIndex < static_cast<int>(m_visible.size())) {
+        const auto &ve = m_visible[selectedIndex];
         const auto &log = m_logs[ve.logIndex];
         const ImVec4 &clr = LevelColor(log.level);
 
@@ -587,6 +747,8 @@ void ConsolePanel::RenderBody(InxGUIContext * /*ctx*/)
         // Read-only multiline input — supports text selection & Ctrl+C
         ImGui::InputTextMultiline("##ConsoleDetail", const_cast<char *>(detailText.c_str()), detailText.size() + 1,
                                   ImVec2(-1, -1), ImGuiInputTextFlags_ReadOnly);
+        ctx->RecordSemanticItem("console_detail", log.firstLine, true, "console.detail", std::nullopt, std::nullopt,
+                                detailText);
 
         ImGui::PopStyleVar();
         ImGui::PopStyleColor(3);
@@ -597,12 +759,10 @@ void ConsolePanel::RenderBody(InxGUIContext * /*ctx*/)
 // Single row
 // ════════════════════════════════════════════════════════════════════
 
-void ConsolePanel::RenderRow(int visIdx, const VisibleEntry &ve)
+void ConsolePanel::RenderRow(InxGUIContext *ctx, int visIdx, const VisibleEntry &ve, bool isSel)
 {
     const auto &log = m_logs[ve.logIndex];
     const ImVec4 &clr = LevelColor(log.level);
-    bool isSel = (visIdx == m_selectedIndex);
-
     // Row background
     if (isSel)
         ImGui::PushStyleColor(ImGuiCol_Header, EditorTheme::SELECTION_BG);
@@ -621,12 +781,18 @@ void ConsolePanel::RenderRow(int visIdx, const VisibleEntry &ve)
              visIdx);
 
     if (ImGui::Selectable(label, isSel, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick)) {
-        m_selectedIndex = visIdx;
+        m_selectedUid = ve.uid;
+        m_requestedUid = 0;
+        m_followTail = false;
+        m_scrollToBottom = false;
         // Double-click: navigate to source
         if (ImGui::IsMouseDoubleClicked(0) && onDoubleClickEntry && !log.sourceFile.empty()) {
             onDoubleClickEntry(log.sourceFile, log.sourceLine);
         }
     }
+    ctx->RecordSemanticItem("console_entry", log.firstLine, true,
+                            "console.entry." + std::to_string(static_cast<unsigned long long>(ve.uid)), isSel,
+                            static_cast<double>(ve.count));
 
     // Collapse count badge
     if (ve.count > 1) {

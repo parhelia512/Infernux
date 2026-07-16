@@ -926,6 +926,20 @@ void RegisterGUIBindings(py::module_ &m)
         .def("get_warning_count", &ConsolePanel::GetWarningCount, "Get count of warning messages")
         .def("get_error_count", &ConsolePanel::GetErrorCount, "Get count of error messages")
         .def("select_latest_entry", &ConsolePanel::SelectLatestEntry, "Select last visible entry and focus window")
+        .def("_select_entry", &ConsolePanel::SelectEntry, py::arg("uid"))
+        .def_property_readonly("_selected_uid", &ConsolePanel::GetSelectedUid)
+        .def_property_readonly("_revision", &ConsolePanel::GetRevision)
+        .def("_get_status_snapshot",
+             [](ConsolePanel &self) {
+                 std::string message;
+                 std::string level;
+                 int infoCount = 0;
+                 int warningCount = 0;
+                 int errorCount = 0;
+                 uint64_t uid = 0;
+                 self.GetStatusBarSnapshot(message, level, infoCount, warningCount, errorCount, uid);
+                 return py::make_tuple(message, level, infoCount, warningCount, errorCount, uid);
+             })
         .def_readwrite("show_info", &ConsolePanel::showInfo)
         .def_readwrite("show_warnings", &ConsolePanel::showWarnings)
         .def_readwrite("show_errors", &ConsolePanel::showErrors)
@@ -933,7 +947,9 @@ void RegisterGUIBindings(py::module_ &m)
         .def_readwrite("clear_on_play", &ConsolePanel::clearOnPlay)
         .def_readwrite("error_pause", &ConsolePanel::errorPause)
         .def_readwrite("auto_scroll", &ConsolePanel::autoScroll)
-        .def_readwrite("on_double_click_entry", &ConsolePanel::onDoubleClickEntry);
+        .def_readwrite("on_double_click_entry", &ConsolePanel::onDoubleClickEntry)
+        .def_readwrite("on_error_pause", &ConsolePanel::onErrorPause)
+        .def_readwrite("on_request_focus", &ConsolePanel::onRequestFocus);
 
     // ── PlayState enum ─────────────────────────────────────────────────
     py::enum_<PlayState>(m, "PlayState")
@@ -956,13 +972,8 @@ void RegisterGUIBindings(py::module_ &m)
             "set_console_panel",
             [](StatusBarPanel &self, std::shared_ptr<ConsolePanel> panel) { self.SetConsolePanel(panel.get()); },
             py::arg("console"), py::keep_alive<1, 2>(), "Wire to ConsolePanel for click-to-select-latest")
-        .def("set_latest_message", &StatusBarPanel::SetLatestMessage, py::arg("message"), py::arg("level"),
-             "Show a new log message in the left zone")
-        .def("clear_counts", &StatusBarPanel::ClearCounts, "Reset counts and latest message")
         .def("set_engine_status", &StatusBarPanel::SetEngineStatus, py::arg("text"), py::arg("progress"),
-             "Update engine-status indicator")
-        .def("increment_warn_count", &StatusBarPanel::IncrementWarnCount)
-        .def("increment_error_count", &StatusBarPanel::IncrementErrorCount);
+             py::arg("kind") = "activity", "Update engine-status indicator");
 
     // ── ToolbarPanel ───────────────────────────────────────────────────
     py::class_<ToolbarPanel, EditorPanel, std::shared_ptr<ToolbarPanel>>(m, "ToolbarPanel")

@@ -352,7 +352,14 @@ class Scene
     std::unique_ptr<GameObject> BuildGameObjectFromJson(const std::string &jsonStr, bool preserveIds);
 
     /// @brief Internal overload operating on an already-parsed JSON value.
-    std::unique_ptr<GameObject> BuildGameObjectFromJsonImpl(const nlohmann::json &objJson, bool preserveIds);
+    struct ComponentPrototype
+    {
+        const nlohmann::json *record = nullptr;
+        Component *component = nullptr;
+    };
+    using ComponentPrototypeCache = std::unordered_map<size_t, std::vector<ComponentPrototype>>;
+    std::unique_ptr<GameObject> BuildGameObjectFromJsonImpl(const nlohmann::json &objJson, bool preserveIds,
+                                                            ComponentPrototypeCache *prototypeCache = nullptr);
 
     /// @brief Recursively register all objects in a subtree with Scene's lookup map.
     void RegisterObjectSubtree(GameObject *root);

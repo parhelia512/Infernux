@@ -12,6 +12,7 @@ import math
 from Infernux.components import serialized_field
 from .inx_ui_component import InxUIComponent
 from .enums import ScreenAlignH, ScreenAlignV
+from .ui_render_revision import mark_runtime_ui_dirty
 
 # Rect cache — avoids repeated hierarchy walks and serialized-field reads.
 # Runtime callers retain it until hierarchy or geometry changes; editor tools
@@ -61,6 +62,7 @@ class InxUIScreenComponent(InxUIComponent):
             "_ui_render_revision",
             int(getattr(self, "_ui_render_revision", 0)) + 1,
         )
+        mark_runtime_ui_dirty()
         if name in self._GEOMETRY_FIELDS:
             _invalidate_rect_cache()
 

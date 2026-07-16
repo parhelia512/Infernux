@@ -15,6 +15,7 @@ from typing import Callable, Dict, Optional
 
 from Infernux.ui.enums import TextAlignH, TextAlignV
 from Infernux.engine.ui.theme import Theme
+from Infernux.ui.ui_render_revision import get_runtime_ui_revision
 
 
 # ── Shared attribute helpers ─────────────────────────────────────────
@@ -76,6 +77,27 @@ def text_align_to_float(align_h, align_v) -> tuple[float, float]:
 # Keyed by (component class name, backend_name)
 _RENDERERS: Dict[tuple[str, str], Callable] = {}
 _RESOLVED_RENDERERS: Dict[tuple[type, str], Optional[Callable]] = {}
+_REVISION_MASK = (1 << 64) - 1
+
+
+def runtime_ui_revision(scene, canvases, width: int, height: int,
+                        texture_generation: int = 0) -> int:
+    """Build an O(1) content revision for native command-list reuse.
+
+    UI components increment a shared generation on visual mutation. Scene
+    structure covers hierarchy and active-state changes, so an unchanged frame
+    no longer crosses Python/pybind once per visible UI element.
+    """
+    del canvases
+    signature = hash((
+        id(scene),
+        int(getattr(scene, "structure_version", 0)),
+        int(width),
+        int(height),
+        int(texture_generation),
+        get_runtime_ui_revision(),
+    )) & _REVISION_MASK
+    return signature or 1
 
 
 def register_ui_renderer(component_cls_name: str, backend: str, fn: Callable):

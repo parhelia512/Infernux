@@ -229,7 +229,12 @@ class SpriteRenderer(BuiltinComponent):
                 scene = SceneManager.instance().get_active_scene()
             if scene is None:
                 return
-            all_objects = scene.get_all_objects()
+            find_objects = getattr(scene, "find_objects_with_component", None)
+            all_objects = (
+                find_objects("SpriteRenderer")
+                if callable(find_objects)
+                else scene.get_all_objects()
+            )
             count = 0
             for obj in all_objects:
                 try:

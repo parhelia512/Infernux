@@ -14,6 +14,7 @@ from Infernux.components import serialized_field
 from Infernux.components.serialized_field import FieldType
 from .inx_ui_screen_component import InxUIScreenComponent
 from .enums import UITransitionType
+from .ui_render_revision import mark_runtime_ui_dirty
 
 
 class SelectionState:
@@ -97,6 +98,7 @@ class UISelectable(InxUIScreenComponent):
 
     def _evaluate_state(self):
         self._init_selectable_state()
+        old_state = self._current_state
         if not self.interactable:
             self._current_state = SelectionState.Disabled
         elif self._is_pointer_down:
@@ -105,6 +107,8 @@ class UISelectable(InxUIScreenComponent):
             self._current_state = SelectionState.Highlighted
         else:
             self._current_state = SelectionState.Normal
+        if self._current_state != old_state:
+            mark_runtime_ui_dirty()
 
     # ------------------------------------------------------------------
     # Pointer hooks — override in further subclasses, call super()

@@ -89,7 +89,7 @@ class PlayModeManager(PlayModeSerializationMixin):
         self._total_play_time: float = 0.0
         
         # Typed scene document captured before entering play mode.
-        self._scene_backup: Optional[dict] = None
+        self._scene_backup: Optional[Any] = None
         # Original scene file path (to restore correct scene on Stop)
         self._scene_path_backup: Optional[str] = None
         self._scene_dirty_backup: bool = False
@@ -104,6 +104,7 @@ class PlayModeManager(PlayModeSerializationMixin):
         self._asset_database = None
         self._runtime_hidden_object_ids: set[int] = set()
         self._runtime_hidden_listeners: list[Callable[[], None]] = []
+        self._last_rebuild_timings_ms: dict[str, float] = {}
 
         # C++ engine handle for renderer-level play mode signalling
         self._native_engine = None
@@ -452,10 +453,14 @@ class PlayModeManager(PlayModeSerializationMixin):
             self._notify_state_change(old_state, PlayModeState.EDIT)
             notify_ms = (time.perf_counter() - notify_started) * 1000.0
             total_ms = (time.perf_counter() - transition_started) * 1000.0
+            phase_text = " ".join(
+                f"{name}={duration:.1f}ms"
+                for name, duration in self._last_rebuild_timings_ms.items()
+            )
             Debug.log_internal(
                 "[Perf] PlayMode exit: "
                 f"total={total_ms:.1f}ms rebuild={rebuild_ms:.1f}ms "
-                f"notify={notify_ms:.1f}ms"
+                f"notify={notify_ms:.1f}ms {phase_text}"
             )
 
         def on_done(ok):
@@ -609,7 +614,7 @@ class PlayModeManager(PlayModeSerializationMixin):
             event.set()
         return True
 
-    def _prepare_active_scene_for_play(self, snapshot: Optional[dict]) -> bool:
+    def _prepare_active_scene_for_play(self, snapshot: Optional[Any]) -> bool:
         """Refresh Python component instances while preserving native objects."""
         if not snapshot:
             Debug.log_warning("Cannot prepare scene for Play Mode: empty snapshot")
@@ -700,7 +705,7 @@ class PlayModeManager(PlayModeSerializationMixin):
 
     def _rebuild_active_scene(
         self,
-        snapshot: Optional[dict],
+        snapshot: Optional[Any],
         *,
         for_play: bool,
         restore_scene_path: bool = False,
@@ -749,14 +754,10 @@ class PlayModeManager(PlayModeSerializationMixin):
             after_publish=after_publish,
         )
         if not transaction.run_to_completion(raise_on_failure=False):
+            self._last_rebuild_timings_ms = transaction.phase_timings_ms
             Debug.log_error(f"Cannot rebuild scene: document transaction failed: {transaction.error}")
             return False
-
-        try:
-            from Infernux.components.builtin.sprite_renderer import SpriteRenderer
-            SpriteRenderer.init_all_in_scene()
-        except Exception as exc:
-            Debug.log_internal(f"SpriteRenderer init after py restore: {exc}")
+        self._last_rebuild_timings_ms = transaction.phase_timings_ms
 
         if restore_scene_path:
             self._restore_scene_file_path()
@@ -922,7 +923,10 @@ class PlayModeManager(PlayModeSerializationMixin):
         
         scene = scene_manager.get_active_scene()
         if scene:
-            self._scene_backup = scene.serialize_document()
+            capture_native = getattr(scene, "_capture_play_mode_snapshot", None)
+            self._scene_backup = (
+                capture_native() if callable(capture_native) else scene.serialize_document()
+            )
             # Remember which scene file was open
             from Infernux.engine.scene_manager import SceneFileManager
             sfm = SceneFileManager.instance()

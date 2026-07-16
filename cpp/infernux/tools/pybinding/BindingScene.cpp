@@ -50,6 +50,99 @@ namespace py = pybind11;
 namespace infernux
 {
 
+class ScenePlayModeSnapshot
+{
+  public:
+    explicit ScenePlayModeSnapshot(nlohmann::json document) : m_document(std::move(document))
+    {
+    }
+
+    [[nodiscard]] py::tuple GetPythonComponentRecords() const
+    {
+        py::set objectIds;
+        py::set nativeTypes;
+        py::list descriptors;
+
+        const auto visit = [&](const auto &self, const nlohmann::json &object) -> void {
+            if (!object.is_object())
+                return;
+
+            const auto idIt = object.find("id");
+            if (idIt == object.end() || !idIt->is_number_unsigned())
+                return;
+            const uint64_t objectId = idIt->get<uint64_t>();
+            objectIds.add(py::int_(objectId));
+
+            const auto componentsIt = object.find("components");
+            bool hasPythonComponent = false;
+            if (componentsIt != object.end() && componentsIt->is_array()) {
+                for (const auto &component : *componentsIt) {
+                    const auto typeIt = component.find("type_id");
+                    if (typeIt != component.end() && typeIt->is_string() &&
+                        typeIt->get_ref<const std::string &>().rfind("python:", 0) == 0) {
+                        hasPythonComponent = true;
+                        break;
+                    }
+                }
+            }
+
+            if (hasPythonComponent) {
+                const auto transformIt = object.find("transform");
+                if (transformIt != object.end() && transformIt->is_object()) {
+                    const auto typeIt = transformIt->find("type");
+                    if (typeIt != transformIt->end() && typeIt->is_string()) {
+                        nativeTypes.add(py::make_tuple(objectId, typeIt->get<std::string>()));
+                    }
+                }
+
+                size_t componentIndex = 0;
+                for (const auto &component : *componentsIt) {
+                    const auto typeIt = component.find("type_id");
+                    if (typeIt != component.end() && typeIt->is_string()) {
+                        const std::string &typeId = typeIt->get_ref<const std::string &>();
+                        if (typeId.rfind("native:", 0) == 0) {
+                            nativeTypes.add(py::make_tuple(objectId, typeId.substr(7)));
+                        } else if (typeId.rfind("python:", 0) == 0) {
+                            descriptors.append(py::make_tuple(objectId,
+                                                              "snapshot.objects[id=" + std::to_string(objectId) +
+                                                                  "].components[" + std::to_string(componentIndex) +
+                                                                  "]",
+                                                              JsonToPython(component)));
+                        }
+                    }
+                    ++componentIndex;
+                }
+            }
+
+            const auto childrenIt = object.find("children");
+            if (childrenIt != object.end() && childrenIt->is_array()) {
+                for (const auto &child : *childrenIt)
+                    self(self, child);
+            }
+        };
+
+        const auto objectsIt = m_document.find("objects");
+        if (objectsIt != m_document.end() && objectsIt->is_array()) {
+            for (const auto &object : *objectsIt)
+                visit(visit, object);
+        }
+        return py::make_tuple(std::move(objectIds), std::move(nativeTypes), std::move(descriptors));
+    }
+
+    void PreflightResourceDependencies() const
+    {
+        PreflightSceneResourceDependencies(m_document);
+    }
+
+    [[nodiscard]] std::shared_ptr<SceneCommitToken> CommitRetainingWorld(Scene &scene) const
+    {
+        return scene.CommitDocumentRetainingCurrentWorld(m_document);
+    }
+
+  private:
+    nlohmann::json m_document;
+};
+
 /// Resolve a Python component type (str, class with _cpp_type_name, or class with __name__)
 /// to a C++ type name string. Returns empty string on failure.
 static std::string ResolveComponentTypeName(py::object componentType)
@@ -1775,6 +1868,10 @@ void RegisterSceneBindings(py::module_ &m)
         .def("rollback", &SceneCommitToken::Rollback)
         .def("finalize", &SceneCommitToken::Finalize);
 
+    py::class_<ScenePlayModeSnapshot, std::shared_ptr<ScenePlayModeSnapshot>>(m, "_ScenePlayModeSnapshot")
+        .def("_python_component_records", &ScenePlayModeSnapshot::GetPythonComponentRecords)
+        .def("_preflight_resource_dependencies", &ScenePlayModeSnapshot::PreflightResourceDependencies);
+
     py::class_<Scene>(m, "Scene")
         .def_property("name", &Scene::GetName, &Scene::SetName)
         .def("set_playing", &Scene::SetPlaying, py::arg("playing"), "Set the scene play-state flag")
@@ -1813,6 +1910,24 @@ void RegisterSceneBindings(py::module_ &m)
             py::return_value_policy::reference, "Get all root-level GameObjects")
         .def("get_all_objects", &Scene::GetAllObjects, py::return_value_policy::reference,
              "Get all GameObjects in the scene")
+        .def(
+            "find_objects_with_component",
+            [](Scene &scene, const std::string &typeName) {
+                std::vector<GameObject *> result;
+                for (GameObject *object : scene.GetAllObjects()) {
+                    if (!object)
+                        continue;
+                    for (const auto &component : object->GetAllComponents()) {
+                        if (component && component->IsComponentType(typeName)) {
+                            result.push_back(object);
+                            break;
+                        }
+                    }
+                }
+                return result;
+            },
+            py::return_value_policy::reference, py::arg("type_name"),
+            "Find GameObjects containing a native component type")
         .def("find", &Scene::Find, py::return_value_policy::reference, py::arg("name"), "Find a GameObject by name")
         .def("find_by_id", &Scene::FindByID, py::return_value_policy::reference, py::arg("id"),
              "Find a GameObject by ID")
@@ -1856,6 +1971,10 @@ void RegisterSceneBindings(py::module_ &m)
             "serialize_document", [](const Scene &scene) { return JsonToPython(scene.SerializeDocument()); },
             "Serialize scene to a Python document")
         .def(
+            "_capture_play_mode_snapshot",
+            [](const Scene &scene) { return std::make_shared<ScenePlayModeSnapshot>(scene.SerializeDocument()); },
+            "Capture an opaque native scene document for Play Mode restoration")
+        .def(
             "_commit_document",
             [](Scene &scene, py::handle document) { return scene.DeserializeDocument(PythonToJson(document)); },
             py::arg("document"), "Internal native staging commit; Python callers must preflight first")
@@ -1865,6 +1984,14 @@ void RegisterSceneBindings(py::module_ &m)
                 return scene.CommitDocumentRetainingCurrentWorld(PythonToJson(document));
             },
             py::arg("document"), "Commit a candidate and retain the previous native world until finalized")
+        .def(
+            "_commit_play_mode_snapshot_retaining_world",
+            [](Scene &scene, const std::shared_ptr<ScenePlayModeSnapshot> &snapshot) {
+                if (!snapshot)
+                    return std::shared_ptr<SceneCommitToken>{};
+                return snapshot->CommitRetainingWorld(scene);
+            },
+            py::arg("snapshot"), "Commit an opaque Play Mode snapshot without crossing the Python JSON bridge")
         .def("save_to_file", &Scene::SaveToFile, py::arg("path"), "Save scene to a JSON file")
         .def("has_pending_py_components", &Scene::HasPendingPyComponents,
              "Check if there are pending Python components to restore")

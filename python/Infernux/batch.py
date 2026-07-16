@@ -343,3 +343,25 @@ def create_batch_handle(targets: list, *, mode: str = "strict") -> "TransformBat
     except KeyError as exc:
         raise ValueError("batch handle mode must be 'strict' or 'compact'") from exc
     return lib.TransformBatchHandle(targets, validation_mode)
+
+
+def create_scene_batch_handle(scene, *, name_prefix: str = "", mode: str = "strict") -> "TransformBatchHandle":
+    """Create a Transform batch from native Scene filtering.
+
+    This avoids materializing every matching GameObject and Transform in Python,
+    which is important for large authored scenes and Play Mode startup.
+    """
+    if scene is None:
+        raise ValueError("scene is required")
+    if not isinstance(name_prefix, str):
+        raise TypeError("name_prefix must be a string")
+    lib = _get_lib()
+    modes = {
+        "strict": lib.TransformBatchMode.STRICT,
+        "compact": lib.TransformBatchMode.COMPACT,
+    }
+    try:
+        validation_mode = modes[mode]
+    except KeyError as exc:
+        raise ValueError("batch handle mode must be 'strict' or 'compact'") from exc
+    return lib._create_scene_transform_batch_handle(scene, name_prefix, validation_mode)

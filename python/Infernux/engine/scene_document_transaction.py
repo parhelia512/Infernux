@@ -57,7 +57,7 @@ class SceneDocumentTransaction:
         scene: Any,
         *,
         path: Optional[os.PathLike[str] | str] = None,
-        document: Optional[dict[str, Any]] = None,
+        document: Any = None,
         asset_database: Any = None,
         clear_registries: bool = True,
         borrow_document: bool = False,
@@ -68,14 +68,17 @@ class SceneDocumentTransaction:
             raise ValueError("scene is required")
         if (path is None) == (document is None):
             raise ValueError("exactly one of path or document is required")
-        if document is not None and not isinstance(document, dict):
-            raise TypeError("scene document must be a dict")
+        is_native_snapshot = document is not None and callable(
+            getattr(document, "_python_component_records", None)
+        ) and callable(getattr(document, "_preflight_resource_dependencies", None))
+        if document is not None and not isinstance(document, dict) and not is_native_snapshot:
+            raise TypeError("scene document must be a dict or native Play Mode snapshot")
 
         self._scene = scene
         self._path = os.fspath(path) if path is not None else None
         self._document = (
             document
-            if document is not None and borrow_document
+            if document is not None and (borrow_document or is_native_snapshot)
             else copy.deepcopy(document) if document is not None else None
         )
         self._asset_database = asset_database
@@ -92,6 +95,7 @@ class SceneDocumentTransaction:
         self._rollback_error = ""
         self._error = ""
         self._failure_exception: Optional[BaseException] = None
+        self._phase_timings_ms: dict[str, float] = {}
 
     @property
     def state(self) -> SceneDocumentTransactionState:
@@ -130,7 +134,13 @@ class SceneDocumentTransaction:
         return self._rollback_error
 
     @property
-    def document(self) -> Optional[dict[str, Any]]:
+    def phase_timings_ms(self) -> dict[str, float]:
+        return dict(self._phase_timings_ms)
+
+    @property
+    def document(self) -> Any:
+        if callable(getattr(self._document, "_python_component_records", None)):
+            return self._document
         return copy.deepcopy(self._document)
 
     def _require_owner_thread(self) -> None:
@@ -228,7 +238,13 @@ class SceneDocumentTransaction:
             if self._state is SceneDocumentTransactionState.DOCUMENT_READY:
                 assert self._document is not None
                 self._state = SceneDocumentTransactionState.RESOURCE_PREFLIGHTING
-                _preflight_scene_resource_dependencies(self._document)
+                phase_started = time.perf_counter()
+                native_preflight = getattr(self._document, "_preflight_resource_dependencies", None)
+                if not callable(native_preflight):
+                    _preflight_scene_resource_dependencies(self._document)
+                self._phase_timings_ms["resources"] = (
+                    time.perf_counter() - phase_started
+                ) * 1000.0
                 self._state = SceneDocumentTransactionState.RESOURCES_READY
                 return False
 
@@ -237,10 +253,14 @@ class SceneDocumentTransaction:
 
                 assert self._document is not None
                 self._state = SceneDocumentTransactionState.PREFLIGHTING
+                phase_started = time.perf_counter()
                 self._prepared_graph = preflight_scene_python_components(
                     self._document,
                     asset_database=self._asset_database,
                 )
+                self._phase_timings_ms["python_preflight"] = (
+                    time.perf_counter() - phase_started
+                ) * 1000.0
                 self._state = SceneDocumentTransactionState.READY_TO_COMMIT
                 return False
 
@@ -252,20 +272,45 @@ class SceneDocumentTransaction:
                 self._state = SceneDocumentTransactionState.COMMITTING
                 if self._before_commit is not None:
                     self._before_commit()
-                self._commit_token = self._scene._commit_document_retaining_world(self._document)
+                native_commit = getattr(
+                    self._scene, "_commit_play_mode_snapshot_retaining_world", None
+                )
+                if callable(getattr(self._document, "_python_component_records", None)) and callable(
+                    native_commit
+                ):
+                    phase_started = time.perf_counter()
+                    self._commit_token = native_commit(self._document)
+                else:
+                    phase_started = time.perf_counter()
+                    self._commit_token = self._scene._commit_document_retaining_world(self._document)
+                self._phase_timings_ms["native_commit"] = (
+                    time.perf_counter() - phase_started
+                ) * 1000.0
                 if self._commit_token is None:
                     self._fail("native scene document commit was rejected")
                     return True
                 self._native_committed = True
+                phase_started = time.perf_counter()
                 publish_prepared_scene_python_components(
                     self._scene,
                     self._prepared_graph,
                     clear_registries=self._clear_registries,
                 )
+                self._phase_timings_ms["python_publish"] = (
+                    time.perf_counter() - phase_started
+                ) * 1000.0
                 self._prepared_graph = None
                 if self._after_publish is not None:
+                    phase_started = time.perf_counter()
                     self._after_publish()
+                    self._phase_timings_ms["after_publish"] = (
+                        time.perf_counter() - phase_started
+                    ) * 1000.0
+                phase_started = time.perf_counter()
                 self._commit_token.finalize()
+                self._phase_timings_ms["finalize"] = (
+                    time.perf_counter() - phase_started
+                ) * 1000.0
                 self._commit_token = None
                 self._native_committed = False
                 self._state = SceneDocumentTransactionState.COMPLETED

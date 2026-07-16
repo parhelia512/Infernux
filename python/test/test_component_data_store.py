@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from Infernux import lib
-from Infernux.batch import batch_read, batch_write, create_batch_handle
+from Infernux.batch import batch_read, batch_write, create_batch_handle, create_scene_batch_handle
 from Infernux.components import InxComponent
 from Infernux.components._cds_bridge import get_class_id
 
@@ -91,6 +91,24 @@ def test_transform_batch_handle_compacts_stale_transforms_with_mask(scene):
 
     with pytest.raises(ValueError, match="mode must be"):
         create_batch_handle([second.transform], mode="lenient")
+
+
+def test_scene_batch_handle_filters_in_native_code(scene):
+    first = scene.create_game_object("WaveCube_0")
+    second = scene.create_game_object("Other")
+    third = scene.create_game_object("WaveCube_1")
+    first.transform.position = lib.Vector3(1.0, 2.0, 3.0)
+    second.transform.position = lib.Vector3(4.0, 5.0, 6.0)
+    third.transform.position = lib.Vector3(7.0, 8.0, 9.0)
+
+    handle = create_scene_batch_handle(scene, name_prefix="WaveCube_")
+    positions = batch_read(handle, "position")
+
+    assert len(handle) == 2
+    np.testing.assert_allclose(
+        positions,
+        np.asarray([[1.0, 2.0, 3.0], [7.0, 8.0, 9.0]], dtype=np.float32),
+    )
 
 
 def test_component_class_can_reserve_numeric_storage():

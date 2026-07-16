@@ -881,6 +881,13 @@ class BuildSettingsPanel:
     def _on_build_progress(self, message: str, fraction: float):
         self._build_message = message
         self._build_progress = fraction
+        from Infernux.engine.ui.engine_status import EngineStatus
+        EngineStatus.set(
+            message or "Building player...",
+            fraction,
+            source="build",
+            priority=20,
+        )
         if self._cancel_event.is_set():
             raise BuildCancelled()
 
@@ -900,10 +907,24 @@ class BuildSettingsPanel:
         self._build_error = None
         self._build_output_dir = None
         self._cancel_event.clear()
+        from Infernux.engine.ui.engine_status import EngineStatus
+        EngineStatus.set(
+            self._build_message,
+            self._build_progress,
+            source="build",
+            priority=20,
+        )
 
         if not get_project_root():
             self._building = False
             self._build_error = "No project root found"
+            EngineStatus.flash(
+                self._build_error,
+                0.0,
+                duration=2.5,
+                source="build",
+                priority=20,
+            )
             return
 
         try:
@@ -912,6 +933,13 @@ class BuildSettingsPanel:
         except BuildOutputDirectoryError as exc:
             self._building = False
             self._show_output_directory_error(exc)
+            EngineStatus.flash(
+                self._build_error or "Build output directory is unavailable",
+                0.0,
+                duration=3.0,
+                source="build",
+                priority=20,
+            )
             return
 
         def _run():
@@ -940,6 +968,31 @@ class BuildSettingsPanel:
                     self._build_error = str(exc)
             finally:
                 self._building = False
+                if self._build_cancelled:
+                    EngineStatus.flash(
+                        "Build cancelled",
+                        -1.0,
+                        duration=2.0,
+                        kind="warning",
+                        source="build",
+                        priority=20,
+                    )
+                elif self._build_error:
+                    EngineStatus.flash(
+                        "Build failed",
+                        0.0,
+                        duration=3.0,
+                        source="build",
+                        priority=20,
+                    )
+                else:
+                    EngineStatus.flash(
+                        "Build completed",
+                        1.0,
+                        duration=2.0,
+                        source="build",
+                        priority=20,
+                    )
 
         threading.Thread(target=_run, daemon=True).start()
 

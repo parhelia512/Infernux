@@ -1,4 +1,6 @@
 #include <function/scene/ComponentDataStore.h>
+#include <function/scene/GameObject.h>
+#include <function/scene/Scene.h>
 #include <function/scene/Transform.h>
 #include <function/scene/TransformECSStore.h>
 #include <pybind11/numpy.h>
@@ -42,9 +44,9 @@ struct TransformBatchHandle
     mutable std::vector<float> valueScratch;
     mutable uint64_t resolvedStructuralVersion = UINT64_MAX;
 
-    explicit TransformBatchHandle(const py::list &pyList, Mode validationMode = Mode::Strict) : mode(validationMode)
+    explicit TransformBatchHandle(std::vector<Transform *> transforms, Mode validationMode = Mode::Strict)
+        : mode(validationMode)
     {
-        const auto transforms = ExtractTransforms(pyList);
         handles.reserve(transforms.size());
         worldIds.reserve(transforms.size());
         resolved.reserve(transforms.size());
@@ -55,6 +57,11 @@ struct TransformBatchHandle
             handles.push_back(transform->GetECSHandle());
             worldIds.push_back(transform->GetHandle().worldId);
         }
+    }
+
+    explicit TransformBatchHandle(const py::list &pyList, Mode validationMode = Mode::Strict)
+        : TransformBatchHandle(ExtractTransforms(pyList), validationMode)
+    {
     }
 
     [[nodiscard]] size_t size() const
@@ -629,6 +636,22 @@ void RegisterBatchBindings(py::module_ &m)
              py::arg("mode") = TransformBatchHandle::Mode::Strict)
         .def("__len__", &TransformBatchHandle::size)
         .def_property_readonly("is_compact", &TransformBatchHandle::IsCompact);
+
+    m.def(
+        "_create_scene_transform_batch_handle",
+        [](Scene &scene, const std::string &namePrefix, TransformBatchHandle::Mode mode) {
+            std::vector<Transform *> transforms;
+            const auto objects = scene.GetAllObjects();
+            transforms.reserve(objects.size());
+            for (GameObject *object : objects) {
+                if (!object || (!namePrefix.empty() && object->GetName().rfind(namePrefix, 0) != 0))
+                    continue;
+                transforms.push_back(object->GetTransform());
+            }
+            return TransformBatchHandle(std::move(transforms), mode);
+        },
+        py::arg("scene"), py::arg("name_prefix") = "", py::arg("mode") = TransformBatchHandle::Mode::Strict,
+        "Build a Transform batch in native code without materializing GameObjects in Python.");
 
     m.def("_transform_batch_read", &HandleBatchRead, py::arg("handle"), py::arg("property"),
           "Read through generational handles; compact mode returns (values, valid_mask).");

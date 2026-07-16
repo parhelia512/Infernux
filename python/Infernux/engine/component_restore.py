@@ -438,13 +438,17 @@ def _prepare_python_component_records(
         raise
 
 
-def preflight_scene_python_components(document: dict, asset_database=None) -> PreparedPythonComponentGraph:
+def preflight_scene_python_components(document, asset_database=None) -> PreparedPythonComponentGraph:
     """Resolve and decode the complete Python graph before native scene commit."""
-    object_ids, native_types, raw_descriptors = _collect_scene_document_python_descriptors(document)
+    records = getattr(document, "_python_component_records", None)
+    if callable(records):
+        object_ids, native_types, raw_descriptors = records()
+    else:
+        object_ids, native_types, raw_descriptors = _collect_scene_document_python_descriptors(document)
     return _prepare_python_component_records(
-        object_ids,
-        native_types,
-        raw_descriptors,
+        set(object_ids),
+        set(native_types),
+        list(raw_descriptors),
         asset_database,
     )
 
@@ -711,7 +715,7 @@ def publish_prepared_scene_python_components(
 
 def replace_scene_python_components_for_play(
     scene,
-    document: dict,
+    document,
     asset_database=None,
 ) -> bool:
     """Create fresh Python instances without rebuilding the native scene graph.

@@ -986,6 +986,13 @@ std::unique_ptr<Component> MeshRenderer::Clone() const
     }
     // Materials
     clone->m_materials = m_materials;
+    auto &graph = AssetDependencyGraph::Instance();
+    if (clone->m_meshAsset.HasGuid())
+        graph.AddRuntimeDependency(clone->GetInstanceGuid(), clone->m_meshAsset.GetGuid());
+    for (const auto &reference : clone->m_materials) {
+        if (reference.HasGuid())
+            graph.AddRuntimeDependency(clone->GetInstanceGuid(), reference.GetGuid());
+    }
     // Rendering flags
     clone->m_castShadows = m_castShadows;
     clone->m_receiveShadows = m_receiveShadows;

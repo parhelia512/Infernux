@@ -17,7 +17,10 @@ from Infernux.timing import Time
 from Infernux.engine.play_mode import PlayModeManager
 from Infernux.engine.project_context import get_project_root
 from Infernux.ui.ui_texture_cache import get_shared_cache as _get_tex_cache
-from Infernux.ui.ui_render_dispatch import dispatch as _ui_dispatch
+from Infernux.ui.ui_render_dispatch import (
+    dispatch as _ui_dispatch,
+    runtime_ui_revision as _runtime_ui_revision,
+)
 from Infernux.ui.ui_event_system import UIEventProcessor
 from Infernux.ui.ui_canvas_utils import collect_sorted_canvases
 from Infernux.ui.ui_button import UIButton
@@ -576,29 +579,35 @@ class GameViewPanel(EditorPanel):
 
         use_overlay = not renderer.is_enabled()
 
-        # Always call begin_frame to clear old GPU commands, even when
-        # using the overlay path (prevents stale commands from rendering
-        # if the renderer is re-enabled later).
-        renderer.begin_frame(game_w, game_h)
-
         if canvases is None:
             canvases = collect_sorted_canvases(scene)
 
-        if not canvases:
+        texture_cache = _get_tex_cache()
+        semantic_capture_enabled = bool(getattr(ctx, "semantic_capture_enabled", False))
+        reused_commands = False
+        if use_overlay or texture_cache.has_pending:
+            renderer.begin_frame(game_w, game_h)
+        else:
+            revision = _runtime_ui_revision(
+                scene, canvases, game_w, game_h, texture_cache.generation,
+            )
+            reused_commands = bool(renderer.begin_frame_cached(game_w, game_h, revision))
+
+        if not canvases or (reused_commands and not semantic_capture_enabled):
             return
 
-        _get_tid = _get_tex_cache().get_bound(self._engine)
+        _get_tid = texture_cache.get_bound(self._engine)
 
         for canvas in canvases:
             self._render_canvas_screen_ui(
                 ctx, canvas, renderer, use_overlay, _get_tid,
                 game_w, game_h, vp_x, vp_y, vp_w, vp_h,
-                ScreenUIList, RenderMode)
+                ScreenUIList, RenderMode, reused_commands)
 
     def _render_canvas_screen_ui(self, ctx, canvas, renderer, use_overlay,
                                  _get_tid, game_w, game_h,
-                                 vp_x, vp_y, vp_w, vp_h,
-                                 ScreenUIList, RenderMode):
+                                  vp_x, vp_y, vp_w, vp_h,
+                                  ScreenUIList, RenderMode, reused_commands=False):
         """Render all elements of one canvas to the screen UI renderer."""
         canvas_go = canvas.game_object
         if canvas_go is not None and not canvas_go.active_in_hierarchy:
@@ -656,6 +665,8 @@ class GameViewPanel(EditorPanel):
                     get_tex_id=_get_tid,
                 )
             else:
+                if reused_commands:
+                    continue
                 _ui_dispatch(
                     elem, "runtime",
                     renderer=renderer,
