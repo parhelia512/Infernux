@@ -124,10 +124,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\VulkanSDK\${{ env.VULKAN_SDK_VERSION }}
-          # The cached SDK must include a private copy of vulkan-1.dll. The
-          # installer normally places it in System32, which is not persistent
-          # between hosted runners.
-          key: vulkan-sdk-${{ env.VULKAN_SDK_VERSION }}-windows-loader-v1
+          # The cached SDK includes a private Vulkan Runtime loader for
+          # headless build tools. Hosted runners do not provide one.
+          key: vulkan-sdk-${{ env.VULKAN_SDK_VERSION }}-windows-loader-v2
 
       - name: Install Vulkan SDK (silent, with SPIRV-Cross)
         if: steps.cache-vulkan.outputs.cache-hit != 'true'
@@ -142,13 +141,20 @@ jobs:
         shell: pwsh
         run: |
           $sdk = "C:\VulkanSDK\$env:VULKAN_SDK_VERSION"
-          $loader = Join-Path $env:WINDIR "System32\vulkan-1.dll"
           $sdkLoader = Join-Path $sdk "Bin\vulkan-1.dll"
           if (!(Test-Path $sdkLoader)) {
-            if (!(Test-Path $loader)) {
-              throw "Vulkan SDK installation did not provide the 64-bit Vulkan loader: $loader"
+            $runtimeUrl = "https://sdk.lunarg.com/sdk/download/$env:VULKAN_SDK_VERSION/windows/VulkanRT-$env:VULKAN_SDK_VERSION-Components.zip"
+            $runtimeZip = Join-Path $env:RUNNER_TEMP "VulkanRT-Components.zip"
+            $runtimeDir = Join-Path $env:RUNNER_TEMP "VulkanRT-Components"
+            Invoke-WebRequest -Uri $runtimeUrl -OutFile $runtimeZip
+            Expand-Archive -Path $runtimeZip -DestinationPath $runtimeDir -Force
+            $loader = Get-ChildItem $runtimeDir -Recurse -File -Filter vulkan-1.dll |
+              Where-Object { $_.FullName -match '[\\/]x64[\\/]' } |
+              Select-Object -First 1
+            if (!$loader) {
+              throw "The Vulkan Runtime package did not contain an x64 vulkan-1.dll."
             }
-            Copy-Item $loader $sdkLoader -Force
+            Copy-Item $loader.FullName $sdkLoader -Force
           }
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           (Join-Path $sdk "Bin") | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
