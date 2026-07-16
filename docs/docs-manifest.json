@@ -7,10 +7,10 @@
   "release_status": "preview",
   "last_verified": "2026-07-15",
   "build": {
-    "status": "unstamped",
-    "source_commit": null,
-    "source_url": null,
-    "generated_at": null,
+    "status": "stamped",
+    "source_commit": "2e09cbbdcd13a828d3b6b9be15c5768b85e88384",
+    "source_url": "https://github.com/ChenlizheMe/Infernux/commit/2e09cbbdcd13a828d3b6b9be15c5768b85e88384",
+    "generated_at": "2026-07-16T23:42:21.000Z",
     "timestamp_source": "source-commit"
   },
   "languages": [

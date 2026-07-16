@@ -8,7 +8,7 @@ Curated-Document-Count: 40
 Learning-Path-Count: 1
 Localized-API-Symbol-Count: 158
 Documentation-Health-Schema: 1
-Corpus-Content-SHA256: 4fdec57a727f7ca9daa554f066de634cbf1924d7352d87a79dd9a7915e803731
+Corpus-Content-SHA256: c79607cd9807bc531d23ba76e9de8bcfd37de787a1cda5fb86f678370c8644c6
 Canonical-Site: https://infernux-engine.com
 Repository: https://github.com/ChenlizheMe/Infernux
 
@@ -35,7 +35,7 @@ Curated-API-Examples: 28
 Localized-Relationship-Edges: 112
 Verification-Window: 2026-07-15..2026-07-15
 Freshness-Policy-Days: 120
-Build-Provenance: unstamped
+Build-Provenance: stamped 2e09cbbdcd13a828d3b6b9be15c5768b85e88384
 Canonical-Health-Report: https://infernux-engine.com/docs-health.json
 
 ## Current release notes

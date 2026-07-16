@@ -8,7 +8,7 @@ Curated-Document-Count: 40
 Localized-API-Symbol-Count: 158
 Guidance-Linked-API-Count: 36
 Learning-Path-Count: 1
-Index-Content-SHA256: a35d70e4a481507e71d19af3a748254f9a04ec51a2c84795ce3859ffe65da5b6
+Index-Content-SHA256: 1bf12f505734668d08cefbed80e45f855d241d5a0a85a33bf4ffbf15ff7cf680
 Canonical-Site: https://infernux-engine.com
 Repository: https://github.com/ChenlizheMe/Infernux
 License: MIT
@@ -152,7 +152,7 @@ Use [api-index.json](https://infernux-engine.com/api-index.json) for exhaustive 
 
 - Documentation health: localized_pages=198; curated_documents=40; localized_api_symbols=158; relationship_edges=112.
 - Release: v0.2.1; channel=technical-preview; published_at=2026-07-10T15:33:55Z; checksum=SHA-256; publisher_signature=not-declared; authority=GitHub Releases.
-- Build provenance: status=unstamped; source_commit=unstamped; generated_at=unstamped.
+- Build provenance: status=stamped; source_commit=2e09cbbdcd13a828d3b6b9be15c5768b85e88384; generated_at=2026-07-16T23:42:21.000Z.
 
 ## Agent trust rules
 
