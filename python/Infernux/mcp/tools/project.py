@@ -31,7 +31,7 @@ def register_project_tools(mcp, project_path: str) -> None:
             sel = SelectionManager.instance()
             scene = SceneManager.instance().get_active_scene()
             return {
-                "engine_version": "0.2.1",
+                "engine_version": "0.2.9",
                 "project_root": project_path,
                 "active_scene": {
                     "name": getattr(scene, "name", ""),

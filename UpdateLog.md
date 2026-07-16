@@ -2,7 +2,7 @@
 
 This preview is the first large architecture update after `v0.2.1`. It rebuilds the scene, asset, rendering, physics, editor, automation, and distribution paths around stricter native data ownership while keeping Python as the public gameplay and tooling layer. It also adds new VFX, capture, build, and agent-facing workflows instead of being an MCP-only release.
 
-**Baseline for comparison:** [`v0.2.1...029/030preview`](https://github.com/ChenlizheMe/Infernux/compare/v0.2.1...029/030preview)
+**Baseline for comparison:** [`v0.2.1...v0.2.9`](https://github.com/ChenlizheMe/Infernux/compare/v0.2.1...v0.2.9)
 
 ---
 
@@ -54,7 +54,7 @@ This preview is the first large architecture update after `v0.2.1`. It rebuilds 
 
 ### Preview notes
 
-* This branch is a `0.3.0` preview, not the final stable release. Scene/component documents, runtime packs, VFX, and MCP contracts are substantially newer than `v0.2.1` and should be tested on copies of important projects.
+* This release is a `0.3.0` preview, not the final stable release. Scene/component documents, runtime packs, VFX, and MCP contracts are substantially newer than `v0.2.1` and should be tested on copies of important projects.
 * Compute shaders are no longer accepted by the public shader API; use graphics shader stages or an external parallel backend.
 * Restart the editor after installing a newly built wheel so Python modules, native bindings, and runtime-pack metadata come from the same build.
 * Current verification: Release preset build succeeded, the packaged wheel passed SystemsLab and PerformanceLab validation, and the repository test suite completed with `1938 passed, 1 skipped`.

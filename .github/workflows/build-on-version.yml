@@ -14,7 +14,13 @@ on:
       - "pyproject.toml"
       - "UpdateLog.md"
       - ".github/workflows/build-on-version.yml"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: Rebuild and replace assets even when this version already has a GitHub Release
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -47,23 +53,21 @@ jobs:
               OLD_VER=$(get_ver /tmp/old_pyproject.toml) || OLD_VER=""
           fi
           echo "version=$NEW_VER" >> "$GITHUB_OUTPUT"
-          UPDATELOG_CHANGED=false
-          if git rev-parse HEAD^ >/dev/null 2>&1; then
-            if git diff --name-only HEAD^ HEAD | grep -qx "UpdateLog.md"; then
-              UPDATELOG_CHANGED=true
-            fi
-          fi
           RELEASE_EXISTS=false
           if gh release view "v$NEW_VER" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             RELEASE_EXISTS=true
           fi
+          FORCE_REBUILD="${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild || false }}"
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$NEW_VER" != "$OLD_VER" ] || [ "$UPDATELOG_CHANGED" = "true" ] || [ "$RELEASE_EXISTS" != "true" ]; then
+          if [ "$RELEASE_EXISTS" = "true" ] && [ "$FORCE_REBUILD" != "true" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Release v$NEW_VER already exists; skipping rebuild. Use workflow_dispatch with force_rebuild=true to replace its assets."
+          elif [ "$NEW_VER" != "$OLD_VER" ] || [ "$RELEASE_EXISTS" != "true" ] || [ "$FORCE_REBUILD" = "true" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Build requested. event='${{ github.event_name }}', old='$OLD_VER', new='$NEW_VER', update_log_changed='$UPDATELOG_CHANGED', release_exists='$RELEASE_EXISTS'"
+            echo "Build requested. event='${{ github.event_name }}', old='$OLD_VER', new='$NEW_VER', release_exists='$RELEASE_EXISTS', force_rebuild='$FORCE_REBUILD'"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Version unchanged and release v$NEW_VER already exists; skipping build."
+            echo "Version unchanged; skipping build."
           fi
 
   build-windows:
