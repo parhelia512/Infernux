@@ -11,7 +11,7 @@ class in <b>Infernux.components.builtin</b>
 Controls physics simulation for the GameObject.
 
 <!-- USER CONTENT START --> description
-**Status:** Preview · **Verified with:** 0.2.1
+**Status:** Preview · **Verified with:** 0.2.9
 
 For dynamic bodies, use forces or velocity rather than writing Transform every frame. Use move operations for kinematic bodies and issue simulation commands from fixed updates.
 <!-- USER CONTENT END -->
@@ -88,7 +88,6 @@ class Thruster(InxComponent):
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [Physics Manual](../manual/physics.md)
 - [Physics](Physics.md)
 - [Collider](Collider.md)
 - [InxComponent](InxComponent.md)

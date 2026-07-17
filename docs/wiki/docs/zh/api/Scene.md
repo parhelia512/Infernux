@@ -36,6 +36,7 @@
 | `create_from_model(guid: str, name: str = '') → Optional[GameObject]` |  |
 | `get_root_objects() → List[GameObject]` |  |
 | `get_all_objects() → List[GameObject]` |  |
+| `find_objects_with_component(type_name: str) → List[GameObject]` |  |
 | `find(name: str) → Optional[GameObject]` |  |
 | `find_by_id(id: int) → Optional[GameObject]` |  |
 | `resolve_game_object(handle: ObjectHandle) → Optional[GameObject]` |  |
@@ -72,7 +73,7 @@
 ## 示例
 
 <!-- USER CONTENT START --> example
-> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。
+> **示例状态：** 当前尚未为此符号验证 0.2.9 示例。请以上方签名为准；不要根据其他引擎中的同名 API 推测行为。
 <!-- USER CONTENT END -->
 
 ## 另请参阅

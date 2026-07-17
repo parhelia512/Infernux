@@ -51,10 +51,12 @@ PROJECT_ROOT = WIKI_ROOT.parent.parent               # Infernux repo root
 WEB_ROOT = PROJECT_ROOT / "docs"
 PYTHON_ROOT = PROJECT_ROOT / "python"
 STUB_ROOT = PYTHON_ROOT / "Infernux"
+DOCUMENTED_RELEASE = json.loads(
+    (WEB_ROOT / "docs-manifest.json").read_text(encoding="utf-8")
+)["documented_release"]
 
 EN_API = DOCS_ROOT / "en" / "api"
 ZH_API = DOCS_ROOT / "zh" / "api"
-WIKI_DOCS_MANIFEST = WEB_ROOT / "assets" / "wiki-docs.json"
 LINKABLE_API_PAGES: set[str] = set()
 
 # Marker for user-editable content blocks
@@ -92,7 +94,7 @@ I18N = {
     "inherits":             {"en": "Inherits from",         "zh": "继承自"},
     "package":              {"en": "Package",               "zh": "包"},
     "packages":             {"en": "Packages",              "zh": "包"},
-    "version":              {"en": "Version 0.2.1",         "zh": "版本 0.2.1"},
+    "version":              {"en": f"Version {DOCUMENTED_RELEASE}", "zh": f"版本 {DOCUMENTED_RELEASE}"},
     "api_ref_title":        {"en": "Infernux Scripting API", "zh": "Infernux 脚本 API"},
     "api_ref_welcome":      {
         "en": "Welcome to the Infernux Scripting API Reference. Browse packages from the sidebar to see class documentation.",
@@ -1859,9 +1861,6 @@ def generate_all(*, include_all: bool = False):
     # Generate mkdocs.yml
     _generate_mkdocs_yml(nav_entries)
 
-    # Generate manifest for hand-written non-API markdown docs used by wiki.html
-    _generate_manual_docs_manifest()
-
     print("\nDone! ✓")
 
 
@@ -1894,7 +1893,6 @@ def _yaml_quote_nav_key(display: str) -> str:
 
 def _generate_mkdocs_yml(nav_entries: Dict[str, List[Tuple[str, str]]]):
     """Regenerate the full mkdocs.yml with auto-generated API nav."""
-    manual_nav_entries = _collect_manual_nav_entries()
     lines = []
     lines.append("site_name: Infernux Scripting API")
     lines.append("site_description: Infernux Game Engine Scripting API Reference")
@@ -1910,19 +1908,6 @@ def _generate_mkdocs_yml(nav_entries: Dict[str, List[Tuple[str, str]]]):
     lines.append("")
     lines.append("nav:")
     lines.append("  - Home: index.md")
-
-    for lang, section_title in [(LANG_EN, "English Guides"), (LANG_ZH, "中文指南")]:
-        groups = manual_nav_entries.get(lang, {})
-        if not groups:
-            continue
-
-        lines.append(f"  - {section_title}:")
-        for group_key in _manual_nav_group_order(groups.keys()):
-            entries = groups[group_key]
-            lines.append(f"    - {_humanize_doc_group(group_key, lang)}:")
-            for display, relative_path in entries:
-                key = _yaml_quote_nav_key(display)
-                lines.append(f"      - {key}: {relative_path}")
 
     for lang, section_title in [("en", "API Reference"), ("zh", "API 参考手册")]:
         prefix = f"{lang}/api"
@@ -1946,8 +1931,7 @@ def _generate_mkdocs_yml(nav_entries: Dict[str, List[Tuple[str, str]]]):
     lines.append("  - pymdownx.superfences")
     lines.append("  - pymdownx.inlinehilite")
     lines.append("")
-    lines.append("plugins:")
-    lines.append("  - search")
+    lines.append("plugins: []")
     lines.append("")
 
     path = WIKI_ROOT / "mkdocs.yml"

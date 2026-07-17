@@ -315,8 +315,7 @@
     }
 
     function contextIndexUrl(manifest, apiPage) {
-        const route = apiPage ? manifest?.indexes?.api : manifest?.indexes?.curated_docs;
-        return route || (apiPage ? "/api-index.json" : "/docs-index.json");
+        return manifest?.indexes?.api || "/api-index.json";
     }
 
     function markdownList(values, fallback) {
@@ -348,9 +347,6 @@
         const signatures = Array.isArray(entry?.signatures) ? entry.signatures : [];
         const trustRules = Array.isArray(manifest?.trust_rules) ? manifest.trust_rules : [];
         const indexRoute = contextIndexUrl(manifest, apiPage);
-    const llmsFullRoute = manifest?.indexes?.llms_full || "/llms-full.txt";
-        const learningPathsRoute = manifest?.indexes?.learning_paths || "/learning-paths.json";
-        const docsHealthRoute = manifest?.indexes?.docs_health || "/docs-health.json";
 
         const lines = [
             "# Infernux documentation context",
@@ -413,9 +409,6 @@
             "## Machine-readable sources",
             "",
             `- ${origin}${indexRoute}`,
-            `- ${origin}${docsHealthRoute}`,
-            `- ${origin}${learningPathsRoute}`,
-            `- ${origin}${llmsFullRoute}`,
             `- ${origin}/docs-manifest.json`
         );
 
@@ -428,7 +421,7 @@
         const apiPage = path.includes("/api/");
         documentModelPromise = Promise.allSettled([
             fetchJson("/docs-manifest.json"),
-            fetchJson(apiPage ? "/api-index.json" : "/docs-index.json")
+            fetchJson("/api-index.json")
         ]).then(([manifestResult, indexResult]) => {
             const manifest = manifestResult.status === "fulfilled" ? manifestResult.value : {};
             const index = indexResult.status === "fulfilled" ? indexResult.value : {};

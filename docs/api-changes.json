@@ -1,15 +1,571 @@
 {
   "schema_version": 1,
-  "current_release": "0.2.1",
-  "previous_release": null,
-  "comparison_available": false,
-  "reason": "0.2.1 is the first recorded API snapshot; no earlier authoritative snapshot exists.",
+  "current_release": "0.2.9",
+  "previous_release": "0.2.1",
+  "comparison_available": true,
   "counts": {
     "added": 0,
     "removed": 0,
-    "changed": 0
+    "changed": 10
   },
   "added": [],
   "removed": [],
-  "changed": []
+  "changed": [
+    {
+      "symbol_key": "Infernux.Component",
+      "changed_fields": [
+        "signatures"
+      ],
+      "before": {
+        "signatures": [
+          "str",
+          "int",
+          "bool",
+          "GameObject",
+          "List[str]",
+          "is_component_type(type_name: str) → bool",
+          "serialize() → str",
+          "deserialize(json_str: str) → None"
+        ]
+      },
+      "after": {
+        "signatures": [
+          "str",
+          "int",
+          "ObjectHandle",
+          "bool",
+          "GameObject",
+          "List[str]",
+          "is_component_type(type_name: str) → bool",
+          "serialize() → str",
+          "serialize_document() → Dict[str, Any]"
+        ]
+      },
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Component.html"
+    },
+    {
+      "symbol_key": "Infernux.GameObject",
+      "changed_fields": [
+        "signatures"
+      ],
+      "before": {
+        "signatures": [
+          "str",
+          "bool",
+          "int",
+          "Optional[GameObject]",
+          "Transform",
+          "Scene",
+          "compare_tag(tag: str) → bool",
+          "get_transform() → Transform",
+          "add_component(component_type: Any) → Optional[Any]",
+          "remove_component(component: Any) → bool",
+          "can_remove_component(component: Any) → bool",
+          "get_remove_component_blockers(component: Any) → List[str]",
+          "get_components(component_type: Any = ...) → List[Any]",
+          "get_component(component_type: Any) → Optional[Any]",
+          "get_cpp_component(type_name: str) → Optional[Component]",
+          "get_cpp_components(type_name: str) → List[Component]",
+          "add_py_component(component_instance: Any) → Any",
+          "get_py_component(component_type: Any) → Any",
+          "get_py_components() → List[Any]",
+          "remove_py_component(component: Any) → bool",
+          "get_parent() → Optional[GameObject]",
+          "set_parent(parent: Optional[GameObject], world_position_stays: bool = True) → None",
+          "get_children() → List[GameObject]",
+          "get_child_count() → int",
+          "get_child(index: int) → GameObject",
+          "find_child(name: str) → Optional[GameObject]",
+          "find_descendant(name: str) → Optional[GameObject]",
+          "is_active_in_hierarchy() → bool",
+          "get_component_in_children(component_type: Any, include_inactive: bool = False) → Any",
+          "get_component_in_parent(component_type: Any, include_inactive: bool = False) → Any",
+          "serialize() → str",
+          "deserialize(json_str: str) → None",
+          "static GameObject.find(name: str) → Optional[GameObject]",
+          "static GameObject.find_with_tag(tag: str) → Optional[GameObject]",
+          "static GameObject.find_game_objects_with_tag(tag: str) → List[GameObject]",
+          "static GameObject.instantiate(original: Any) → Optional[GameObject]",
+          "static GameObject.destroy(game_object: GameObject) → None"
+        ]
+      },
+      "after": {
+        "signatures": [
+          "str",
+          "bool",
+          "int",
+          "ObjectHandle",
+          "Optional[GameObject]",
+          "Transform",
+          "Scene",
+          "compare_tag(tag: str) → bool",
+          "get_transform() → Transform",
+          "add_component(component_type: Any) → Optional[Any]",
+          "remove_component(component: Any) → bool",
+          "can_remove_component(component: Any) → bool",
+          "get_remove_component_blockers(component: Any) → List[str]",
+          "get_components(component_type: Any = ...) → List[Any]",
+          "get_component(component_type: Any) → Optional[Any]",
+          "get_cpp_component(type_name: str) → Optional[Component]",
+          "get_cpp_components(type_name: str) → List[Component]",
+          "add_py_component(component_instance: Any) → Any",
+          "get_py_component(component_type: Any) → Any",
+          "get_py_components() → List[Any]",
+          "remove_py_component(component: Any) → bool",
+          "get_parent() → Optional[GameObject]",
+          "set_parent(parent: Optional[GameObject], world_position_stays: bool = True) → None",
+          "get_children() → List[GameObject]",
+          "get_child_count() → int",
+          "get_child(index: int) → GameObject",
+          "find_child(name: str) → Optional[GameObject]",
+          "find_descendant(name: str) → Optional[GameObject]",
+          "is_active_in_hierarchy() → bool",
+          "get_component_in_children(component_type: Any, include_inactive: bool = False) → Any",
+          "get_component_in_parent(component_type: Any, include_inactive: bool = False) → Any",
+          "serialize() → str",
+          "deserialize(json_str: str) → bool",
+          "serialize_document() → Dict[str, Any]",
+          "deserialize_document(document: Dict[str, Any]) → bool",
+          "static GameObject.find(name: str) → Optional[GameObject]",
+          "static GameObject.find_with_tag(tag: str) → Optional[GameObject]",
+          "static GameObject.find_game_objects_with_tag(tag: str) → List[GameObject]",
+          "static GameObject.instantiate(original: Any) → Optional[GameObject]",
+          "static GameObject.destroy(game_object: GameObject) → None"
+        ]
+      },
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/api/GameObject.html"
+    },
+    {
+      "symbol_key": "Infernux.Scene",
+      "changed_fields": [
+        "signatures"
+      ],
+      "before": {
+        "signatures": [
+          "str",
+          "int",
+          "Optional[Camera]",
+          "set_playing(playing: bool) → None",
+          "create_game_object(name: str = 'GameObject') → GameObject",
+          "create_primitive(type: PrimitiveType, name: str = '') → GameObject",
+          "create_primitives_batch(type: PrimitiveType, count: int, name_prefix: str = '') → List[GameObject]",
+          "create_from_model(guid: str, name: str = '') → Optional[GameObject]",
+          "get_root_objects() → List[GameObject]",
+          "get_all_objects() → List[GameObject]",
+          "find(name: str) → Optional[GameObject]",
+          "find_by_id(id: int) → Optional[GameObject]",
+          "find_object_by_id(id: int) → Optional[GameObject]",
+          "find_with_tag(tag: str) → Optional[GameObject]",
+          "find_game_objects_with_tag(tag: str) → List[GameObject]",
+          "find_game_objects_in_layer(layer: int) → List[GameObject]",
+          "destroy_game_object(game_object: GameObject) → None",
+          "instantiate_game_object(source: GameObject, parent: Optional[GameObject] = None) → Optional[GameObject]",
+          "instantiate_from_json(json_str: str, parent: Optional[GameObject] = None) → Optional[GameObject]",
+          "process_pending_destroys() → None",
+          "is_playing() → bool",
+          "awake_object(game_object: GameObject) → None",
+          "serialize() → str",
+          "deserialize(json_str: str) → None",
+          "save_to_file(path: str) → None",
+          "load_from_file(path: str) → None",
+          "has_pending_py_components() → bool",
+          "take_pending_py_components() → List[PendingPyComponent]",
+          "start() → None"
+        ]
+      },
+      "after": {
+        "signatures": [
+          "str",
+          "int",
+          "Optional[Camera]",
+          "set_playing(playing: bool) → None",
+          "create_game_object(name: str = 'GameObject') → GameObject",
+          "create_primitive(type: PrimitiveType, name: str = '') → GameObject",
+          "create_primitives_batch(type: PrimitiveType, count: int, name_prefix: str = '') → List[GameObject]",
+          "create_from_model(guid: str, name: str = '') → Optional[GameObject]",
+          "get_root_objects() → List[GameObject]",
+          "get_all_objects() → List[GameObject]",
+          "find_objects_with_component(type_name: str) → List[GameObject]",
+          "find(name: str) → Optional[GameObject]",
+          "find_by_id(id: int) → Optional[GameObject]",
+          "resolve_game_object(handle: ObjectHandle) → Optional[GameObject]",
+          "resolve_component(handle: ObjectHandle) → Optional[Component]",
+          "find_object_by_id(id: int) → Optional[GameObject]",
+          "find_with_tag(tag: str) → Optional[GameObject]",
+          "find_game_objects_with_tag(tag: str) → List[GameObject]",
+          "find_game_objects_in_layer(layer: int) → List[GameObject]",
+          "destroy_game_object(game_object: GameObject) → None",
+          "process_pending_destroys() → None",
+          "is_playing() → bool",
+          "awake_object(game_object: GameObject) → None",
+          "serialize() → str",
+          "serialize_document() → Dict[str, Any]",
+          "save_to_file(path: str) → None",
+          "has_pending_py_components() → bool",
+          "get_pending_py_components() → List[PendingPyComponent]",
+          "take_pending_py_components() → List[PendingPyComponent]",
+          "start() → None"
+        ]
+      },
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Scene.html"
+    },
+    {
+      "symbol_key": "Infernux.components.InxComponent",
+      "changed_fields": [
+        "signatures"
+      ],
+      "before": {
+        "signatures": [
+          "InxComponent.__init__() → None",
+          "GameObject",
+          "Transform",
+          "bool",
+          "str",
+          "int",
+          "destroy() → None",
+          "on_collision_enter(collision: Any) → None",
+          "on_collision_stay(collision: Any) → None",
+          "on_collision_exit(collision: Any) → None",
+          "on_trigger_enter(other: Any) → None",
+          "on_trigger_stay(other: Any) → None",
+          "on_trigger_exit(other: Any) → None",
+          "start_coroutine(generator: Any) → Coroutine",
+          "stop_coroutine(coroutine: Coroutine) → None",
+          "stop_all_coroutines() → None",
+          "compare_tag(tag: str) → bool",
+          "awake() → None",
+          "start() → None",
+          "update(delta_time: float) → None",
+          "fixed_update(fixed_delta_time: float) → None",
+          "late_update(delta_time: float) → None",
+          "on_destroy() → None",
+          "on_enable() → None",
+          "on_disable() → None",
+          "on_validate() → None",
+          "reset() → None",
+          "on_after_deserialize() → None",
+          "on_before_serialize() → None",
+          "on_draw_gizmos() → None",
+          "on_draw_gizmos_selected() → None",
+          "__repr__() → str"
+        ]
+      },
+      "after": {
+        "signatures": [
+          "InxComponent.__init__() → None",
+          "GameObject",
+          "Transform",
+          "bool",
+          "str",
+          "int",
+          "destroy() → None",
+          "on_collision_enter(collision: Any) → None",
+          "on_collision_stay(collision: Any) → None",
+          "on_collision_exit(collision: Any) → None",
+          "on_trigger_enter(other: Any) → None",
+          "on_trigger_stay(other: Any) → None",
+          "on_trigger_exit(other: Any) → None",
+          "start_coroutine(generator: Any) → Coroutine",
+          "stop_coroutine(coroutine: Coroutine) → None",
+          "stop_all_coroutines() → None",
+          "compare_tag(tag: str) → bool",
+          "InxComponent.reserve_instances(count: int) → None",
+          "awake() → None",
+          "start() → None",
+          "update(delta_time: float) → None",
+          "fixed_update(fixed_delta_time: float) → None",
+          "late_update(delta_time: float) → None",
+          "on_destroy() → None",
+          "on_enable() → None",
+          "on_disable() → None",
+          "on_validate() → None",
+          "reset() → None",
+          "on_after_deserialize() → None",
+          "on_before_serialize() → None",
+          "on_draw_gizmos() → None",
+          "on_draw_gizmos_selected() → None",
+          "__repr__() → str"
+        ]
+      },
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/api/InxComponent.html"
+    },
+    {
+      "symbol_key": "Infernux.components.builtin.Collider",
+      "changed_fields": [
+        "signatures"
+      ],
+      "before": {
+        "signatures": [
+          "Any",
+          "bool",
+          "float"
+        ]
+      },
+      "after": {
+        "signatures": [
+          "Any",
+          "bool",
+          "PhysicMaterialRef"
+        ]
+      },
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Collider.html"
+    },
+    {
+      "symbol_key": "Infernux.components.builtin.MeshCollider",
+      "changed_fields": [
+        "signatures"
+      ],
+      "before": {
+        "signatures": [
+          "bool"
+        ]
+      },
+      "after": {
+        "signatures": [
+          "bool",
+          "str"
+        ]
+      },
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/api/MeshCollider.html"
+    },
+    {
+      "symbol_key": "Infernux.components.builtin.MeshRenderer",
+      "changed_fields": [
+        "signatures"
+      ],
+      "before": {
+        "signatures": [
+          "bool",
+          "str",
+          "int",
+          "has_render_material() → bool",
+          "get_effective_material(slot: int = ...) → Any",
+          "get_material(slot: int) → Any",
+          "set_material(slot: int, guid: str) → None",
+          "get_material_guids() → List[str]",
+          "set_materials(guids: List[str]) → None",
+          "set_material_slot_count(count: int) → None",
+          "has_inline_mesh() → bool",
+          "get_mesh_asset() → Any",
+          "get_material_slot_names() → List[str]",
+          "get_submesh_infos() → List[Dict[str, Any]]",
+          "get_positions() → List[Tuple[float, float, float]]",
+          "get_normals() → List[Tuple[float, float, float]]",
+          "get_uvs() → List[Tuple[float, float]]",
+          "get_indices() → List[int]",
+          "set_primitive_mesh(primitive_type: Any) → None",
+          "set_mesh_asset_guid(guid: str) → None",
+          "clear_mesh_asset() → None",
+          "serialize() → str"
+        ]
+      },
+      "after": {
+        "signatures": [
+          "bool",
+          "str",
+          "int",
+          "has_render_material() → bool",
+          "get_effective_material(slot: int = ...) → Any",
+          "get_material(slot: int) → Any",
+          "get_material_guids() → List[str]",
+          "set_materials(guids: List[str]) → None",
+          "set_material_slot_count(count: int) → None",
+          "has_inline_mesh() → bool",
+          "get_mesh_asset() → Any",
+          "get_material_slot_names() → List[str]",
+          "get_submesh_infos() → List[Dict[str, Any]]",
+          "get_positions() → List[Tuple[float, float, float]]",
+          "get_normals() → List[Tuple[float, float, float]]",
+          "get_uvs() → List[Tuple[float, float]]",
+          "get_indices() → List[int]",
+          "set_primitive_mesh(primitive_type: Any) → None",
+          "set_mesh_asset_guid(guid: str) → None",
+          "clear_mesh_asset() → None",
+          "serialize() → str"
+        ]
+      },
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/api/MeshRenderer.html"
+    },
+    {
+      "symbol_key": "Infernux.core.Material",
+      "changed_fields": [
+        "signatures"
+      ],
+      "before": {
+        "signatures": [
+          "Material.__init__(native: InxMaterial) → None",
+          "InxMaterial",
+          "str",
+          "int",
+          "bool",
+          "float",
+          "dispose() → None",
+          "clone() → Material",
+          "set_shader(shader_name: str) → None",
+          "set_float(name: str, value: float) → None",
+          "set_int(name: str, value: int) → None",
+          "set_color(name: str, r: float, g: float, b: float, a: float = ...) → None",
+          "set_vector2(name: str, x: float, y: float) → None",
+          "set_vector3(name: str, x: float, y: float, z: float) → None",
+          "set_vector4(name: str, x: float, y: float, z: float, w: float) → None",
+          "set_texture_guid(name: str, texture_guid: str) → None",
+          "clear_texture(name: str) → None",
+          "get_float(name: str, default: float = ...) → float",
+          "get_int(name: str, default: int = ...) → int",
+          "get_color(name: str) → Tuple[float, float, float, float]",
+          "get_vector2(name: str) → Tuple[float, float]",
+          "get_vector3(name: str) → Tuple[float, float, float]",
+          "get_vector4(name: str) → Tuple[float, float, float, float]",
+          "get_texture(name: str) → Optional[str]",
+          "has_property(name: str) → bool",
+          "get_property(name: str) → Any",
+          "get_all_properties() → dict",
+          "to_dict() → dict",
+          "save(file_path: str) → bool",
+          "set_param(name: str, value: Any) → None",
+          "set_texture(name: str, value: Any) → None",
+          "flush() → None",
+          "static Material.create_lit(name: str = ...) → Material",
+          "static Material.create_unlit(name: str = ...) → Material",
+          "static Material.from_native(native: InxMaterial) → Material",
+          "static Material.load(file_path: str) → Optional[Material]",
+          "static Material.get(name: str) → Optional[Material]",
+          "static Material.flush_all_pending() → None",
+          "__repr__() → str",
+          "__eq__(other: object) → bool",
+          "__hash__() → int"
+        ]
+      },
+      "after": {
+        "signatures": [
+          "Material.__init__(native: InxMaterial) → None",
+          "InxMaterial",
+          "str",
+          "int",
+          "bool",
+          "float",
+          "to_dict() → dict",
+          "apply_dict(document: dict) → bool",
+          "dispose() → None",
+          "clone() → Material",
+          "set_shader(shader_name: str) → None",
+          "set_float(name: str, value: float) → None",
+          "set_int(name: str, value: int) → None",
+          "set_color(name: str, r: float, g: float, b: float, a: float = ...) → None",
+          "set_vector2(name: str, x: float, y: float) → None",
+          "set_vector3(name: str, x: float, y: float, z: float) → None",
+          "set_vector4(name: str, x: float, y: float, z: float, w: float) → None",
+          "set_texture_guid(name: str, texture_guid: str) → None",
+          "clear_texture(name: str) → None",
+          "get_float(name: str, default: float = ...) → float",
+          "get_int(name: str, default: int = ...) → int",
+          "get_color(name: str) → Tuple[float, float, float, float]",
+          "get_vector2(name: str) → Tuple[float, float]",
+          "get_vector3(name: str) → Tuple[float, float, float]",
+          "get_vector4(name: str) → Tuple[float, float, float, float]",
+          "get_texture(name: str) → Optional[str]",
+          "has_property(name: str) → bool",
+          "get_property(name: str) → Any",
+          "get_all_properties() → dict",
+          "save(file_path: str) → bool",
+          "set_param(name: str, value: Any) → None",
+          "set_texture(name: str, value: Any) → None",
+          "flush() → None",
+          "static Material.create_lit(name: str = ...) → Material",
+          "static Material.create_unlit(name: str = ...) → Material",
+          "static Material.from_native(native: InxMaterial) → Material",
+          "static Material.load(file_path: str) → Optional[Material]",
+          "static Material.get(name: str) → Optional[Material]",
+          "static Material.flush_all_pending() → None",
+          "__repr__() → str",
+          "__eq__(other: object) → bool",
+          "__hash__() → int"
+        ]
+      },
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Material.html"
+    },
+    {
+      "symbol_key": "Infernux.core.Texture",
+      "changed_fields": [
+        "signatures"
+      ],
+      "before": {
+        "signatures": [
+          "Texture.__init__(native: TextureData) → None",
+          "TextureData",
+          "int",
+          "str",
+          "Tuple[int, int]",
+          "pixels_as_bytes() → bytes",
+          "pixels_as_list() → list",
+          "to_numpy() → 'numpy.ndarray'",
+          "static Texture.load(file_path: str) → Optional[Texture]",
+          "static Texture.from_memory(data: bytes, width: int, height: int, channels: int = ..., name: str = ...) → Optional[Texture]",
+          "static Texture.solid_color(width: int, height: int, r: int = ..., g: int = ..., b: int = ..., a: int = ...) → Optional[Texture]",
+          "static Texture.checkerboard(width: int, height: int, cell_size: int = ...) → Optional[Texture]",
+          "static Texture.from_native(native: TextureData) → Texture",
+          "__repr__() → str"
+        ]
+      },
+      "after": {
+        "signatures": [
+          "Texture.__init__(native: TextureData) → None",
+          "TextureData",
+          "int",
+          "str",
+          "Tuple[int, int]",
+          "pixels_as_bytes() → bytes",
+          "pixels_as_list() → list",
+          "to_numpy() → 'numpy.ndarray'",
+          "static Texture.load(file_path: str) → Optional[Texture]",
+          "static Texture.decode(data: bytes, name: str = ...) → Optional[Texture]",
+          "static Texture.solid_color(width: int, height: int, r: int = ..., g: int = ..., b: int = ..., a: int = ...) → Optional[Texture]",
+          "static Texture.checkerboard(width: int, height: int, cell_size: int = ...) → Optional[Texture]",
+          "static Texture.from_native(native: TextureData) → Texture",
+          "__repr__() → str"
+        ]
+      },
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Texture.html"
+    },
+    {
+      "symbol_key": "Infernux.physics.Physics",
+      "changed_fields": [
+        "signatures"
+      ],
+      "before": {
+        "signatures": [
+          "Any",
+          "static Physics.get_gravity() → Any",
+          "static Physics.set_gravity(value: Any) → None",
+          "static Physics.raycast(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
+          "static Physics.raycast_all(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
+          "static Physics.overlap_sphere(center: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
+          "static Physics.overlap_box(center: Any, half_extents: Any, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
+          "static Physics.sphere_cast(origin: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
+          "static Physics.box_cast(center: Any, half_extents: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
+          "static Physics.ignore_layer_collision(layer1: int, layer2: int, ignore: bool = ...) → None",
+          "static Physics.get_ignore_layer_collision(layer1: int, layer2: int) → bool"
+        ]
+      },
+      "after": {
+        "signatures": [
+          "int",
+          "Any",
+          "static Physics.get_gravity() → Any",
+          "static Physics.set_gravity(value: Any) → None",
+          "static Physics.raycast(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
+          "static Physics.raycast_all(origin: Any, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
+          "static Physics.overlap_sphere(center: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
+          "static Physics.overlap_box(center: Any, half_extents: Any, orientation: Any = ..., layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
+          "static Physics.overlap_capsule(point0: Any, point1: Any, radius: float, layer_mask: int = ..., query_triggers: bool = ...) → List[Any]",
+          "static Physics.sphere_cast(origin: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
+          "static Physics.box_cast(center: Any, half_extents: Any, direction: Any, orientation: Any = ..., max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
+          "static Physics.capsule_cast(point0: Any, point1: Any, radius: float, direction: Any, max_distance: float = ..., layer_mask: int = ..., query_triggers: bool = ...) → Optional[Any]",
+          "static Physics.ignore_layer_collision(layer1: int, layer2: int, ignore: bool = ...) → None",
+          "static Physics.get_ignore_layer_collision(layer1: int, layer2: int) → bool"
+        ]
+      },
+      "canonical_url": "https://infernux-engine.com/wiki/site/en/api/Physics.html"
+    }
+  ]
 }

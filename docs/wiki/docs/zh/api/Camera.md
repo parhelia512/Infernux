@@ -11,7 +11,7 @@
 渲染场景视图的摄像机组件。
 
 <!-- USER CONTENT START --> description
-**状态：** Preview · **验证版本：** 0.2.1
+**状态：** Preview · **验证版本：** 0.2.9
 
 普通 3D 深度使用透视 Camera，尺度稳定的 2D 构图使用正交 Camera。Near/Far 裁剪应与场景尺度匹配。
 <!-- USER CONTENT END -->
@@ -79,8 +79,5 @@ if camera_object is not None:
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [2D 基础](../learn/2d-foundations.md)
-- [3D 基础](../learn/3d-foundations.md)
 - [CameraProjection](CameraProjection.md)
-- [渲染与 RenderStack](../manual/rendering-and-renderstack.md)
 <!-- USER CONTENT END -->

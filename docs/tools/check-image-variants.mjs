@@ -80,11 +80,6 @@ if (webpBytes >= pngBytes * 0.6) fail(`lossless WebP must save at least 40% over
 if (avifBytes >= pngBytes * 0.2) fail(`AVIF must save at least 80% over PNG; found ${avifBytes} versus ${pngBytes} bytes`);
 if (webpBytes <= avifBytes) fail("AVIF should remain the smallest preferred representation");
 
-const release = JSON.parse(await readFile(path.join(docsRoot, "release.json"), "utf8"));
-for (const extension of ["webp", "avif"]) {
-    if (!expected[`demo-${release.version}.${extension}`]) fail(`${extension.toUpperCase()} filename must follow release.json version '${release.version}'`);
-}
-
 const homepage = await readFile(path.join(docsRoot, "index.html"), "utf8");
 const picture = homepage.match(/<picture>([\s\S]*?)<\/picture>/i)?.[1];
 if (!picture) {

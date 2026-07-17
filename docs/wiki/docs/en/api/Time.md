@@ -9,7 +9,7 @@ class in <b>Infernux.timing</b>
 Provides access to time information for the current frame.
 
 <!-- USER CONTENT START --> description
-**Status:** Preview · **Verified with:** 0.2.1
+**Status:** Preview · **Verified with:** 0.2.9
 
 Use scaled time for gameplay and unscaled time for UI or diagnostics that continue while paused. Physics work belongs to fixed updates.
 <!-- USER CONTENT END -->
@@ -52,7 +52,6 @@ class PauseClock(InxComponent):
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [Input and Time](../manual/input-and-time.md)
 - [InxComponent](InxComponent.md)
 - [Rigidbody](Rigidbody.md)
 <!-- USER CONTENT END -->

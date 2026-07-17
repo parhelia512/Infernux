@@ -16,14 +16,12 @@ async function namedRoutes(directory, pattern) {
 
 const hashedTemplateStyles = await namedRoutes("css", /^wiki-template\.[a-f0-9]{16}\.css$/);
 if (hashedTemplateStyles.length !== 1) throw new Error(`Expected one content-hashed Wiki template style, found ${hashedTemplateStyles.length}.`);
-const hashedWikiCatalogs = await namedRoutes("assets", /^wiki-docs\.[a-f0-9]{16}\.json$/);
-if (hashedWikiCatalogs.length !== 1) throw new Error(`Expected one content-hashed Wiki catalog, found ${hashedWikiCatalogs.length}.`);
-
 const shellPages = [
     "/offline.html",
     "/404.html",
     "/index.html",
-    "/wiki.html",
+    "/start.html",
+    "/learn.html",
     "/roadmap.html",
     "/community.html",
     "/download.html",
@@ -49,8 +47,6 @@ const precacheRoutes = [
     ...shellPages,
     "/site.webmanifest",
     "/assets/logo.png",
-    "/docs-index.json",
-    "/learning-paths.json",
     ...await shellRuntimeRoutes(shellPages),
     ...await namedRoutes("assets/fonts", /\.woff2$/),
 ].filter((route, index, values) => values.indexOf(route) === index).sort();
@@ -59,24 +55,16 @@ const precacheRoutes = [
 // installation. A data/runtime change can still announce a new site version,
 // while the larger API index and route-specific generated-page assets remain
 // on demand and are cached only after the visitor requests them. The compact
-// curated-guide index stays in the core so offline search can degrade to useful
-// Learn/Manual/Architecture results instead of failing as a whole. The small
-// learning-path model also stays in core so device-local progress can resolve
-// its next step on a first offline launch.
+// generated API index remains on demand and is cached after it is requested.
 const evidenceRoutes = [
     ...precacheRoutes,
-    "/docs-index.json",
-    "/docs-health.json",
-    "/learning-paths.json",
     "/api-index.json",
     "/docs-manifest.json",
     "/release.json",
     "/release-notes.json",
-    "/llms.txt",
     ...await namedRoutes("css", /\.css$/),
     ...await namedRoutes("js", /\.js$/),
     ...hashedTemplateStyles,
-    ...hashedWikiCatalogs,
 ].filter((route, index, values) => values.indexOf(route) === index).sort();
 
 const evidence = [];
@@ -227,8 +215,12 @@ self.addEventListener("fetch", (event) => {
         return;
     }
 
+    if (url.searchParams.has("v") && /\\.(?:css|js)$/i.test(url.pathname)) {
+        event.respondWith(networkFirst(request));
+        return;
+    }
+
     if (/\\/css\\/wiki-template\\.[a-f0-9]{16}\\.css$/.test(url.pathname)
-        || /\\/assets\\/wiki-docs\\.[a-f0-9]{16}\\.json$/.test(url.pathname)
         || /\\/assets\\/fonts\\//.test(url.pathname)
         || /\\.(?:avif|gif|jpe?g|png|webp|woff2?)$/i.test(url.pathname)) {
         event.respondWith(cacheFirst(request));

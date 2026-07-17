@@ -26,7 +26,8 @@ function assertBreakpoint(css, breakpoint, surface) {
 
 const rootPages = [
     ["index.html", "Home"],
-    ["wiki.html", "Wiki"],
+    ["start.html", "Start"],
+    ["learn.html", "Learn"],
     ["roadmap.html", "Roadmap"],
     ["community.html", "Community"],
     ["download.html", "Download"],
@@ -41,7 +42,7 @@ for (const [relativePath, surface] of rootPages) {
     assert.doesNotMatch(html, /\sstyle\s*=/i, `${surface} must not reintroduce fixed inline layout styles`);
 }
 
-for (const relativePath of ["index.html", "wiki.html", "roadmap.html", "community.html", "download.html", "404.html"]) {
+for (const relativePath of ["index.html", "start.html", "learn.html", "roadmap.html", "community.html", "download.html", "404.html"]) {
     const html = await read(relativePath);
     assert.match(html, /<a[^>]+class=["'][^"']*skip-link[^"']*["'][^>]+href=["']#main-content["']/i, `${relativePath} must retain a skip link`);
     assert.match(html, /<main\b[^>]*\bid=["']main-content["']/i, `${relativePath} must retain one addressable main region`);
@@ -50,7 +51,8 @@ for (const relativePath of ["index.html", "wiki.html", "roadmap.html", "communit
 const styles = {
     shared: await read("css/style.css"),
     home: await read("css/home.css"),
-    wiki: await read("css/wiki.css"),
+    start: await read("css/start.css"),
+    learn: await read("css/learn.css"),
     community: await read("css/community.css"),
     download: await read("css/download.css"),
     roadmap: await read("css/roadmap.css"),
@@ -64,9 +66,10 @@ assert.equal(hashedTemplateStyles.length, 1, "generated documentation must publi
 const templateStyles = await read(`css/${hashedTemplateStyles[0]}`);
 
 for (const breakpoint of [1180, 1080, 820, 520]) assertBreakpoint(styles.shared, breakpoint, "Shared shell");
-for (const breakpoint of [1200, 1080, 820]) assertBreakpoint(styles.wiki, breakpoint, "Wiki hub");
+assertBreakpoint(styles.start, 700, "Start");
+assertBreakpoint(styles.learn, 720, "Learn");
 for (const breakpoint of [1000, 760, 520]) assertBreakpoint(styles.community, breakpoint, "Community");
-for (const breakpoint of [900, 640]) assertBreakpoint(styles.download, breakpoint, "Download");
+assertBreakpoint(styles.download, 700, "Download");
 for (const breakpoint of [1080, 820]) assertBreakpoint(styles.roadmap, breakpoint, "Roadmap");
 assertBreakpoint(styles.search, 720, "Documentation search");
 assertBreakpoint(styles.home, 520, "Home starter action");
@@ -79,7 +82,8 @@ for (const css of [template, templateStyles]) {
 const surfaces = {
     Home: `${styles.shared}\n${styles.home}`,
     "Not-found recovery": `${styles.shared}\n${styles.search}`,
-    Wiki: `${styles.shared}\n${styles.wiki}\n${styles.search}`,
+    Start: `${styles.shared}\n${styles.start}\n${styles.search}`,
+    Learn: `${styles.shared}\n${styles.learn}\n${styles.search}`,
     Roadmap: `${styles.shared}\n${styles.roadmap}\n${styles.search}`,
     Community: `${styles.shared}\n${styles.community}\n${styles.search}`,
     Download: `${styles.shared}\n${styles.download}\n${styles.search}`,
@@ -115,14 +119,11 @@ assert.match(templateStyles, /\.api-main\s*\{[^}]*min-width:\s*0;/, "generated d
 assert.match(templateStyles, /@media\s*\(max-width:\s*768px\)[\s\S]*?\.api-main td,[\s\S]*?overflow-wrap:\s*anywhere;/, "API tables must wrap long symbols on narrow screens");
 assert.match(styles.generated, /\.api-main \.doc-diagram pre\s*\{[\s\S]*?overflow-x:\s*auto;/, "documentation diagrams must contain their own horizontal scrolling");
 
-for (const [relativePath, surface] of [
-    ["wiki/site/en/learn/getting-started.html", "learning guide"],
-    ["wiki/site/en/api/GameObject.html", "API reference"]
-]) {
+for (const [relativePath, surface] of [["wiki/site/en/api/GameObject.html", "API reference"]]) {
     const html = await read(relativePath);
     assert.match(html, viewportContract, `${surface} must opt into the device viewport`);
     assert.doesNotMatch(html, /\sstyle\s*=/i, `${surface} must not use inline layout styles`);
-    assert.ok(html.includes('/css/wiki-generated.css?v=8'), `${surface} must load responsive generated-document styles`);
+    assert.ok(html.includes('/css/wiki-generated.css?v=9'), `${surface} must load responsive generated-document styles`);
     assert.ok(html.includes(`/css/${hashedTemplateStyles[0]}`), `${surface} must load the current responsive template stylesheet`);
     assert.ok(html.includes('data-doc-outline'), `${surface} must retain its collapsible document outline`);
 }

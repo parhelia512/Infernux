@@ -2,7 +2,9 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$')]
     [string]$Version,
-    [switch]$Publish
+    [switch]$Publish,
+    [switch]$Force,
+    [switch]$UploadOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,18 +44,74 @@ if (-not ((Get-Content -LiteralPath $UpdateLog -Raw).Contains($Version))) {
     throw "UpdateLog.md must mention release version $Version."
 }
 
-if (Test-Path -LiteralPath $ReleaseDir) {
-    Remove-Item -LiteralPath $ReleaseDir -Recurse -Force
+function Invoke-GhWithRetry([string]$Description, [scriptblock]$Operation) {
+    for ($Attempt = 1; $Attempt -le 5; $Attempt++) {
+        & $Operation
+        if ($LASTEXITCODE -eq 0) { return }
+        if ($Attempt -eq 5) { throw "$Description failed after $Attempt attempts." }
+        $Delay = $Attempt * 3
+        Write-Warning "$Description failed (attempt $Attempt/5); retrying in $Delay seconds."
+        Start-Sleep -Seconds $Delay
+    }
 }
-New-Item -ItemType Directory -Path $ReleaseDir -Force | Out-Null
+
+function Test-GitHubRelease([string]$ApiUrl, [string]$TagName) {
+    for ($Attempt = 1; $Attempt -le 5; $Attempt++) {
+        try {
+            $null = Invoke-RestMethod -Uri $ApiUrl -Headers @{
+                Accept = 'application/vnd.github+json'
+                'User-Agent' = 'Infernux-Local-Release'
+                'X-GitHub-Api-Version' = '2022-11-28'
+            }
+            return $true
+        } catch {
+            $StatusCode = [int]$_.Exception.Response.StatusCode
+            if ($StatusCode -eq 404) { return $false }
+            $Transient = $StatusCode -eq 0 -or $StatusCode -eq 429 -or $StatusCode -ge 500
+            if ($Transient -and $Attempt -lt 5) {
+                $Delay = $Attempt * 3
+                Write-Warning "Release lookup for $TagName failed (HTTP $StatusCode, attempt $Attempt/5); retrying in $Delay seconds."
+                Start-Sleep -Seconds $Delay
+                continue
+            }
+            throw "Could not verify whether GitHub Release $TagName exists (HTTP $StatusCode). Refusing to build an unverified version."
+        }
+    }
+    throw "Could not verify whether GitHub Release $TagName exists."
+}
+
+$Tag = "v$Version"
+$ReleaseApi = "https://api.github.com/repos/ChenlizheMe/Infernux/releases/tags/$Tag"
+$ReleaseExists = Test-GitHubRelease $ReleaseApi $Tag
+if ($ReleaseExists -and -not $Force) {
+    throw "GitHub Release $Tag already exists. Existing versions are immutable and will not be rebuilt or overwritten."
+}
+if ($ReleaseExists -and $Force) {
+    Write-Warning "Force mode will rebuild and replace every asset attached to GitHub Release $Tag."
+}
+
+if ($UploadOnly) {
+    if (-not (Test-Path -LiteralPath $ReleaseDir -PathType Container)) {
+        throw "Upload-only release directory does not exist: $ReleaseDir"
+    }
+    Write-Host "Reusing locally built release assets from $ReleaseDir" -ForegroundColor Cyan
+} else {
+    if (Test-Path -LiteralPath $ReleaseDir) {
+        Remove-Item -LiteralPath $ReleaseDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $ReleaseDir -Force | Out-Null
 
 Write-Host "[1/6] Configuring the release preset..." -ForegroundColor Cyan
 & cmake --preset release
 if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed.' }
 
-Write-Host "[2/6] Building the engine wheel..." -ForegroundColor Cyan
+Write-Host "[2/6] Building the native module and Release Player Runtime Pack..." -ForegroundColor Cyan
 & cmake --build --preset release --target _Infernux --parallel
 if ($LASTEXITCODE -ne 0) { throw 'Native engine build failed.' }
+& cmake --build --preset release --target prebuild_player_runtime --parallel
+if ($LASTEXITCODE -ne 0) { throw 'Release Player Runtime Pack build failed.' }
+
+Write-Host "       Building the wheel from the verified local Release payload..." -ForegroundColor Cyan
 $env:INFERNUX_SOURCE_DIR = $Root
 & python -m build --wheel --no-isolation --outdir $ReleaseDir
 if ($LASTEXITCODE -ne 0) { throw 'Wheel build failed.' }
@@ -116,24 +174,62 @@ Write-Host "[6/6] Release assets are ready:" -ForegroundColor Green
 Get-ChildItem -LiteralPath $ReleaseDir -File | Sort-Object Name | ForEach-Object {
     Write-Host ("  {0,-72} {1,10:N1} MB" -f $_.Name, ($_.Length / 1MB))
 }
+}
+
+$RequiredAssets = @(
+    "infernux-$Version-cp312-cp312-win_amd64.whl",
+    "InfernuxHubInstaller-$Version.exe",
+    "InfernuxHub-$Version-windows-x64-full.zip",
+    "InfernuxHub-$Version-manifest.json",
+    'InfernuxHub-manifest.json',
+    'SHA256SUMS.txt'
+)
+foreach ($AssetName in $RequiredAssets) {
+    $AssetPath = Join-Path $ReleaseDir $AssetName
+    if (-not (Test-Path -LiteralPath $AssetPath -PathType Leaf) -or (Get-Item -LiteralPath $AssetPath).Length -eq 0) {
+        throw "Required release asset is missing or empty: $AssetPath"
+    }
+}
 
 if ($Publish) {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'GitHub CLI (gh) is required to publish.' }
     & gh auth status
     if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI is not authenticated.' }
     $Files = @(Get-ChildItem -LiteralPath $ReleaseDir -File | ForEach-Object { $_.FullName })
-    $Tag = "v$Version"
-    & gh release view $Tag --repo ChenlizheMe/Infernux *> $null
-    if ($LASTEXITCODE -eq 0) {
+    if (-not $ReleaseExists) {
+        Invoke-GhWithRetry "Creating GitHub Release $Tag" {
+            & gh release create $Tag --repo ChenlizheMe/Infernux --title "Infernux v$Version" --notes-file $UpdateLog --latest
+            if ($LASTEXITCODE -ne 0) {
+                & gh release view $Tag --repo ChenlizheMe/Infernux *> $null
+            }
+        }
+    }
+
+    Invoke-GhWithRetry "Uploading assets for $Tag" {
         & gh release upload $Tag @Files --clobber --repo ChenlizheMe/Infernux
-        if ($LASTEXITCODE -ne 0) { throw 'Uploading release assets failed.' }
-        & gh release edit $Tag --notes-file $UpdateLog --title "Infernux v$Version" --latest --repo ChenlizheMe/Infernux
-        if ($LASTEXITCODE -ne 0) { throw 'Updating the GitHub Release failed.' }
-    } else {
-        & gh release create $Tag @Files --repo ChenlizheMe/Infernux --title "Infernux v$Version" --notes-file $UpdateLog --latest
-        if ($LASTEXITCODE -ne 0) { throw 'Creating the GitHub Release failed.' }
+    }
+
+    if ($Force -and $ReleaseExists) {
+        $LocalNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($File in $Files) { $null = $LocalNames.Add([IO.Path]::GetFileName($File)) }
+        $RemoteJson = $null
+        Invoke-GhWithRetry "Reading replaced assets for $Tag" {
+            $script:RemoteJson = & gh release view $Tag --repo ChenlizheMe/Infernux --json assets
+        }
+        $RemoteRelease = $RemoteJson | ConvertFrom-Json
+        foreach ($RemoteAsset in $RemoteRelease.assets) {
+            if (-not $LocalNames.Contains($RemoteAsset.name)) {
+                Invoke-GhWithRetry "Removing stale release asset '$($RemoteAsset.name)'" {
+                    & gh release delete-asset $Tag $RemoteAsset.name --yes --repo ChenlizheMe/Infernux
+                }
+            }
+        }
+    }
+
+    Invoke-GhWithRetry "Updating metadata for $Tag" {
+        & gh release edit $Tag --repo ChenlizheMe/Infernux --title "Infernux v$Version" --notes-file $UpdateLog --latest
     }
     Write-Host "Published GitHub Release $Tag." -ForegroundColor Green
 } else {
-    Write-Host 'Publish was skipped. Run release_hub.bat <version> --publish when the artifacts are ready.' -ForegroundColor Yellow
+    Write-Host 'Publish was skipped. Run release_hub.bat <version> to rebuild and publish while the tag is still absent.' -ForegroundColor Yellow
 }

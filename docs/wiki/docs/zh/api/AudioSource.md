@@ -11,7 +11,7 @@
 音频源组件。在场景中播放声音的扬声器。
 
 <!-- USER CONTENT START --> description
-**状态：** Preview · **验证版本：** 0.2.1
+**状态：** Preview · **验证版本：** 0.2.9
 
 AudioSource 拥有 1–16 个 Track，`play_on_awake` 只启动 Track 0。瞬时效果使用池化 One-shot，并在播放仍可能引用时保持 AudioClip 已加载。
 <!-- USER CONTENT END -->
@@ -85,8 +85,6 @@ if audio_object is not None and clip is not None:
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [音频工作流](../learn/audio-workflow.md)
 - [AudioClip](AudioClip.md)
 - [AudioListener](AudioListener.md)
-- [输入与时间](../manual/input-and-time.md)
 <!-- USER CONTENT END -->

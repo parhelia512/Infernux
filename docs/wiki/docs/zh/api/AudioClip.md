@@ -9,7 +9,7 @@
 音频剪辑资源。
 
 <!-- USER CONTENT START --> description
-**状态：** Preview · **验证版本：** 0.2.1
+**状态：** Preview · **验证版本：** 0.2.9
 
 当前可靠解码器支持 WAV。当 AudioSource Track 或 One-shot 仍可能引用时，应保持 Clip 已加载。
 <!-- USER CONTENT END -->
@@ -87,7 +87,5 @@ if clip is not None:
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [音频工作流](../learn/audio-workflow.md)
 - [AudioSource](AudioSource.md)
-- [资源与 Meta 文件](../manual/assets-and-meta.md)
 <!-- USER CONTENT END -->

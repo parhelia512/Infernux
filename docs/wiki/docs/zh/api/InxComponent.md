@@ -9,9 +9,9 @@
 用户脚本组件的基类，类似于 Unity 的 MonoBehaviour。
 
 <!-- USER CONTENT START --> description
-**状态：** Preview · **验证版本：** 0.2.1
+**状态：** Preview · **验证版本：** 0.2.9
 
-项目玩法组件应继承此基类。不要只阅读生命周期表；请先完成[第一个组件](../learn/first-component.md)。
+项目玩法组件应继承此基类。不要只阅读生命周期表；请先完成第一个组件。
 <!-- USER CONTENT END -->
 
 ## 构造函数
@@ -123,8 +123,6 @@ class Patrol(InxComponent):
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [第一个组件](../learn/first-component.md)
-- [场景与对象](../manual/scenes-and-objects.md)
 - [GameObject](GameObject.md)
 - [serialized_field](serialized_field.md)
 - [Time](Time.md)

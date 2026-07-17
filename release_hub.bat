@@ -2,6 +2,13 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+rem Maintainer release commands:
+rem   release_hub.bat 0.2.9                 Build every package and publish a new release.
+rem   release_hub.bat 0.2.9 --force         Rebuild and replace an existing release.
+rem   release_hub.bat 0.2.9 --overwrite     Alias for --force.
+rem   release_hub.bat 0.2.9 --build-only    Build every package without uploading.
+rem   release_hub.bat 0.2.9 --upload-only   Upload an already completed local build.
+
 set "VERSION=%~1"
 if not defined VERSION set /p "VERSION=Infernux version (for example 0.2.2): "
 if not defined VERSION (
@@ -27,12 +34,15 @@ if errorlevel 1 (
     exit /b 4
 )
 
-set "PUBLISH_ARG="
-if /I "%~2"=="--publish" set "PUBLISH_ARG=-Publish"
-if not defined PUBLISH_ARG (
-    set /p "PUBLISH_CHOICE=Publish the generated assets to GitHub Release v%VERSION%? [y/N]: "
-    if /I "%PUBLISH_CHOICE%"=="Y" set "PUBLISH_ARG=-Publish"
+set "PUBLISH_ARG=-Publish"
+set "FORCE_ARG="
+set "UPLOAD_ONLY_ARG="
+for %%A in (%*) do (
+    if /I "%%~A"=="--build-only" set "PUBLISH_ARG="
+    if /I "%%~A"=="--force" set "FORCE_ARG=-Force"
+    if /I "%%~A"=="--overwrite" set "FORCE_ARG=-Force"
+    if /I "%%~A"=="--upload-only" set "UPLOAD_ONLY_ARG=-UploadOnly"
 )
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0packaging\release_hub.ps1" -Version "%VERSION%" %PUBLISH_ARG%
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0packaging\release_hub.ps1" -Version "%VERSION%" %PUBLISH_ARG% %FORCE_ARG% %UPLOAD_ONLY_ARG%
 exit /b %ERRORLEVEL%

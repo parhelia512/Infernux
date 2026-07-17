@@ -9,7 +9,7 @@
 时间管理器。掌管每一帧的时间节奏——引擎的心跳。
 
 <!-- USER CONTENT START --> description
-**状态：** Preview · **验证版本：** 0.2.1
+**状态：** Preview · **验证版本：** 0.2.9
 
 玩法使用缩放时间；暂停后仍继续的 UI 或诊断使用非缩放时间。物理工作放入固定更新。
 <!-- USER CONTENT END -->
@@ -52,7 +52,6 @@ class PauseClock(InxComponent):
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [输入与时间](../manual/input-and-time.md)
 - [InxComponent](InxComponent.md)
 - [Rigidbody](Rigidbody.md)
 <!-- USER CONTENT END -->

@@ -9,10 +9,11 @@ const source = JSON.parse(await readFile(path.join(docsRoot, "tools", "i18n-sour
 const routeKeys = {
     "404": "error.title",
     index: "home.hero.title",
-    wiki: "wiki.hero.title",
+    start: "pageTitle.start",
     roadmap: "roadmap.hero.title",
     community: "community.forum.title",
-    download: "downloadPage.hero.title",
+    "community-topic": "community.topic.replies",
+    download: "pageTitle.download",
 };
 
 for (const [page, pageKey] of Object.entries(routeKeys)) {
@@ -45,7 +46,7 @@ for (const [page, pageKey] of Object.entries(routeKeys)) {
         assert.equal(translate("nav.start", language), source[language]["nav.start"], `${page}: shared navigation copy must resolve in ${language}`);
         assert.equal(translate(pageKey, language), source[language][pageKey], `${page}: route copy must resolve in ${language}`);
     }
-    const foreignKey = page === "community" ? routeKeys.index : routeKeys.community;
+    const foreignKey = page.startsWith("community") ? routeKeys.index : routeKeys.community;
     assert.equal(translate(foreignKey, "en"), "", `${page}: another route's copy must not be delivered`);
     assert.equal("INFERNUX_PAGE_TRANSLATIONS" in sandbox, false, `${page}: staging data should be released after merge`);
     assert.equal(typeof listeners.get("DOMContentLoaded"), "function", `${page}: localization runtime should initialize after parsing`);
@@ -89,4 +90,4 @@ for (const obsolete of ["nav.home", "nav.features", "nav.showcase", "hero.roadma
     assert.equal(Object.hasOwn(source.en, obsolete), false, `unused key '${obsolete}' should stay removed`);
 }
 
-console.log("Localization bundle test passed: six routes load shared navigation plus only their own bilingual copy, explicit URL language wins, and the shared runtime stays below 8 KiB.");
+console.log("Localization bundle test passed: route bundles load shared navigation plus only their own bilingual copy, explicit URL language wins, and the shared runtime stays below 8 KiB.");

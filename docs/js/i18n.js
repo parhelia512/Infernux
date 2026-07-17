@@ -6,7 +6,7 @@ const translations = {
     en: { ...{
     "brand.footerTitle": "熔炉 · INFERNUX",
     "brand.navShort": "熔炉 · INFERNUX",
-    "brand.ribbonKicker": "Open-source engine · 0.2.1 live",
+    "brand.ribbonKicker": "Open-source engine · 0.2.9 live",
     "brand.ribbonName": "INFER<span class=\"mission-accent\">NUX</span>",
     "brand.ribbonSub": "熔炉 · ENG-CORE",
     "footer.community": "Community",
@@ -16,17 +16,15 @@ const translations = {
     "footer.tagline": "Open code, explicit architecture, and a render stack you can actually reason about.",
     "nav.api": "API",
     "nav.community": "Community",
-    "nav.docs": "Docs",
     "nav.download": "Download",
     "nav.learn": "Learn",
-    "nav.manual": "Manual",
     "nav.roadmap": "Roadmap",
     "nav.start": "Start"
 }, ...(pageTranslations.en || {}) },
     zh: { ...{
     "brand.footerTitle": "熔炉 · INFERNUX",
     "brand.navShort": "熔炉 · INFERNUX",
-    "brand.ribbonKicker": "开源引擎 · 0.2.1 已上线",
+    "brand.ribbonKicker": "开源引擎 · 0.2.9 已上线",
     "brand.ribbonName": "<span class=\"mission-accent\">熔</span>炉",
     "brand.ribbonSub": "INFERNUX · ENG-CORE",
     "footer.community": "社区",
@@ -36,10 +34,8 @@ const translations = {
     "footer.tagline": "开放代码、明确架构，以及一套你能真正讲清楚的渲染栈。",
     "nav.api": "API",
     "nav.community": "社区",
-    "nav.docs": "文档",
     "nav.download": "下载",
     "nav.learn": "学习",
-    "nav.manual": "手册",
     "nav.roadmap": "路线图",
     "nav.start": "开始使用"
 }, ...(pageTranslations.zh || {}) }

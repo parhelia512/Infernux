@@ -17,7 +17,6 @@ on:
       - "docs/js/**"
       - "docs/tools/**"
       - "docs/docs-manifest.json"
-      - "docs/learning-paths.json"
       - "UpdateLog.md"
   workflow_dispatch:
 
@@ -65,34 +64,16 @@ jobs:
       - name: Verify checked-in curated API guidance
         run: node docs/tools/apply-api-curation.mjs --check
 
-      - name: Generate content-hashed Wiki catalog
-        run: node docs/tools/build-wiki-catalog.mjs
+      - name: Generate API index
+        run: node docs/tools/build-api-index.mjs
 
       - name: Stamp documentation build provenance
         env:
           DOCS_SOURCE_COMMIT: ${{ github.sha }}
         run: node docs/tools/stamp-docs-manifest.mjs
 
-      - name: Generate machine-readable documentation indexes
-        run: node docs/tools/build-doc-index.mjs
-
-      - name: Verify curated front matter is synchronized
-        run: node docs/tools/sync-curated-frontmatter.mjs --check
-
-      - name: Generate documentation health report
-        run: node docs/tools/build-doc-health.mjs
-
       - name: Generate structured release notes
         run: node docs/tools/build-release-notes.mjs
-
-      - name: Generate compact Agent documentation index
-        run: node docs/tools/build-llms-index.mjs
-
-      - name: Test compact Agent documentation index
-        run: node docs/tools/test-llms-index.mjs
-
-      - name: Generate full Agent documentation corpus
-        run: node docs/tools/build-agent-corpus.mjs
 
       - name: Build static wiki
         env:
@@ -116,9 +97,6 @@ jobs:
 
       - name: Verify installable PWA assets
         run: node docs/tools/check-pwa-assets.mjs
-
-      - name: Test PWA installation interaction
-        run: node docs/tools/test-pwa-install.mjs
 
       - name: Test route-localized bundles
         run: node docs/tools/test-i18n-bundles.mjs
@@ -153,26 +131,11 @@ jobs:
       - name: Test community readiness rules
         run: node docs/tools/test-community-readiness.mjs
 
-      - name: Test generated documentation context
-        run: node docs/tools/test-doc-context.mjs
-
-      - name: Test bilingual section continuity
-        run: node docs/tools/test-doc-language-continuity.mjs
-
-      - name: Test Wiki learning continuity
-        run: node docs/tools/test-wiki-learning-progress.mjs
-
-      - name: Test recent-document continuity
-        run: node docs/tools/test-doc-recent.mjs
-
       - name: Test documentation printing
         run: node docs/tools/test-doc-print.mjs
 
       - name: Test documentation search
         run: node docs/tools/test-doc-search.mjs
-
-      - name: Test documentation health client
-        run: node docs/tools/test-doc-health.mjs
 
       - name: Test website health reporting
         run: node docs/tools/test-website-health-report.mjs
@@ -189,7 +152,7 @@ jobs:
       - name: Commit generated wiki output
         shell: bash
         run: |
-          git add docs/wiki/docs docs/wiki/site docs/wiki/mkdocs.yml docs/wiki/mkdocs_api_nav.yml docs/assets/wiki-docs*.json docs/docs-manifest.json docs/docs-index.json docs/docs-health.json docs/api-index.json docs/release-notes.json docs/llms.txt docs/llms-full.txt docs/wiki.html
+          git add docs/wiki/docs docs/wiki/site docs/wiki/mkdocs.yml docs/wiki/mkdocs_api_nav.yml docs/docs-manifest.json docs/api-index.json docs/release-notes.json docs/wiki.html docs/start.html
           git add -A -- ':(glob)docs/css/wiki-template.*.css'
           git add docs/sw.js docs/sitemap.xml docs/js/i18n*.js
 

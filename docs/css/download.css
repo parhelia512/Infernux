@@ -1,144 +1,212 @@
-.download-hero { margin-bottom: 28px; }
-
-.release-telemetry {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 10px;
-    margin-top: 26px;
+.download-page {
+    padding: 44px 0 80px;
 }
 
-.release-telemetry span {
-    min-width: 0;
-    padding: 14px 16px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
+.download-page [hidden] {
+    display: none !important;
 }
 
-.release-telemetry small,
-.release-telemetry strong { display: block; }
-.release-telemetry small { margin-bottom: 7px; color: var(--text-soft); font-family: var(--font-mono); font-size: .66rem; letter-spacing: .12em; text-transform: uppercase; }
-.release-telemetry strong { overflow-wrap: anywhere; font-size: .9rem; }
-.release-source { margin: 14px 0 0; color: var(--text-soft); font-family: var(--font-mono); font-size: .72rem; }
+.download-page > .container > div {
+    max-width: 980px;
+    margin: 0 auto;
+}
 
-.download-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 28px; }
-.download-card { display: flex; flex-direction: column; min-width: 0; padding: 26px; background: linear-gradient(155deg, var(--bg-panel), var(--bg-elevated)); border: 1px solid var(--border-strong); box-shadow: var(--shadow-soft); }
-.download-card > i { margin: 30px 0 18px; color: var(--accent); font-size: 1.7rem; }
-.download-card h3 { margin: 0 0 10px; }
-.download-card > p { min-height: 74px; margin: 0; color: var(--text-muted); line-height: 1.7; }
-.download-card dl { display: grid; gap: 8px; margin: 22px 0 12px; }
-.download-card dl div { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 12px; }
-.download-card dt { color: var(--text-soft); font-family: var(--font-mono); font-size: .7rem; text-transform: uppercase; }
-.download-card dd { margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: .72rem; }
-.checksum { display: block; min-height: 67px; padding: 12px; overflow-wrap: anywhere; white-space: normal; color: var(--text-muted); background: var(--code-bg); border: 1px solid var(--border); font-size: .7rem; line-height: 1.55; }
-.download-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: auto; padding-top: 18px; }
+.download-heading {
+    max-width: 720px;
+    padding-bottom: 30px;
+}
 
-.download-protocol { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 30px; align-items: center; margin-top: var(--section-space); padding: 28px; background: var(--bg-panel); border: 1px solid var(--border-strong); }
-.download-protocol h2 { margin: 12px 0 8px; }
-.download-protocol p { margin: 0; color: var(--text-muted); }
-.download-protocol .verification-boundary { margin-top: 12px; color: var(--text-soft); font-size: .78rem; line-height: 1.65; }
-.download-protocol pre { margin: 0; padding: 18px; overflow-x: auto; background: var(--code-bg); border: 1px solid var(--border); }
-.download-protocol code { font-family: var(--font-mono); font-size: .78rem; }
+.download-heading h1 {
+    margin: 12px 0 10px;
+    font-family: var(--font-display);
+    font-size: 1.55rem;
+    line-height: 1.16;
+    letter-spacing: 0;
+}
 
-.pwa-install {
-    position: relative;
+.download-heading p,
+.hub-download p,
+.version-copy p,
+.version-note,
+.download-help p {
+    color: var(--text-soft);
+    line-height: 1.7;
+}
+
+.hub-download {
     display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(250px, .65fr);
-    gap: 30px;
+    grid-template-columns: 128px minmax(0, 1fr);
+    gap: 28px;
     align-items: center;
-    margin-top: var(--section-space);
     padding: 30px;
-    overflow: hidden;
-    background:
-        linear-gradient(135deg, var(--accent-soft), transparent 52%),
-        var(--bg-panel);
     border: 1px solid var(--border-strong);
-    box-shadow: var(--shadow-soft);
+    background: var(--surface);
 }
 
-.pwa-install::before {
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 3px;
-    content: "";
-    background: var(--accent);
+.hub-download img {
+    width: 128px;
+    height: 128px;
 }
 
-.pwa-install[data-install-state="ready"] { border-color: var(--accent); }
-.pwa-install[data-install-state="installed"] { border-color: var(--signal); }
-.pwa-install[data-install-state="iosSafari"],
-.pwa-install[data-install-state="iosOther"] { border-color: var(--hazard); }
-.pwa-install-copy h2 { margin: 14px 0 10px; }
-.pwa-install-copy > p { margin: 0; color: var(--text-muted); line-height: 1.7; }
+.hub-download h2,
+.version-section h2,
+.download-help h2 {
+    margin: 8px 0 10px;
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    line-height: 1.25;
+    letter-spacing: 0;
+}
 
-.pwa-install-benefits {
-    display: grid;
-    gap: 9px;
-    margin: 20px 0 0;
-    padding: 0;
+.hub-download .btn {
+    margin-top: 8px;
+}
+
+.download-meta {
+    display: block;
+    margin-top: 12px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+}
+
+.advanced-download {
+    margin-top: 28px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+}
+
+.advanced-download summary {
+    display: flex;
+    min-height: 68px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 14px 2px;
+    cursor: pointer;
     list-style: none;
 }
 
-.pwa-install-benefits li {
-    position: relative;
-    padding-left: 22px;
-    color: var(--text-muted);
-    line-height: 1.55;
+.advanced-download summary::-webkit-details-marker {
+    display: none;
 }
 
-.pwa-install-benefits li::before {
-    position: absolute;
-    left: 0;
-    content: "▰";
-    color: var(--accent);
-    font-size: .72rem;
-}
-
-.pwa-install-control {
+.advanced-download summary span {
     display: grid;
-    justify-items: center;
-    gap: 14px;
-    min-width: 0;
-    padding: 20px;
+    gap: 4px;
+}
+
+.advanced-download summary strong {
+    font-size: 1rem;
+}
+
+.advanced-download summary small {
+    color: var(--text-soft);
+    font-size: 0.84rem;
+}
+
+.advanced-download summary i {
+    color: var(--text-muted);
+    transition: transform 150ms ease;
+}
+
+.advanced-download[open] summary i {
+    transform: rotate(180deg);
+}
+
+.advanced-download summary:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 3px;
+}
+
+.version-section {
+    padding: 10px 0 36px;
+}
+
+.version-copy {
+    max-width: 720px;
+}
+
+.version-picker {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    gap: 10px 14px;
+    align-items: end;
+    max-width: 720px;
+    margin-top: 24px;
+}
+
+.version-picker label {
+    grid-column: 1 / -1;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
+.version-picker select {
+    min-height: 48px;
+    padding: 0 42px 0 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: 0;
     background: var(--bg-contrast);
-    border: 1px solid var(--border);
-    text-align: center;
+    color: var(--text);
+    font: inherit;
 }
 
-.pwa-install-icon { width: 88px; height: 88px; border: 1px solid var(--border-strong); }
-.pwa-install-status { min-height: 3.2em; margin: 0; color: var(--text-soft); font: .72rem/1.6 var(--font-mono); }
-.pwa-install-status[data-install-state="ready"] { color: var(--accent-strong); }
-.pwa-install-status[data-install-state="installed"] { color: var(--signal); }
-.pwa-install-status[data-install-state="iosSafari"],
-.pwa-install-status[data-install-state="iosOther"] { color: var(--hazard); }
-.pwa-install-control .btn { min-width: 190px; justify-content: center; }
-.pwa-install-control [hidden] { display: none; }
-.pwa-install-noscript { margin: 0; color: var(--text-muted); font-size: .78rem; line-height: 1.6; }
-
-.release-notes-status { color: var(--text-soft); font: .72rem/1.6 var(--font-mono); }
-.release-notes-summary { margin-top: 20px; padding: 18px 20px; border-left: 2px solid var(--accent); background: var(--accent-soft); color: var(--text-muted); line-height: 1.7; }
-.release-notes-summary:empty { display: none; }
-.release-notes-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
-.release-note-section { padding: 20px; border: 1px solid var(--border); background: var(--bg-panel); }
-.release-note-section h3 { margin: 0 0 14px; font-size: 1rem; }
-.release-note-section ul { display: grid; gap: 12px; margin: 0; padding-left: 18px; color: var(--text-muted); }
-.release-note-section li { line-height: 1.6; }
-.release-note-section li strong { color: var(--text); }
-.release-note-section-upgrade { grid-column: 1 / -1; border-color: var(--hazard); background: var(--hazard-soft); }
-
-.requirement-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 24px; }
-.requirement-grid article { padding: 20px; background: var(--bg-panel); border: 1px solid var(--border); }
-.requirement-grid h3 { margin: 0 0 8px; }
-.requirement-grid p { margin: 0; color: var(--text-muted); line-height: 1.7; }
-
-@media (max-width: 900px) {
-    .release-telemetry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .download-grid, .download-protocol, .release-notes-grid, .pwa-install { grid-template-columns: 1fr; }
-    .release-note-section-upgrade { grid-column: auto; }
+.version-picker .btn {
+    min-height: 48px;
 }
 
-@media (max-width: 640px) {
-    .release-telemetry, .requirement-grid { grid-template-columns: 1fr; }
-    .download-card, .download-protocol, .pwa-install { padding: 18px; }
-    .download-actions .btn { width: 100%; justify-content: center; }
-    .pwa-install-control .btn { width: 100%; }
+.version-note {
+    max-width: 720px;
+    margin: 16px 0 0;
+    font-size: 0.9rem;
+}
+
+.download-help {
+    padding-top: 34px;
+}
+
+.download-help a {
+    color: var(--info);
+    font-weight: 700;
+}
+
+@media (max-width: 700px) {
+    .download-page {
+        padding-top: 28px;
+    }
+
+    .download-heading h1 {
+        font-size: 1.45rem;
+    }
+
+    .hub-download {
+        grid-template-columns: 72px minmax(0, 1fr);
+        gap: 18px;
+        padding: 22px;
+    }
+
+    .hub-download img {
+        width: 72px;
+        height: 72px;
+        align-self: start;
+    }
+
+    .hub-download .btn,
+    .download-meta {
+        grid-column: 1 / -1;
+    }
+
+    .version-picker {
+        grid-template-columns: 1fr;
+    }
+
+    .version-picker label {
+        grid-column: auto;
+    }
+
+    .version-picker .btn {
+        width: 100%;
+    }
 }

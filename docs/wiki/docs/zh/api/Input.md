@@ -9,7 +9,7 @@
 用于读取键盘、鼠标和触摸输入的接口。
 
 <!-- USER CONTENT START --> description
-**状态：** Preview · **验证版本：** 0.2.1
+**状态：** Preview · **验证版本：** 0.2.9
 
 连续动作使用按住状态，一帧边沿操作使用 down/up。游戏鼠标逻辑应使用 Game 视口坐标并尊重 Game 焦点。
 <!-- USER CONTENT END -->
@@ -76,7 +76,6 @@ class KeyboardMover(InxComponent):
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [输入与时间](../manual/input-and-time.md)
 - [KeyCode](KeyCode.md)
 - [Time](Time.md)
 - [Camera](Camera.md)

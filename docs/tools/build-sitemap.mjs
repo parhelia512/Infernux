@@ -6,11 +6,10 @@ const docsRoot = path.resolve("docs");
 const outputFile = path.join(docsRoot, "sitemap.xml");
 const check = process.argv.includes("--check");
 const manifest = JSON.parse(await readFile(path.join(docsRoot, "docs-manifest.json"), "utf8"));
-const docsIndex = JSON.parse(await readFile(path.join(docsRoot, "docs-index.json"), "utf8"));
 const apiIndex = JSON.parse(await readFile(path.join(docsRoot, "api-index.json"), "utf8"));
 const origin = manifest.canonical_origin.replace(/\/$/, "");
 const defaultLastmod = manifest.last_verified;
-const rootPages = ["index.html", "wiki.html", "roadmap.html", "community.html", "download.html"];
+const rootPages = ["index.html", "start.html", "learn.html", "learn/placeholder.html", "roadmap.html", "community.html", "download.html"];
 const entries = new Map();
 
 function escapeXml(value) {
@@ -45,19 +44,6 @@ addEntry(`${origin}/wiki/site/zh/api/index.html`, {
     language: "zh-CN",
     counterpart: `${origin}/wiki/site/en/api/index.html`
 });
-
-const curatedUrls = new Set(docsIndex.documents.map((document) => document.canonical_url));
-for (const document of docsIndex.documents) {
-    const counterpart = document.language === "zh-CN"
-        ? document.canonical_url.replace("/zh/", "/en/")
-        : document.canonical_url.replace("/en/", "/zh/");
-    if (!curatedUrls.has(counterpart)) throw new Error(`Missing sitemap counterpart for ${document.id}: ${counterpart}`);
-    addEntry(document.canonical_url, {
-        lastmod: document.last_verified,
-        language: document.language,
-        counterpart
-    });
-}
 
 const apiUrls = new Set(apiIndex.symbols.map((symbol) => symbol.canonical_url));
 for (const symbol of apiIndex.symbols) {

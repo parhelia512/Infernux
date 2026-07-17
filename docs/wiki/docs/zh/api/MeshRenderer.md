@@ -11,7 +11,7 @@
 使用网格和材质渲染 3D 几何体的组件。
 
 <!-- USER CONTENT START --> description
-**状态：** Preview · **验证版本：** 0.2.1
+**状态：** Preview · **验证版本：** 0.2.9
 
 MeshRenderer 可使用内联基础体或导入网格，并支持多个材质槽。排查光照效果前先证明网格和材质分配正确。
 <!-- USER CONTENT END -->
@@ -79,7 +79,6 @@ if display is not None:
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [3D 基础](../learn/3d-foundations.md)
 - [Material](Material.md)
 - [Light](Light.md)
 - [RenderStack](RenderStack.md)

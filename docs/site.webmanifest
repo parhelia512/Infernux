@@ -2,7 +2,7 @@
   "name": "Infernux · 熔炉",
   "short_name": "Infernux",
   "id": "/",
-  "description": "Documentation, learning paths, releases, and community access for the Infernux game engine.",
+  "description": "Get started, browse the API, download releases, and join the Infernux community.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -34,17 +34,17 @@
   ],
   "shortcuts": [
     {
-      "name": "Start learning Infernux",
+      "name": "Get started with Infernux",
       "short_name": "Start",
-      "description": "Open the first guided Infernux project.",
-      "url": "/wiki/site/en/learn/getting-started.html",
+      "description": "Open the short, hand-maintained getting-started guide.",
+      "url": "/start.html",
       "icons": [{ "src": "/assets/infernux-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "Infernux Documentation",
-      "short_name": "Docs",
-      "description": "Search guides, manuals, architecture notes, and API symbols.",
-      "url": "/wiki.html",
+      "name": "Infernux API",
+      "short_name": "API",
+      "description": "Browse the generated Infernux Python API reference.",
+      "url": "/wiki/site/en/api/index.html",
       "icons": [{ "src": "/assets/infernux-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
@@ -57,7 +57,7 @@
     {
       "name": "Download Infernux",
       "short_name": "Download",
-      "description": "Open verified release artifacts and installation guidance.",
+      "description": "Download InfernuxHub or choose an Infernux version.",
       "url": "/download.html",
       "icons": [{ "src": "/assets/infernux-icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }

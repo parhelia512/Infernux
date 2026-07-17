@@ -9,7 +9,7 @@ class in <b>Infernux</b>
 Game object in the scene hierarchy.
 
 <!-- USER CONTENT START --> description
-**Status:** Preview · **Verified with:** 0.2.1
+**Status:** Preview · **Verified with:** 0.2.9
 
 A GameObject owns a Transform and a set of components. Distinguish `active_self` from the derived `active_in_hierarchy`, and prefer component lookup by type.
 <!-- USER CONTENT END -->
@@ -106,8 +106,6 @@ if player is not None and player.active_in_hierarchy:
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [Scenes and Objects](../manual/scenes-and-objects.md)
-- [Your First Component](../learn/first-component.md)
 - [Transform](Transform.md)
 - [InxComponent](InxComponent.md)
 <!-- USER CONTENT END -->

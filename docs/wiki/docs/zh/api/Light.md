@@ -11,7 +11,7 @@
 为场景提供照明的光源组件。
 
 <!-- USER CONTENT START --> description
-**状态：** Preview · **验证版本：** 0.2.1
+**状态：** Preview · **验证版本：** 0.2.9
 
 根据场景尺度选择 Light 类型、范围、强度、颜色和阴影。先确认无阴影光照，再启用阴影并调整 Bias。
 <!-- USER CONTENT END -->
@@ -75,8 +75,6 @@ if light_object is not None:
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [3D 基础](../learn/3d-foundations.md)
 - [LightType](LightType.md)
 - [MeshRenderer](MeshRenderer.md)
-- [渲染与 RenderStack](../manual/rendering-and-renderstack.md)
 <!-- USER CONTENT END -->

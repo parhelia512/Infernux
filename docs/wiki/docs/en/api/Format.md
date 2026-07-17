@@ -47,12 +47,11 @@ Texture format for render targets. This public alias maps to the native `PixelFo
 ## Example
 
 <!-- USER CONTENT START --> example
-> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
+> **Example status:** No curated example has been verified for this symbol in 0.2.9. Use the signatures above; do not infer behavior from similarly named APIs in other engines.
 <!-- USER CONTENT END -->
 
 ## See Also
 
 <!-- USER CONTENT START --> see_also
 - [RenderGraph](RenderGraph.md)
-- [Rendering and RenderStack](../manual/rendering-and-renderstack.md)
 <!-- USER CONTENT END -->

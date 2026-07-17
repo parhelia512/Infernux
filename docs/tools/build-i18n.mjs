@@ -8,10 +8,12 @@ const check = process.argv.includes("--check");
 const pageConfigs = {
     "404": [],
     index: [],
-    wiki: ["wiki.js", "docs-health.js", "docs-recent.js"],
+    start: ["bilingual-page.js"],
+    learn: ["learn.js", "bilingual-page.js"],
     roadmap: [],
     community: ["community.js"],
-    download: ["download.js", "pwa-install.js"],
+    "community-topic": ["community-topic.js"],
+    download: ["download.js", "bilingual-page.js"],
 };
 
 function stableDictionary(keys, dictionary) {
