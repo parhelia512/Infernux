@@ -10,6 +10,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from installer.payload import HUB_PAYLOAD_ARCHIVE, create_payload_archive
+
 
 def _run(command: list[str], *, cwd: Path) -> None:
     subprocess.run(command, cwd=cwd, check=True)
@@ -78,11 +80,12 @@ def _build_installer(source_root: Path, build_dir: Path, dist_dir: Path) -> None
     output_dir = build_dir / "nuitka"
     shutil.rmtree(output_dir, ignore_errors=True)
     output_dir.mkdir(parents=True, exist_ok=True)
+    payload_archive = create_payload_archive(hub_payload, build_dir / HUB_PAYLOAD_ARCHIVE)
     command = _common_nuitka_command(output_dir) + [
         "--onefile",
         "--output-filename=InfernuxHubInstaller.exe" if os.name == "nt" else "--output-filename=InfernuxHubInstaller",
         f"--include-data-file={packaging_dir / 'resources' / 'icon.png'}=resources/icon.png",
-        f"--include-data-dir={hub_payload}=payload",
+        f"--include-data-file={payload_archive}=payload/{HUB_PAYLOAD_ARCHIVE}",
     ]
     if os.name == "nt":
         command.append("--windows-uac-admin")

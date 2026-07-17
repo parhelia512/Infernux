@@ -19,8 +19,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from installer.install_application import HubInstallTransaction
 from installer.install_python_runtime import install_runtime_for_app
-from installer_safety import install_target_error, is_recognized_install_dir, write_install_marker
+from installer_safety import install_target_error, is_recognized_install_dir
 from i18n import tr
 import logging
 
@@ -183,17 +184,20 @@ class InstallWorker(QObject):
             if not os.path.isdir(payload_dir):
                 raise RuntimeError(f"Hub payload directory not found: {payload_dir}")
 
-            os.makedirs(self.install_dir, exist_ok=True)
-            self.progress.emit(tr("Copying Infernux Hub files..."))
-            shutil.copytree(payload_dir, self.install_dir, dirs_exist_ok=True)
-            write_install_marker(self.install_dir)
+            with HubInstallTransaction(payload_dir, self.install_dir, progress=self.progress.emit) as installation:
+                self.progress.emit(tr("Preparing Infernux Hub files..."))
+                installation.prepare()
 
-            self.progress.emit(tr("Installing private Python 3.12 runtime..."))
-            install_runtime_for_app(self.install_dir, progress_callback=self.progress.emit)
+                self.progress.emit(tr("Installing private Python 3.12 runtime..."))
+                install_runtime_for_app(installation.staged_dir, progress_callback=self.progress.emit)
 
-            self.progress.emit(tr("Registering Infernux Hub..."))
-            _write_registry(self.install_dir)
-            _create_start_menu_shortcut(self.install_dir)
+                self.progress.emit(tr("Replacing the installed Infernux Hub..."))
+                installation.activate()
+
+                self.progress.emit(tr("Registering Infernux Hub..."))
+                _write_registry(self.install_dir)
+                _create_start_menu_shortcut(self.install_dir)
+                installation.commit()
 
             self.finished.emit(self.install_dir)
         except Exception as exc:
@@ -282,14 +286,19 @@ class InstallerWindow(QWidget):
 
         if os.path.exists(install_dir) and os.listdir(install_dir):
             if not is_recognized_install_dir(install_dir):
-                warning = (
-                    "The selected directory already contains files and is not marked as an Infernux Hub install folder.\n\n"
-                    "The installer will overwrite matching Hub application files, but it will not delete your projects "
-                    "or the engine versions stored under your user profile.\n\n"
-                    "Continue only if this is the old Infernux Hub application directory."
+                QMessageBox.critical(
+                    self,
+                    tr("Unrecognized Install Location"),
+                    tr(
+                        "The selected directory contains files but is not a recognized Infernux Hub installation. "
+                        "Choose the existing Hub application directory or an empty folder."
+                    ),
                 )
-            else:
-                warning = "The selected Infernux Hub directory already contains files. Continue and update it?"
+                return
+            warning = (
+                "The selected Infernux Hub directory already contains files. Updating it will close any running "
+                "Infernux Hub process and replace the application files. Continue?"
+            )
             answer = QMessageBox.question(
                 self,
                 tr("Directory Not Empty"),
