@@ -16,12 +16,12 @@
     function copy(key) {
         const messages = {
             en: {
-                standbyTitle: "Replies load only when you ask.",
-                standbyDetail: "Loading this panel contacts giscus.app and enables GitHub sign-in inside its frame.",
+                standbyTitle: "Preparing the discussion editor…",
+                standbyDetail: "The editor will appear here.",
                 checkingTitle: "Checking embedded replies…",
                 checkingDetail: "Waiting for a verified response from the Giscus frame.",
                 readyTitle: "Embedded replies are ready.",
-                readyDetail: "Use GitHub sign-in inside the panel to reply or react.",
+                readyDetail: "Write, reply, or react below.",
                 uninstalledTitle: "Embedded replies need administrator setup.",
                 uninstalledDetail: "The Giscus App is not installed for this repository. Public Discussions remain available.",
                 degradedTitle: "Embedded replies are temporarily degraded.",
@@ -37,12 +37,12 @@
                 loading: "Loading replies…"
             },
             zh: {
-                standbyTitle: "回复只会在你主动选择后加载。",
-                standbyDetail: "加载此面板会连接 giscus.app，并在其框架内启用 GitHub 登录。",
+                standbyTitle: "正在准备讨论编辑器……",
+                standbyDetail: "编辑器将在这里显示。",
                 checkingTitle: "正在检查站内回复……",
                 checkingDetail: "正在等待 Giscus 框架返回可验证状态。",
                 readyTitle: "站内回复已就绪。",
-                readyDetail: "可在面板中使用 GitHub 登录、回复或 reaction。",
+                readyDetail: "可以在下方发帖、回复或 reaction。",
                 uninstalledTitle: "站内回复需要管理员完成设置。",
                 uninstalledDetail: "当前仓库尚未安装 Giscus App；公开 Discussions 仍可正常使用。",
                 degradedTitle: "站内回复暂时降级。",
@@ -136,7 +136,7 @@
         if (!host) return null;
         const keys = ["repo", "repoId", "category", "categoryId", "mapping", "term", "strict", "reactionsEnabled", "emitMetadata", "inputPosition", "loading"];
         const config = Object.fromEntries(keys.map((key) => [key, host.dataset[key] || ""]));
-        if (!config.repo || !config.repoId || !config.categoryId || config.mapping !== "specific" || !config.term) return null;
+        if (!config.repo || !config.repoId || !config.categoryId || !["specific", "number"].includes(config.mapping) || !config.term) return null;
         return config;
     }
 
@@ -181,14 +181,17 @@
 
     function open(config) {
         const host = document.querySelector(".giscus");
+        const mapping = config?.mapping === "number" ? "number" : "specific";
         const term = String(config?.term || "").trim().slice(0, 120);
         const category = String(config?.category || "").trim().slice(0, 80);
         const categoryId = String(config?.categoryId || "").trim();
-        if (!host || term.length < 4 || !category || !/^DIC_[A-Za-z0-9_-]+$/.test(categoryId)) {
+        const validTerm = mapping === "number" ? /^[1-9]\d*$/.test(term) : term.length >= 4;
+        if (!host || !validTerm || !category || !/^DIC_[A-Za-z0-9_-]+$/.test(categoryId)) {
             render("error");
             return false;
         }
 
+        host.dataset.mapping = mapping;
         host.dataset.term = term;
         host.dataset.category = category;
         host.dataset.categoryId = categoryId;

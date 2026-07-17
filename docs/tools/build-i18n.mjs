@@ -11,6 +11,7 @@ const pageConfigs = {
     wiki: ["wiki.js", "docs-health.js", "docs-recent.js"],
     roadmap: [],
     community: ["community.js"],
+    "community-topic": ["community-topic.js"],
     download: ["download.js", "pwa-install.js"],
 };
 

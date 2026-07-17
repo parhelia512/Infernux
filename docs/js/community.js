@@ -6,7 +6,7 @@ const COMMUNITY_CACHE_TTL_MS = 5 * 60 * 1000;
 const COMMUNITY_REQUEST_TIMEOUT_MS = 10000;
 const GISCUS_OPT_IN_KEY = "infernux-giscus-opt-in-v1";
 const GISCUS_CONTROLLER_ID = "community-giscus-controller";
-const GISCUS_CONTROLLER_SRC = "/js/community-giscus.js?v=2";
+const GISCUS_CONTROLLER_SRC = "/js/community-giscus.js?v=3";
 const COMMUNITY_LOBBY_TERM = "Infernux Community Lobby";
 const COMMUNITY_CATEGORIES = Object.freeze({
     announcements: Object.freeze({ name: "Announcements", id: "DIC_kwDOO_wV3M4C5oaB" }),
@@ -69,8 +69,8 @@ function communityCopy(key) {
             sortReplies: "Most replies",
             sortReactions: "Most reactions",
             feedNav: "Discussion feed navigation",
-            giscusStandbyTitle: "Replies load only when you ask.",
-            giscusStandbyDetail: "Loading this panel contacts giscus.app and enables GitHub sign-in inside its frame.",
+            giscusStandbyTitle: "Preparing the post editor…",
+            giscusStandbyDetail: "Write the topic body and add images below.",
             giscusControllerErrorTitle: "Reply controls could not be loaded.",
             giscusControllerErrorDetail: "The local Giscus controller is unavailable. Retry or continue on GitHub.",
             giscusOpen: "Open Discussions",
@@ -78,7 +78,7 @@ function communityCopy(key) {
             giscusLoad: "Load replies",
             composeMissingTitle: "Enter a topic title before opening the editor.",
             composeOpening: "Opening the embedded editor…",
-            composeReady: "Write your post below. GitHub sign-in stays inside the editor.",
+            composeReady: "The body editor is ready. Write the post and add images below.",
             composeFailed: "The embedded editor could not be opened. Try again in a moment.",
             closeEditor: "Close editor",
             refreshTopics: "Refresh topics",
@@ -118,8 +118,8 @@ function communityCopy(key) {
             sortReplies: "回复最多",
             sortReactions: "reaction 最多",
             feedNav: "讨论列表导航",
-            giscusStandbyTitle: "回复只会在你主动选择后加载。",
-            giscusStandbyDetail: "加载此面板会连接 giscus.app，并在其框架内启用 GitHub 登录。",
+            giscusStandbyTitle: "正在准备正文编辑器……",
+            giscusStandbyDetail: "在下方编写话题正文并插入图片。",
             giscusControllerErrorTitle: "无法加载回复控制器。",
             giscusControllerErrorDetail: "本站的 Giscus 控制器暂不可用，请重试或前往 GitHub。",
             giscusOpen: "前往 Discussions",
@@ -127,7 +127,7 @@ function communityCopy(key) {
             giscusLoad: "加载回复",
             composeMissingTitle: "请先输入话题标题，再打开编辑器。",
             composeOpening: "正在打开站内编辑器……",
-            composeReady: "在下方编写正文；GitHub 登录会留在编辑器内部完成。",
+            composeReady: "正文编辑器已就绪，可以在下方编写内容并插入图片。",
             composeFailed: "暂时无法打开站内编辑器，请稍后重试。",
             closeEditor: "关闭编辑器",
             refreshTopics: "刷新话题",
@@ -197,7 +197,7 @@ function communityTopicActionMode(topic) {
     if (typeof globalThis.navigator?.share !== "function") return "copy";
     if (typeof globalThis.navigator?.canShare !== "function") return "share";
     try {
-        return globalThis.navigator.canShare({ title: topic?.title || "", url: topic?.html_url || "" }) === true
+        return globalThis.navigator.canShare({ title: topic?.title || "", url: communityTopicAbsoluteUrl(topic) }) === true
             ? "share"
             : "copy";
     } catch {
@@ -208,7 +208,7 @@ function communityTopicActionMode(topic) {
 async function shareOrCopyCommunityTopic(topic) {
     const normalized = normalizeCommunityTopic(topic);
     if (!normalized) return "failed";
-    const payload = { title: normalized.title, url: normalized.html_url };
+    const payload = { title: normalized.title, url: communityTopicAbsoluteUrl(normalized) };
     if (communityTopicActionMode(normalized) === "share") {
         try {
             await globalThis.navigator.share(payload);
@@ -217,7 +217,18 @@ async function shareOrCopyCommunityTopic(topic) {
             if (error?.name === "AbortError") return "cancelled";
         }
     }
-    return await copyCommunityText(normalized.html_url) ? "copied" : "failed";
+    return await copyCommunityText(payload.url) ? "copied" : "failed";
+}
+
+function communityTopicUrl(topic) {
+    const number = Number(topic?.number);
+    return Number.isSafeInteger(number) && number > 0
+        ? `community-topic.html?topic=${number}`
+        : "community.html";
+}
+
+function communityTopicAbsoluteUrl(topic) {
+    return new URL(communityTopicUrl(topic), window.location.href).href;
 }
 
 function communityTopicActionLabel(topic) {
@@ -532,10 +543,16 @@ function selectCommunityCategory(category) {
 function setCommunityComposerVisible(visible, { focusTitle = false } = {}) {
     const composer = document.getElementById("community-compose");
     if (!composer) return;
-    composer.hidden = !visible;
-    document.getElementById("community-auth")?.setAttribute("aria-expanded", String(visible));
-    document.getElementById("community-new-topic")?.setAttribute("aria-expanded", String(visible));
+    if (visible && !composer.open) composer.showModal();
+    if (!visible && composer.open) composer.close();
     if (visible && focusTitle) document.getElementById("community-compose-topic")?.focus();
+}
+
+function setCommunityComposerLocked(locked) {
+    for (const id of ["community-compose-topic", "community-compose-category", "community-compose-open"]) {
+        const control = document.getElementById(id);
+        if (control) control.disabled = locked;
+    }
 }
 
 function setCommunityComposerStatus(messageKey) {
@@ -549,20 +566,25 @@ async function openCommunityEditor(term, categorySlug = "general") {
     if (!title) return false;
 
     setCommunityComposerVisible(true);
+    setCommunityComposerLocked(true);
+    const bodyEditor = document.getElementById("community-body-editor");
+    if (bodyEditor) bodyEditor.hidden = false;
     setCommunityComposerStatus("composeOpening");
     setGiscusControllerBusy(true);
     try {
         const controller = await ensureGiscusController();
         rememberGiscusOptIn();
         const opened = typeof controller.open === "function"
-            ? controller.open({ term: title, category: category.name, categoryId: category.id })
+            ? controller.open({ mapping: "specific", term: title, category: category.name, categoryId: category.id })
             : controller.load();
         setCommunityComposerStatus(opened ? "composeReady" : "composeFailed");
+        if (!opened) setCommunityComposerLocked(false);
         return opened;
     } catch (error) {
         console.warn(error);
         renderGiscusControllerError();
         setCommunityComposerStatus("composeFailed");
+        setCommunityComposerLocked(false);
         return false;
     } finally {
         setGiscusControllerBusy(false);
@@ -572,26 +594,15 @@ async function openCommunityEditor(term, categorySlug = "general") {
 function startCommunityTopic() {
     setCommunityComposerVisible(true, { focusTitle: true });
     setCommunityComposerStatus("");
+    setCommunityComposerLocked(false);
+    const bodyEditor = document.getElementById("community-body-editor");
+    if (bodyEditor) bodyEditor.hidden = true;
     const title = document.getElementById("community-compose-topic");
     if (title) title.value = "";
     const category = document.getElementById("community-compose-category");
     if (category && communityCategory && [...category.options].some((option) => option.value === communityCategory)) {
         category.value = communityCategory;
     }
-}
-
-function openCommunityTopic(topic) {
-    const category = COMMUNITY_CATEGORIES[topic?.category?.slug];
-    if (!topic?.title || !category) return false;
-    const title = document.getElementById("community-compose-topic");
-    const categorySelect = document.getElementById("community-compose-category");
-    if (title) title.value = topic.title;
-    if (categorySelect && [...categorySelect.options].some((option) => option.value === topic.category.slug)) {
-        categorySelect.value = topic.category.slug;
-    }
-    openCommunityEditor(topic.title, topic.category.slug);
-    document.getElementById("community-compose")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    return true;
 }
 
 function filteredCommunityTopics() {
@@ -688,14 +699,7 @@ function renderCommunityTopics() {
 
         const link = document.createElement("a");
         link.className = "topic-main";
-        link.href = topic.html_url;
-        link.target = "_blank";
-        link.rel = "noopener";
-        link.addEventListener("click", (event) => {
-            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-            if (!openCommunityTopic(topic)) return;
-            event.preventDefault();
-        });
+        link.href = communityTopicUrl(topic);
 
         const category = document.createElement("span");
         category.className = "topic-category";
@@ -920,10 +924,6 @@ document.addEventListener("DOMContentLoaded", () => {
         button.addEventListener("click", () => selectCommunityCategory(button.dataset.forumCategory || ""));
     });
     document.getElementById("community-new-topic")?.addEventListener("click", startCommunityTopic);
-    document.getElementById("community-auth")?.addEventListener("click", () => {
-        setCommunityComposerVisible(true);
-        openCommunityEditor(COMMUNITY_LOBBY_TERM, "general");
-    });
     document.getElementById("community-compose-close")?.addEventListener("click", () => setCommunityComposerVisible(false));
     document.getElementById("community-compose-form")?.addEventListener("submit", (event) => {
         event.preventDefault();
@@ -947,6 +947,10 @@ document.addEventListener("DOMContentLoaded", () => {
         composeClose.setAttribute("aria-label", communityCopy("closeEditor"));
         composeClose.title = communityCopy("closeEditor");
     }
+    const composer = document.getElementById("community-compose");
+    composer?.addEventListener("click", (event) => {
+        if (event.target === composer) setCommunityComposerVisible(false);
+    });
     const refresh = document.getElementById("community-refresh");
     if (refresh) {
         refresh.setAttribute("aria-label", communityCopy("refreshTopics"));

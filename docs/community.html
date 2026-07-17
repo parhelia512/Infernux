@@ -32,7 +32,7 @@
     <link rel="stylesheet" href="css/style.css?v=17">
     <link rel="stylesheet" href="css/docs-search.css?v=3">
     <link rel="stylesheet" href="css/mission.css?v=2">
-    <link rel="stylesheet" href="css/community.css?v=12">
+    <link rel="stylesheet" href="css/community.css?v=13">
     <link rel="stylesheet" href="css/fontawesome-subset.css?v=6.4.0">
 </head>
 <body>
@@ -40,7 +40,7 @@
     <header class="site-header" role="banner">
         <div class="mission-ribbon" aria-label="Engine identity strip">
             <div class="mission-ribbon-inner">
-                <span class="mission-kicker" data-i18n="brand.ribbonKicker">Open engine · release 0.2.1 online</span>
+                <span class="mission-kicker" data-i18n="brand.ribbonKicker">Open-source engine · 0.2.9 live</span>
                 <span class="mission-name" data-i18n="brand.ribbonName">INFER<span class="mission-accent">NUX</span></span>
                 <span class="mission-sub" data-i18n="brand.ribbonSub">熔炉 · ENG-CORE</span>
             </div>
@@ -74,26 +74,13 @@
         <div class="container">
             <header class="forum-header">
                 <div class="forum-heading">
-                    <p class="forum-eyebrow" data-i18n="community.forum.eyebrow">INFERNUX COMMUNITY</p>
                     <h1 data-i18n="community.forum.title">Community forum</h1>
                     <p data-i18n="community.forum.subtitle">Ask a question, report a problem, share a project, or propose an idea.</p>
                 </div>
-                <div class="forum-account" aria-label="Community account controls">
-                    <div class="forum-account-copy">
-                        <i class="fab fa-github" aria-hidden="true"></i>
-                        <span data-i18n="community.forum.account">Read publicly. Sign in with GitHub inside the editor to post or reply.</span>
-                    </div>
-                    <div class="forum-account-actions">
-                        <button type="button" class="forum-button forum-button-secondary" id="community-auth" aria-controls="community-compose" aria-expanded="false">
-                            <i class="fas fa-unlock" aria-hidden="true"></i>
-                            <span data-i18n="community.forum.signIn">Sign in / reply</span>
-                        </button>
-                        <button type="button" class="forum-button forum-button-primary" id="community-new-topic" aria-controls="community-compose" aria-expanded="false">
-                            <i class="fas fa-message" aria-hidden="true"></i>
-                            <span data-i18n="community.forum.newTopic">New topic</span>
-                        </button>
-                    </div>
-                </div>
+                <button type="button" class="forum-button forum-button-primary" id="community-new-topic" aria-controls="community-compose" aria-haspopup="dialog">
+                    <i class="fas fa-message" aria-hidden="true"></i>
+                    <span data-i18n="community.forum.newTopic">New topic</span>
+                </button>
             </header>
 
             <nav class="forum-category-bar" aria-label="Discussion categories">
@@ -104,61 +91,68 @@
                 <button type="button" class="forum-category" data-forum-category="show-and-tell" aria-pressed="false"><i class="fas fa-cubes" aria-hidden="true"></i><span data-i18n="community.channel.show.title">Show and tell</span></button>
             </nav>
 
-            <section class="forum-compose" id="community-compose" aria-labelledby="community-compose-title" hidden>
-                <div class="forum-compose-heading">
-                    <div>
-                        <h2 id="community-compose-title" data-i18n="community.compose.title">Write a topic</h2>
-                        <p data-i18n="community.compose.intro">Choose a category and title, then write the body in the embedded editor below.</p>
-                    </div>
-                    <button type="button" class="forum-icon-button" id="community-compose-close" aria-label="Close editor" title="Close editor"><i class="fas fa-xmark" aria-hidden="true"></i></button>
-                </div>
-                <form class="forum-compose-form" id="community-compose-form">
-                    <div class="forum-field">
-                        <label for="community-compose-category" data-i18n="community.compose.category">Category</label>
-                        <select id="community-compose-category" name="compose-category">
-                            <option value="general" data-i18n="community.channel.general.title">General</option>
-                            <option value="q-a" data-i18n="community.channel.qa.title">Q&amp;A</option>
-                            <option value="ideas" data-i18n="community.channel.ideas.title">Ideas</option>
-                            <option value="show-and-tell" data-i18n="community.channel.show.title">Show and tell</option>
-                        </select>
-                    </div>
-                    <div class="forum-field forum-compose-title-field">
-                        <label for="community-compose-topic" data-i18n="community.compose.topicTitle">Topic title</label>
-                        <input id="community-compose-topic" name="topic-title" type="text" minlength="4" maxlength="120" autocomplete="off" data-i18n="community.compose.placeholder" placeholder="What do you want to discuss?" required>
-                    </div>
-                    <button type="submit" class="forum-button forum-button-primary" id="community-compose-open">
-                        <i class="fas fa-comments" aria-hidden="true"></i>
-                        <span data-i18n="community.compose.openEditor">Open editor</span>
-                    </button>
-                </form>
-                <p class="forum-compose-status" id="community-compose-status" role="status" aria-live="polite"></p>
-                <div class="giscus-shell">
-                    <div class="giscus-readiness" id="giscus-readiness" data-state="standby">
-                        <div class="giscus-readiness-copy" role="status" aria-live="polite" aria-atomic="true">
-                            <strong id="giscus-readiness-title">The editor is ready when you are.</strong>
-                            <p id="giscus-readiness-detail">Your GitHub sign-in happens inside the editor. Infernux never receives your password.</p>
+            <dialog class="forum-compose" id="community-compose" aria-labelledby="community-compose-title" data-community-administrators="ChenlizheMe">
+                <div class="forum-compose-shell">
+                    <div class="forum-compose-heading">
+                        <div>
+                            <h2 id="community-compose-title" data-i18n="community.compose.title">Write a topic</h2>
+                            <p data-i18n="community.compose.intro">Add a title and category, then write the post body and attach images.</p>
                         </div>
-                        <div class="giscus-readiness-actions">
-                            <button type="button" class="giscus-load-action" id="giscus-load" aria-controls="giscus-thread"><i class="fas fa-comments" aria-hidden="true"></i><span>Load editor</span></button>
-                            <a href="https://github.com/login?return_to=%2FChenlizheMe%2FInfernux%2Fdiscussions" target="_blank" rel="noopener" class="giscus-sign-in-action" id="giscus-sign-in"><i class="fab fa-github" aria-hidden="true"></i><span data-i18n="community.auth.signIn">Sign in on GitHub</span></a>
-                            <a href="https://github.com/ChenlizheMe/Infernux/discussions" target="_blank" rel="noopener" id="giscus-open-discussions"><span>Open Discussions</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
-                            <a href="https://github.com/apps/giscus/installations/new" target="_blank" rel="noopener" class="giscus-install-action" id="giscus-install"><span>Install Giscus</span><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
-                        </div>
+                        <button type="button" class="forum-icon-button" id="community-compose-close" aria-label="Close editor" title="Close editor"><i class="fas fa-xmark" aria-hidden="true"></i></button>
                     </div>
-                    <div class="giscus" id="giscus-thread"
-                         data-repo="ChenlizheMe/Infernux"
-                         data-repo-id="R_kgDOO_wV3A"
-                         data-category="General"
-                         data-category-id="DIC_kwDOO_wV3M4C5oaC"
-                         data-mapping="specific"
-                         data-term="Infernux Community Lobby"
-                         data-strict="1"
-                         data-reactions-enabled="1"
-                         data-emit-metadata="1"
-                         data-input-position="top"
-                         data-loading="lazy"></div>
+                    <form class="forum-compose-form" id="community-compose-form">
+                        <div class="forum-field forum-compose-title-field">
+                            <label for="community-compose-topic" data-i18n="community.compose.topicTitle">Topic title</label>
+                            <input id="community-compose-topic" name="topic-title" type="text" minlength="4" maxlength="120" autocomplete="off" data-i18n="community.compose.placeholder" placeholder="What do you want to discuss?" required>
+                        </div>
+                        <div class="forum-field">
+                            <label for="community-compose-category" data-i18n="community.compose.category">Category</label>
+                            <select id="community-compose-category" name="compose-category">
+                                <option value="general" data-i18n="community.channel.general.title">General</option>
+                                <option value="q-a" data-i18n="community.channel.qa.title">Q&amp;A</option>
+                                <option value="ideas" data-i18n="community.channel.ideas.title">Ideas</option>
+                                <option value="show-and-tell" data-i18n="community.channel.show.title">Show and tell</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="forum-button forum-button-primary" id="community-compose-open">
+                            <i class="fas fa-comments" aria-hidden="true"></i>
+                            <span data-i18n="community.compose.openEditor">Write body</span>
+                        </button>
+                    </form>
+                    <p class="forum-compose-status" id="community-compose-status" role="status" aria-live="polite"></p>
+                    <section class="forum-body-editor" id="community-body-editor" aria-labelledby="community-body-title" hidden>
+                        <div class="forum-body-heading">
+                            <h3 id="community-body-title" data-i18n="community.compose.body">Post body</h3>
+                            <span><i class="fas fa-file-lines" aria-hidden="true"></i><span data-i18n="community.compose.images">Images supported</span></span>
+                        </div>
+                        <div class="giscus-shell">
+                            <div class="giscus-readiness" id="giscus-readiness" data-state="standby">
+                                <div class="giscus-readiness-copy" role="status" aria-live="polite" aria-atomic="true">
+                                    <strong id="giscus-readiness-title">Loading editor…</strong>
+                                    <p id="giscus-readiness-detail">Preparing the post body editor.</p>
+                                </div>
+                                <div class="giscus-readiness-actions">
+                                    <button type="button" class="giscus-load-action" id="giscus-load" aria-controls="giscus-thread"><i class="fas fa-rotate" aria-hidden="true"></i><span>Retry</span></button>
+                                    <a href="https://github.com/ChenlizheMe/Infernux/discussions" target="_blank" rel="noopener" id="giscus-open-discussions" hidden><span>Open Discussions</span></a>
+                                    <a href="https://github.com/apps/giscus/installations/new" target="_blank" rel="noopener" class="giscus-install-action" id="giscus-install" hidden><span>Install Giscus</span></a>
+                                </div>
+                            </div>
+                            <div class="giscus" id="giscus-thread"
+                                 data-repo="ChenlizheMe/Infernux"
+                                 data-repo-id="R_kgDOO_wV3A"
+                                 data-category="General"
+                                 data-category-id="DIC_kwDOO_wV3M4C5oaC"
+                                 data-mapping="specific"
+                                 data-term="Infernux Community Lobby"
+                                 data-strict="1"
+                                 data-reactions-enabled="1"
+                                 data-emit-metadata="1"
+                                 data-input-position="top"
+                                 data-loading="lazy"></div>
+                        </div>
+                    </section>
                 </div>
-            </section>
+            </dialog>
 
             <section class="forum-board" aria-labelledby="latest-topics-title">
                 <div class="forum-board-heading">
@@ -228,23 +222,6 @@
                 <noscript><p class="topic-status">JavaScript is disabled. <a href="https://github.com/ChenlizheMe/Infernux/discussions">Open Discussions on GitHub</a>.</p></noscript>
             </section>
 
-            <section class="community-contract forum-data-note" aria-labelledby="community-contract-title" data-community-administrators="ChenlizheMe">
-                <i class="fas fa-shield-halved" aria-hidden="true"></i>
-                <div>
-                    <h2 id="community-contract-title" data-i18n="community.contract.title">GitHub-backed, operated here.</h2>
-                    <p data-i18n="community.forum.dataNote">Topics and accounts remain on GitHub; this page provides the forum interface. Public metadata is cached for five minutes.</p>
-                </div>
-                <details>
-                    <summary data-i18n="community.forum.details">Data and moderation details</summary>
-                    <ul>
-                        <li data-i18n="community.contract.item1">GitHub Discussions stores topics, answers, and reactions.</li>
-                        <li data-i18n="community.contract.item2">GitHub Issues stores reproducible engineering work.</li>
-                        <li data-i18n="community.contract.item3">GitHub permissions remain the moderation authority.</li>
-                        <li data-i18n="community.contract.admin">ChenlizheMe is the sole declared Infernux community administrator.</li>
-                        <li><a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">GitHub privacy</a> · <a href="https://github.com/settings/applications" target="_blank" rel="noopener">Authorized applications</a> · <a href="https://github.com/giscus/giscus/blob/main/PRIVACY-POLICY.md" target="_blank" rel="noopener">Giscus privacy</a></li>
-                    </ul>
-                </details>
-            </section>
         </div>
     </main>
 
@@ -264,11 +241,11 @@
         </div>
     </footer>
 
-    <script src="js/i18n-community.js?v=5"></script>
+    <script src="js/i18n-community.js?v=6"></script>
     <script src="js/i18n.js?v=18"></script>
     <script src="js/main.js?v=14"></script>
     <script src="js/docs-search.js?v=5"></script>
-    <script src="js/community.js?v=10"></script>
+    <script src="js/community.js?v=11"></script>
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",

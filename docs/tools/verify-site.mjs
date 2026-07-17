@@ -10,6 +10,7 @@ const wikiDocsRoot = path.join(docsRoot, "wiki", "docs");
 const errors = [];
 const commonStaticCsp = "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests";
 const communityStaticCsp = "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' https://giscus.app; script-src-attr 'none'; style-src 'self' https://giscus.app; style-src-attr 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.github.com; frame-src https://giscus.app; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests";
+const communityTopicStaticCsp = "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' https://giscus.app; script-src-attr 'none'; style-src 'self' https://giscus.app; style-src-attr 'unsafe-inline'; img-src 'self' data: https://github.com https://*.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.github.com; frame-src https://giscus.app; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests";
 const offlineStaticCsp = "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests";
 const socialImageName = "infernux-social-card-0.2.1.jpg";
 const socialImageUrl = `https://infernux-engine.com/assets/${socialImageName}`;
@@ -200,7 +201,7 @@ async function verifyMarkdownLinks() {
 }
 
 async function verifyRootHtml() {
-    const pages = ["index.html", "wiki.html", "roadmap.html", "community.html", "download.html", "404.html", "offline.html"];
+    const pages = ["index.html", "wiki.html", "roadmap.html", "community.html", "community-topic.html", "download.html", "404.html", "offline.html"];
     const i18n = await readFile(path.join(docsRoot, "tools", "i18n-source.json"), "utf8");
     const sharedStyle = await readFile(path.join(docsRoot, "css", "style.css"), "utf8");
     const noScriptWikiStyle = await readFile(path.join(docsRoot, "css", "wiki-noscript.css"), "utf8");
@@ -220,6 +221,7 @@ async function verifyRootHtml() {
         if (duplicateIds.length) fail(`${pageName}: duplicate ids: ${[...new Set(duplicateIds)].join(", ")}`);
         const expectedCsp = pageName === "community.html"
             ? communityStaticCsp
+            : pageName === "community-topic.html" ? communityTopicStaticCsp
             : pageName === "offline.html" ? offlineStaticCsp : commonStaticCsp;
         if (metaContent(source, "http-equiv", "Content-Security-Policy") !== expectedCsp) fail(`${pageName}: static Content Security Policy differs from its least-privilege contract`);
         if (metaContent(source, "name", "referrer") !== "strict-origin-when-cross-origin") fail(`${pageName}: missing strict cross-origin referrer policy`);
@@ -270,9 +272,9 @@ async function verifyRootHtml() {
             fail("wiki.html: no-script bilingual directory fallback must remain external under the strict style policy");
         }
 
-        if (["index.html", "wiki.html", "roadmap.html", "community.html", "download.html"].includes(pageName)) {
+        if (["index.html", "wiki.html", "roadmap.html", "community.html", "community-topic.html", "download.html"].includes(pageName)) {
             const routeName = path.basename(pageName, ".html");
-            const pageBundleVersion = routeName === "community" ? 5 : routeName === "download" ? 2 : 1;
+            const pageBundleVersion = routeName === "community" ? 6 : routeName === "download" ? 2 : 1;
             const pageBundle = `js/i18n-${routeName}.js?v=${pageBundleVersion}`;
             if (!source.includes(pageBundle)) fail(`${pageName}: missing route-localized bundle '${pageBundle}'`);
             if (!source.includes("js/i18n.js?v=18")) fail(`${pageName}: shared localization runtime cache version is stale`);
@@ -296,6 +298,7 @@ async function verifyRootHtml() {
                 "wiki.html": expectedHrefs[1],
                 "roadmap.html": expectedHrefs[4],
                 "community.html": expectedHrefs[5],
+                "community-topic.html": expectedHrefs[5],
                 "download.html": expectedHrefs[6]
             };
             verifyTaskNavigation(source, pageName, expectedHrefs, activeByPage[pageName] || null);
@@ -972,18 +975,11 @@ async function verifyPublishingFiles() {
     for (const token of ["R_kgDOO_wV3A", "DIC_kwDOO_wV3M4C5oaC", "Infernux Community Lobby"]) {
         if (!community.includes(token)) fail(`community.html: missing Giscus configuration token '${token}'`);
     }
-    if (!community.includes('data-community-administrators="ChenlizheMe"') || !community.includes('data-i18n="community.contract.admin"')) {
+    if (!community.includes('data-community-administrators="ChenlizheMe"')) {
         fail("community.html: ChenlizheMe must remain the sole declared community administrator");
     }
     const declaredAdministrators = community.match(/data-community-administrators="([^"]*)"/)?.[1]?.split(/[\s,]+/).filter(Boolean) || [];
     if (JSON.stringify(declaredAdministrators) !== JSON.stringify(["ChenlizheMe"])) fail("community.html: community administrator declaration must contain exactly ChenlizheMe");
-    for (const url of [
-        "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement",
-        "https://github.com/settings/applications",
-        "https://github.com/giscus/giscus/blob/main/PRIVACY-POLICY.md"
-    ]) {
-        if (!community.includes(url)) fail(`community.html: missing privacy or authorization link '${url}'`);
-    }
     for (const contract of [
         "id=\"community-filters\"",
         "id=\"community-search\"",
@@ -998,23 +994,21 @@ async function verifyPublishingFiles() {
         "id=\"community-browse-all\"",
         "id=\"giscus-readiness\"",
         "id=\"giscus-load\"",
-        "id=\"giscus-sign-in\"",
-        "https://github.com/login?return_to=%2FChenlizheMe%2FInfernux%2Fdiscussions",
-        "data-i18n=\"community.auth.signIn\"",
         "id=\"giscus-thread\"",
         "id=\"giscus-open-discussions\"",
         "id=\"giscus-install\"",
-        "id=\"community-auth\"",
         "id=\"community-new-topic\"",
+        "<dialog class=\"forum-compose\"",
         "id=\"community-compose-form\"",
+        "id=\"community-body-editor\"",
         "id=\"community-compose-category\"",
         "id=\"community-compose-topic\"",
         "id=\"community-compose-open\"",
         "https://github.com/apps/giscus/installations/new",
         "data-loading=\"lazy\"",
-        "js/i18n-community.js?v=5",
-        "js/community.js?v=10",
-        "css/community.css?v=12"
+        "js/i18n-community.js?v=6",
+        "js/community.js?v=11",
+        "css/community.css?v=13"
     ]) {
         if (!community.includes(contract)) fail(`community.html: missing forum discovery contract '${contract}'`);
     }
@@ -1094,13 +1088,14 @@ async function verifyPublishingFiles() {
         "[\"updated\", \"newest\", \"replies\", \"reactions\"]",
         "replaceChildren()",
         "GISCUS_OPT_IN_KEY = \"infernux-giscus-opt-in-v1\"",
-        "GISCUS_CONTROLLER_SRC = \"/js/community-giscus.js?v=2\"",
+        "GISCUS_CONTROLLER_SRC = \"/js/community-giscus.js?v=3\"",
         "readGiscusOptIn",
         "rememberGiscusOptIn",
         "ensureGiscusController",
         "loadDeferredGiscus",
         "openCommunityEditor",
-        "openCommunityTopic",
+        "communityTopicUrl",
+        "showModal",
         "document.createElement(\"script\")",
         "AbortController"
     ]) {
@@ -1125,23 +1120,20 @@ async function verifyPublishingFiles() {
         if (!communityGiscusJs.includes(contract)) fail(`community-giscus.js: missing deferred Giscus contract '${contract}'`);
     }
     if (/innerHTML\s*=|\.style(?:\.|\[|\s*=)/.test(communityGiscusJs)) fail("community-giscus.js: deferred reply UI must remain DOM-safe and class-driven");
+    const communityTopic = await readFile(path.join(docsRoot, "community-topic.html"), "utf8");
+    const communityTopicJs = await readFile(path.join(docsRoot, "js", "community-topic.js"), "utf8");
+    for (const contract of ["id=\"community-topic\"", "id=\"topic-body\"", "id=\"topic-replies\"", "data-mapping=\"number\"", "js/community-topic.js?v=2"]) {
+        if (!communityTopic.includes(contract)) fail(`community-topic.html: missing dedicated topic contract '${contract}'`);
+    }
+    for (const contract of ["normalizeCommunityTopicDetail", "DOMParser", "appendSafeCommunityNode", "COMMUNITY_TOPIC_TAGS", "application/vnd.github.html+json", "mapping: \"number\""]) {
+        if (!communityTopicJs.includes(contract)) fail(`community-topic.js: missing safe rich-topic contract '${contract}'`);
+    }
+    if (/innerHTML\s*=|\.style(?:\.|\[|\s*=)/.test(communityTopicJs)) fail("community-topic.js: remote topic bodies must use the safe DOM whitelist without inline visual injection");
     const communityServiceWorker = await readFile(path.join(docsRoot, "sw.js"), "utf8");
     if (communityServiceWorker.includes("/js/community-giscus.js")) fail("sw.js: consent-gated Giscus controller must stay outside the first-install core shell");
     if (/<script\b[^>]*src=["']https:\/\/giscus\.app\/client\.js/i.test(community)) fail("community.html: Giscus must not contact a third party before the visitor explicitly loads replies");
-    const githubSignIn = community.match(/<a\s+href="([^"]+)"[^>]+id="giscus-sign-in"/)?.[1]?.replaceAll("&amp;", "&");
-    if (!githubSignIn) {
-        fail("community.html: missing user-initiated GitHub sign-in fallback");
-    } else {
-        const signInUrl = new URL(githubSignIn);
-        if (signInUrl.origin !== "https://github.com" || signInUrl.pathname !== "/login" || signInUrl.searchParams.get("return_to") !== "/ChenlizheMe/Infernux/discussions") {
-            fail("community.html: GitHub sign-in must return only to this repository's Discussions");
-        }
-        for (const forbidden of ["client_id", "client_secret", "token", "redirect_uri"]) {
-            if (signInUrl.searchParams.has(forbidden)) fail(`community.html: static GitHub sign-in must not carry '${forbidden}'`);
-        }
-    }
     const communityTest = await readFile(path.join(docsRoot, "tools", "test-community-client.mjs"), "utf8");
-    for (const contract of ["only unlocked answerable topics", "default forum view should keep a clean canonical URL", "cached reaction totals should survive normalization", "compact BBS controls", "on-site topic composition", "supported phones should use the operating system share surface", "native sharing must receive only the normalized title and canonical Discussion URL", "cancelling native sharing must not unexpectedly write to the clipboard", "browsers without Web Share should retain the clipboard action", "topic share feedback must use one polite live region", "same-origin controller before Giscus", "loading the local controller must not contact giscus.app", "controller loading alone must not persist visitor consent", "deferred controller must register one verified frame listener", "user-initiated GitHub sign-in fallback", "return only to this repository's Discussions", "static GitHub sign-in must not carry"]) {
+    for (const contract of ["only unlocked answerable topics", "default forum view should keep a clean canonical URL", "cached reaction totals should survive normalization", "modal topic composition", "dedicated detail routing", "safe rich-body rendering", "supported phones should use the operating system share surface", "canonical on-site topic URL", "cancelling native sharing must not unexpectedly write to the clipboard", "browsers without Web Share should retain the clipboard action", "topic share feedback must use one polite live region", "same-origin controller before Giscus", "loading the local controller must not contact giscus.app", "controller loading alone must not persist visitor consent", "deferred controller must register one verified frame listener"]) {
         if (!communityTest.includes(contract)) fail(`test-community-client.mjs: missing forum discovery assertion '${contract}'`);
     }
     const communityCss = await readFile(path.join(docsRoot, "css", "community.css"), "utf8");

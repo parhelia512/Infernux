@@ -8,6 +8,8 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const source = await readFile(path.join(scriptDir, "..", "js", "community.js"), "utf8");
 const giscusSource = await readFile(path.join(scriptDir, "..", "js", "community-giscus.js"), "utf8");
 const communityHtml = await readFile(path.join(scriptDir, "..", "community.html"), "utf8");
+const topicHtml = await readFile(path.join(scriptDir, "..", "community-topic.html"), "utf8");
+const topicSource = await readFile(path.join(scriptDir, "..", "js", "community-topic.js"), "utf8");
 const communityCss = await readFile(path.join(scriptDir, "..", "css", "community.css"), "utf8");
 const storage = new Map();
 let copiedText = null;
@@ -143,7 +145,7 @@ assert.equal(client.readGiscusOptIn(), false);
 const lazyControllerPromise = client.ensureGiscusController();
 const lazyControllerScript = appendedGiscusScript;
 assert.equal(lazyControllerScript.id, "community-giscus-controller");
-assert.equal(lazyControllerScript.src, "/js/community-giscus.js?v=2", "the consent gate may fetch only the same-origin controller before Giscus");
+assert.equal(lazyControllerScript.src, "/js/community-giscus.js?v=3", "the forum may fetch only the same-origin controller before Giscus");
 assert.equal(client.giscusScript(), null, "loading the local controller must not contact giscus.app");
 new vm.Script(giscusSource, { filename: "community-giscus.js" }).runInContext(sandbox);
 lazyControllerScript.listeners.get("load")();
@@ -211,8 +213,8 @@ assert.equal(client.actionMode(normalized[0]), "share");
 assert.equal(await client.shareTopic(normalized[0]), "shared", "supported phones should use the operating system share surface");
 assert.deepEqual(JSON.parse(JSON.stringify(sharedPayload)), {
     title: normalized[0].title,
-    url: normalized[0].html_url
-}, "native sharing must receive only the normalized title and canonical Discussion URL");
+    url: "https://infernux-engine.com/community-topic.html?topic=41"
+}, "native sharing must receive only the normalized title and canonical on-site topic URL");
 assert.equal(await client.shareTopic({ ...normalized[0], html_url: "https://evil.example/discussions/41" }), "failed", "native sharing must reject non-repository URLs");
 sandbox.navigator.share = async () => {
     const error = new Error("visitor cancelled");
@@ -225,12 +227,12 @@ assert.equal(copiedText, null, "cancelling native sharing must not unexpectedly 
 sandbox.navigator.canShare = () => false;
 assert.equal(client.actionMode(normalized[0]), "copy", "a browser that rejects the payload should advertise the copy fallback immediately");
 assert.equal(await client.shareTopic(normalized[0]), "copied", "unsupported native payloads should fall back to canonical link copying");
-assert.equal(copiedText, normalized[0].html_url);
+assert.equal(copiedText, "https://infernux-engine.com/community-topic.html?topic=41");
 delete sandbox.navigator.share;
 assert.equal(client.actionMode(normalized[0]), "copy");
 copiedText = null;
 assert.equal(await client.shareTopic(normalized[0]), "copied", "browsers without Web Share should retain the clipboard action");
-assert.equal(copiedText, normalized[0].html_url);
+assert.equal(copiedText, "https://infernux-engine.com/community-topic.html?topic=41");
 assert.deepEqual(Array.from(client.filter(normalized, "python engine-user", ""), (topic) => topic.title), ["Python package naming"]);
 assert.deepEqual(Array.from(client.filter(normalized, "", "q-a"), (topic) => topic.title), ["Python package naming", "How do I load a scene?"]);
 assert.deepEqual(Array.from(client.filter(normalized, "", "", "unanswered"), (topic) => topic.title), ["How do I load a scene?"], "only unlocked answerable topics should be presented as open");
@@ -319,6 +321,10 @@ assert.equal(giscusHost.dataset.categoryId, "DIC_kwDOO_wV3M4C5oaE");
 assert.equal(client.giscusScript().dataset.term, "Embedded forum topic");
 assert.equal(client.giscusScript().dataset.categoryId, "DIC_kwDOO_wV3M4C5oaE");
 assert.equal(giscus.open({ term: "x", category: "Ideas", categoryId: "not-a-category-id" }), false, "invalid forum targets must be rejected before loading Giscus");
+assert.equal(giscus.open({ mapping: "number", term: "41", category: "Q&A", categoryId: "DIC_kwDOO_wV3M4C5oaD" }), true, "a detail page must bind replies to an existing Discussion number");
+assert.equal(giscusHost.dataset.mapping, "number");
+assert.equal(giscusHost.dataset.term, "41");
+assert.equal(giscus.open({ mapping: "number", term: "bad", category: "Q&A", categoryId: "DIC_kwDOO_wV3M4C5oaD" }), false, "number mappings must reject non-numeric Discussion identifiers");
 const initialScript = client.giscusScript();
 assert.equal(giscus.load(), true);
 assert.equal(giscus.state(), "checking");
@@ -332,16 +338,7 @@ assert.equal(giscus.load(), true);
 giscusMessageListener({ origin: "https://giscus.app", source: client.giscusFrameWindow, data: { giscus: { resizeHeight: 420 } } });
 assert.equal(giscus.state(), "ready");
 
-const signInHref = communityHtml.match(/<a\s+href="([^"]+)"[^>]+id="giscus-sign-in"/)?.[1]?.replaceAll("&amp;", "&");
-assert.ok(signInHref, "community wall must expose a user-initiated GitHub sign-in fallback");
-const signInUrl = new URL(signInHref);
-assert.equal(signInUrl.origin, "https://github.com", "sign-in fallback must remain on GitHub");
-assert.equal(signInUrl.pathname, "/login", "sign-in fallback must use GitHub's own login route");
-assert.equal(signInUrl.searchParams.get("return_to"), "/ChenlizheMe/Infernux/discussions", "sign-in must return only to this repository's Discussions");
-for (const forbidden of ["client_id", "client_secret", "token", "redirect_uri"]) {
-    assert.equal(signInUrl.searchParams.has(forbidden), false, `static GitHub sign-in must not carry '${forbidden}'`);
-}
-assert.ok(communityHtml.includes('data-i18n="community.auth.signIn"'), "GitHub sign-in action must remain bilingual");
+assert.equal(communityHtml.includes('id="giscus-sign-in"'), false, "the forum home must not show an unnecessary standalone sign-in explanation");
 assert.ok(communityHtml.includes('id="community-share-status"'), "topic share feedback must use one polite live region");
 for (const contract of [".topic-main", ".topic-action", "width: 44px", "height: 44px", ".community-copy-fallback"]) {
     assert.ok(communityCss.includes(contract), `community.css must retain topic-link accessibility contract '${contract}'`);
@@ -349,19 +346,25 @@ for (const contract of [".topic-main", ".topic-action", "width: 44px", "height: 
 for (const contract of ["shareOrCopyCommunityTopic", "navigator?.share", "navigator?.canShare", "navigator?.clipboard?.writeText", "fallbackCommunityCopy", "document.createElement(\"time\")", "updated.dateTime = topic.updated_at", "dataset.state", "dataset.mode", "community-share-status"]) {
     assert.ok(source.includes(contract), `community.js must retain safe topic-sharing contract '${contract}'`);
 }
-for (const contract of ["GISCUS_CONTROLLER_SRC = \"/js/community-giscus.js?v=2\"", "ensureGiscusController", "loadDeferredGiscus", "openCommunityEditor", "openCommunityTopic", "document.createElement(\"script\")"]) {
-    assert.ok(source.includes(contract), `community.js must retain consent-aware lazy controller contract '${contract}'`);
+for (const contract of ["GISCUS_CONTROLLER_SRC = \"/js/community-giscus.js?v=3\"", "ensureGiscusController", "openCommunityEditor", "communityTopicUrl", "showModal", "document.createElement(\"script\")"]) {
+    assert.ok(source.includes(contract), `community.js must retain modal composition and on-site topic routing contract '${contract}'`);
 }
 for (const contract of ["globalThis.InfernuxGiscus = controller", "GISCUS_ORIGIN = \"https://giscus.app\"", "event.origin !== GISCUS_ORIGIN", "event.source !== frame.contentWindow", "function open(config)", "script.src = `${GISCUS_ORIGIN}/client.js`", "new MutationObserver(syncConfig)"]) {
     assert.ok(giscusSource.includes(contract), `community-giscus.js must retain verified deferred embed contract '${contract}'`);
 }
-for (const contract of ['id="community-auth"', 'id="community-new-topic"', 'id="community-compose-form"', 'data-forum-category', 'id="community-search"']) {
+for (const contract of ['id="community-new-topic"', '<dialog class="forum-compose"', 'id="community-compose-form"', 'id="community-body-editor"', 'data-forum-category', 'id="community-search"']) {
     assert.ok(communityHtml.includes(contract), `community page must expose compact forum control '${contract}'`);
+}
+for (const contract of ['id="community-topic"', 'id="topic-body"', 'id="topic-replies"', 'data-mapping="number"', 'js/community-topic.js?v=2']) {
+    assert.ok(topicHtml.includes(contract), `topic page must expose dedicated discussion contract '${contract}'`);
+}
+for (const contract of ["normalizeCommunityTopicDetail", "DOMParser", "appendSafeCommunityNode", "COMMUNITY_TOPIC_TAGS", "application/vnd.github.html+json", "mapping: \"number\""]) {
+    assert.ok(topicSource.includes(contract), `community-topic.js must retain safe detail rendering contract '${contract}'`);
 }
 for (const removedLayout of ["community-hero", "community-channel-grid", "subpage-hero"]) {
     assert.equal(communityHtml.includes(removedLayout), false, `community page must not restore the oversized '${removedLayout}' layout`);
 }
 assert.equal(/href="[^"]*\/discussions\/new/.test(communityHtml), false, "the normal new-topic flow must stay in the embedded forum editor");
-assert.doesNotMatch(`${source}\n${giscusSource}`, /\.innerHTML\s*=|\.style(?:\.|\[|\s*=)/, "topic and reply controls must not introduce HTML or inline visual injection");
+assert.doesNotMatch(`${source}\n${topicSource}\n${giscusSource}`, /\.innerHTML\s*=|\.style(?:\.|\[|\s*=)/, "topic and reply controls must not introduce HTML or inline visual injection");
 
-console.log("Community client test passed: compact BBS controls, on-site topic composition, canonical URLs, sharing, filtering, deferred Giscus loading, and verified frame messages.");
+console.log("Community client test passed: modal topic composition, dedicated detail routing, safe rich-body rendering, image support, filtering, sharing, and verified Giscus replies.");
