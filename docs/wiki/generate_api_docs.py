@@ -51,6 +51,9 @@ PROJECT_ROOT = WIKI_ROOT.parent.parent               # Infernux repo root
 WEB_ROOT = PROJECT_ROOT / "docs"
 PYTHON_ROOT = PROJECT_ROOT / "python"
 STUB_ROOT = PYTHON_ROOT / "Infernux"
+DOCUMENTED_RELEASE = json.loads(
+    (WEB_ROOT / "docs-manifest.json").read_text(encoding="utf-8")
+)["documented_release"]
 
 EN_API = DOCS_ROOT / "en" / "api"
 ZH_API = DOCS_ROOT / "zh" / "api"
@@ -92,7 +95,7 @@ I18N = {
     "inherits":             {"en": "Inherits from",         "zh": "继承自"},
     "package":              {"en": "Package",               "zh": "包"},
     "packages":             {"en": "Packages",              "zh": "包"},
-    "version":              {"en": "Version 0.2.1",         "zh": "版本 0.2.1"},
+    "version":              {"en": f"Version {DOCUMENTED_RELEASE}", "zh": f"版本 {DOCUMENTED_RELEASE}"},
     "api_ref_title":        {"en": "Infernux Scripting API", "zh": "Infernux 脚本 API"},
     "api_ref_welcome":      {
         "en": "Welcome to the Infernux Scripting API Reference. Browse packages from the sidebar to see class documentation.",

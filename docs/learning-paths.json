@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "documented_release": "0.2.1",
+  "documented_release": "0.2.9",
   "paths": [
     {
       "id": "first-flight",

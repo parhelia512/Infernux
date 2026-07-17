@@ -5,7 +5,7 @@ category: 学习
 tags: ["入门", "编辑器", "安装"]
 status: preview
 since: "0.2.1"
-last_verified: "2026-07-15"
+last_verified: "2026-07-17"
 audience: ["new-user", "agent"]
 related_api: []
 agent_summary: "安装 Infernux 预览版，创建或打开项目，理解主要编辑器面板，保存场景并进入 Play 模式。"
@@ -14,7 +14,7 @@ source_paths: ["README-zh.md", "packaging", "python/Infernux/engine/ui"]
 
 # 快速开始
 
-这份指南帮助你从一台新机器走到可运行的 Infernux 场景，当前针对 Windows 上的 **0.2.1 预览版**。预览版迭代很快；排查行为差异前，请先确认 Hub 或 Release 页面显示的实际版本。
+这份指南帮助你从一台新机器走到可运行的 Infernux 场景，当前针对 Windows 上的 **0.2.9 预览版**。预览版迭代很快；排查行为差异前，请先确认 Hub 或 Release 页面显示的实际版本。
 
 **预计时间：** 预览版下载完成后 5–10 分钟。
 

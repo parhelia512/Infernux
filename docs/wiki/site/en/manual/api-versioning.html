@@ -29,7 +29,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
     <meta name="referrer" content="strict-origin-when-cross-origin">
-    <meta name="description" content="Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols.">
+    <meta name="description" content="Explain API snapshot immutability, the current 0.2.9 comparison, and how to interpret added, removed, or changed symbols.">
     
     <meta name="theme-color" content="#0a0c11">
     <meta name="color-scheme" content="dark light">
@@ -39,7 +39,7 @@
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="Infernux Engine">
     <meta property="og:title" content="API Versioning and Compatibility - Infernux Documentation">
-    <meta property="og:description" content="Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols.">
+    <meta property="og:description" content="Explain API snapshot immutability, the current 0.2.9 comparison, and how to interpret added, removed, or changed symbols.">
     <meta property="og:url" content="https://infernux-engine.com/wiki/site/en/manual/api-versioning.html">
     <meta property="og:locale" content="en_US">
     <meta property="og:locale:alternate" content="zh_CN">
@@ -48,12 +48,12 @@
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status.">
-    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:modified_time" content="2026-07-17T00:00:00+00:00">
     <meta property="article:section" content="Manual">
     <meta property="article:tag" content="api"><meta property="article:tag" content="version"><meta property="article:tag" content="compatibility"><meta property="article:tag" content="agent">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="API Versioning and Compatibility - Infernux Documentation">
-    <meta name="twitter:description" content="Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols.">
+    <meta name="twitter:description" content="Explain API snapshot immutability, the current 0.2.9 comparison, and how to interpret added, removed, or changed symbols.">
     <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
     <meta name="twitter:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status.">
     <script type="application/ld+json">
@@ -65,7 +65,7 @@
           "@id": "https://infernux-engine.com/wiki/site/en/manual/api-versioning.html#document",
           "headline": "API Versioning and Compatibility",
           "name": "API Versioning and Compatibility",
-          "description": "Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols.",
+          "description": "Explain API snapshot immutability, the current 0.2.9 comparison, and how to interpret added, removed, or changed symbols.",
           "url": "https://infernux-engine.com/wiki/site/en/manual/api-versioning.html",
           "mainEntityOfPage": {
             "@type": "WebPage",
@@ -98,7 +98,7 @@
           },
           "isPartOf": { "@id": "https://infernux-engine.com/#website" },
           "about": { "@id": "https://infernux-engine.com/#software" },
-          "dateModified": "2026-07-15",
+          "dateModified": "2026-07-17",
           "keywords": ["api", "version", "compatibility", "agent"]
         },
         {
@@ -207,11 +207,11 @@
     </nav>
     
                 
-                <section class="doc-provenance" aria-label="Document version and sources" data-status="preview" data-last-verified="2026-07-15">
+                <section class="doc-provenance" aria-label="Document version and sources" data-status="preview" data-last-verified="2026-07-17">
                     <div class="doc-provenance-primary">
                         <strong class="doc-status">preview</strong>
                         <span class="doc-provenance-item"><span>Since</span> 0.2.1</span>
-                        <span class="doc-provenance-item"><span>Verified</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>Verified</span> 2026-07-17</span>
                         <span class="doc-provenance-item"><span>Audience</span> user, agent</span>
                         <a class="doc-provenance-item" href="/docs-manifest.json">Docs manifest</a>
                         
@@ -255,7 +255,7 @@
                 <h1 id="api-versioning-and-compatibility">API Versioning and Compatibility<a class="headerlink" href="#api-versioning-and-compatibility" title="Permanent link">&para;</a></h1>
 <p>The generated API index describes one documented engine release. A compact immutable snapshot records its English symbol keys, kinds, signatures, status, and canonical URLs. The next release is compared with the nearest earlier snapshot.</p>
 <h2 id="current-baseline">Current baseline<a class="headerlink" href="#current-baseline" title="Permanent link">&para;</a></h2>
-<p><code>0.2.1</code> is the first authoritative snapshot. There is no earlier machine-readable API baseline in the repository, so the current comparison correctly reports <code>comparison_available: false</code>. It does not infer history from file dates or commit noise.</p>
+<p><code>0.2.1</code> remains the first authoritative snapshot. The current <code>0.2.9</code> snapshot is compared with that nearest earlier baseline, so <code>api-changes.json</code> reports structural additions, removals, and signature/status changes without inferring history from file dates or commit noise.</p>
 <ul>
 <li><a href="https://infernux-engine.com/api-index.json">Current API index</a></li>
 <li><a href="https://infernux-engine.com/api-changes.json">Machine-readable API changes</a></li>

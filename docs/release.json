@@ -1,13 +1,13 @@
 {
   "schema_version": 2,
-  "version": "0.2.1",
-  "tag": "v0.2.1",
-  "name": "Infernux v0.2.1",
+  "version": "0.2.9",
+  "tag": "v0.2.9",
+  "name": "Infernux v0.2.9",
   "channel": "technical-preview",
-  "published_at": "2026-07-10T15:33:55Z",
+  "published_at": "2026-07-17T00:27:03Z",
   "platforms": ["Windows 10/11 x64"],
   "python_abi": "CPython 3.12 x64",
-  "release_url": "https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.1",
+  "release_url": "https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.9",
   "verification": {
     "checksum_algorithm": "SHA-256",
     "publisher_signature": "not-declared",
@@ -16,17 +16,17 @@
   "assets": [
     {
       "kind": "hub-installer",
-      "name": "InfernuxHubInstaller.exe",
-      "size_bytes": 284507432,
-      "sha256": "31d03e77358a80441658f82c0012f352e23b917d7ae210c2d7a55c7a953231b4",
-      "url": "https://github.com/ChenlizheMe/Infernux/releases/download/v0.2.1/InfernuxHubInstaller.exe"
+      "name": "InfernuxHubInstaller-0.2.9.exe",
+      "size_bytes": 23057408,
+      "sha256": "07706dd846053b7b5023da8db3d0fb32c7a11890f18c18e63e13619ec576360d",
+      "url": "https://github.com/ChenlizheMe/Infernux/releases/download/v0.2.9/InfernuxHubInstaller-0.2.9.exe"
     },
     {
       "kind": "python-wheel",
-      "name": "infernux-0.2.1-cp312-cp312-win_amd64.whl",
-      "size_bytes": 20657224,
-      "sha256": "1873fb30a3b95c1aceb68e814b140526fcedbaaf72da4ca07d43837338670533",
-      "url": "https://github.com/ChenlizheMe/Infernux/releases/download/v0.2.1/infernux-0.2.1-cp312-cp312-win_amd64.whl"
+      "name": "infernux-0.2.9-cp312-cp312-win_amd64.whl",
+      "size_bytes": 122110761,
+      "sha256": "e84fea916affb87dc0ec045ae4433208f96e0f15599900378ba330aa7018b4b7",
+      "url": "https://github.com/ChenlizheMe/Infernux/releases/download/v0.2.9/infernux-0.2.9-cp312-cp312-win_amd64.whl"
     }
   ]
 }

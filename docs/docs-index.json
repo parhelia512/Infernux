@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "generated_for_release": "0.2.1",
+  "generated_for_release": "0.2.9",
   "document_count": 40,
   "documents": [
     {
@@ -288,7 +288,7 @@
       "navigation_order": 6,
       "status": "preview",
       "since": "0.2.1",
-      "last_verified": "2026-07-15",
+      "last_verified": "2026-07-17",
       "audience": [
         "new-user",
         "agent"
@@ -350,7 +350,7 @@
       "navigation_order": 4,
       "status": "preview",
       "since": "0.2.1",
-      "last_verified": "2026-07-15",
+      "last_verified": "2026-07-17",
       "audience": [
         "new-user",
         "agent"
@@ -373,14 +373,14 @@
       "language": "en",
       "layer": "manual",
       "title": "API Versioning and Compatibility",
-      "description": "Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols.",
+      "description": "Explain API snapshot immutability, the current 0.2.9 comparison, and how to interpret added, removed, or changed symbols.",
       "url": "/wiki/site/en/manual/api-versioning.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/en/manual/api-versioning.html",
       "source": "docs/wiki/docs/en/manual/api-versioning.md",
       "navigation_order": 11,
       "status": "preview",
       "since": "0.2.1",
-      "last_verified": "2026-07-15",
+      "last_verified": "2026-07-17",
       "audience": [
         "user",
         "agent"
@@ -392,7 +392,7 @@
         "agent"
       ],
       "related_api": [],
-      "summary": "Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols.",
+      "summary": "Explain API snapshot immutability, the current 0.2.9 comparison, and how to interpret added, removed, or changed symbols.",
       "source_paths": [
         "docs/tools/build-api-diff.mjs",
         "docs/api-snapshots",
@@ -997,7 +997,7 @@
       "navigation_order": 26,
       "status": "preview",
       "since": "0.2.1",
-      "last_verified": "2026-07-15",
+      "last_verified": "2026-07-17",
       "audience": [
         "new-user",
         "agent"
@@ -1059,7 +1059,7 @@
       "navigation_order": 24,
       "status": "preview",
       "since": "0.2.1",
-      "last_verified": "2026-07-15",
+      "last_verified": "2026-07-17",
       "audience": [
         "new-user",
         "agent"
@@ -1082,14 +1082,14 @@
       "language": "zh-CN",
       "layer": "manual",
       "title": "API 版本与兼容性",
-      "description": "解释 API 快照不可变性、机器可读版本比较、当前 0.2.1 基线限制，以及如何理解新增、移除或改变的符号。",
+      "description": "解释 API 快照不可变性、当前 0.2.9 版本比较，以及如何理解新增、移除或改变的符号。",
       "url": "/wiki/site/zh/manual/api-versioning.html",
       "canonical_url": "https://infernux-engine.com/wiki/site/zh/manual/api-versioning.html",
       "source": "docs/wiki/docs/zh/manual/api-versioning.md",
       "navigation_order": 31,
       "status": "preview",
       "since": "0.2.1",
-      "last_verified": "2026-07-15",
+      "last_verified": "2026-07-17",
       "audience": [
         "user",
         "agent"
@@ -1101,7 +1101,7 @@
         "Agent"
       ],
       "related_api": [],
-      "summary": "解释 API 快照不可变性、机器可读版本比较、当前 0.2.1 基线限制，以及如何理解新增、移除或改变的符号。",
+      "summary": "解释 API 快照不可变性、当前 0.2.9 版本比较，以及如何理解新增、移除或改变的符号。",
       "source_paths": [
         "docs/tools/build-api-diff.mjs",
         "docs/api-snapshots",

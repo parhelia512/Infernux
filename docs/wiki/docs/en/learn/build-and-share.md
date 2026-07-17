@@ -5,7 +5,7 @@ category: Learn
 tags: ["beginner", "build", "windows", "release"]
 status: preview
 since: "0.2.1"
-last_verified: "2026-07-15"
+last_verified: "2026-07-17"
 audience: ["new-user", "agent"]
 related_api: []
 agent_summary: "Add saved scenes to Build Settings, configure a Windows standalone player, build it, and verify the result outside the editor."
@@ -14,7 +14,7 @@ source_paths: ["python/Infernux/engine/ui/build_settings_panel.py", "python/Infe
 
 # Build and Share a Project
 
-This tutorial turns the project you tested in the editor into a Windows standalone build. It targets the **0.2.1 preview** build pipeline.
+This tutorial turns the project you tested in the editor into a Windows standalone build. It targets the **0.2.9 preview** build pipeline.
 
 **Estimated time:** 10–20 minutes after build dependencies are available.
 

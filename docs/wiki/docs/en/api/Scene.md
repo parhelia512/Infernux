@@ -36,6 +36,7 @@ A single scene containing GameObjects.
 | `create_from_model(guid: str, name: str = '') → Optional[GameObject]` |  |
 | `get_root_objects() → List[GameObject]` |  |
 | `get_all_objects() → List[GameObject]` |  |
+| `find_objects_with_component(type_name: str) → List[GameObject]` |  |
 | `find(name: str) → Optional[GameObject]` |  |
 | `find_by_id(id: int) → Optional[GameObject]` |  |
 | `resolve_game_object(handle: ObjectHandle) → Optional[GameObject]` |  |
@@ -72,7 +73,7 @@ A single scene containing GameObjects.
 ## Example
 
 <!-- USER CONTENT START --> example
-> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
+> **Example status:** No curated example has been verified for this symbol in 0.2.9. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
 <!-- USER CONTENT END -->
 
 ## See Also

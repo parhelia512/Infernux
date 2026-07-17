@@ -39,7 +39,7 @@ Example::
         speed: float = serialized_field(default=5.0, range=(0, 100))
 
 <!-- USER CONTENT START --> description
-**状态：** Preview · **验证版本：** 0.2.1
+**状态：** Preview · **验证版本：** 0.2.9
 
 每个序列化字段都应保留明确类型标注。元数据用于 Inspector 展示与校验，不能替代对缺失对象或资源引用的运行时检查。
 <!-- USER CONTENT END -->

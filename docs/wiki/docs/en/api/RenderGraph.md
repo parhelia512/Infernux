@@ -62,7 +62,7 @@ A declarative render graph that defines texture resources and render passes.
 ## Example
 
 <!-- USER CONTENT START --> example
-> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
+> **Example status:** No curated example has been verified for this symbol in 0.2.9. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
 <!-- USER CONTENT END -->
 
 ## See Also

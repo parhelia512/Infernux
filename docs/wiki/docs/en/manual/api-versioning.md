@@ -1,14 +1,14 @@
 ---
 title: "API Versioning and Compatibility"
-description: "Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols."
+description: "Explain API snapshot immutability, the current 0.2.9 comparison, and how to interpret added, removed, or changed symbols."
 category: Manual
 tags: ["api", "version", "compatibility", "agent"]
 status: preview
 since: "0.2.1"
-last_verified: "2026-07-15"
+last_verified: "2026-07-17"
 audience: ["user", "agent"]
 related_api: []
-agent_summary: "Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols."
+agent_summary: "Explain API snapshot immutability, the current 0.2.9 comparison, and how to interpret added, removed, or changed symbols."
 source_paths: ["docs/tools/build-api-diff.mjs", "docs/api-snapshots", "docs/api-changes.json", "docs/api-index.json"]
 ---
 
@@ -18,7 +18,7 @@ The generated API index describes one documented engine release. A compact immut
 
 ## Current baseline
 
-`0.2.1` is the first authoritative snapshot. There is no earlier machine-readable API baseline in the repository, so the current comparison correctly reports `comparison_available: false`. It does not infer history from file dates or commit noise.
+`0.2.1` remains the first authoritative snapshot. The current `0.2.9` snapshot is compared with that nearest earlier baseline, so `api-changes.json` reports structural additions, removals, and signature/status changes without inferring history from file dates or commit noise.
 
 - [Current API index](https://infernux-engine.com/api-index.json)
 - [Machine-readable API changes](https://infernux-engine.com/api-changes.json)

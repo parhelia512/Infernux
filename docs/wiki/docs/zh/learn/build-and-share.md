@@ -5,7 +5,7 @@ category: 学习
 tags: ["入门", "构建", "windows", "发布"]
 status: preview
 since: "0.2.1"
-last_verified: "2026-07-15"
+last_verified: "2026-07-17"
 audience: ["new-user", "agent"]
 related_api: []
 agent_summary: "把已保存场景加入 Build Settings，配置 Windows 独立播放器，执行构建，并在编辑器之外验证产物。"
@@ -14,7 +14,7 @@ source_paths: ["python/Infernux/engine/ui/build_settings_panel.py", "python/Infe
 
 # 构建并分享项目
 
-这份教程会把已在编辑器中验证的项目变成 Windows 独立构建，当前针对 **0.2.1 预览版**构建流程。
+这份教程会把已在编辑器中验证的项目变成 Windows 独立构建，当前针对 **0.2.9 预览版**构建流程。
 
 **预计时间：** 构建依赖可用后约 10–20 分钟。
 

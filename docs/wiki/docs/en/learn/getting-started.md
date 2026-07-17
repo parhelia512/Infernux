@@ -5,7 +5,7 @@ category: Learn
 tags: ["beginner", "editor", "installation"]
 status: preview
 since: "0.2.1"
-last_verified: "2026-07-15"
+last_verified: "2026-07-17"
 audience: ["new-user", "agent"]
 related_api: []
 agent_summary: "Install an Infernux preview, create or open a project, identify the main editor panels, save a scene, and enter Play mode."
@@ -14,7 +14,7 @@ source_paths: ["README.md", "packaging", "python/Infernux/engine/ui"]
 
 # Getting Started
 
-This guide gets you from a fresh machine to a running Infernux scene. It targets the **0.2.1 preview** on Windows. Preview builds change quickly, so confirm the version shown by the Hub or release page before diagnosing a mismatch.
+This guide gets you from a fresh machine to a running Infernux scene. It targets the **0.2.9 preview** on Windows. Preview builds change quickly, so confirm the version shown by the Hub or release page before diagnosing a mismatch.
 
 **Estimated time:** 5–10 minutes after the preview download is available.
 

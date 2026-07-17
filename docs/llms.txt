@@ -1,14 +1,14 @@
 # Infernux Agent Documentation Index
 
 Index-Schema: 1
-Documented-Release: 0.2.1
+Documented-Release: 0.2.9
 Release-Status: preview
-Last-Verified: 2026-07-15
+Last-Verified: 2026-07-17
 Curated-Document-Count: 40
 Localized-API-Symbol-Count: 158
 Guidance-Linked-API-Count: 36
 Learning-Path-Count: 1
-Index-Content-SHA256: 1bf12f505734668d08cefbed80e45f855d241d5a0a85a33bf4ffbf15ff7cf680
+Index-Content-SHA256: 3003760368bb32332c4c4396ac6a1f1478adb09661c71187107b98fa4a866305
 Canonical-Site: https://infernux-engine.com
 Repository: https://github.com/ChenlizheMe/Infernux
 License: MIT
@@ -32,18 +32,18 @@ Every Learn, Manual, and Architecture entry below comes from docs-index.json. St
 ### Learn
 
 #### en
-- [Getting Started](https://infernux-engine.com/wiki/site/en/learn/getting-started.html) — Install an Infernux preview, create or open a project, identify the main editor panels, save a scene, and enter Play mode. · status=preview; since=0.2.1; last_verified=2026-07-15
+- [Getting Started](https://infernux-engine.com/wiki/site/en/learn/getting-started.html) — Install an Infernux preview, create or open a project, identify the main editor panels, save a scene, and enter Play mode. · status=preview; since=0.2.1; last_verified=2026-07-17
 - [Your First Component](https://infernux-engine.com/wiki/site/en/learn/first-component.html) — Create an InxComponent Python script, expose a serialized speed field, attach it to a GameObject, and verify lifecycle behavior in Play mode. · status=preview; since=0.2.1; last_verified=2026-07-15
-- [Build and Share a Project](https://infernux-engine.com/wiki/site/en/learn/build-and-share.html) — Add saved scenes to Build Settings, configure a Windows standalone player, build it, and verify the result outside the editor. · status=preview; since=0.2.1; last_verified=2026-07-15
+- [Build and Share a Project](https://infernux-engine.com/wiki/site/en/learn/build-and-share.html) — Add saved scenes to Build Settings, configure a Windows standalone player, build it, and verify the result outside the editor. · status=preview; since=0.2.1; last_verified=2026-07-17
 - [2D Foundations](https://infernux-engine.com/wiki/site/en/learn/2d-foundations.html) — Build a minimal 2D scene with an orthographic Camera, SpriteRenderer, imported texture, predictable world scale, and a frame-rate-independent movement check. · status=preview; since=0.2.1; last_verified=2026-07-15
 - [3D Foundations](https://infernux-engine.com/wiki/site/en/learn/3d-foundations.html) — Build and validate a minimal lit 3D scene using a perspective Camera, MeshRenderer, material, Light, shadows, and RenderStack. · status=preview; since=0.2.1; last_verified=2026-07-15
 - [Animation Workflow](https://infernux-engine.com/wiki/site/en/learn/animation-workflow.html) — Create 2D or 3D animation clips, place them in an .animfsm controller, attach SpiritAnimator or SkeletalAnimator, and verify state, transition, event, and playback behavior. · status=preview; since=0.2.1; last_verified=2026-07-15
 - [Audio Workflow](https://infernux-engine.com/wiki/site/en/learn/audio-workflow.html) — Import a WAV clip, configure one AudioListener and a multi-track AudioSource, test looping and one-shot playback, and diagnose lifetime or spatial attenuation issues. · status=preview; since=0.2.1; last_verified=2026-07-15
 
 #### zh-CN
-- [快速开始](https://infernux-engine.com/wiki/site/zh/learn/getting-started.html) — 安装 Infernux 预览版，创建或打开项目，理解主要编辑器面板，保存场景并进入 Play 模式。 · status=preview; since=0.2.1; last_verified=2026-07-15
+- [快速开始](https://infernux-engine.com/wiki/site/zh/learn/getting-started.html) — 安装 Infernux 预览版，创建或打开项目，理解主要编辑器面板，保存场景并进入 Play 模式。 · status=preview; since=0.2.1; last_verified=2026-07-17
 - [第一个组件](https://infernux-engine.com/wiki/site/zh/learn/first-component.html) — 创建 InxComponent Python 脚本，暴露可序列化速度字段，把它挂到 GameObject，并在 Play 模式验证生命周期。 · status=preview; since=0.2.1; last_verified=2026-07-15
-- [构建并分享项目](https://infernux-engine.com/wiki/site/zh/learn/build-and-share.html) — 把已保存场景加入 Build Settings，配置 Windows 独立播放器，执行构建，并在编辑器之外验证产物。 · status=preview; since=0.2.1; last_verified=2026-07-15
+- [构建并分享项目](https://infernux-engine.com/wiki/site/zh/learn/build-and-share.html) — 把已保存场景加入 Build Settings，配置 Windows 独立播放器，执行构建，并在编辑器之外验证产物。 · status=preview; since=0.2.1; last_verified=2026-07-17
 - [2D 基础](https://infernux-engine.com/wiki/site/zh/learn/2d-foundations.html) — 使用正交 Camera、SpriteRenderer、导入纹理、明确世界尺度和帧率无关移动检查构建最小 2D 场景。 · status=preview; since=0.2.1; last_verified=2026-07-15
 - [3D 基础](https://infernux-engine.com/wiki/site/zh/learn/3d-foundations.html) — 使用透视 Camera、MeshRenderer、材质、Light、阴影与 RenderStack 构建并验证最小受光 3D 场景。 · status=preview; since=0.2.1; last_verified=2026-07-15
 - [动画工作流](https://infernux-engine.com/wiki/site/zh/learn/animation-workflow.html) — 创建 2D 或 3D 动画 Clip，放入 .animfsm 控制器，挂载 SpiritAnimator 或 SkeletalAnimator，并验证状态、过渡、事件与播放行为。 · status=preview; since=0.2.1; last_verified=2026-07-15
@@ -52,7 +52,7 @@ Every Learn, Manual, and Architecture entry below comes from docs-index.json. St
 ### Manual
 
 #### en
-- [API Versioning and Compatibility](https://infernux-engine.com/wiki/site/en/manual/api-versioning.html) — Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols. · status=preview; since=0.2.1; last_verified=2026-07-15
+- [API Versioning and Compatibility](https://infernux-engine.com/wiki/site/en/manual/api-versioning.html) — Explain API snapshot immutability, the current 0.2.9 comparison, and how to interpret added, removed, or changed symbols. · status=preview; since=0.2.1; last_verified=2026-07-17
 - [Assets and `.meta` files](https://infernux-engine.com/wiki/site/en/manual/assets-and-meta.html) — Explain project assets, GUID and path identity, .meta sidecars, typed references, import settings, safe move/delete operations, caching, and runtime loading. · status=preview; since=0.2.1; last_verified=2026-07-15
 - [Debugging and the Console](https://infernux-engine.com/wiki/site/en/manual/debugging.html) — A repeatable Infernux debugging workflow using the Console, Debug logging, lifecycle checks, minimal reproduction, and evidence suitable for GitHub Issues. · status=preview; since=0.2.1; last_verified=2026-07-15
 - [Engine Map](https://infernux-engine.com/wiki/site/en/manual/engine-map.html) — A routing map from common Infernux development tasks to the responsible engine systems and canonical API pages. · status=preview; since=0.2.1; last_verified=2026-07-15
@@ -63,7 +63,7 @@ Every Learn, Manual, and Architecture entry below comes from docs-index.json. St
 - [Screen-space UI](https://infernux-engine.com/wiki/site/en/manual/ui.html) — Explain the screen-space UI hierarchy, Canvas scaling, anchors, text and image layout, button events, hit testing, and current transition limitations. · status=preview; since=0.2.1; last_verified=2026-07-15
 
 #### zh-CN
-- [API 版本与兼容性](https://infernux-engine.com/wiki/site/zh/manual/api-versioning.html) — 解释 API 快照不可变性、机器可读版本比较、当前 0.2.1 基线限制，以及如何理解新增、移除或改变的符号。 · status=preview; since=0.2.1; last_verified=2026-07-15
+- [API 版本与兼容性](https://infernux-engine.com/wiki/site/zh/manual/api-versioning.html) — 解释 API 快照不可变性、当前 0.2.9 版本比较，以及如何理解新增、移除或改变的符号。 · status=preview; since=0.2.1; last_verified=2026-07-17
 - [资源与 `.meta` 文件](https://infernux-engine.com/wiki/site/zh/manual/assets-and-meta.html) — 解释项目资源、GUID 与路径身份、.meta 边车文件、类型化引用、导入设置、安全移动/删除、缓存和运行时加载。 · status=preview; since=0.2.1; last_verified=2026-07-15
 - [调试与 Console](https://infernux-engine.com/wiki/site/zh/manual/debugging.html) — 使用 Console、Debug 日志、生命周期检查、最小复现与 GitHub Issue 证据进行可重复的 Infernux 调试。 · status=preview; since=0.2.1; last_verified=2026-07-15
 - [引擎地图](https://infernux-engine.com/wiki/site/zh/manual/engine-map.html) — 把常见 Infernux 开发任务映射到对应引擎系统与权威 API 页的路由地图。 · status=preview; since=0.2.1; last_verified=2026-07-15
@@ -151,8 +151,8 @@ Use [api-index.json](https://infernux-engine.com/api-index.json) for exhaustive 
 ## Current evidence snapshot
 
 - Documentation health: localized_pages=198; curated_documents=40; localized_api_symbols=158; relationship_edges=112.
-- Release: v0.2.1; channel=technical-preview; published_at=2026-07-10T15:33:55Z; checksum=SHA-256; publisher_signature=not-declared; authority=GitHub Releases.
-- Build provenance: status=stamped; source_commit=2e09cbbdcd13a828d3b6b9be15c5768b85e88384; generated_at=2026-07-16T23:42:21.000Z.
+- Release: v0.2.9; channel=technical-preview; published_at=2026-07-17T00:27:03Z; checksum=SHA-256; publisher_signature=not-declared; authority=GitHub Releases.
+- Build provenance: status=unstamped; source_commit=unstamped; generated_at=unstamped.
 
 ## Agent trust rules
 

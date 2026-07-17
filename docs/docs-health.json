@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "documented_release": "0.2.1",
+  "documented_release": "0.2.9",
   "release_status": "preview",
   "canonical_origin": "https://infernux-engine.com",
   "coverage": {
@@ -25,18 +25,18 @@
     "localized_relationship_edges": 112
   },
   "verification": {
-    "manifest_last_verified": "2026-07-15",
+    "manifest_last_verified": "2026-07-17",
     "curated_oldest": "2026-07-15",
-    "curated_latest": "2026-07-15",
+    "curated_latest": "2026-07-17",
     "curated_missing_dates": 0,
     "freshness_policy_days": 120
   },
   "build": {
-    "status": "stamped",
-    "source_commit": "2e09cbbdcd13a828d3b6b9be15c5768b85e88384",
-    "source_url": "https://github.com/ChenlizheMe/Infernux/commit/2e09cbbdcd13a828d3b6b9be15c5768b85e88384",
-    "generated_at": "2026-07-16T23:42:21.000Z",
-    "timestamp_source": "source-commit"
+    "status": "unstamped",
+    "source_commit": null,
+    "source_url": null,
+    "generated_at": null,
+    "timestamp_source": null
   },
   "sources": {
     "manifest": "/docs-manifest.json",

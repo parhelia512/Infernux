@@ -29,7 +29,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
     <meta name="referrer" content="strict-origin-when-cross-origin">
-    <meta name="description" content="解释 API 快照不可变性、机器可读版本比较、当前 0.2.1 基线限制，以及如何理解新增、移除或改变的符号。">
+    <meta name="description" content="解释 API 快照不可变性、当前 0.2.9 版本比较，以及如何理解新增、移除或改变的符号。">
     
     <meta name="theme-color" content="#0a0c11">
     <meta name="color-scheme" content="dark light">
@@ -39,7 +39,7 @@
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="Infernux Engine">
     <meta property="og:title" content="API 版本与兼容性 - Infernux Documentation">
-    <meta property="og:description" content="解释 API 快照不可变性、机器可读版本比较、当前 0.2.1 基线限制，以及如何理解新增、移除或改变的符号。">
+    <meta property="og:description" content="解释 API 快照不可变性、当前 0.2.9 版本比较，以及如何理解新增、移除或改变的符号。">
     <meta property="og:url" content="https://infernux-engine.com/wiki/site/zh/manual/api-versioning.html">
     <meta property="og:locale" content="zh_CN">
     <meta property="og:locale:alternate" content="en_US">
@@ -48,12 +48,12 @@
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
-    <meta property="article:modified_time" content="2026-07-15T00:00:00+00:00">
+    <meta property="article:modified_time" content="2026-07-17T00:00:00+00:00">
     <meta property="article:section" content="手册">
     <meta property="article:tag" content="API"><meta property="article:tag" content="版本"><meta property="article:tag" content="兼容性"><meta property="article:tag" content="Agent">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="API 版本与兼容性 - Infernux Documentation">
-    <meta name="twitter:description" content="解释 API 快照不可变性、机器可读版本比较、当前 0.2.1 基线限制，以及如何理解新增、移除或改变的符号。">
+    <meta name="twitter:description" content="解释 API 快照不可变性、当前 0.2.9 版本比较，以及如何理解新增、移除或改变的符号。">
     <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
     <meta name="twitter:image:alt" content="Infernux NASA Punk 任务卡，包含编辑器、熔炉标志和技术预览状态。">
     <script type="application/ld+json">
@@ -65,7 +65,7 @@
           "@id": "https://infernux-engine.com/wiki/site/zh/manual/api-versioning.html#document",
           "headline": "API \u7248\u672c\u4e0e\u517c\u5bb9\u6027",
           "name": "API \u7248\u672c\u4e0e\u517c\u5bb9\u6027",
-          "description": "\u89e3\u91ca API \u5feb\u7167\u4e0d\u53ef\u53d8\u6027\u3001\u673a\u5668\u53ef\u8bfb\u7248\u672c\u6bd4\u8f83\u3001\u5f53\u524d 0.2.1 \u57fa\u7ebf\u9650\u5236\uff0c\u4ee5\u53ca\u5982\u4f55\u7406\u89e3\u65b0\u589e\u3001\u79fb\u9664\u6216\u6539\u53d8\u7684\u7b26\u53f7\u3002",
+          "description": "\u89e3\u91ca API \u5feb\u7167\u4e0d\u53ef\u53d8\u6027\u3001\u5f53\u524d 0.2.9 \u7248\u672c\u6bd4\u8f83\uff0c\u4ee5\u53ca\u5982\u4f55\u7406\u89e3\u65b0\u589e\u3001\u79fb\u9664\u6216\u6539\u53d8\u7684\u7b26\u53f7\u3002",
           "url": "https://infernux-engine.com/wiki/site/zh/manual/api-versioning.html",
           "mainEntityOfPage": {
             "@type": "WebPage",
@@ -98,7 +98,7 @@
           },
           "isPartOf": { "@id": "https://infernux-engine.com/#website" },
           "about": { "@id": "https://infernux-engine.com/#software" },
-          "dateModified": "2026-07-15",
+          "dateModified": "2026-07-17",
           "keywords": ["API", "\u7248\u672c", "\u517c\u5bb9\u6027", "Agent"]
         },
         {
@@ -207,11 +207,11 @@
     </nav>
     
                 
-                <section class="doc-provenance" aria-label="文档版本与来源" data-status="preview" data-last-verified="2026-07-15">
+                <section class="doc-provenance" aria-label="文档版本与来源" data-status="preview" data-last-verified="2026-07-17">
                     <div class="doc-provenance-primary">
                         <strong class="doc-status">preview</strong>
                         <span class="doc-provenance-item"><span>始于</span> 0.2.1</span>
-                        <span class="doc-provenance-item"><span>已验证</span> 2026-07-15</span>
+                        <span class="doc-provenance-item"><span>已验证</span> 2026-07-17</span>
                         <span class="doc-provenance-item"><span>读者</span> user, agent</span>
                         <a class="doc-provenance-item" href="/docs-manifest.json">文档清单</a>
                         
@@ -255,7 +255,7 @@
                 <h1 id="api">API 版本与兼容性<a class="headerlink" href="#api" title="Permanent link">&para;</a></h1>
 <p>生成的 API 索引描述一个已记录引擎版本。紧凑且不可变的快照保存英文符号键、类型、签名、状态与 canonical URL；下一版本与最近的更早快照比较。</p>
 <h2 id="_1">当前基线<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
-<p><code>0.2.1</code> 是第一个权威快照。仓库中没有更早的机器可读 API 基线，因此当前比较会正确报告 <code>comparison_available: false</code>，不会根据文件日期或提交噪声猜测历史。</p>
+<p><code>0.2.1</code> 仍是第一份权威快照。当前 <code>0.2.9</code> 快照会和这份最近的旧基线比较，因此 <code>api-changes.json</code> 可以报告结构上的新增、移除和签名/状态变化，而不会根据文件日期或提交噪声猜测历史。</p>
 <ul>
 <li><a href="https://infernux-engine.com/api-index.json">当前 API 索引</a></li>
 <li><a href="https://infernux-engine.com/api-changes.json">机器可读 API 变更</a></li>

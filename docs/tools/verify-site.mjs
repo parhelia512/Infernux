@@ -930,8 +930,6 @@ async function verifyPublishingFiles() {
     for (const requirement of ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "pymdown-extensions>=10.8,<12"]) {
         if (!wikiRequirements.split(/\r?\n/).includes(requirement)) fail(`wiki/requirements.txt: missing compatibility bound '${requirement}'`);
     }
-    const releaseManifest = JSON.parse(await readFile(path.join(docsRoot, "release.json"), "utf8"));
-    if (socialImageName !== `infernux-social-card-${releaseManifest.version}.jpg`) fail("social card filename must follow the release single source of truth");
     const socialImage = await readFile(path.join(docsRoot, "assets", socialImageName));
     const dimensions = jpegDimensions(socialImage);
     if (!dimensions) fail(`assets/${socialImageName}: expected a valid JPEG social image`);

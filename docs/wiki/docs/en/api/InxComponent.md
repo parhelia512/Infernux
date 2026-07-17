@@ -26,7 +26,7 @@ Example::
             )
 
 <!-- USER CONTENT START --> description
-**Status:** Preview · **Verified with:** 0.2.1
+**Status:** Preview · **Verified with:** 0.2.9
 
 Use this base for project gameplay components. Read [Your First Component](../learn/first-component.md) before relying on the lifecycle table alone.
 <!-- USER CONTENT END -->

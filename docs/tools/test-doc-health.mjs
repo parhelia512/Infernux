@@ -16,7 +16,7 @@ new vm.Script(source, { filename: "docs-health.js" }).runInContext(sandbox);
 const normalize = sandbox.__infernuxDocsHealth?.normalizeDocsHealth;
 assert.equal(typeof normalize, "function");
 const model = normalize(health, new Date("2026-07-15T12:00:00Z"));
-assert.equal(model.release, "0.2.1");
+assert.equal(model.release, health.documented_release);
 assert.equal(model.curatedDocuments, 40);
 assert.equal(model.apiSymbols, 158);
 assert.equal(model.localizedPages, 198);

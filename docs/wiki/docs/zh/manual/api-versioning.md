@@ -1,14 +1,14 @@
 ---
 title: "API 版本与兼容性"
-description: "解释 API 快照不可变性、机器可读版本比较、当前 0.2.1 基线限制，以及如何理解新增、移除或改变的符号。"
+description: "解释 API 快照不可变性、当前 0.2.9 版本比较，以及如何理解新增、移除或改变的符号。"
 category: 手册
 tags: ["API", "版本", "兼容性", "Agent"]
 status: preview
 since: "0.2.1"
-last_verified: "2026-07-15"
+last_verified: "2026-07-17"
 audience: ["user", "agent"]
 related_api: []
-agent_summary: "解释 API 快照不可变性、机器可读版本比较、当前 0.2.1 基线限制，以及如何理解新增、移除或改变的符号。"
+agent_summary: "解释 API 快照不可变性、当前 0.2.9 版本比较，以及如何理解新增、移除或改变的符号。"
 source_paths: ["docs/tools/build-api-diff.mjs", "docs/api-snapshots", "docs/api-changes.json", "docs/api-index.json"]
 ---
 
@@ -18,7 +18,7 @@ source_paths: ["docs/tools/build-api-diff.mjs", "docs/api-snapshots", "docs/api-
 
 ## 当前基线
 
-`0.2.1` 是第一个权威快照。仓库中没有更早的机器可读 API 基线，因此当前比较会正确报告 `comparison_available: false`，不会根据文件日期或提交噪声猜测历史。
+`0.2.1` 仍是第一份权威快照。当前 `0.2.9` 快照会和这份最近的旧基线比较，因此 `api-changes.json` 可以报告结构上的新增、移除和签名/状态变化，而不会根据文件日期或提交噪声猜测历史。
 
 - [当前 API 索引](https://infernux-engine.com/api-index.json)
 - [机器可读 API 变更](https://infernux-engine.com/api-changes.json)

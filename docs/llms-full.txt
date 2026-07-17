@@ -1,14 +1,14 @@
 # Infernux Full Documentation Corpus
 
 Corpus-Schema: 1
-Documented-Release: 0.2.1
+Documented-Release: 0.2.9
 Release-Status: preview
-Last-Verified: 2026-07-15
+Last-Verified: 2026-07-17
 Curated-Document-Count: 40
 Learning-Path-Count: 1
 Localized-API-Symbol-Count: 158
 Documentation-Health-Schema: 1
-Corpus-Content-SHA256: c79607cd9807bc531d23ba76e9de8bcfd37de787a1cda5fb86f678370c8644c6
+Corpus-Content-SHA256: b54d311e5d21c0997090e875b7e07d66a2fd451874cefcf625c3be5ebc33615c
 Canonical-Site: https://infernux-engine.com
 Repository: https://github.com/ChenlizheMe/Infernux
 
@@ -33,46 +33,65 @@ Localized-API-Symbols: 158
 Status-Counts: stable=2, preview=194, experimental=2, deprecated=0
 Curated-API-Examples: 28
 Localized-Relationship-Edges: 112
-Verification-Window: 2026-07-15..2026-07-15
+Verification-Window: 2026-07-15..2026-07-17
 Freshness-Policy-Days: 120
-Build-Provenance: stamped 2e09cbbdcd13a828d3b6b9be15c5768b85e88384
+Build-Provenance: unstamped
 Canonical-Health-Report: https://infernux-engine.com/docs-health.json
 
 ## Current release notes
 
-<!-- RELEASE 0.2.1 START -->
-Release: v0.2.1
-Published-At: 2026-07-10T15:33:55Z
+<!-- RELEASE 0.2.9 START -->
+Release: v0.2.9
+Published-At: 2026-07-17T00:27:03Z
 Source: UpdateLog.md
-Comparison: 0.2.0...0.2.1
-Comparison-URL: https://github.com/ChenlizheMe/Infernux/compare/v0.2.0...v0.2.1
-Summary: This is a focused stability and release-pipeline update after v0.2.0. It fixes the inline material preview path that could break when inspecting or creating SpriteRenderer materials, reduces noisy MeshCollider diagnostics, and makes the GitHub release workflow produce the Windows wheel and Hub installer from the same tagged version line.
+Comparison: 0.2.1...0.2.9
+Comparison-URL: https://github.com/ChenlizheMe/Infernux/compare/v0.2.1...v0.2.9
+Summary: This preview is the first large architecture update after v0.2.1. It rebuilds the scene, asset, rendering, physics, editor, automation, and distribution paths around stricter native data ownership while keeping Python as the public gameplay and tooling layer. It also adds new VFX, capture, build, and agent-facing workflows instead of being an MCP-only release.
 
-### Editor and material preview fixes
-- Fixed inline material preview crashes when the Inspector needed to render an unsaved or scene-local material preview from JSON instead of a .mat file on disk.
-- Updated the Python preview callsite to match the unified C++ material-preview bridge, removing a stale resource_key argument that no longer belonged in the inline preview API.
-- Improved SpriteRenderer material inspection stability by letting inline previews resolve through the current path-hint based preview flow instead of an older mixed key/path call.
+### Scene data, serialization, and asset pipeline
+- Introduced typed Scene and Component documents with stable object/component identities, strict validation, Python value codecs, missing-script recovery, and transactional publication or rollback.
+- Added native atomic document storage and asynchronous scene reads, including dependency preflight, owner-thread commit boundaries, prefab-safe reference remapping, and stronger undo reconstruction.
+- Reworked the AssetDatabase around indexed records and dependency tracking, with coordinated imports, artifact-backed meshes/textures/skinned meshes, safer rename/delete handling, and stable material and physical-material references.
+- Improved runtime isolation and Play Mode transitions. Entering Play now refreshes the Python scripting domain without rebuilding an unchanged native graph; Stop restores the complete authored snapshot through the transaction path.
 
-### Physics and runtime cleanup
-- Reduced MeshCollider log noise by silencing high-frequency shape/cooking info logs that were useful while debugging collision generation but too chatty for normal editor and runtime sessions.
+### Rendering, VFX, and capture
+- Expanded the render graph and RHI boundaries with explicit upload/residency accounting, asynchronous transfer publication, transient resource tracking, multi-camera state, and clearer ScriptableRenderContext contracts.
+- Reworked material, texture, mesh, and preview lifetime management, fixing stale previews, descriptor pressure, delayed Inspector updates, and resource replacement races.
+- Added the first VFX Graph and particle runtime, including typed VFX assets, compiler validation, renderer submission, and scene/game camera support.
+- Added engine-native capture paths for the full editor, individual editor views, and game cameras. Capture does not depend on Windows screen APIs and remains compatible with hidden/headless rendering.
+- Removed compute-shader authoring support. Parallel compute is intentionally routed toward external Python-compatible backends instead of extending the old compute-shader path.
 
-### GitHub Release and packaging automation
-- GitHub Releases now use UpdateLog.md as the release body, so the release notes are authored intentionally instead of relying only on auto-generated PR summaries.
-- The version workflow now rebuilds when UpdateLog.md changes or when the target release is missing, making patch-release publishing less fragile.
-- Windows release assets now include both artifacts from CI: the CPython 3.12 Windows wheel and InfernuxHubInstaller.exe.
-- The publish job verifies required assets before editing or creating the release, preventing an incomplete release from being marked latest.
-- Hub installer CI dependencies were fixed by installing the PyInstaller/PySide6/Pillow build requirements in the Windows workflow and removing a stale hidden import from the Hub spec.
+### Physics and large-scene performance
+- Moved transform, component, and physics state toward contiguous native stores, with generation-safe handles, batched transform synchronization, deferred collider creation, and Jolt batch broadphase publication.
+- Expanded collider and Rigidbody correctness, including physical materials, scene reload/rebinding behavior, contact lifecycle fixes, mesh cooking, runtime force delivery, and stricter serialized validation.
+- Improved large-scene rendering and simulation stability through cached scene queries, render submission batching, static/dynamic body handling, and reduced Python/native round trips.
+- PerformanceLab Play/Stop no longer rebuilds 10,000 unchanged native objects on entry. Measured internal transition cost fell from roughly 1.21s / 0.79s to 0.43s / 0.59s for Play/Stop, with repeated 10,001-collider cycles producing no runtime errors.
 
-### Version, docs, and metadata
-- Bumped project metadata to 0.2.1 in pyproject.toml, Windows version resources, README badges, docs pages, MCP project metadata, and generated API index pages.
-- Updated Hub version-manager examples so downloaded engine wheels are documented under the 0.2.1 cache layout.
-- Refreshed website and roadmap text so public project pages point at the current release line instead of 0.2.0.
+### Editor and runtime UI
+- Unified dirty-document, Save, Save As, close, and exit confirmation behavior across scenes and asset editors, including focused-panel Ctrl+S, native file dialogs for people, and explicit paths for agent operations.
+- Improved Project, Inspector, Console, Hierarchy, menus, and window state, with native fast paths, cached plans, better focus/close interception, semantic control metadata, and lower per-frame polling overhead.
+- Expanded Unity-style Screen UI behavior, including Canvas collection caches, persistent Button event targets, first-click Game View focus, runtime input routing, and editor-visible interaction semantics.
+- Cached stable Screen UI rectangles and GPU command packets. SystemsLab increased from about 150 FPS to 265 FPS in the packaged Release wheel while retaining invalidation for text, geometry, and button-state changes.
+- Improved animation, timeline, node graph, and VFX editor consistency, including shared graph interaction behavior, corrected timeline preview/runtime paths, and more predictable document switching.
 
-### Upgrade notes
-- Install the new Windows wheel or Hub installer from this release if you hit Inspector material-preview failures in v0.2.0.
-- Restart the editor after upgrading so the native preview bridge, Python UI layer, and MCP version metadata are all loaded from the same 0.2.1 package.
-- If you maintain release automation for a fork, keep UpdateLog.md present and non-empty; the workflow now treats it as the canonical GitHub Release body.
-<!-- RELEASE 0.2.1 END -->
+### Python API and agent validation
+- Kept Python as the public engine surface while tightening C++ ownership. Public stubs, component identity, references, render APIs, physics settings, and parallel-backend contracts were expanded and validated.
+- Added a two-mode MCP workflow for developer assistance and global validation, with semantic editor controls, deterministic input injection, frame/time-bounded runtime actions, transactions, checkpoints, blocker reports, and executable API guidance.
+- Agent control remains editor-side. MCP is not exported into built games; player validation is launched and supervised from the editor so release games do not carry the development service.
+- Added logic-first automated validation and optional recording/capture artifacts so agents can reproduce editor and gameplay workflows while human reviewers retain visual evidence.
+
+### Build and distribution
+- Release presets now enforce the packaged runtime path, clean Python build artifacts and source metadata, verify native wheel payloads, and build the Windows launcher with Release LTO/IPO.
+- Added a wheel-distributed Player Runtime Pack so projects do not compile Nuitka dependencies on first use. Core and optional parallel modules are staged as Deflate-compressed archives and expanded only when required.
+- Reorganized game exports around a native launcher, private engine runtime, public data directory, and compressed Content.inxpkg instead of exposing the source package layout directly.
+- Parallel support is prepared by Release builds by default but included in a game only when its build settings require the independent Numba/LLVM module.
+
+### Preview notes
+- This release is a 0.3.0 preview, not the final stable release. Scene/component documents, runtime packs, VFX, and MCP contracts are substantially newer than v0.2.1 and should be tested on copies of important projects.
+- Compute shaders are no longer accepted by the public shader API; use graphics shader stages or an external parallel backend.
+- Restart the editor after installing a newly built wheel so Python modules, native bindings, and runtime-pack metadata come from the same build.
+- Current verification: Release preset build succeeded, the packaged wheel passed SystemsLab and PerformanceLab validation, and the repository test suite completed with 1938 passed, 1 skipped.
+<!-- RELEASE 0.2.9 END -->
 
 ## Learning paths
 
@@ -1105,7 +1124,7 @@ Document-ID: en.learn.build-and-share
 Layer: learn
 Status: preview
 Since: 0.2.1
-Last-Verified: 2026-07-15
+Last-Verified: 2026-07-17
 Audience: new-user, agent
 Tags: beginner, build, windows, release
 Related-API: none
@@ -1116,7 +1135,7 @@ Agent-Summary: Add saved scenes to Build Settings, configure a Windows standalon
 
 # Build and Share a Project
 
-This tutorial turns the project you tested in the editor into a Windows standalone build. It targets the **0.2.1 preview** build pipeline.
+This tutorial turns the project you tested in the editor into a Windows standalone build. It targets the **0.2.9 preview** build pipeline.
 
 **Estimated time:** 10–20 minutes after build dependencies are available.
 
@@ -1339,7 +1358,7 @@ Document-ID: en.learn.getting-started
 Layer: learn
 Status: preview
 Since: 0.2.1
-Last-Verified: 2026-07-15
+Last-Verified: 2026-07-17
 Audience: new-user, agent
 Tags: beginner, editor, installation
 Related-API: none
@@ -1350,7 +1369,7 @@ Agent-Summary: Install an Infernux preview, create or open a project, identify t
 
 # Getting Started
 
-This guide gets you from a fresh machine to a running Infernux scene. It targets the **0.2.1 preview** on Windows. Preview builds change quickly, so confirm the version shown by the Hub or release page before diagnosing a mismatch.
+This guide gets you from a fresh machine to a running Infernux scene. It targets the **0.2.9 preview** on Windows. Preview builds change quickly, so confirm the version shown by the Hub or release page before diagnosing a mismatch.
 
 **Estimated time:** 5–10 minutes after the preview download is available.
 
@@ -1437,14 +1456,14 @@ Document-ID: en.manual.api-versioning
 Layer: manual
 Status: preview
 Since: 0.2.1
-Last-Verified: 2026-07-15
+Last-Verified: 2026-07-17
 Audience: user, agent
 Tags: api, version, compatibility, agent
 Related-API: none
 Canonical-URL: https://infernux-engine.com/wiki/site/en/manual/api-versioning.html
 Repository-Source: docs/wiki/docs/en/manual/api-versioning.md
 Evidence-Sources: docs/tools/build-api-diff.mjs, docs/api-snapshots, docs/api-changes.json, docs/api-index.json
-Agent-Summary: Explain API snapshot immutability, machine-readable version comparisons, current 0.2.1 baseline limits, and how to interpret added, removed, or changed symbols.
+Agent-Summary: Explain API snapshot immutability, the current 0.2.9 comparison, and how to interpret added, removed, or changed symbols.
 
 # API Versioning and Compatibility
 
@@ -1452,7 +1471,7 @@ The generated API index describes one documented engine release. A compact immut
 
 ## Current baseline
 
-`0.2.1` is the first authoritative snapshot. There is no earlier machine-readable API baseline in the repository, so the current comparison correctly reports `comparison_available: false`. It does not infer history from file dates or commit noise.
+`0.2.1` remains the first authoritative snapshot. The current `0.2.9` snapshot is compared with that nearest earlier baseline, so `api-changes.json` reports structural additions, removals, and signature/status changes without inferring history from file dates or commit noise.
 
 - [Current API index](https://infernux-engine.com/api-index.json)
 - [Machine-readable API changes](https://infernux-engine.com/api-changes.json)
@@ -3511,7 +3530,7 @@ Document-ID: zh.learn.build-and-share
 Layer: learn
 Status: preview
 Since: 0.2.1
-Last-Verified: 2026-07-15
+Last-Verified: 2026-07-17
 Audience: new-user, agent
 Tags: 入门, 构建, windows, 发布
 Related-API: none
@@ -3522,7 +3541,7 @@ Agent-Summary: 把已保存场景加入 Build Settings，配置 Windows 独立�
 
 # 构建并分享项目
 
-这份教程会把已在编辑器中验证的项目变成 Windows 独立构建，当前针对 **0.2.1 预览版**构建流程。
+这份教程会把已在编辑器中验证的项目变成 Windows 独立构建，当前针对 **0.2.9 预览版**构建流程。
 
 **预计时间：** 构建依赖可用后约 10–20 分钟。
 
@@ -3745,7 +3764,7 @@ Document-ID: zh.learn.getting-started
 Layer: learn
 Status: preview
 Since: 0.2.1
-Last-Verified: 2026-07-15
+Last-Verified: 2026-07-17
 Audience: new-user, agent
 Tags: 入门, 编辑器, 安装
 Related-API: none
@@ -3756,7 +3775,7 @@ Agent-Summary: 安装 Infernux 预览版，创建或打开项目，理解主要�
 
 # 快速开始
 
-这份指南帮助你从一台新机器走到可运行的 Infernux 场景，当前针对 Windows 上的 **0.2.1 预览版**。预览版迭代很快；排查行为差异前，请先确认 Hub 或 Release 页面显示的实际版本。
+这份指南帮助你从一台新机器走到可运行的 Infernux 场景，当前针对 Windows 上的 **0.2.9 预览版**。预览版迭代很快；排查行为差异前，请先确认 Hub 或 Release 页面显示的实际版本。
 
 **预计时间：** 预览版下载完成后 5–10 分钟。
 
@@ -3843,14 +3862,14 @@ Document-ID: zh.manual.api-versioning
 Layer: manual
 Status: preview
 Since: 0.2.1
-Last-Verified: 2026-07-15
+Last-Verified: 2026-07-17
 Audience: user, agent
 Tags: API, 版本, 兼容性, Agent
 Related-API: none
 Canonical-URL: https://infernux-engine.com/wiki/site/zh/manual/api-versioning.html
 Repository-Source: docs/wiki/docs/zh/manual/api-versioning.md
 Evidence-Sources: docs/tools/build-api-diff.mjs, docs/api-snapshots, docs/api-changes.json, docs/api-index.json
-Agent-Summary: 解释 API 快照不可变性、机器可读版本比较、当前 0.2.1 基线限制，以及如何理解新增、移除或改变的符号。
+Agent-Summary: 解释 API 快照不可变性、当前 0.2.9 版本比较，以及如何理解新增、移除或改变的符号。
 
 # API 版本与兼容性
 
@@ -3858,7 +3877,7 @@ Agent-Summary: 解释 API 快照不可变性、机器可读版本比较、当前
 
 ## 当前基线
 
-`0.2.1` 是第一个权威快照。仓库中没有更早的机器可读 API 基线，因此当前比较会正确报告 `comparison_available: false`，不会根据文件日期或提交噪声猜测历史。
+`0.2.1` 仍是第一份权威快照。当前 `0.2.9` 快照会和这份最近的旧基线比较，因此 `api-changes.json` 可以报告结构上的新增、移除和签名/状态变化，而不会根据文件日期或提交噪声猜测历史。
 
 - [当前 API 索引](https://infernux-engine.com/api-index.json)
 - [机器可读 API 变更](https://infernux-engine.com/api-changes.json)
@@ -5086,6 +5105,7 @@ Signatures:
 - create_from_model(guid: str, name: str = '') → Optional[GameObject]
 - get_root_objects() → List[GameObject]
 - get_all_objects() → List[GameObject]
+- find_objects_with_component(type_name: str) → List[GameObject]
 - find(name: str) → Optional[GameObject]
 - find_by_id(id: int) → Optional[GameObject]
 - resolve_game_object(handle: ObjectHandle) → Optional[GameObject]
@@ -7220,6 +7240,7 @@ Signatures:
 - create_from_model(guid: str, name: str = '') → Optional[GameObject]
 - get_root_objects() → List[GameObject]
 - get_all_objects() → List[GameObject]
+- find_objects_with_component(type_name: str) → List[GameObject]
 - find(name: str) → Optional[GameObject]
 - find_by_id(id: int) → Optional[GameObject]
 - resolve_game_object(handle: ObjectHandle) → Optional[GameObject]
