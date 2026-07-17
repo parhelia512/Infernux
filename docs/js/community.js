@@ -1,13 +1,10 @@
 const COMMUNITY_PAGE_SIZE = 20;
-const COMMUNITY_API = `https://api.github.com/repos/ChenlizheMe/Infernux/discussions?per_page=${COMMUNITY_PAGE_SIZE}&sort=updated&direction=desc`;
-const COMMUNITY_CACHE_KEY = "infernux-community-feed-v1";
-const COMMUNITY_CACHE_VERSION = 3;
-const COMMUNITY_CACHE_TTL_MS = 5 * 60 * 1000;
+const COMMUNITY_FALLBACK_API = `https://api.github.com/repos/ChenlizheMe/Infernux/discussions?per_page=${COMMUNITY_PAGE_SIZE}&sort=updated&direction=desc`;
+const COMMUNITY_CACHE_KEY = "infernux-community-feed-v2";
+const COMMUNITY_CACHE_VERSION = 4;
+const COMMUNITY_CACHE_TTL_MS = 15 * 60 * 1000;
 const COMMUNITY_REQUEST_TIMEOUT_MS = 10000;
-const GISCUS_OPT_IN_KEY = "infernux-giscus-opt-in-v1";
-const GISCUS_CONTROLLER_ID = "community-giscus-controller";
-const GISCUS_CONTROLLER_SRC = "/js/community-giscus.js?v=3";
-const COMMUNITY_LOBBY_TERM = "Infernux Community Lobby";
+const COMMUNITY_DRAFT_KEY = "infernux-community-draft-v1";
 const COMMUNITY_CATEGORIES = Object.freeze({
     announcements: Object.freeze({ name: "Announcements", id: "DIC_kwDOO_wV3M4C5oaB" }),
     general: Object.freeze({ name: "General", id: "DIC_kwDOO_wV3M4C5oaC" }),
@@ -26,7 +23,9 @@ let communityState = "";
 let communitySort = "updated";
 let communityNextPage = 1;
 let activeCommunityRequest = null;
-let giscusControllerPromise = null;
+let communityUser = null;
+let communityPublishing = false;
+let communityLastError = null;
 
 function communityLanguage() {
     return document.documentElement.lang?.toLowerCase().startsWith("zh") ? "zh" : "en";
@@ -35,7 +34,9 @@ function communityLanguage() {
 function communityCopy(key) {
     const copy = {
         en: {
-            error: "The live relay is unavailable or rate-limited.",
+            error: "Topics could not be loaded.",
+            anonymousRate: "GitHub's anonymous quota for this network is exhausted",
+            resetAt: "resets",
             open: "Open Discussions on GitHub",
             empty: "No public discussions yet. Start the first topic.",
             emptyFiltered: "No topics match these filters.",
@@ -48,8 +49,10 @@ function communityCopy(key) {
             shareLink: "Share discussion",
             sharedLink: "Shared discussion",
             copyFailed: "Could not copy the discussion link. Open it and use your browser's share controls.",
-            sourceLive: "GitHub live data",
-            sourceCache: "5-minute session cache",
+            sourceLive: "authenticated GitHub data",
+            sourcePublic: "forum service",
+            sourceDirect: "direct GitHub fallback",
+            sourceCache: "15-minute device cache",
             sourceStale: "stale cache · refresh unavailable",
             sourcePartial: "topics retained · older page unavailable",
             sourceLoading: "contacting GitHub",
@@ -69,22 +72,24 @@ function communityCopy(key) {
             sortReplies: "Most replies",
             sortReactions: "Most reactions",
             feedNav: "Discussion feed navigation",
-            giscusStandbyTitle: "Preparing the post editor…",
-            giscusStandbyDetail: "Write the topic body and add images below.",
-            giscusControllerErrorTitle: "Reply controls could not be loaded.",
-            giscusControllerErrorDetail: "The local Giscus controller is unavailable. Retry or continue on GitHub.",
-            giscusOpen: "Open Discussions",
-            giscusInstall: "Install Giscus",
-            giscusLoad: "Load replies",
-            composeMissingTitle: "Enter a topic title before opening the editor.",
-            composeOpening: "Opening the embedded editor…",
-            composeReady: "The body editor is ready. Write the post and add images below.",
-            composeFailed: "The embedded editor could not be opened. Try again in a moment.",
+            composeMissingTitle: "Enter a topic title.",
+            composeMissingBody: "Write the topic body before publishing.",
+            composeSignIn: "Sign in with GitHub before publishing this topic.",
+            composePublishing: "Publishing topic…",
+            composeFailed: "The topic could not be published. Your draft is still here.",
+            uploadStarted: "Uploading image…",
+            uploadDone: "Image added to the topic body.",
+            uploadFailed: "The image could not be uploaded.",
+            uploadInvalid: "Use a PNG, JPEG, GIF, or WebP image no larger than 5 MiB.",
+            signedOut: "Sign in to publish topics with your own GitHub account.",
+            sessionUnavailable: "The forum sign-in service is unavailable.",
             closeEditor: "Close editor",
             refreshTopics: "Refresh topics",
         },
         zh: {
-            error: "实时话题暂时不可用，或已达到 GitHub API 频率限制。",
+            error: "暂时无法加载话题。",
+            anonymousRate: "当前网络的 GitHub 匿名请求额度已用完",
+            resetAt: "恢复于",
             open: "前往 GitHub Discussions",
             empty: "还没有公开话题，来创建第一个讨论吧。",
             emptyFiltered: "没有符合当前筛选条件的话题。",
@@ -97,8 +102,10 @@ function communityCopy(key) {
             shareLink: "分享讨论",
             sharedLink: "已分享讨论",
             copyFailed: "无法复制讨论链接，请打开话题并使用浏览器的分享功能。",
-            sourceLive: "GitHub 实时数据",
-            sourceCache: "五分钟会话缓存",
+            sourceLive: "登录用户的 GitHub 数据",
+            sourcePublic: "论坛服务",
+            sourceDirect: "GitHub 直连备用路径",
+            sourceCache: "十五分钟设备缓存",
             sourceStale: "过期缓存 · 暂时无法刷新",
             sourcePartial: "已保留当前话题 · 更早页面暂不可用",
             sourceLoading: "正在连接 GitHub",
@@ -118,17 +125,17 @@ function communityCopy(key) {
             sortReplies: "回复最多",
             sortReactions: "reaction 最多",
             feedNav: "讨论列表导航",
-            giscusStandbyTitle: "正在准备正文编辑器……",
-            giscusStandbyDetail: "在下方编写话题正文并插入图片。",
-            giscusControllerErrorTitle: "无法加载回复控制器。",
-            giscusControllerErrorDetail: "本站的 Giscus 控制器暂不可用，请重试或前往 GitHub。",
-            giscusOpen: "前往 Discussions",
-            giscusInstall: "安装 Giscus",
-            giscusLoad: "加载回复",
-            composeMissingTitle: "请先输入话题标题，再打开编辑器。",
-            composeOpening: "正在打开站内编辑器……",
-            composeReady: "正文编辑器已就绪，可以在下方编写内容并插入图片。",
-            composeFailed: "暂时无法打开站内编辑器，请稍后重试。",
+            composeMissingTitle: "请输入话题标题。",
+            composeMissingBody: "发布前请填写话题正文。",
+            composeSignIn: "发布话题前请先登录 GitHub。",
+            composePublishing: "正在发布话题……",
+            composeFailed: "话题发布失败，草稿仍保留在这里。",
+            uploadStarted: "正在上传图片……",
+            uploadDone: "图片已插入话题正文。",
+            uploadFailed: "图片上传失败。",
+            uploadInvalid: "请选择不超过 5 MiB 的 PNG、JPEG、GIF 或 WebP 图片。",
+            signedOut: "登录后将以你自己的 GitHub 账号发布话题。",
+            sessionUnavailable: "论坛登录服务暂时不可用。",
             closeEditor: "关闭编辑器",
             refreshTopics: "刷新话题",
         }
@@ -340,7 +347,7 @@ function sortCommunityTopics(topics, sort = communitySort) {
 
 function readCommunityCache() {
     try {
-        const record = JSON.parse(sessionStorage.getItem(COMMUNITY_CACHE_KEY) || "null");
+        const record = JSON.parse(localStorage.getItem(COMMUNITY_CACHE_KEY) || "null");
         if (record?.version !== COMMUNITY_CACHE_VERSION || !Number.isFinite(record.storedAt)) return null;
         const topics = normalizeCommunityTopics(record.topics);
         if (!Array.isArray(record.topics) || topics.length !== record.topics.length) return null;
@@ -354,7 +361,7 @@ function readCommunityCache() {
 
 function writeCommunityCache(topics, nextPage = communityNextPage) {
     try {
-        sessionStorage.setItem(COMMUNITY_CACHE_KEY, JSON.stringify({
+        localStorage.setItem(COMMUNITY_CACHE_KEY, JSON.stringify({
             version: COMMUNITY_CACHE_VERSION,
             storedAt: Date.now(),
             topics,
@@ -362,103 +369,6 @@ function writeCommunityCache(topics, nextPage = communityNextPage) {
         }));
     } catch {
         // Storage can be unavailable in privacy modes; the public feed still works without it.
-    }
-}
-
-function readGiscusOptIn() {
-    try {
-        return sessionStorage.getItem(GISCUS_OPT_IN_KEY) === "1";
-    } catch {
-        return false;
-    }
-}
-
-function rememberGiscusOptIn() {
-    try {
-        sessionStorage.setItem(GISCUS_OPT_IN_KEY, "1");
-    } catch {
-        // Explicit loading still works when session storage is unavailable.
-    }
-}
-
-function syncGiscusBootstrapCopy() {
-    if (globalThis.InfernuxGiscus) {
-        globalThis.InfernuxGiscus.syncCopy();
-        return;
-    }
-    const title = document.getElementById("giscus-readiness-title");
-    const detail = document.getElementById("giscus-readiness-detail");
-    if (title && detail?.dataset.controllerError === "true") {
-        title.textContent = communityCopy("giscusControllerErrorTitle");
-        detail.textContent = communityCopy("giscusControllerErrorDetail");
-    } else {
-        if (title) title.textContent = communityCopy("giscusStandbyTitle");
-        if (detail) detail.textContent = communityCopy("giscusStandbyDetail");
-    }
-    const open = document.querySelector("#giscus-open-discussions span");
-    const install = document.querySelector("#giscus-install span");
-    const load = document.querySelector("#giscus-load span");
-    if (open) open.textContent = communityCopy("giscusOpen");
-    if (install) install.textContent = communityCopy("giscusInstall");
-    if (load) load.textContent = communityCopy("giscusLoad");
-}
-
-function renderGiscusControllerError() {
-    const host = document.getElementById("giscus-readiness");
-    if (host) host.dataset.state = "error";
-    const code = host?.querySelector(".giscus-readiness-code");
-    if (code) code.textContent = "OFFLINE";
-    const detail = document.getElementById("giscus-readiness-detail");
-    if (detail) detail.dataset.controllerError = "true";
-    syncGiscusBootstrapCopy();
-}
-
-function setGiscusControllerBusy(busy) {
-    const load = document.getElementById("giscus-load");
-    if (!load) return;
-    load.disabled = busy;
-    load.setAttribute("aria-busy", String(busy));
-}
-
-function ensureGiscusController() {
-    if (globalThis.InfernuxGiscus) return Promise.resolve(globalThis.InfernuxGiscus);
-    if (giscusControllerPromise) return giscusControllerPromise;
-    setGiscusControllerBusy(true);
-    giscusControllerPromise = new Promise((resolve, reject) => {
-        document.getElementById(GISCUS_CONTROLLER_ID)?.remove();
-        const script = document.createElement("script");
-        script.id = GISCUS_CONTROLLER_ID;
-        script.src = GISCUS_CONTROLLER_SRC;
-        script.async = true;
-        script.addEventListener("load", () => {
-            if (globalThis.InfernuxGiscus) resolve(globalThis.InfernuxGiscus);
-            else reject(new Error("Giscus controller did not initialize"));
-        }, { once: true });
-        script.addEventListener("error", () => reject(new Error("Giscus controller request failed")), { once: true });
-        document.body.appendChild(script);
-    }).catch((error) => {
-        console.warn(error);
-        document.getElementById(GISCUS_CONTROLLER_ID)?.remove();
-        giscusControllerPromise = null;
-        renderGiscusControllerError();
-        return null;
-    }).finally(() => setGiscusControllerBusy(false));
-    return giscusControllerPromise;
-}
-
-async function loadDeferredGiscus({ remember = true } = {}) {
-    if (remember) rememberGiscusOptIn();
-    const controller = await ensureGiscusController();
-    if (!controller) return false;
-    const detail = document.getElementById("giscus-readiness-detail");
-    if (detail) delete detail.dataset.controllerError;
-    return controller.load();
-}
-
-function syncLoadedGiscus() {
-    if (globalThis.InfernuxGiscus) {
-        globalThis.InfernuxGiscus.syncCopy();
-        globalThis.InfernuxGiscus.syncConfig();
     }
 }
 
@@ -549,7 +459,8 @@ function setCommunityComposerVisible(visible, { focusTitle = false } = {}) {
 }
 
 function setCommunityComposerLocked(locked) {
-    for (const id of ["community-compose-topic", "community-compose-category", "community-compose-open"]) {
+    communityPublishing = locked;
+    for (const id of ["community-compose-topic", "community-compose-category", "community-compose-body", "community-compose-images", "community-compose-publish"]) {
         const control = document.getElementById(id);
         if (control) control.disabled = locked;
     }
@@ -560,48 +471,192 @@ function setCommunityComposerStatus(messageKey) {
     if (status) status.textContent = messageKey ? communityCopy(messageKey) : "";
 }
 
-async function openCommunityEditor(term, categorySlug = "general") {
-    const title = String(term || "").trim().slice(0, 120);
-    const category = COMMUNITY_CATEGORIES[categorySlug] || COMMUNITY_CATEGORIES.general;
-    if (!title) return false;
+function currentCommunityDraft() {
+    return {
+        title: (document.getElementById("community-compose-topic")?.value || "").slice(0, 120),
+        category: document.getElementById("community-compose-category")?.value || "general",
+        body: (document.getElementById("community-compose-body")?.value || "").slice(0, 65536)
+    };
+}
 
-    setCommunityComposerVisible(true);
-    setCommunityComposerLocked(true);
-    const bodyEditor = document.getElementById("community-body-editor");
-    if (bodyEditor) bodyEditor.hidden = false;
-    setCommunityComposerStatus("composeOpening");
-    setGiscusControllerBusy(true);
+function storeCommunityDraft() {
     try {
-        const controller = await ensureGiscusController();
-        rememberGiscusOptIn();
-        const opened = typeof controller.open === "function"
-            ? controller.open({ mapping: "specific", term: title, category: category.name, categoryId: category.id })
-            : controller.load();
-        setCommunityComposerStatus(opened ? "composeReady" : "composeFailed");
-        if (!opened) setCommunityComposerLocked(false);
-        return opened;
-    } catch (error) {
-        console.warn(error);
-        renderGiscusControllerError();
-        setCommunityComposerStatus("composeFailed");
-        setCommunityComposerLocked(false);
-        return false;
-    } finally {
-        setGiscusControllerBusy(false);
+        const draft = currentCommunityDraft();
+        if (draft.title || draft.body) sessionStorage.setItem(COMMUNITY_DRAFT_KEY, JSON.stringify(draft));
+        else sessionStorage.removeItem(COMMUNITY_DRAFT_KEY);
+    } catch {}
+}
+
+function readCommunityDraft() {
+    try {
+        const draft = JSON.parse(sessionStorage.getItem(COMMUNITY_DRAFT_KEY) || "null");
+        if (!draft || typeof draft !== "object") return null;
+        return {
+            title: typeof draft.title === "string" ? draft.title.slice(0, 120) : "",
+            category: Object.hasOwn(COMMUNITY_CATEGORIES, draft.category) ? draft.category : "general",
+            body: typeof draft.body === "string" ? draft.body.slice(0, 65536) : ""
+        };
+    } catch {
+        return null;
     }
+}
+
+function clearCommunityDraft() {
+    try { sessionStorage.removeItem(COMMUNITY_DRAFT_KEY); } catch {}
+}
+
+function syncCommunityAccount() {
+    const profile = document.getElementById("community-account-profile");
+    const avatar = document.getElementById("community-account-avatar");
+    const login = document.getElementById("community-account-login");
+    const status = document.getElementById("community-account-status");
+    const signIn = document.getElementById("community-sign-in");
+    const signOut = document.getElementById("community-sign-out");
+    const composeSignIn = document.getElementById("community-compose-sign-in");
+    if (profile) profile.hidden = !communityUser;
+    if (avatar && communityUser) {
+        avatar.src = communityUser.avatarUrl || "assets/logo.png";
+        avatar.alt = `@${communityUser.login}`;
+    }
+    if (login) login.textContent = communityUser ? `@${communityUser.login}` : "";
+    if (status) {
+        status.hidden = Boolean(communityUser);
+        if (!communityUser) status.textContent = communityCopy("signedOut");
+    }
+    if (signIn) signIn.hidden = Boolean(communityUser);
+    if (signOut) signOut.hidden = !communityUser;
+    if (composeSignIn) composeSignIn.hidden = Boolean(communityUser);
+}
+
+async function loadCommunityAccount() {
+    const api = globalThis.InfernuxCommunityApi;
+    if (!api) return syncCommunityAccount();
+    const session = await api.session();
+    communityUser = session?.authenticated ? session.user : null;
+    syncCommunityAccount();
+}
+
+function beginCommunitySignIn() {
+    storeCommunityDraft();
+    globalThis.InfernuxCommunityApi?.signIn();
 }
 
 function startCommunityTopic() {
     setCommunityComposerVisible(true, { focusTitle: true });
     setCommunityComposerStatus("");
     setCommunityComposerLocked(false);
-    const bodyEditor = document.getElementById("community-body-editor");
-    if (bodyEditor) bodyEditor.hidden = true;
+    const draft = readCommunityDraft();
     const title = document.getElementById("community-compose-topic");
-    if (title) title.value = "";
+    const body = document.getElementById("community-compose-body");
     const category = document.getElementById("community-compose-category");
-    if (category && communityCategory && [...category.options].some((option) => option.value === communityCategory)) {
-        category.value = communityCategory;
+    if (title) title.value = draft?.title || "";
+    if (body) body.value = draft?.body || "";
+    if (category) category.value = draft?.category || (communityCategory && Object.hasOwn(COMMUNITY_CATEGORIES, communityCategory) ? communityCategory : "general");
+    document.getElementById("community-upload-list")?.replaceChildren();
+    syncCommunityAccount();
+}
+
+function insertCommunityMarkdown(markdown) {
+    const body = document.getElementById("community-compose-body");
+    if (!body) return;
+    const start = body.selectionStart ?? body.value.length;
+    const end = body.selectionEnd ?? start;
+    const prefix = start > 0 && !body.value.slice(0, start).endsWith("\n") ? "\n" : "";
+    const suffix = end < body.value.length && !body.value.slice(end).startsWith("\n") ? "\n" : "";
+    const insertion = `${prefix}${markdown}\n${suffix}`;
+    body.setRangeText(insertion, start, end, "end");
+    body.focus();
+    storeCommunityDraft();
+}
+
+function appendCommunityUpload(file, state) {
+    const list = document.getElementById("community-upload-list");
+    if (!list) return null;
+    const item = document.createElement("li");
+    item.dataset.state = state;
+    const name = document.createElement("span");
+    name.textContent = file.name;
+    const status = document.createElement("small");
+    status.textContent = communityCopy(state === "uploading" ? "uploadStarted" : "uploadFailed");
+    item.append(name, status);
+    list.appendChild(item);
+    return { item, status };
+}
+
+async function uploadCommunityImage(file) {
+    const validType = ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file?.type);
+    if (!validType || !file.size || file.size > 5 * 1024 * 1024) {
+        setCommunityComposerStatus("uploadInvalid");
+        return false;
+    }
+    if (!communityUser) {
+        setCommunityComposerStatus("composeSignIn");
+        return false;
+    }
+    const upload = appendCommunityUpload(file, "uploading");
+    try {
+        const payload = await globalThis.InfernuxCommunityApi.request("/api/uploads", {
+            method: "POST",
+            headers: { "Content-Type": file.type, "X-File-Name": file.name.slice(0, 180) },
+            body: file
+        });
+        if (!payload?.markdown) throw new Error("Upload response did not include Markdown");
+        insertCommunityMarkdown(payload.markdown);
+        if (upload) {
+            upload.item.dataset.state = "complete";
+            upload.status.textContent = communityCopy("uploadDone");
+        }
+        setCommunityComposerStatus("");
+        return true;
+    } catch (error) {
+        console.warn(error);
+        if (upload) {
+            upload.item.dataset.state = "error";
+            upload.status.textContent = communityCopy("uploadFailed");
+        }
+        setCommunityComposerStatus("uploadFailed");
+        return false;
+    }
+}
+
+async function publishCommunityTopic() {
+    if (communityPublishing) return false;
+    const draft = currentCommunityDraft();
+    if (draft.title.trim().length < 4) {
+        setCommunityComposerStatus("composeMissingTitle");
+        document.getElementById("community-compose-topic")?.focus();
+        return false;
+    }
+    if (!draft.body.trim()) {
+        setCommunityComposerStatus("composeMissingBody");
+        document.getElementById("community-compose-body")?.focus();
+        return false;
+    }
+    if (!communityUser) {
+        setCommunityComposerStatus("composeSignIn");
+        return false;
+    }
+    const category = COMMUNITY_CATEGORIES[draft.category] || COMMUNITY_CATEGORIES.general;
+    storeCommunityDraft();
+    setCommunityComposerLocked(true);
+    setCommunityComposerStatus("composePublishing");
+    try {
+        const payload = await globalThis.InfernuxCommunityApi.request("/api/discussions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: draft.title.trim(), body: draft.body.trim(), categoryId: category.id })
+        });
+        const number = Number(payload?.discussion?.number);
+        if (!Number.isSafeInteger(number) || number < 1) throw new Error("Publish response did not include a discussion number");
+        clearCommunityDraft();
+        window.location.assign(`community-topic.html?topic=${number}`);
+        return true;
+    } catch (error) {
+        console.warn(error);
+        setCommunityComposerStatus(error?.code === "authentication_required" ? "composeSignIn" : "composeFailed");
+        return false;
+    } finally {
+        setCommunityComposerLocked(false);
     }
 }
 
@@ -634,6 +689,8 @@ function communitySortLabel() {
 function communitySourceLabel() {
     const key = {
         live: "sourceLive",
+        public: "sourcePublic",
+        direct: "sourceDirect",
         cache: "sourceCache",
         stale: "sourceStale",
         partial: "sourcePartial",
@@ -781,7 +838,15 @@ function renderCommunityError() {
     renderCommunityPagination();
     const status = document.createElement("div");
     status.className = "topic-status";
-    status.append(document.createTextNode(`${communityCopy("error")} `));
+    let message = communityCopy("error");
+    if (communityLastError?.code === "anonymous_rate_limited" && communityLastError.reset) {
+        const reset = new Intl.DateTimeFormat(communityLanguage() === "zh" ? "zh-CN" : "en", {
+            hour: "2-digit",
+            minute: "2-digit"
+        }).format(new Date(communityLastError.reset * 1000));
+        message = `${communityCopy("anonymousRate")} · ${communityCopy("resetAt")} ${reset}.`;
+    }
+    status.append(document.createTextNode(`${message} `));
     const link = document.createElement("a");
     link.href = "https://github.com/ChenlizheMe/Infernux/discussions";
     link.target = "_blank";
@@ -803,6 +868,41 @@ function setCommunityRequestBusy(busy, { loadingMore = false } = {}) {
         loadMore.setAttribute("aria-busy", String(busy && loadingMore));
     }
     syncCommunityPaginationCopy({ loadingMore: busy && loadingMore });
+}
+
+async function requestCommunityPage(page, signal) {
+    const gateway = globalThis.InfernuxCommunityApi;
+    if (gateway) {
+        try {
+            const payload = await gateway.request(`/api/discussions?page=${page}&per_page=${COMMUNITY_PAGE_SIZE}`, { signal });
+            if (!Array.isArray(payload?.items)) throw new Error("Forum gateway returned an unexpected payload");
+            return { items: payload.items, source: communityUser ? "live" : "public" };
+        } catch (error) {
+            console.warn("Forum gateway unavailable; trying the public GitHub fallback.", error);
+        }
+    }
+
+    const requestUrl = new URL(COMMUNITY_FALLBACK_API);
+    requestUrl.searchParams.set("page", String(page));
+    const response = await fetch(requestUrl, {
+        headers: {
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        },
+        cache: "no-store",
+        signal
+    });
+    if (!response.ok) {
+        const error = new Error(`GitHub API ${response.status}`);
+        if (response.status === 403 && response.headers.get("X-RateLimit-Remaining") === "0") {
+            error.code = "anonymous_rate_limited";
+            error.reset = Number(response.headers.get("X-RateLimit-Reset")) || null;
+        }
+        throw error;
+    }
+    const items = await response.json();
+    if (!Array.isArray(items)) throw new Error("GitHub API returned an unexpected payload");
+    return { items, source: "direct" };
 }
 
 async function loadCommunityTopics({ force = false, page = 1 } = {}) {
@@ -829,31 +929,21 @@ async function loadCommunityTopics({ force = false, page = 1 } = {}) {
         const controller = new AbortController();
         const timeout = window.setTimeout(() => controller.abort(), COMMUNITY_REQUEST_TIMEOUT_MS);
         try {
-            const requestUrl = new URL(COMMUNITY_API);
-            requestUrl.searchParams.set("page", String(page));
-            const response = await fetch(requestUrl, {
-                headers: {
-                    Accept: "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28"
-                },
-                cache: "no-store",
-                signal: controller.signal
-            });
-            if (!response.ok) throw new Error(`GitHub API ${response.status}`);
-            const payload = await response.json();
-            if (!Array.isArray(payload)) throw new Error("GitHub API returned an unexpected payload");
-            const receivedTopics = normalizeCommunityTopics(payload);
+            const result = await requestCommunityPage(page, controller.signal);
+            const receivedTopics = normalizeCommunityTopics(result.items);
             cachedCommunityTopics = loadingMore
                 ? mergeCommunityTopics(cachedCommunityTopics, receivedTopics)
                 : receivedTopics;
-            communityNextPage = payload.length === COMMUNITY_PAGE_SIZE ? page + 1 : null;
+            communityNextPage = result.items.length === COMMUNITY_PAGE_SIZE ? page + 1 : null;
             hasCommunitySnapshot = true;
-            communitySource = "live";
+            communitySource = result.source;
+            communityLastError = null;
             writeCommunityCache(cachedCommunityTopics);
             renderCommunityCategories();
             renderCommunityTopics();
         } catch (error) {
             console.warn(error);
+            communityLastError = error;
             if (hasCommunitySnapshot) {
                 communitySource = loadingMore ? "partial" : "stale";
                 renderCommunityCategories();
@@ -904,11 +994,11 @@ function clearCommunityFilters() {
     searchInput?.focus();
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
     readCommunityFiltersFromUrl();
     syncCommunityFilterCopy();
     syncCommunityPaginationCopy();
-    syncGiscusBootstrapCopy();
+    await loadCommunityAccount();
 
     document.getElementById("community-filters")?.addEventListener("submit", (event) => event.preventDefault());
     document.getElementById("community-search")?.addEventListener("input", syncCommunityFiltersFromControls);
@@ -924,23 +1014,30 @@ document.addEventListener("DOMContentLoaded", () => {
         button.addEventListener("click", () => selectCommunityCategory(button.dataset.forumCategory || ""));
     });
     document.getElementById("community-new-topic")?.addEventListener("click", startCommunityTopic);
-    document.getElementById("community-compose-close")?.addEventListener("click", () => setCommunityComposerVisible(false));
+    document.getElementById("community-sign-in")?.addEventListener("click", beginCommunitySignIn);
+    document.getElementById("community-compose-sign-in")?.addEventListener("click", beginCommunitySignIn);
+    document.getElementById("community-sign-out")?.addEventListener("click", () => {
+        globalThis.InfernuxCommunityApi?.signOut();
+        communityUser = null;
+        syncCommunityAccount();
+        loadCommunityTopics({ force: true });
+    });
+    document.getElementById("community-compose-close")?.addEventListener("click", () => {
+        storeCommunityDraft();
+        setCommunityComposerVisible(false);
+    });
     document.getElementById("community-compose-form")?.addEventListener("submit", (event) => {
         event.preventDefault();
-        const title = (document.getElementById("community-compose-topic")?.value || "").trim();
-        if (title.length < 4) {
-            setCommunityComposerStatus("composeMissingTitle");
-            document.getElementById("community-compose-topic")?.focus();
-            return;
-        }
-        const category = document.getElementById("community-compose-category")?.value || "general";
-        openCommunityEditor(title, category);
+        publishCommunityTopic();
     });
-    document.getElementById("giscus-load")?.addEventListener("click", () => {
-        const title = (document.getElementById("community-compose-topic")?.value || "").trim() || COMMUNITY_LOBBY_TERM;
-        const category = document.getElementById("community-compose-category")?.value || "general";
-        openCommunityEditor(title, category);
+    document.getElementById("community-compose-images")?.addEventListener("change", async (event) => {
+        for (const file of [...(event.currentTarget.files || [])]) await uploadCommunityImage(file);
+        event.currentTarget.value = "";
     });
+    for (const id of ["community-compose-topic", "community-compose-category", "community-compose-body"]) {
+        document.getElementById(id)?.addEventListener("input", storeCommunityDraft);
+        document.getElementById(id)?.addEventListener("change", storeCommunityDraft);
+    }
     syncCommunityCategoryButtons();
     const composeClose = document.getElementById("community-compose-close");
     if (composeClose) {
@@ -949,7 +1046,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const composer = document.getElementById("community-compose");
     composer?.addEventListener("click", (event) => {
-        if (event.target === composer) setCommunityComposerVisible(false);
+        if (event.target === composer) {
+            storeCommunityDraft();
+            setCommunityComposerVisible(false);
+        }
     });
     const refresh = document.getElementById("community-refresh");
     if (refresh) {
@@ -973,7 +1073,5 @@ document.addEventListener("site:language-changed", () => {
     syncCommunityCategoryButtons();
     if (hasCommunitySnapshot) renderCommunityTopics();
     else syncCommunityPaginationCopy();
-    syncGiscusBootstrapCopy();
-    syncLoadedGiscus();
+    syncCommunityAccount();
 });
-document.addEventListener("site:theme-changed", syncLoadedGiscus);

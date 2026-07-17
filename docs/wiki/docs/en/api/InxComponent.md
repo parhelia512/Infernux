@@ -28,7 +28,7 @@ Example::
 <!-- USER CONTENT START --> description
 **Status:** Preview · **Verified with:** 0.2.9
 
-Use this base for project gameplay components. Read [Your First Component](../learn/first-component.md) before relying on the lifecycle table alone.
+Use this base for project gameplay components. Read Your First Component before relying on the lifecycle table alone.
 <!-- USER CONTENT END -->
 
 ## Constructors
@@ -140,8 +140,6 @@ class Patrol(InxComponent):
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [Your First Component](../learn/first-component.md)
-- [Scenes and Objects](../manual/scenes-and-objects.md)
 - [GameObject](GameObject.md)
 - [serialized_field](serialized_field.md)
 - [Time](Time.md)

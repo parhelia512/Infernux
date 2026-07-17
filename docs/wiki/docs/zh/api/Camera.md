@@ -79,8 +79,5 @@ if camera_object is not None:
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [2D 基础](../learn/2d-foundations.md)
-- [3D 基础](../learn/3d-foundations.md)
 - [CameraProjection](CameraProjection.md)
-- [渲染与 RenderStack](../manual/rendering-and-renderstack.md)
 <!-- USER CONTENT END -->

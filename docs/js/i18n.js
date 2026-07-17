@@ -16,10 +16,8 @@ const translations = {
     "footer.tagline": "Open code, explicit architecture, and a render stack you can actually reason about.",
     "nav.api": "API",
     "nav.community": "Community",
-    "nav.docs": "Docs",
     "nav.download": "Download",
     "nav.learn": "Learn",
-    "nav.manual": "Manual",
     "nav.roadmap": "Roadmap",
     "nav.start": "Start"
 }, ...(pageTranslations.en || {}) },
@@ -36,10 +34,8 @@ const translations = {
     "footer.tagline": "开放代码、明确架构，以及一套你能真正讲清楚的渲染栈。",
     "nav.api": "API",
     "nav.community": "社区",
-    "nav.docs": "文档",
     "nav.download": "下载",
     "nav.learn": "学习",
-    "nav.manual": "手册",
     "nav.roadmap": "路线图",
     "nav.start": "开始使用"
 }, ...(pageTranslations.zh || {}) }

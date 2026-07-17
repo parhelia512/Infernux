@@ -19,10 +19,6 @@
 
 
 
-
-
-
-
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -106,8 +102,8 @@
             {
               "@type": "ListItem",
               "position": 1,
-              "name": "Documentation",
-              "item": "https://infernux-engine.com/wiki.html"
+              "name": "Start",
+              "item": "https://infernux-engine.com/start.html"
             },
             
             {
@@ -134,13 +130,12 @@
     <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/zh/api/Camera.html">
     <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/en/api/Camera.html">
     
-    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
-    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/api-index.json">
+    <link rel="alternate" type="application/json" title="Infernux API index" href="/api-index.json">
     <link rel="manifest" href="/site.webmanifest">
     <link rel="icon" type="image/png" href="/assets/logo.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
     <link rel="stylesheet" href="/css/fonts.css?v=1">
-    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/style.css?v=18">
     <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
     <link rel="stylesheet" href="/css/docs-search.css?v=3">
     <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
@@ -160,9 +155,8 @@
                 <span class="logo-text">Infernux</span>
             </a>
             <div class="nav-links" id="primary-navigation">
-                <a href="/wiki/site/en/learn/getting-started.html" class="nav-priority">Start</a>
-                <a href="/wiki.html#start-here">Learn</a>
-                <a href="/wiki.html?layer=manual#written-guides">Manual</a>
+                <a href="/start.html" class="nav-priority">Start</a>
+                <a href="/start.html#first-script">Learn</a>
                 <a href="/wiki/site/en/api/index.html" class="active" aria-current="page">API</a>
                 <a href="/roadmap.html">Roadmap</a>
                 <a href="/community.html" class="nav-priority">Community</a>
@@ -318,7 +312,7 @@
         <main class="api-main" id="main-content">
             
     <nav class="doc-breadcrumb" aria-label="Breadcrumb">
-        <a href="/wiki.html">Docs</a>
+        <a href="/start.html">Start</a>
         <span aria-hidden="true">/</span>
         
         <a href="/wiki/site/en/api/index.html">API</a>
@@ -500,14 +494,11 @@ class in <b>Infernux.components.builtin</b>
 <h2 id="see-also">See Also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <!-- USER CONTENT START -->
 <p>see_also
-- <a href="../learn/2d-foundations.html">2D Foundations</a>
-- <a href="../learn/3d-foundations.html">3D Foundations</a>
-- <a href="CameraProjection.html">CameraProjection</a>
-- <a href="../manual/rendering-and-renderstack.html">Rendering and RenderStack</a></p>
+- <a href="CameraProjection.html">CameraProjection</a></p>
 <!-- USER CONTENT END -->
             
     <nav class="doc-trail" data-doc-trail aria-label="Document navigation and feedback">
-        <a class="doc-trail-fallback" href="/wiki.html">Back to documentation</a>
+        <a class="doc-trail-fallback" href="/wiki/site/en/api/index.html">Back to API index</a>
     </nav>
     
             
@@ -543,7 +534,7 @@ class in <b>Infernux.components.builtin</b>
             </div>
             <label class="docs-search-field" for="docs-search-input">
                 <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API symbol, system, workflow…">
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API symbol, module, or method…">
             </label>
             <div class="docs-search-filters" id="docs-search-filters" aria-label="Documentation search filters"></div>
             <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
@@ -553,7 +544,6 @@ class in <b>Infernux.components.builtin</b>
 
     <script src="/js/main.js?v=14"></script>
     <script src="/js/docs-search.js?v=5"></script>
-    <script src="/js/docs-recent.js?v=1"></script>
     <script src="/js/wiki-generated.js?v=14"></script>
 </body>
 </html>

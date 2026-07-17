@@ -87,7 +87,5 @@ if clip is not None:
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [音频工作流](../learn/audio-workflow.md)
 - [AudioSource](AudioSource.md)
-- [资源与 Meta 文件](../manual/assets-and-meta.md)
 <!-- USER CONTENT END -->

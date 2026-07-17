@@ -68,7 +68,6 @@ if ui_root is not None:
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [屏幕空间 UI 手册](../manual/ui.md)
 - [UIText](UIText.md)
 - [UIImage](UIImage.md)
 - [UIButton](UIButton.md)

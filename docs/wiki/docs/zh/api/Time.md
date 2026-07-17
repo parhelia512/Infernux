@@ -52,7 +52,6 @@ class PauseClock(InxComponent):
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [输入与时间](../manual/input-and-time.md)
 - [InxComponent](InxComponent.md)
 - [Rigidbody](Rigidbody.md)
 <!-- USER CONTENT END -->

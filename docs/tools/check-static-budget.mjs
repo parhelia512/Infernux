@@ -11,15 +11,13 @@ const limits = {
   image: 1024 * 1024,
   webfont: 192 * 1024,
   machineIndex: 512 * 1024,
-  compactAgentIndex: 64 * 1024,
-  fullCorpus: 768 * 1024,
   rootExperience: 1250 * 1024,
   generatedWikiHtml: 96 * 1024,
   generatedWikiTotal: 8 * 1024 * 1024,
 };
 const rootRouteBudgets = new Map([
   ["index.html", 500 * 1024],
-  ["wiki.html", 400 * 1024],
+  ["start.html", 320 * 1024],
   ["roadmap.html", 300 * 1024],
   ["community.html", 360 * 1024],
   ["download.html", 320 * 1024],
@@ -156,16 +154,10 @@ for (const [pageName, limit] of rootRouteBudgets) {
   routePayloads.set(pageName, bytes);
   if (bytes > limit) errors.push(`${pageName} first-view payload is ${human(bytes)}; route budget is ${human(limit)}`);
 }
-for (const name of ["docs-index.json", "docs-health.json", "learning-paths.json", "api-index.json", "api-changes.json", "release-notes.json"]) {
+for (const name of ["api-index.json", "api-changes.json", "release-notes.json"]) {
   await enforce(path.join(docsRoot, name), limits.machineIndex, "machine index");
 }
 await enforce(path.join(docsRoot, "sitemap.xml"), limits.machineIndex, "unified sitemap");
-await enforce(path.join(docsRoot, "llms.txt"), limits.compactAgentIndex, "compact Agent index");
-for (const name of (await readdir(path.join(docsRoot, "assets"))).filter((name) => /^wiki-docs\.[a-f0-9]{16}\.json$/.test(name))) {
-  await enforce(path.join(docsRoot, "assets", name), limits.machineIndex, "hashed Wiki catalog");
-}
-await enforce(path.join(docsRoot, "llms-full.txt"), limits.fullCorpus, "full Agent corpus");
-
 const generatedWikiFiles = await recursiveFiles(path.join(docsRoot, "wiki", "site"));
 let generatedWikiTotal = 0;
 for (const file of generatedWikiFiles) {

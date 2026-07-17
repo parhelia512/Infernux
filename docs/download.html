@@ -5,53 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self'; upgrade-insecure-requests">
     <meta name="referrer" content="strict-origin-when-cross-origin">
-    <meta name="description" content="Download the verified Infernux Hub installer or Python 3.12 wheel from GitHub Releases, with file size and SHA-256 checksums.">
+    <meta name="description" content="Download InfernuxHub and choose an Infernux engine version for Windows.">
     <meta name="theme-color" content="#0a0c11">
     <meta name="color-scheme" content="dark light">
     <link rel="canonical" href="https://infernux-engine.com/download.html">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Infernux · 熔炉">
     <meta property="og:title" content="Download Infernux">
-    <meta property="og:description" content="Verified Windows downloads for the Infernux technical preview, served by GitHub Releases.">
+    <meta property="og:description" content="Get InfernuxHub and install the engine version your project needs.">
     <meta property="og:url" content="https://infernux-engine.com/download.html">
     <meta property="og:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
-    <meta property="og:image:type" content="image/jpeg">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Download Infernux">
-    <meta name="twitter:description" content="Verified Windows downloads for the Infernux technical preview, served by GitHub Releases.">
+    <meta name="twitter:description" content="Get InfernuxHub and choose an engine version.">
     <meta name="twitter:image" content="https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg">
-    <meta name="twitter:image:alt" content="Infernux NASA Punk mission card with the editor, forge emblem, and technical preview status">
-    <title>Infernux · 熔炉 — Download</title>
+    <title>Download Infernux</title>
     <link rel="icon" type="image/png" href="assets/logo.png">
     <link rel="apple-touch-icon" sizes="180x180" href="assets/infernux-apple-touch-icon.png">
     <link rel="manifest" href="site.webmanifest">
     <link rel="stylesheet" href="css/fonts.css?v=1">
-    <link rel="stylesheet" href="css/style.css?v=17">
+    <link rel="stylesheet" href="css/style.css?v=18">
     <link rel="stylesheet" href="css/docs-search.css?v=3">
     <link rel="stylesheet" href="css/mission.css?v=2">
-    <link rel="stylesheet" href="css/download.css?v=2">
+    <link rel="stylesheet" href="css/download.css?v=3">
     <link rel="stylesheet" href="css/fontawesome-subset.css?v=6.4.0">
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header" role="banner">
-        <div class="mission-ribbon" aria-label="Engine identity strip">
-            <div class="mission-ribbon-inner">
-                <span class="mission-kicker" data-i18n="brand.ribbonKicker">Open-source engine · 0.2.1 live</span>
-                <span class="mission-name" data-i18n="brand.ribbonName">INFER<span class="mission-accent">NUX</span></span>
-                <span class="mission-sub" data-i18n="brand.ribbonSub">熔炉 · ENG-CORE</span>
-            </div>
-        </div>
+        <div class="mission-ribbon" aria-label="Engine identity strip"><div class="mission-ribbon-inner"><span class="mission-kicker" data-i18n="brand.ribbonKicker">Open-source engine · 0.2.9 live</span><span class="mission-name" data-i18n="brand.ribbonName">INFER<span class="mission-accent">NUX</span></span><span class="mission-sub" data-i18n="brand.ribbonSub">熔炉 · ENG-CORE</span></div></div>
         <nav class="navbar" aria-label="Primary navigation">
             <div class="nav-container">
                 <a href="index.html" class="nav-logo"><span class="logo-icon"><img src="assets/logo.png" width="256" height="256" alt="Infernux logo"></span><span class="logo-text" data-i18n="brand.navShort">熔炉 · INFERNUX</span></a>
                 <div class="nav-links" id="primary-navigation">
-                    <a href="wiki/site/en/learn/getting-started.html" data-href-en="wiki/site/en/learn/getting-started.html" data-href-zh="wiki/site/zh/learn/getting-started.html" class="nav-priority" data-i18n="nav.start">Start</a>
-                    <a href="wiki.html#start-here" data-i18n="nav.learn">Learn</a>
-                    <a href="wiki.html?layer=manual#written-guides" data-i18n="nav.manual">Manual</a>
+                    <a href="start.html" class="nav-priority" data-i18n="nav.start">Start</a>
+                    <a href="start.html#first-script" data-i18n="nav.learn">Learn</a>
                     <a href="wiki/site/en/api/index.html" data-href-en="wiki/site/en/api/index.html" data-href-zh="wiki/site/zh/api/index.html" data-i18n="nav.api">API</a>
                     <a href="roadmap.html" data-i18n="nav.roadmap">Roadmap</a>
                     <a href="community.html" class="nav-priority" data-i18n="nav.community">Community</a>
@@ -67,117 +55,112 @@
         </nav>
     </header>
 
-    <main class="page-shell download-layout" id="main-content">
+    <main class="page-shell download-page" id="main-content">
         <div class="container">
-            <section class="subpage-hero download-hero">
-                <div class="hero-codename"><span class="badge" data-i18n="downloadPage.hero.badge">RELEASE BAY · VERIFIED ARTIFACTS</span><span data-i18n="downloadPage.hero.kicker">Windows-first technical preview</span></div>
-                <h1 data-i18n="downloadPage.hero.title">Download from the source. Verify before launch.</h1>
-                <p data-i18n="downloadPage.hero.description">The website publishes identity, size, and SHA-256 evidence. GitHub Releases remains the only binary host.</p>
-                <div class="release-telemetry" aria-live="polite">
-                    <span><small data-i18n="downloadPage.version">Release</small><strong id="release-version">0.2.9</strong></span>
-                    <span><small data-i18n="downloadPage.channel">Channel</small><strong data-i18n="downloadPage.preview">Technical preview</strong></span>
-                    <span><small data-i18n="downloadPage.platform">Platform</small><strong>Windows 10/11 · x64</strong></span>
-                    <span><small data-i18n="downloadPage.published">Published</small><strong id="release-date">2026-07-17</strong></span>
-                    <span><small data-i18n="downloadPage.signature">Publisher signature</small><strong data-i18n="downloadPage.signature.none">Not declared</strong></span>
-                </div>
-                <p class="release-source" id="release-status" data-i18n="downloadPage.loading">Reading the release manifest…</p>
-            </section>
+            <div data-page-language="en">
+                <header class="download-heading">
+                    <span class="mini-tag">Windows 10/11 · x64</span>
+                    <h1>Download Infernux</h1>
+                    <p>Start with InfernuxHub. It keeps your projects and installed engine versions in one place.</p>
+                </header>
 
-            <section class="section" aria-labelledby="downloads-title">
-                <div class="section-head">
-                    <div><div class="section-kicker" data-i18n="downloadPage.assets.kicker">Choose an artifact</div><h2 class="section-title" id="downloads-title" data-i18n="downloadPage.assets.title">Hub for normal use. Wheel for controlled Python environments.</h2></div>
-                    <p class="section-intro" data-i18n="downloadPage.assets.intro">Both files are the exact assets published with GitHub release v0.2.9.</p>
-                </div>
-                <div class="download-grid">
-                    <article class="download-card" data-release-kind="hub-installer">
-                        <span class="mini-tag" data-i18n="downloadPage.hub.tag">RECOMMENDED · WINDOWS</span>
-                        <i class="fas fa-rocket" aria-hidden="true"></i>
-                        <h3 data-i18n="downloadPage.hub.title">Infernux Hub Installer</h3>
-                        <p data-i18n="downloadPage.hub.body">Install the project launcher and its managed Python 3.12 runtime. This is the normal entry point for creating and opening projects.</p>
-                        <dl><div><dt data-i18n="downloadPage.file">File</dt><dd data-release-field="name">InfernuxHubInstaller-0.2.9.exe</dd></div><div><dt data-i18n="downloadPage.size">Size</dt><dd data-release-field="size">22.0 MiB</dd></div></dl>
-                        <code class="checksum" data-release-field="sha256">07706dd846053b7b5023da8db3d0fb32c7a11890f18c18e63e13619ec576360d</code>
-                        <div class="download-actions"><a class="btn btn-primary" data-release-field="url" href="https://github.com/ChenlizheMe/Infernux/releases/download/v0.2.9/InfernuxHubInstaller-0.2.9.exe" target="_blank" rel="noopener"><i class="fas fa-download" aria-hidden="true"></i><span data-i18n="downloadPage.hub.action">Download installer</span></a><button class="btn btn-secondary copy-checksum" type="button" data-i18n="downloadPage.copy">Copy SHA-256</button></div>
-                    </article>
+                <section class="hub-download" aria-labelledby="hub-title-en">
+                    <img src="assets/infernux-icon-192.png" width="192" height="192" alt="InfernuxHub">
+                    <div>
+                        <span class="mini-tag">Recommended</span>
+                        <h2 id="hub-title-en">InfernuxHub</h2>
+                        <p>Use the Hub to install or switch Infernux versions, create projects, and open existing projects. You do not need to prepare Python by hand.</p>
+                        <a class="btn btn-primary" href="https://github.com/ChenlizheMe/Infernux/releases/download/v0.2.9/InfernuxHubInstaller-0.2.9.exe"><i class="fas fa-download" aria-hidden="true"></i> Download InfernuxHub</a>
+                        <span class="download-meta">Windows x64 · InfernuxHub 0.2.9</span>
+                    </div>
+                </section>
 
-                    <article class="download-card" data-release-kind="python-wheel">
-                        <span class="mini-tag" data-i18n="downloadPage.wheel.tag">ADVANCED · CPYTHON 3.12</span>
-                        <i class="fab fa-python" aria-hidden="true"></i>
-                        <h3 data-i18n="downloadPage.wheel.title">Windows Python Wheel</h3>
-                        <p data-i18n="downloadPage.wheel.body">Use this only when you manage the Python environment yourself. It targets CPython 3.12 on Windows x64.</p>
-                        <dl><div><dt data-i18n="downloadPage.file">File</dt><dd data-release-field="name">infernux-0.2.9-cp312-cp312-win_amd64.whl</dd></div><div><dt data-i18n="downloadPage.size">Size</dt><dd data-release-field="size">116.5 MiB</dd></div></dl>
-                        <code class="checksum" data-release-field="sha256">e84fea916affb87dc0ec045ae4433208f96e0f15599900378ba330aa7018b4b7</code>
-                        <div class="download-actions"><a class="btn btn-primary" data-release-field="url" href="https://github.com/ChenlizheMe/Infernux/releases/download/v0.2.9/infernux-0.2.9-cp312-cp312-win_amd64.whl" target="_blank" rel="noopener"><i class="fas fa-download" aria-hidden="true"></i><span data-i18n="downloadPage.wheel.action">Download wheel</span></a><button class="btn btn-secondary copy-checksum" type="button" data-i18n="downloadPage.copy">Copy SHA-256</button></div>
-                    </article>
-                </div>
-            </section>
+                <section class="version-section" aria-labelledby="versions-title-en">
+                    <div class="version-copy">
+                        <h2 id="versions-title-en">Choose an engine version</h2>
+                        <p>InfernuxHub can install several engine versions side by side. For a direct wheel or an older release, choose a version below.</p>
+                    </div>
+                    <div class="version-picker">
+                        <label for="engine-version-en">Infernux version</label>
+                        <select id="engine-version-en" data-version-select>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.9">0.2.9 · current preview</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.1">0.2.1</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.0">0.2.0</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.6">0.1.6</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.5">0.1.5</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.4">0.1.4</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.3">0.1.3</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.2">0.1.2</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.1">0.1.1</option>
+                        </select>
+                        <a class="btn btn-secondary" data-version-link href="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.9" target="_blank" rel="noopener">Open version downloads <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                    </div>
+                    <p class="version-note">Direct engine packages target CPython 3.12 on Windows x64. Most users should install versions from inside InfernuxHub.</p>
+                </section>
 
-            <section class="pwa-install" aria-labelledby="pwa-install-title" data-pwa-install data-install-state="checking">
-                <div class="pwa-install-copy">
-                    <span class="mini-tag" data-i18n="downloadPage.webApp.kicker">WEB APP · DOCUMENTATION SHELL</span>
-                    <h2 id="pwa-install-title" data-i18n="downloadPage.webApp.title">Keep the Infernux knowledge deck within reach.</h2>
-                    <p data-i18n="downloadPage.webApp.body">Install this website as a lightweight app for a dedicated window, quick launch, and resilient access to pages you have already visited.</p>
-                    <ul class="pwa-install-benefits">
-                        <li data-i18n="downloadPage.webApp.home">Launch from the home screen, Start menu, or app launcher.</li>
-                        <li data-i18n="downloadPage.webApp.offline">The shell and previously visited pages can recover when the connection drops.</li>
-                        <li id="pwa-install-boundary" data-i18n="downloadPage.webApp.boundary">This does not install the game engine or pre-download the complete Manual.</li>
-                    </ul>
-                </div>
-                <div class="pwa-install-control">
-                    <img class="pwa-install-icon" src="assets/infernux-icon-192.png" width="192" height="192" alt="" aria-hidden="true">
-                    <p class="pwa-install-status" id="pwa-install-status" role="status" aria-live="polite" data-install-state="checking" data-i18n="downloadPage.webApp.status.checking">Checking whether this browser can install the web app…</p>
-                    <button class="btn btn-primary" id="pwa-install-button" type="button" aria-describedby="pwa-install-status pwa-install-boundary" data-i18n="downloadPage.webApp.action" hidden>Install documentation app</button>
-                    <noscript><p class="pwa-install-noscript">Install / 安装：use the browser menu, or Safari Share → Add to Home Screen / 使用浏览器菜单，或在 Safari 中点“分享 → 添加到主屏幕”。</p></noscript>
-                </div>
-            </section>
+                <section class="download-help">
+                    <h2>After installing</h2>
+                    <p>Open InfernuxHub, install an engine version from <strong>Installs</strong>, then create a project with that version.</p>
+                    <a href="start.html">Read the short getting-started guide</a>
+                </section>
+            </div>
 
-            <section class="download-protocol" aria-labelledby="verify-title">
-                <div><span class="mini-tag">SHA-256 · POWERSHELL</span><h2 id="verify-title" data-i18n="downloadPage.verify.title">Verify the file before running it.</h2><p data-i18n="downloadPage.verify.body">Compare the command output with the checksum shown on the artifact card.</p><p class="verification-boundary" data-i18n="downloadPage.verify.boundary">SHA-256 detects whether the downloaded bytes differ from the reviewed GitHub asset. It is not proof of publisher identity, and this release manifest declares no separate signature. Download only from the canonical GitHub Releases links on this page.</p></div>
-                <pre><code>Get-FileHash .\InfernuxHubInstaller-0.2.9.exe -Algorithm SHA256</code></pre>
-            </section>
+            <div data-page-language="zh" lang="zh-CN" hidden>
+                <header class="download-heading">
+                    <span class="mini-tag">Windows 10/11 · x64</span>
+                    <h1>下载 Infernux</h1>
+                    <p>先安装 InfernuxHub。项目和已经安装的引擎版本都可以在 Hub 里统一管理。</p>
+                </header>
 
-            <section class="section release-notes" aria-labelledby="release-notes-title">
-                <div class="section-head">
-                    <div><div class="section-kicker" data-i18n="downloadPage.releaseNotes.kicker">Release record</div><h2 class="section-title" id="release-notes-title" data-i18n="downloadPage.releaseNotes.title">What changed in this build.</h2></div>
-                    <p class="section-intro" data-i18n="downloadPage.releaseNotes.intro">Rendered from the same UpdateLog.md used as the canonical GitHub Release body.</p>
-                </div>
-                <p class="release-notes-status" id="release-notes-status" aria-live="polite" data-i18n="downloadPage.releaseNotes.loading">Reading structured release notes…</p>
-                <div class="release-notes-summary" id="release-notes-summary"></div>
-                <div class="release-notes-grid" id="release-notes-grid"></div>
-                <noscript><p><a href="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.9">Read the release notes on GitHub.</a></p></noscript>
-            </section>
+                <section class="hub-download" aria-labelledby="hub-title-zh">
+                    <img src="assets/infernux-icon-192.png" width="192" height="192" alt="InfernuxHub">
+                    <div>
+                        <span class="mini-tag">推荐</span>
+                        <h2 id="hub-title-zh">InfernuxHub</h2>
+                        <p>通过 Hub 安装或切换 Infernux 版本、创建项目、打开已有项目。普通用户不需要自己准备 Python 环境。</p>
+                        <a class="btn btn-primary" href="https://github.com/ChenlizheMe/Infernux/releases/download/v0.2.9/InfernuxHubInstaller-0.2.9.exe"><i class="fas fa-download" aria-hidden="true"></i> 下载 InfernuxHub</a>
+                        <span class="download-meta">Windows x64 · InfernuxHub 0.2.9</span>
+                    </div>
+                </section>
 
-            <section class="section requirements" aria-labelledby="requirements-title">
-                <div class="section-head"><div><div class="section-kicker" data-i18n="downloadPage.requirements.kicker">Before ignition</div><h2 class="section-title" id="requirements-title" data-i18n="downloadPage.requirements.title">Know the preview boundary.</h2></div></div>
-                <div class="requirement-grid">
-                    <article><h3 data-i18n="downloadPage.requirements.system">System</h3><p data-i18n="downloadPage.requirements.systemBody">Windows 10 or 11, 64-bit, with a current Vulkan-capable graphics driver. The standalone wheel requires CPython 3.12 x64.</p></article>
-                    <article><h3 data-i18n="downloadPage.requirements.preview">Preview status</h3><p data-i18n="downloadPage.requirements.previewBody">APIs and project formats are still evolving. Keep projects in version control and read the Roadmap before production commitments.</p></article>
-                    <article><h3 data-i18n="downloadPage.requirements.help">Recovery</h3><p data-i18n="downloadPage.requirements.helpBody">If verification or installation fails, retain the filename, checksum, Windows version, GPU driver, and exact error before opening an Issue.</p></article>
-                </div>
-                <div class="hub-actions"><a class="btn btn-secondary" href="wiki/site/en/learn/getting-started.html" data-i18n="downloadPage.start">Installation guide</a><a class="btn btn-secondary" id="release-notes-link" href="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.9" target="_blank" rel="noopener" data-i18n="downloadPage.notes">Release notes on GitHub</a><a class="btn btn-secondary" id="all-releases-link" href="https://github.com/ChenlizheMe/Infernux/releases" target="_blank" rel="noopener" data-i18n="downloadPage.archive">All releases / older versions</a></div>
-            </section>
+                <section class="version-section" aria-labelledby="versions-title-zh">
+                    <div class="version-copy">
+                        <h2 id="versions-title-zh">选择引擎版本</h2>
+                        <p>InfernuxHub 可以同时安装多个引擎版本。需要直接下载 wheel 或使用旧版本时，在下面选择版本。</p>
+                    </div>
+                    <div class="version-picker">
+                        <label for="engine-version-zh">Infernux 版本</label>
+                        <select id="engine-version-zh" data-version-select>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.9">0.2.9 · 当前预览版</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.1">0.2.1</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.0">0.2.0</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.6">0.1.6</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.5">0.1.5</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.4">0.1.4</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.3">0.1.3</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.2">0.1.2</option>
+                            <option value="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.1.1">0.1.1</option>
+                        </select>
+                        <a class="btn btn-secondary" data-version-link href="https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.9" target="_blank" rel="noopener">打开这个版本的下载页面 <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                    </div>
+                    <p class="version-note">直接下载的引擎包面向 Windows x64 与 CPython 3.12。普通用户直接在 InfernuxHub 里安装版本即可。</p>
+                </section>
+
+                <section class="download-help">
+                    <h2>安装之后</h2>
+                    <p>打开 InfernuxHub，在<strong>安装</strong>页面选择引擎版本，然后使用这个版本创建项目。</p>
+                    <a href="start.html">查看简短的开始使用说明</a>
+                </section>
+            </div>
         </div>
     </main>
 
-    <footer class="footer"><div class="container"><div class="footer-bottom">© 2024–2026 Lizhe Chen · MIT License · 熔炉 · INFERNUX</div></div></footer>
-    <script src="js/i18n-download.js?v=2"></script>
+    <footer class="footer"><div class="container"><div class="footer-content"><div class="footer-brand"><div class="nav-logo"><span class="logo-icon"><img src="assets/logo.png" width="256" height="256" alt="Infernux logo"></span><span class="logo-text" data-i18n="brand.footerTitle">熔炉 · INFERNUX</span></div><p data-i18n="footer.tagline">Open code, explicit architecture, and a render stack you can actually reason about.</p></div><div class="footer-links"><div class="footer-column"><h4 data-i18n="footer.resources">Resources</h4><a href="start.html" data-i18n="nav.start">Start</a><a href="roadmap.html" data-i18n="nav.roadmap">Roadmap</a></div><div class="footer-column"><h4 data-i18n="footer.community">Community</h4><a href="community.html" data-i18n="nav.community">Community</a><a href="https://github.com/ChenlizheMe/Infernux/issues" target="_blank" rel="noopener" data-i18n="footer.issues">Issues</a></div></div></div><div class="footer-bottom">© 2024–2026 Lizhe Chen · MIT License · 熔炉 · INFERNUX</div></div></footer>
+    <script src="js/i18n-download.js?v=3"></script>
     <script src="js/i18n.js?v=18"></script>
     <script src="js/main.js?v=14"></script>
     <script src="js/docs-search.js?v=5"></script>
-    <script src="js/pwa-install.js?v=1"></script>
-    <script src="js/download.js?v=2"></script>
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebPage",
-      "@id": "https://infernux-engine.com/download.html#page",
-      "name": "Download Infernux",
-      "description": "Verified Windows downloads for the Infernux technical preview, with file sizes and SHA-256 checksums.",
-      "url": "https://infernux-engine.com/download.html",
-      "inLanguage": ["en", "zh-CN"],
-      "isPartOf": { "@id": "https://infernux-engine.com/#website" },
-      "about": { "@id": "https://infernux-engine.com/#software" },
-      "significantLink": "https://github.com/ChenlizheMe/Infernux/releases/tag/v0.2.9"
-    }
-    </script>
+    <script src="js/bilingual-page.js?v=1"></script>
+    <script src="js/download.js?v=3"></script>
 </body>
 </html>

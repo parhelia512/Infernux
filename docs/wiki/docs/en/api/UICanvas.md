@@ -84,7 +84,6 @@ if ui_root is not None:
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [Screen-space UI Manual](../manual/ui.md)
 - [UIText](UIText.md)
 - [UIImage](UIImage.md)
 - [UIButton](UIButton.md)

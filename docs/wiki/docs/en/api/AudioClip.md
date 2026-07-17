@@ -92,7 +92,5 @@ if clip is not None:
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [Audio Workflow](../learn/audio-workflow.md)
 - [AudioSource](AudioSource.md)
-- [Assets and Meta Files](../manual/assets-and-meta.md)
 <!-- USER CONTENT END -->

@@ -591,13 +591,21 @@ table { max-width: 100%; }
     box-shadow: 0 0 8px var(--accent);
 }
 
-.hero-title,
-.subpage-hero h1,
-.hub-hero h1 {
+.hero-title {
     font-family: var(--font-display);
     font-size: clamp(3rem, 6vw, 5.6rem);
     line-height: 0.92;
-    letter-spacing: -0.04em;
+    letter-spacing: 0;
+    font-weight: 700;
+}
+
+.subpage-hero h1,
+.hub-hero h1 {
+    max-width: 32ch;
+    font-family: var(--font-display);
+    font-size: 2.15rem;
+    line-height: 1.15;
+    letter-spacing: 0;
     font-weight: 700;
 }
 
@@ -953,9 +961,9 @@ table { max-width: 100%; }
 
 .section-title {
     font-family: var(--font-display);
-    font-size: clamp(2rem, 3.4vw, 3.1rem);
-    line-height: 1.04;
-    letter-spacing: -0.03em;
+    font-size: 1.75rem;
+    line-height: 1.18;
+    letter-spacing: 0;
     font-weight: 700;
 }
 
@@ -1342,12 +1350,34 @@ table { max-width: 100%; }
 
 /* ── Subpage hero ────────────────────────────────────────────────── */
 .subpage-hero,
-.hub-hero { padding: 48px 52px 52px; }
+.hub-hero {
+    overflow: visible;
+    padding: 24px 0 28px;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+}
+
+.subpage-hero::before,
+.subpage-hero::after,
+.hub-hero::before {
+    display: none;
+}
 
 .subpage-hero p,
 .hub-hero p {
+    margin-top: 10px;
     max-width: 760px;
+    font-size: 0.94rem;
 }
+
+.subpage-hero .hero-codename,
+.hub-hero .hero-codename { margin-bottom: 10px; }
+
+.subpage-hero .hub-actions,
+.hub-hero .hub-actions { margin-top: 18px; }
 
 .roadmap-layout,
 .hub-layout {
@@ -1701,16 +1731,17 @@ table { max-width: 100%; }
         grid-template-columns: 1fr;
     }
 
-    .hero-grid,
-    .subpage-hero,
-    .hub-hero {
+    .hero-grid {
         padding: 32px;
     }
 
-    .hero-title,
+    .hero-title {
+        font-size: 2.6rem;
+    }
+
     .subpage-hero h1,
     .hub-hero h1 {
-        font-size: 2.6rem;
+        font-size: 1.9rem;
     }
 
     .footer-content,
@@ -1737,16 +1768,17 @@ table { max-width: 100%; }
     .logo-icon { width: 32px; height: 32px; }
     .lang-toggle { min-width: 52px; padding: 0 8px; }
 
-    .hero-grid,
-    .subpage-hero,
-    .hub-hero {
+    .hero-grid {
         padding: 26px 22px;
     }
 
-    .hero-title,
+    .hero-title {
+        font-size: 2.25rem;
+    }
+
     .subpage-hero h1,
     .hub-hero h1 {
-        font-size: clamp(2rem, 11vw, 2.6rem);
+        font-size: 1.7rem;
     }
 
     .hero-actions,
@@ -1762,7 +1794,7 @@ table { max-width: 100%; }
         gap: 2px 10px;
     }
     .code-preview pre { font-size: 0.74rem; }
-    .section-title { font-size: clamp(1.75rem, 9vw, 2.3rem); }
+    .section-title { font-size: 1.5rem; }
     .pillar-card,
     .capability-card,
     .status-card,

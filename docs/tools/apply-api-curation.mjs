@@ -12,6 +12,14 @@ function forCurrentRelease(value) {
   return value.replaceAll("0.2.1", DOCUMENTED_RELEASE);
 }
 
+function withoutRemovedGuideLinks(value) {
+  return value
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*-\s+\[[^\]]+\]\(\.\.\/(?:learn|manual|architecture)\//.test(line))
+    .join("\n")
+    .replace(/\[([^\]]+)\]\(\.\.\/(?:learn|manual|architecture)\/[^)]+\)/g, "$1");
+}
+
 const examples = {
   InxComponent: `\`\`\`python
 from Infernux import InxComponent, Vector3, serialized_field
@@ -476,7 +484,7 @@ Texture format for render targets. This public alias maps to the native \`PixelF
 ## Example
 
 <!-- USER CONTENT START --> example
-> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines.
+> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above; do not infer behavior from similarly named APIs in other engines.
 <!-- USER CONTENT END -->
 
 ## See Also
@@ -535,7 +543,7 @@ Texture format for render targets. This public alias maps to the native \`PixelF
 ## 示例
 
 <!-- USER CONTENT START --> example
-> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。
+> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请以上方签名为准；不要根据其他引擎中的同名 API 推测行为。
 <!-- USER CONTENT END -->
 
 ## 另请参阅
@@ -552,7 +560,7 @@ function ensureGeneratedAliasPages() {
     const relative = path.join("docs", "wiki", "docs", language, "api", "Format.md");
     const file = path.join(ROOT, relative);
     const current = fs.existsSync(file) ? fs.readFileSync(file, "utf8").replaceAll("\r\n", "\n") : "";
-    const expected = forCurrentRelease(content);
+    const expected = withoutRemovedGuideLinks(forCurrentRelease(content));
     if (current === expected) continue;
     if (CHECK) stale.add(relative);
     else fs.writeFileSync(file, expected, "utf8");
@@ -607,10 +615,10 @@ for (const [language, entries] of Object.entries({ en: english, zh: chinese })) 
 
     const original = fs.readFileSync(file, "utf8");
     let updated = original;
-    updated = replaceSection(updated, "description", forCurrentRelease(sections.description), relative);
+    updated = replaceSection(updated, "description", withoutRemovedGuideLinks(forCurrentRelease(sections.description)), relative);
     updated = replaceSection(updated, "example", examples[symbol], relative);
     if (sections.see_also) {
-      updated = replaceSection(updated, "see_also", sections.see_also, relative);
+      updated = replaceSection(updated, "see_also", withoutRemovedGuideLinks(sections.see_also), relative);
     }
 
     if (updated !== original) {
@@ -626,8 +634,8 @@ for (const [language, entries] of Object.entries({ en: english, zh: chinese })) 
 for (const language of ["en", "zh"]) {
   const apiRoot = path.join(ROOT, "docs", "wiki", "docs", language, "api");
   const fallback = forCurrentRelease(language === "en"
-    ? "> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above and related Manual/Learn pages; do not infer behavior from similarly named APIs in other engines."
-    : "> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请使用上方签名及相关 Manual/Learn；不要根据其他引擎中的同名 API 推测行为。");
+    ? "> **Example status:** No curated example has been verified for this symbol in 0.2.1. Use the signatures above; do not infer behavior from similarly named APIs in other engines."
+    : "> **示例状态：** 当前尚未为此符号验证 0.2.1 示例。请以上方签名为准；不要根据其他引擎中的同名 API 推测行为。");
 
   for (const name of fs.readdirSync(apiRoot).filter((entry) => entry.endsWith(".md") && entry !== "index.md")) {
     const file = path.join(apiRoot, name);

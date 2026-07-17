@@ -106,8 +106,6 @@ if player is not None and player.active_in_hierarchy:
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [Scenes and Objects](../manual/scenes-and-objects.md)
-- [Your First Component](../learn/first-component.md)
 - [Transform](Transform.md)
 - [InxComponent](InxComponent.md)
 <!-- USER CONTENT END -->

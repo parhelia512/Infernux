@@ -3,10 +3,6 @@
 {% set is_not_found = not page.title %}
 {% set page_path = '/' ~ (page.url or '') %}
 {% set is_api = '/api/' in page_path %}
-{% set is_learn = '/learn/' in page_path %}
-{% set is_getting_started = '/learn/getting-started.html' in page_path %}
-{% set is_manual = '/manual/' in page_path %}
-{% set is_architecture = '/architecture/' in page_path %}
 {% set is_section_index = page.url and page.url.endswith('/api/index.html') %}
 {% set canonical_url = 'https://infernux-engine.com/wiki/site/' ~ (page.url or '') %}
 {% set document_title = page.title or ('页面未找到' if is_zh else 'Page not found') %}
@@ -30,26 +26,11 @@
 {% set section_name = 'API 参考' if is_zh else 'API Reference' %}
 {% set section_url = 'https://infernux-engine.com/wiki/site/' ~ ('zh' if is_zh else 'en') ~ '/api/index.html' %}
 {% set resource_type = 'API reference' %}
-{% elif is_learn %}
-{% set schema_type = 'LearningResource' %}
-{% set section_name = '学习' if is_zh else 'Learn' %}
-{% set section_url = 'https://infernux-engine.com/wiki.html#start-here' %}
-{% set resource_type = 'Tutorial' %}
-{% elif is_manual %}
-{% set schema_type = 'TechArticle' %}
-{% set section_name = '手册' if is_zh else 'Manual' %}
-{% set section_url = 'https://infernux-engine.com/wiki.html?layer=manual#written-guides' %}
-{% set resource_type = 'Manual' %}
-{% elif is_architecture %}
-{% set schema_type = 'TechArticle' %}
-{% set section_name = '架构' if is_zh else 'Architecture' %}
-{% set section_url = 'https://infernux-engine.com/wiki.html?layer=architecture#written-guides' %}
-{% set resource_type = 'Architecture reference' %}
 {% else %}
 {% set schema_type = 'TechArticle' %}
-{% set section_name = '文档' if is_zh else 'Documentation' %}
-{% set section_url = 'https://infernux-engine.com/wiki.html' %}
-{% set resource_type = 'Documentation' %}
+{% set section_name = 'API 参考' if is_zh else 'API Reference' %}
+{% set section_url = 'https://infernux-engine.com/wiki/site/' ~ ('zh' if is_zh else 'en') ~ '/api/index.html' %}
+{% set resource_type = 'API reference' %}
 {% endif %}
 <html lang="{{ page_language }}">
 <head>
@@ -136,10 +117,10 @@
             {
               "@type": "ListItem",
               "position": 1,
-              "name": {{ ('文档' if is_zh else 'Documentation') | tojson }},
-              "item": "https://infernux-engine.com/wiki.html"
+              "name": {{ ('开始使用' if is_zh else 'Start') | tojson }},
+              "item": "https://infernux-engine.com/start.html"
             },
-            {% if is_section_index or not (is_api or is_learn or is_manual or is_architecture) %}
+            {% if is_section_index or not is_api %}
             {
               "@type": "ListItem",
               "position": 2,
@@ -175,13 +156,12 @@
     <link rel="alternate" hreflang="zh-CN" href="https://infernux-engine.com/wiki/site/{{ page.url | replace('en/', 'zh/') }}">
     <link rel="alternate" hreflang="x-default" href="https://infernux-engine.com/wiki/site/{{ page.url }}">
     {% endif %}
-    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
-    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="{% if page.url and '/api/' in '/' + page.url %}/api-index.json{% else %}/docs-index.json{% endif %}">
+    <link rel="alternate" type="application/json" title="Infernux API index" href="/api-index.json">
     <link rel="manifest" href="/site.webmanifest">
     <link rel="icon" type="image/png" href="/assets/logo.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
     <link rel="stylesheet" href="/css/fonts.css?v=1">
-    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/style.css?v=18">
     <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
     <link rel="stylesheet" href="/css/docs-search.css?v=3">
     <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
@@ -616,19 +596,10 @@
 <body class="{% if page.url and '/api/' in '/' + page.url %}api-reference-page{% else %}guide-page{% endif %}">
     {% macro document_breadcrumb() %}
     <nav class="doc-breadcrumb" aria-label="{% if page.url and 'zh/' in page.url %}面包屑{% else %}Breadcrumb{% endif %}">
-        <a href="/wiki.html">{% if page.url and 'zh/' in page.url %}文档{% else %}Docs{% endif %}</a>
+        <a href="/start.html">{% if page.url and 'zh/' in page.url %}开始使用{% else %}Start{% endif %}</a>
         <span aria-hidden="true">/</span>
         {% if page.url and '/api/' in '/' + page.url %}
         <a href="/wiki/site/{% if 'zh/' in page.url %}zh{% else %}en{% endif %}/api/index.html">API</a>
-        <span aria-hidden="true">/</span>
-        {% elif page.url and '/learn/' in '/' + page.url %}
-        <a href="/wiki.html#start-here">{% if 'zh/' in page.url %}学习{% else %}Learn{% endif %}</a>
-        <span aria-hidden="true">/</span>
-        {% elif page.url and '/manual/' in '/' + page.url %}
-        <a href="/wiki.html?layer=manual#written-guides">{% if 'zh/' in page.url %}手册{% else %}Manual{% endif %}</a>
-        <span aria-hidden="true">/</span>
-        {% elif page.url and '/architecture/' in '/' + page.url %}
-        <a href="/wiki.html?layer=architecture#written-guides">{% if 'zh/' in page.url %}架构{% else %}Architecture{% endif %}</a>
         <span aria-hidden="true">/</span>
         {% endif %}
         <span aria-current="page">{{ page.title }}</span>
@@ -636,7 +607,7 @@
     {% endmacro %}
     {% macro document_trail() %}
     <nav class="doc-trail" data-doc-trail aria-label="{% if page.url and 'zh/' in page.url %}文档连续阅读与反馈{% else %}Document navigation and feedback{% endif %}">
-        <a class="doc-trail-fallback" href="/wiki.html">{% if page.url and 'zh/' in page.url %}返回文档中心{% else %}Back to documentation{% endif %}</a>
+        <a class="doc-trail-fallback" href="/wiki/site/{% if is_zh %}zh{% else %}en{% endif %}/api/index.html">{% if is_zh %}返回 API 目录{% else %}Back to API index{% endif %}</a>
     </nav>
     {% endmacro %}
     {% macro document_build_provenance() %}
@@ -671,9 +642,8 @@
                 <span class="logo-text">Infernux</span>
             </a>
             <div class="nav-links" id="primary-navigation">
-                <a href="/wiki/site/{% if is_zh %}zh{% else %}en{% endif %}/learn/getting-started.html" class="nav-priority{% if is_getting_started %} active{% endif %}"{% if is_getting_started %} aria-current="page"{% endif %}>{% if is_zh %}开始使用{% else %}Start{% endif %}</a>
-                <a href="/wiki.html#start-here"{% if is_learn and not is_getting_started %} class="active" aria-current="page"{% endif %}>{% if is_zh %}学习{% else %}Learn{% endif %}</a>
-                <a href="/wiki.html?layer=manual#written-guides"{% if is_manual or is_architecture %} class="active" aria-current="page"{% endif %}>{% if is_zh %}手册{% else %}Manual{% endif %}</a>
+                <a href="/start.html" class="nav-priority">{% if is_zh %}开始使用{% else %}Start{% endif %}</a>
+                <a href="/start.html#first-script">{% if is_zh %}学习{% else %}Learn{% endif %}</a>
                 <a href="/wiki/site/{% if is_zh %}zh{% else %}en{% endif %}/api/index.html"{% if is_api %} class="active" aria-current="page"{% endif %}>API</a>
                 <a href="/roadmap.html">{% if page.url and 'zh/' in page.url %}路线图{% else %}Roadmap{% endif %}</a>
                 <a href="/community.html" class="nav-priority">{% if is_zh %}社区{% else %}Community{% endif %}</a>
@@ -835,7 +805,7 @@
             </div>
             <label class="docs-search-field" for="docs-search-input">
                 <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="{% if page.url and 'zh/' in page.url %}API 符号、系统、工作流…{% else %}API symbol, system, workflow…{% endif %}">
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="{% if page.url and 'zh/' in page.url %}API 符号、模块或方法…{% else %}API symbol, module, or method…{% endif %}">
             </label>
             <div class="docs-search-filters" id="docs-search-filters" aria-label="{% if is_zh %}文档搜索筛选器{% else %}Documentation search filters{% endif %}"></div>
             <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
@@ -845,7 +815,6 @@
 
     <script src="/js/main.js?v=14"></script>
     <script src="/js/docs-search.js?v=5"></script>
-    <script src="/js/docs-recent.js?v=1"></script>
     <script src="/js/wiki-generated.js?v=14"></script>
 </body>
 </html>

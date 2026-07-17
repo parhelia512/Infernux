@@ -19,10 +19,6 @@
 
 
 
-
-
-
-
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -73,8 +69,8 @@
           },
           "inLanguage": "en",
           "isAccessibleForFree": true,
-          "learningResourceType": "Documentation",
-          "articleSection": "Documentation",
+          "learningResourceType": "API reference",
+          "articleSection": "API Reference",
           "image": {
             "@type": "ImageObject",
             "url": "https://infernux-engine.com/assets/infernux-social-card-0.2.1.jpg",
@@ -106,8 +102,8 @@
             {
               "@type": "ListItem",
               "position": 1,
-              "name": "Documentation",
-              "item": "https://infernux-engine.com/wiki.html"
+              "name": "Start",
+              "item": "https://infernux-engine.com/start.html"
             },
             
             {
@@ -124,13 +120,12 @@
     </script>
     
     
-    <link rel="alternate" type="text/plain" title="Infernux Agent index" href="/llms.txt">
-    <link rel="alternate" type="application/json" title="Infernux machine-readable document index" href="/docs-index.json">
+    <link rel="alternate" type="application/json" title="Infernux API index" href="/api-index.json">
     <link rel="manifest" href="/site.webmanifest">
     <link rel="icon" type="image/png" href="/assets/logo.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
     <link rel="stylesheet" href="/css/fonts.css?v=1">
-    <link rel="stylesheet" href="/css/style.css?v=17">
+    <link rel="stylesheet" href="/css/style.css?v=18">
     <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
     <link rel="stylesheet" href="/css/docs-search.css?v=3">
     <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
@@ -150,9 +145,8 @@
                 <span class="logo-text">Infernux</span>
             </a>
             <div class="nav-links" id="primary-navigation">
-                <a href="/wiki/site/en/learn/getting-started.html" class="nav-priority">Start</a>
-                <a href="/wiki.html#start-here">Learn</a>
-                <a href="/wiki.html?layer=manual#written-guides">Manual</a>
+                <a href="/start.html" class="nav-priority">Start</a>
+                <a href="/start.html#first-script">Learn</a>
                 <a href="/wiki/site/en/api/index.html">API</a>
                 <a href="/roadmap.html">Roadmap</a>
                 <a href="/community.html" class="nav-priority">Community</a>
@@ -185,7 +179,7 @@
             <div class="api-main article-page-content">
                 
     <nav class="doc-breadcrumb" aria-label="Breadcrumb">
-        <a href="/wiki.html">Docs</a>
+        <a href="/start.html">Start</a>
         <span aria-hidden="true">/</span>
         
         <span aria-current="page">Home</span>
@@ -204,210 +198,17 @@
         <nav class="doc-outline-links" id="doc-outline-links" aria-label="Sections on this page"></nav>
     </aside>
     
-                <h1 id="infernux-documentation">Infernux Documentation<a class="headerlink" href="#infernux-documentation" title="Permanent link">&para;</a></h1>
-<p>Learn Infernux by completing a small task, look up a system in the manual, or jump directly to the generated Python API reference.</p>
-<p>中文入口：<a href="zh/learn/getting-started.html">快速开始</a> · <a href="zh/learn/first-component.html">第一个组件</a> · <a href="zh/learn/2d-foundations.html">2D</a> · <a href="zh/learn/3d-foundations.html">3D</a> · <a href="zh/learn/animation-workflow.html">动画</a> · <a href="zh/learn/audio-workflow.html">音频</a> · <a href="zh/learn/build-and-share.html">构建并分享</a> · <a href="zh/manual/engine-map.html">引擎地图</a></p>
-<h2 id="start-here">Start here<a class="headerlink" href="#start-here" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>If you want to…</th>
-<th>Go to</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Install the preview and understand the editor</td>
-<td><a href="en/learn/getting-started.html">Getting Started</a></td>
-</tr>
-<tr>
-<td>Write and attach gameplay logic</td>
-<td><a href="en/learn/first-component.html">Your First Component</a></td>
-</tr>
-<tr>
-<td>Build an orthographic sprite scene</td>
-<td><a href="en/learn/2d-foundations.html">2D Foundations</a></td>
-</tr>
-<tr>
-<td>Build a minimal lit mesh scene</td>
-<td><a href="en/learn/3d-foundations.html">3D Foundations</a></td>
-</tr>
-<tr>
-<td>Create clips and Animator transitions</td>
-<td><a href="en/learn/animation-workflow.html">Animation Workflow</a></td>
-</tr>
-<tr>
-<td>Configure persistent and one-shot sound</td>
-<td><a href="en/learn/audio-workflow.html">Audio Workflow</a></td>
-</tr>
-<tr>
-<td>Build and validate a standalone player</td>
-<td><a href="en/learn/build-and-share.html">Build and Share a Project</a></td>
-</tr>
-<tr>
-<td>Find the right engine system</td>
-<td><a href="en/manual/engine-map.html">Engine Map</a></td>
-</tr>
-<tr>
-<td>Understand scene and object ownership</td>
-<td><a href="en/manual/scenes-and-objects.html">Scenes and Objects</a></td>
-</tr>
-<tr>
-<td>Handle input and frame-independent motion</td>
-<td><a href="en/manual/input-and-time.html">Input and Time</a></td>
-</tr>
-<tr>
-<td>Configure collisions, forces, and queries</td>
-<td><a href="en/manual/physics.html">Physics</a></td>
-</tr>
-<tr>
-<td>Build responsive game interfaces</td>
-<td><a href="en/manual/ui.html">Screen-space UI</a></td>
-</tr>
-<tr>
-<td>Import, reference, and move content safely</td>
-<td><a href="en/manual/assets-and-meta.html">Assets and <code>.meta</code> Files</a></td>
-</tr>
-<tr>
-<td>Select pipelines and order render effects</td>
-<td><a href="en/manual/rendering-and-renderstack.html">Rendering and RenderStack</a></td>
-</tr>
-<tr>
-<td>Check API release compatibility</td>
-<td><a href="en/manual/api-versioning.html">API Versioning and Compatibility</a></td>
-</tr>
-<tr>
-<td>Diagnose errors and report evidence</td>
-<td><a href="en/manual/debugging.html">Debugging and the Console</a></td>
-</tr>
-<tr>
-<td>Look up an exact class or method</td>
-<td><a href="en/api/index.html">API Reference</a></td>
-</tr>
-</tbody>
-</table>
-<h2 id="quick-links">Quick Links<a class="headerlink" href="#quick-links" title="Permanent link">&para;</a></h2>
+                <h1 id="infernux-scripting-api">Infernux Scripting API<a class="headerlink" href="#infernux-scripting-api" title="Permanent link">&para;</a></h1>
+<p>This section contains the generated Python API reference.</p>
 <ul>
-<li><a href="https://github.com/ChenlizheMe/Infernux#readme">Project README</a></li>
-<li><a href="https://github.com/ChenlizheMe/Infernux/blob/master/README-zh.md">Chinese README</a></li>
-<li><a href="https://infernux-engine.com/">Website</a></li>
-<li><a href="https://arxiv.org/pdf/2604.10263">Technical Report</a></li>
-<li><a href="en/api/index.html">API Reference</a></li>
+<li><a href="en/api/index.html">English API</a></li>
+<li><a href="zh/api/index.html">中文 API</a></li>
+<li><a href="https://infernux-engine.com/start.html">Get started</a></li>
 </ul>
-<h2 id="architecture-and-research">Architecture and Research<a class="headerlink" href="#architecture-and-research" title="Permanent link">&para;</a></h2>
-<p>Project context and the current performance story live here:</p>
-<table>
-<thead>
-<tr>
-<th>Page</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="en/architecture/about.html">Why Infernux Exists</a></td>
-<td>Project motivation, origin story, and long-term direction</td>
-</tr>
-<tr>
-<td><a href="en/architecture/jit.html">JIT-Accelerated Scripting</a></td>
-<td>Batch bridge, Numba integration, auto-parallelization, and benchmark takeaways</td>
-</tr>
-<tr>
-<td><a href="https://arxiv.org/pdf/2604.10263">Technical Report</a></td>
-<td>Full report: <em>Infernux: A Python-Native Game Engine with JIT-Accelerated Scripting</em></td>
-</tr>
-</tbody>
-</table>
-<p>中文内容：<a href="zh/architecture/about.html">为什么会有 Infernux</a> · <a href="zh/architecture/jit.html">JIT 加速脚本</a> · <a href="https://arxiv.org/pdf/2604.10263">技术报告</a></p>
-<h2 id="a-minimal-component">A minimal component<a class="headerlink" href="#a-minimal-component" title="Permanent link">&para;</a></h2>
-<p>Infernux is an open-source game engine with a C++17 / Vulkan runtime and a Python production layer. Use Python for gameplay, tools, and iteration-heavy workflows while the engine handles rendering, physics, audio, and runtime ownership.</p>
-<h3 id="hello-world">Hello World<a class="headerlink" href="#hello-world" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">Infernux</span><span class="w"> </span><span class="kn">import</span> <span class="o">*</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">HelloWorld</span><span class="p">(</span><span class="n">InxComponent</span><span class="p">):</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">speed</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">serialized_field</span><span class="p">(</span><span class="n">default</span><span class="o">=</span><span class="mf">5.0</span><span class="p">)</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        <span class="n">Debug</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="s2">&quot;Hello, Infernux!&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">delta_time</span><span class="p">:</span> <span class="nb">float</span><span class="p">):</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">transform</span><span class="o">.</span><span class="n">rotate</span><span class="p">(</span><span class="n">Vector3</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">speed</span> <span class="o">*</span> <span class="n">delta_time</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
-</code></pre></div>
-<p>See <a href="en/learn/first-component.html">Your First Component</a> for where this file belongs, how to attach it, and how to verify the result.</p>
-<h2 id="modules">Modules<a class="headerlink" href="#modules" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Module</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><a href="en/api/index.html">Infernux</a></td>
-<td>Core types — GameObject, Transform, Scene, Component</td>
-</tr>
-<tr>
-<td><a href="en/api/InxComponent.html">Infernux.components</a></td>
-<td>Component system — InxComponent, serialized_field, decorators</td>
-</tr>
-<tr>
-<td><a href="en/api/Material.html">Infernux.core</a></td>
-<td>Assets — Material, Texture, Shader, AudioClip</td>
-</tr>
-<tr>
-<td><a href="en/api/Coroutine.html">Infernux.coroutine</a></td>
-<td>Coroutines — WaitForSeconds, WaitUntil, WaitWhile</td>
-</tr>
-<tr>
-<td><a href="en/api/Input.html">Infernux.input</a></td>
-<td>Input system — keyboard, mouse, touch</td>
-</tr>
-<tr>
-<td><a href="en/api/vector3.html">Infernux.math</a></td>
-<td>Math — vector2, vector3, vector4, quaternion</td>
-</tr>
-<tr>
-<td><a href="en/api/Mathf.html">Infernux.mathf</a></td>
-<td>Math utilities — clamp, lerp, smooth_step</td>
-</tr>
-<tr>
-<td><a href="en/api/Physics.html">Infernux.physics</a></td>
-<td>Physics — Rigidbody, colliders, raycasting</td>
-</tr>
-<tr>
-<td><a href="en/api/RenderGraph.html">Infernux.rendergraph</a></td>
-<td>Render graph — textures, passes, formats</td>
-</tr>
-<tr>
-<td><a href="en/api/RenderStack.html">Infernux.renderstack</a></td>
-<td>Render stack — pipelines, post-processing effects</td>
-</tr>
-<tr>
-<td><a href="en/api/SceneManager.html">Infernux.scene</a></td>
-<td>Scene management</td>
-</tr>
-<tr>
-<td><a href="en/api/Time.html">Infernux.timing</a></td>
-<td>Time — delta_time, time_scale, frame timing</td>
-</tr>
-<tr>
-<td><a href="en/api/UICanvas.html">Infernux.ui</a></td>
-<td>UI — Canvas, Text, Image, Button</td>
-</tr>
-<tr>
-<td><a href="en/api/Debug.html">Infernux.debug</a></td>
-<td>Logging and diagnostics</td>
-</tr>
-<tr>
-<td><a href="en/api/Gizmos.html">Infernux.gizmos</a></td>
-<td>Visual debugging aids</td>
-</tr>
-</tbody>
-</table>
+<p>The short getting-started guide is maintained directly in <code>docs/start.html</code>. It is intentionally separate from the generated API pages so it can be edited by hand without rebuilding the documentation source tree.</p>
                 
     <nav class="doc-trail" data-doc-trail aria-label="Document navigation and feedback">
-        <a class="doc-trail-fallback" href="/wiki.html">Back to documentation</a>
+        <a class="doc-trail-fallback" href="/wiki/site/en/api/index.html">Back to API index</a>
     </nav>
     
                 
@@ -444,7 +245,7 @@
             </div>
             <label class="docs-search-field" for="docs-search-input">
                 <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API symbol, system, workflow…">
+                <input class="docs-search-input" id="docs-search-input" type="search" autocomplete="off" spellcheck="false" aria-controls="docs-search-results" aria-describedby="docs-search-status" aria-autocomplete="list" placeholder="API symbol, module, or method…">
             </label>
             <div class="docs-search-filters" id="docs-search-filters" aria-label="Documentation search filters"></div>
             <p class="docs-search-status" id="docs-search-status" aria-live="polite" aria-atomic="true"></p>
@@ -454,7 +255,6 @@
 
     <script src="/js/main.js?v=14"></script>
     <script src="/js/docs-search.js?v=5"></script>
-    <script src="/js/docs-recent.js?v=1"></script>
     <script src="/js/wiki-generated.js?v=14"></script>
 </body>
 </html>

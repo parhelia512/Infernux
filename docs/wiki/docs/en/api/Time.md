@@ -52,7 +52,6 @@ class PauseClock(InxComponent):
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [Input and Time](../manual/input-and-time.md)
 - [InxComponent](InxComponent.md)
 - [Rigidbody](Rigidbody.md)
 <!-- USER CONTENT END -->

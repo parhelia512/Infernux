@@ -1,0 +1,13 @@
+name = "infernux-community"
+main = "src/index.js"
+compatibility_date = "2026-07-01"
+
+[vars]
+SITE_ORIGIN = "https://infernux-engine.com"
+GITHUB_OWNER = "ChenlizheMe"
+GITHUB_REPO = "Infernux"
+GITHUB_REPOSITORY_ID = "R_kgDOO_wV3A"
+
+[[r2_buckets]]
+binding = "COMMUNITY_UPLOADS"
+bucket_name = "infernux-community-uploads"

@@ -88,7 +88,6 @@ class Thruster(InxComponent):
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [Physics Manual](../manual/physics.md)
 - [Physics](Physics.md)
 - [Collider](Collider.md)
 - [InxComponent](InxComponent.md)

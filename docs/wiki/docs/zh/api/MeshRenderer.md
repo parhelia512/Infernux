@@ -79,7 +79,6 @@ if display is not None:
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [3D 基础](../learn/3d-foundations.md)
 - [Material](Material.md)
 - [Light](Light.md)
 - [RenderStack](RenderStack.md)

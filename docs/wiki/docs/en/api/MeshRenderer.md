@@ -79,7 +79,6 @@ if display is not None:
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [3D Foundations](../learn/3d-foundations.md)
 - [Material](Material.md)
 - [Light](Light.md)
 - [RenderStack](RenderStack.md)

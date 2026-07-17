@@ -106,8 +106,6 @@ if player is not None and player.active_in_hierarchy:
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [场景与对象](../manual/scenes-and-objects.md)
-- [第一个组件](../learn/first-component.md)
 - [Transform](Transform.md)
 - [InxComponent](InxComponent.md)
 <!-- USER CONTENT END -->

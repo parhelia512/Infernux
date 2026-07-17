@@ -76,7 +76,6 @@ class KeyboardMover(InxComponent):
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [Input and Time](../manual/input-and-time.md)
 - [KeyCode](KeyCode.md)
 - [Time](Time.md)
 - [Camera](Camera.md)

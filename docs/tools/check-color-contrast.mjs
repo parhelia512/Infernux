@@ -183,7 +183,7 @@ if (rootTokens["text-faint"] || themes.light["text-faint"]) fail("Low-contrast o
 const foregroundSources = [
     "css/style.css",
     "css/mission.css",
-    "css/wiki.css",
+    "css/start.css",
     "css/community.css",
     "css/download.css",
     "css/roadmap.css",

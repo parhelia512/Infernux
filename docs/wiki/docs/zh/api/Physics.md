@@ -68,7 +68,6 @@ class GroundProbe(InxComponent):
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [物理手册](../manual/physics.md)
 - [Rigidbody](Rigidbody.md)
 - [Collider](Collider.md)
 - [BoxCollider](BoxCollider.md)

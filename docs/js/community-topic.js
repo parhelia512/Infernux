@@ -51,7 +51,7 @@ function safeCommunityUrl(value, { image = false } = {}) {
         if (url.protocol !== "https:") return null;
         if (!image) return url;
         const hostname = url.hostname.toLowerCase();
-        if (hostname === "github.com" || hostname.endsWith(".githubusercontent.com")) return url;
+        if (hostname === "github.com" || hostname.endsWith(".githubusercontent.com") || hostname === "community-api.infernux-engine.com") return url;
     } catch {}
     return null;
 }
@@ -233,6 +233,27 @@ async function loadCommunityTopicReplies(topic) {
     });
 }
 
+async function requestCommunityTopic(number, signal) {
+    if (globalThis.InfernuxCommunityApi) {
+        try {
+            const payload = await globalThis.InfernuxCommunityApi.request(`/api/discussions/${number}`, { signal });
+            if (payload?.discussion) return payload.discussion;
+            throw new Error("Forum gateway returned an unexpected topic payload");
+        } catch (error) {
+            console.warn("Forum gateway unavailable; trying the public GitHub fallback.", error);
+        }
+    }
+    const response = await fetch(`${COMMUNITY_TOPIC_API}/${number}`, {
+        headers: {
+            Accept: "application/vnd.github.html+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        },
+        signal
+    });
+    if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
+    return response.json();
+}
+
 async function loadCommunityTopic() {
     const number = readCommunityTopicNumber();
     if (!number) {
@@ -242,15 +263,7 @@ async function loadCommunityTopic() {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), COMMUNITY_TOPIC_TIMEOUT_MS);
     try {
-        const response = await fetch(`${COMMUNITY_TOPIC_API}/${number}`, {
-            headers: {
-                Accept: "application/vnd.github.html+json",
-                "X-GitHub-Api-Version": "2022-11-28"
-            },
-            signal: controller.signal
-        });
-        if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
-        const topic = normalizeCommunityTopicDetail(await response.json(), number);
+        const topic = normalizeCommunityTopicDetail(await requestCommunityTopic(number, controller.signal), number);
         if (!topic) throw new Error("Invalid community topic response");
         activeCommunityTopic = topic;
         renderCommunityTopicMeta(topic);

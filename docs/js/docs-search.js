@@ -108,66 +108,66 @@
         if (status !== "all") params.set("status", status);
         if (language) params.set("lang", language);
         const queryString = params.toString();
-        return `/wiki.html${queryString ? `?${queryString}` : ""}#written-guides`;
+        return "/wiki/site/en/api/index.html";
     }
 
     const copyByLanguage = {
         en: {
             title: "Search Infernux documentation",
-            placeholder: "API symbol, system, workflow…",
+            placeholder: "API symbol, module, or method…",
             close: "Close documentation search",
             trigger: "Search documentation",
             triggerText: "Search docs",
-            loading: "Loading documentation indexes…",
-            ready: "Search the selected language, or narrow the layer and status to browse.",
-            empty: "No documentation matches this query and filter set.",
-            failed: "Documentation search is temporarily unavailable. Close and retry when the connection recovers.",
-            apiUnavailable: "The API index is unavailable; showing guides only.",
-            docsUnavailable: "The guide index is unavailable; showing API symbols only.",
+            loading: "Loading the API index…",
+            ready: "Search the selected language or filter by stability.",
+            empty: "No API symbol matches this query and filter set.",
+            failed: "API search is temporarily unavailable. Close and retry when the connection recovers.",
+            apiUnavailable: "The API index is unavailable.",
+            docsUnavailable: "",
             release: (version) => `Documented release ${version}`,
             results: (count, shown) => shown < count ? `Showing ${shown} of ${count} results` : `${count} result${count === 1 ? "" : "s"}`,
-            continueTitle: "Continue in the Wiki",
-            continueBody: "Open a full-page, shareable view with this query, language, layer, and stability state.",
+            continueTitle: "Open the API index",
+            continueBody: "Browse the complete generated API reference.",
             language: { en: "English", "zh-CN": "中文" },
             filters: {
                 language: "Language",
-                layer: "Content layer",
+                layer: "Content",
                 state: "Stability",
                 allLanguages: "All languages",
                 allLayers: "All layers",
                 allStates: "All states",
                 release: "Search release scope"
             },
-            layers: { learn: "Learn", manual: "Manual", architecture: "Architecture", api: "API" },
+            layers: { api: "API" },
             states: { stable: "Stable", preview: "Preview", experimental: "Experimental", deprecated: "Deprecated" }
         },
         zh: {
             title: "搜索 Infernux 文档",
-            placeholder: "API 符号、系统、工作流…",
+            placeholder: "API 符号、模块或方法…",
             close: "关闭文档搜索",
             trigger: "搜索文档",
             triggerText: "搜索文档",
-            loading: "正在加载文档索引…",
-            ready: "搜索所选语言，或按层级和状态直接浏览。",
-            empty: "没有匹配当前查询与筛选条件的文档。",
-            failed: "文档搜索暂时不可用。关闭面板，网络恢复后可重试。",
-            apiUnavailable: "API 索引暂不可用；当前仅显示指南。",
-            docsUnavailable: "指南索引暂不可用；当前仅显示 API 符号。",
+            loading: "正在加载 API 索引…",
+            ready: "搜索所选语言，或按稳定性筛选。",
+            empty: "没有匹配当前查询与筛选条件的 API。",
+            failed: "API 搜索暂时不可用。关闭面板，网络恢复后可重试。",
+            apiUnavailable: "API 索引暂不可用。",
+            docsUnavailable: "",
             release: (version) => `文档版本 ${version}`,
             results: (count, shown) => shown < count ? `显示 ${shown} / ${count} 条结果` : `${count} 条结果`,
-            continueTitle: "在 Wiki 中继续",
-            continueBody: "使用当前查询、语言、层级和稳定性打开可分享的完整结果页面。",
+            continueTitle: "打开 API 目录",
+            continueBody: "浏览完整的自动生成 API 参考。",
             language: { en: "English", "zh-CN": "中文" },
             filters: {
                 language: "语言",
-                layer: "内容层级",
+                layer: "内容",
                 state: "稳定性",
                 allLanguages: "全部语言",
                 allLayers: "全部层级",
                 allStates: "全部状态",
                 release: "检索版本范围"
             },
-            layers: { learn: "学习", manual: "手册", architecture: "架构", api: "API" },
+            layers: { api: "API" },
             states: { stable: "稳定", preview: "预览", experimental: "实验性", deprecated: "已弃用" }
         }
     };
@@ -257,7 +257,7 @@
                 const continuation = appendElement(panel, "a", {
                     id: "docs-search-wiki-continuation",
                     className: "docs-search-result docs-search-continuation",
-                    attributes: { href: "/wiki.html#written-guides", "aria-describedby": "docs-search-status" }
+                    attributes: { href: "/wiki/site/en/api/index.html", "aria-describedby": "docs-search-status" }
                 });
                 const top = appendElement(continuation, "span", { className: "docs-search-result-top" });
                 appendElement(top, "strong", { attributes: { "data-docs-search-continuation-title": "" } });
@@ -311,7 +311,7 @@
             ["en", "English"], ["zh-CN", "中文"], ["all", copy.filters.allLanguages]
         ], locale);
         const layerControl = createFilter("docs-search-layer", copy.filters.layer, [
-            ["all", copy.filters.allLayers], ["learn", copy.layers.learn], ["manual", copy.layers.manual], ["architecture", copy.layers.architecture], ["api", copy.layers.api]
+            ["all", copy.filters.allLayers], ["api", copy.layers.api]
         ]);
         const statusControl = createFilter("docs-search-state", copy.filters.state, [
             ["all", copy.filters.allStates], ["stable", copy.states.stable], ["preview", copy.states.preview], ["experimental", copy.states.experimental], ["deprecated", copy.states.deprecated]
@@ -359,31 +359,16 @@
         }
 
         function loadSearchModel({ retryPartial = false } = {}) {
-            if (retryPartial && activeModel && (!activeModel.sources.api || !activeModel.sources.docs)) {
+            if (retryPartial && activeModel && !activeModel.sources.api) {
                 searchModelPromise = null;
             }
             if (!searchModelPromise) {
-                searchModelPromise = Promise.allSettled([
-                    fetch("/docs-index.json").then((response) => {
-                        if (!response.ok) throw new Error(`Docs index HTTP ${response.status}`);
-                        return response.json();
-                    }),
-                    fetch("/api-index.json").then((response) => {
+                searchModelPromise = fetch("/api-index.json")
+                    .then((response) => {
                         if (!response.ok) throw new Error(`API index HTTP ${response.status}`);
                         return response.json();
                     })
-                ])
-                    .then(([docsResult, apiResult]) => {
-                        const docsIndex = docsResult.status === "fulfilled" ? docsResult.value : null;
-                        const apiIndex = apiResult.status === "fulfilled" ? apiResult.value : null;
-                        if (!docsIndex && !apiIndex) {
-                            throw new AggregateError(
-                                [docsResult.reason, apiResult.reason].filter(Boolean),
-                                "Both documentation search indexes are unavailable."
-                            );
-                        }
-                        return buildSearchModel(apiIndex, docsIndex);
-                    })
+                    .then((apiIndex) => buildSearchModel(apiIndex, null))
                     .then((model) => {
                         activeModel = model;
                         return model;

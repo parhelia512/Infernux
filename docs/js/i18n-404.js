@@ -3,7 +3,7 @@ globalThis.INFERNUX_PAGE_TRANSLATIONS = {
     "en": {
         "error.badge": "HTTP 404 · SIGNAL LOST",
         "error.body": "The page may have moved during a documentation rebuild. Search the current release index, return to the learning deck, or inspect the repository.",
-        "error.docs": "Open Learn & Docs",
+        "error.docs": "Get started",
         "error.github": "Inspect GitHub",
         "error.heading": "That route is no longer on the flight plan.",
         "error.hint": "Tip: press Ctrl/⌘ + K from any main page, or / inside generated documentation, to reopen this search.",
@@ -16,7 +16,7 @@ globalThis.INFERNUX_PAGE_TRANSLATIONS = {
     "zh": {
         "error.badge": "HTTP 404 · 信号丢失",
         "error.body": "该页面可能在文档重建时移动。请搜索当前版本索引、返回学习中心，或检查代码仓库。",
-        "error.docs": "打开学习与文档",
+        "error.docs": "开始使用",
         "error.github": "查看 GitHub",
         "error.heading": "这条路线已不在当前飞行计划中。",
         "error.hint": "提示：可在任意主页面按 Ctrl/⌘ + K，或在生成文档中按 /，重新打开此搜索。",

@@ -79,8 +79,5 @@ if camera_object is not None:
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [2D Foundations](../learn/2d-foundations.md)
-- [3D Foundations](../learn/3d-foundations.md)
 - [CameraProjection](CameraProjection.md)
-- [Rendering and RenderStack](../manual/rendering-and-renderstack.md)
 <!-- USER CONTENT END -->

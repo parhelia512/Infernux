@@ -4,14 +4,19 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
     parseCommunityReadinessConfig,
+    validateCommunityGateway,
     validateCommunityRepository,
     validateGiscusInstallation
 } from "./community-readiness-core.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const communityPath = path.resolve(scriptDir, "..", "community.html");
-const html = await readFile(communityPath, "utf8");
-const config = parseCommunityReadinessConfig(html);
+const topicPath = path.resolve(scriptDir, "..", "community-topic.html");
+const apiPath = path.resolve(scriptDir, "..", "js", "community-api.js");
+const communityHtml = await readFile(communityPath, "utf8");
+const topicHtml = await readFile(topicPath, "utf8");
+const apiSource = await readFile(apiPath, "utf8");
+const config = parseCommunityReadinessConfig(communityHtml, topicHtml, apiSource);
 
 const headers = {
     accept: "application/vnd.github+json",
@@ -38,3 +43,8 @@ const giscusResponse = await fetch(categoriesUrl, {
 const giscusPayload = await giscusResponse.json().catch(() => ({}));
 const category = validateGiscusInstallation(giscusResponse.status, giscusPayload, config);
 console.log(`PASS Giscus installation and category ${category.name} (${category.id})`);
+
+const gatewayResponse = await fetch(`${config.gatewayOrigin}/health`, { signal: AbortSignal.timeout(15_000) });
+const gatewayBody = await gatewayResponse.text();
+validateCommunityGateway(gatewayResponse.status, gatewayBody);
+console.log(`PASS community gateway at ${config.gatewayOrigin}`);

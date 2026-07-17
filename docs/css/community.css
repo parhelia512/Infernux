@@ -31,8 +31,8 @@
     margin: 0;
     color: var(--text);
     font-family: var(--font-display);
-    font-size: clamp(2rem, 3vw, 2.5rem);
-    line-height: 1;
+    font-size: 1.9rem;
+    line-height: 1.15;
     letter-spacing: 0;
 }
 
@@ -46,7 +46,10 @@
 
 .forum-account {
     display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 14px;
+    align-items: center;
+    margin-top: 14px;
     padding: 16px;
     border: 1px solid var(--border);
     border-left: 3px solid var(--signal);
@@ -128,6 +131,7 @@
 .forum-category:focus-visible,
 .forum-field input:focus-visible,
 .forum-field select:focus-visible,
+.forum-field textarea:focus-visible,
 .topic-main:focus-visible,
 .topic-action:focus-visible,
 .forum-load-more:focus-visible,
@@ -259,7 +263,8 @@
 }
 
 .forum-field input,
-.forum-field select {
+.forum-field select,
+.forum-field textarea {
     width: 100%;
     min-width: 0;
     height: 48px;
@@ -272,9 +277,19 @@
     font-size: 0.84rem;
 }
 
+.forum-field textarea {
+    min-height: 220px;
+    height: auto;
+    padding: 12px;
+    resize: vertical;
+    line-height: 1.6;
+}
+
 .forum-field input:hover,
-.forum-field select:hover { border-color: var(--text-soft); }
-.forum-field input::placeholder { color: var(--text-soft); }
+.forum-field select:hover,
+.forum-field textarea:hover { border-color: var(--text-soft); }
+.forum-field input::placeholder,
+.forum-field textarea::placeholder { color: var(--text-soft); }
 
 .forum-compose-status {
     min-height: 20px;
@@ -691,13 +706,66 @@
 }
 
 .forum-compose .forum-compose-form {
-    grid-template-columns: minmax(260px, 1fr) 180px auto;
+    grid-template-columns: minmax(260px, 1fr) 180px;
 }
 
 .forum-compose input:disabled,
 .forum-compose select:disabled,
+.forum-compose textarea:disabled,
 .forum-compose button:disabled {
     opacity: 0.64;
+}
+
+.forum-compose-body-field,
+.forum-compose-tools,
+.forum-upload-list,
+.forum-compose-actions {
+    grid-column: 1 / -1;
+}
+
+.forum-compose-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.forum-compose-tools > span {
+    color: var(--text-soft);
+    font-size: 0.72rem;
+}
+
+.forum-upload-list {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.forum-upload-list:empty { display: none; }
+
+.forum-upload-list li {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--info);
+    border-radius: 3px;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+}
+
+.forum-upload-list li[data-state="complete"] { border-left-color: var(--signal); }
+.forum-upload-list li[data-state="error"] { border-left-color: var(--hazard); }
+.forum-upload-list small { color: var(--text-soft); }
+
+.forum-compose-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
 }
 
 .forum-body-editor {
@@ -770,6 +838,27 @@
     border-radius: 5px;
     background: var(--bg-panel);
 }
+
+.forum-account-profile {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.forum-account-profile img {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+}
+
+.forum-account-profile span { display: grid; gap: 2px; }
+.forum-account-profile small,
+.forum-account > p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+.forum-account-profile strong { font-size: 0.84rem; }
 
 .topic-article { overflow: hidden; }
 
@@ -898,7 +987,15 @@
     .forum-compose { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
     .forum-compose-shell { max-height: calc(100dvh - 18px); padding: 16px; }
     .forum-compose .forum-compose-form { grid-template-columns: 1fr; }
+    .forum-account { grid-template-columns: 1fr; }
+    .forum-account-actions { justify-content: flex-start; }
+    .forum-compose-actions { display: grid; grid-template-columns: 1fr; }
+    .forum-compose-actions .forum-button { width: 100%; }
     .topic-article-header,
     .topic-body,
     .topic-replies { padding-left: 18px; padding-right: 18px; }
+}
+.community-layout [hidden],
+.topic-page [hidden] {
+    display: none !important;
 }

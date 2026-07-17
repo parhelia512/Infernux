@@ -47,38 +47,20 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Verify content-hashed Wiki catalog
-        run: node docs/tools/build-wiki-catalog.mjs --check
-
       - name: Verify deterministic Wiki configuration
         run: node docs/tools/normalize-wiki-config.mjs --check
 
       - name: Verify documentation build provenance schema
         run: node docs/tools/stamp-docs-manifest.mjs --check
 
-      - name: Verify generated indexes are current
-        run: node docs/tools/build-doc-index.mjs --check
-
-      - name: Verify curated front matter is synchronized
-        run: node docs/tools/sync-curated-frontmatter.mjs --check
-
-      - name: Verify documentation health report
-        run: node docs/tools/build-doc-health.mjs --check
-
       - name: Verify curated core API guidance is current
         run: node docs/tools/apply-api-curation.mjs --check
 
+      - name: Verify generated API index
+        run: node docs/tools/build-api-index.mjs --check
+
       - name: Verify structured release notes
         run: node docs/tools/build-release-notes.mjs --check
-
-      - name: Verify compact Agent documentation index
-        run: node docs/tools/build-llms-index.mjs --check
-
-      - name: Test compact Agent documentation index
-        run: node docs/tools/test-llms-index.mjs
-
-      - name: Verify full Agent documentation corpus
-        run: node docs/tools/build-agent-corpus.mjs --check
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -113,9 +95,6 @@ jobs:
       - name: Verify installable PWA assets
         run: node docs/tools/check-pwa-assets.mjs
 
-      - name: Test PWA installation interaction
-        run: node docs/tools/test-pwa-install.mjs
-
       - name: Test route-localized bundles
         run: node docs/tools/test-i18n-bundles.mjs
 
@@ -149,26 +128,11 @@ jobs:
       - name: Test community readiness rules
         run: node docs/tools/test-community-readiness.mjs
 
-      - name: Test generated documentation context
-        run: node docs/tools/test-doc-context.mjs
-
-      - name: Test bilingual section continuity
-        run: node docs/tools/test-doc-language-continuity.mjs
-
-      - name: Test Wiki learning continuity
-        run: node docs/tools/test-wiki-learning-progress.mjs
-
-      - name: Test recent-document continuity
-        run: node docs/tools/test-doc-recent.mjs
-
       - name: Test documentation printing
         run: node docs/tools/test-doc-print.mjs
 
       - name: Test documentation search
         run: node docs/tools/test-doc-search.mjs
-
-      - name: Test documentation health client
-        run: node docs/tools/test-doc-health.mjs
 
       - name: Test website health reporting
         run: node docs/tools/test-website-health-report.mjs

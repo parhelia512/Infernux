@@ -75,8 +75,6 @@ if light_object is not None:
 ## 另请参阅
 
 <!-- USER CONTENT START --> see_also
-- [3D 基础](../learn/3d-foundations.md)
 - [LightType](LightType.md)
 - [MeshRenderer](MeshRenderer.md)
-- [渲染与 RenderStack](../manual/rendering-and-renderstack.md)
 <!-- USER CONTENT END -->

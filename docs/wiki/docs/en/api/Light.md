@@ -75,8 +75,6 @@ if light_object is not None:
 ## See Also
 
 <!-- USER CONTENT START --> see_also
-- [3D Foundations](../learn/3d-foundations.md)
 - [LightType](LightType.md)
 - [MeshRenderer](MeshRenderer.md)
-- [Rendering and RenderStack](../manual/rendering-and-renderstack.md)
 <!-- USER CONTENT END -->
