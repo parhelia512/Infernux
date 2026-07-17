@@ -19,7 +19,7 @@
 .download-heading h1 {
     margin: 12px 0 10px;
     font-family: var(--font-display);
-    font-size: 2.1rem;
+    font-size: 1.55rem;
     line-height: 1.16;
     letter-spacing: 0;
 }
@@ -70,9 +70,57 @@
     font-size: 0.78rem;
 }
 
-.version-section {
-    padding: 42px 0;
+.advanced-download {
+    margin-top: 28px;
+    border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
+}
+
+.advanced-download summary {
+    display: flex;
+    min-height: 68px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 14px 2px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.advanced-download summary::-webkit-details-marker {
+    display: none;
+}
+
+.advanced-download summary span {
+    display: grid;
+    gap: 4px;
+}
+
+.advanced-download summary strong {
+    font-size: 1rem;
+}
+
+.advanced-download summary small {
+    color: var(--text-soft);
+    font-size: 0.84rem;
+}
+
+.advanced-download summary i {
+    color: var(--text-muted);
+    transition: transform 150ms ease;
+}
+
+.advanced-download[open] summary i {
+    transform: rotate(180deg);
+}
+
+.advanced-download summary:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 3px;
+}
+
+.version-section {
+    padding: 10px 0 36px;
 }
 
 .version-copy {
@@ -130,7 +178,7 @@
     }
 
     .download-heading h1 {
-        font-size: 1.8rem;
+        font-size: 1.45rem;
     }
 
     .hub-download {

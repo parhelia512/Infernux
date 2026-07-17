@@ -16,8 +16,10 @@ const communityCss = await readFile(path.join(docsRoot, "css", "community.css"),
 
 const deviceStorage = new Map();
 const tabStorage = new Map();
+const elements = new Map();
 let copiedText = null;
 let sharedPayload = null;
+let assignedUrl = null;
 
 function storageFor(values) {
     return {
@@ -52,21 +54,22 @@ const sandbox = {
         documentElement: { lang: "en", getAttribute() { return null; } },
         addEventListener() {},
         createElement() { return { className: "", value: "", setAttribute() {}, select() {}, remove() {} }; },
-        getElementById() { return null; },
+        getElementById(id) { return elements.get(id) || null; },
         querySelectorAll() { return []; },
         body: { appendChild() {} }
     },
     window: {
         addEventListener() {},
         clearTimeout() {},
-        location: { href: "https://infernux-engine.com/community.html", search: "", hash: "", assign() {} },
+        location: { href: "https://infernux-engine.com/community.html", search: "", hash: "", assign(url) { assignedUrl = url; } },
         setTimeout() { return 1; }
     },
     InfernuxCommunityApi: {
         async request() { throw new Error("gateway is disabled in unit tests"); },
         async session() { return { authenticated: false, user: null }; },
         signIn() {},
-        signOut() {}
+        signOut() {},
+        token() { return ""; }
     }
 };
 sandbox.globalThis = sandbox;
@@ -82,6 +85,9 @@ new vm.Script(`${source}\n;globalThis.__communityTest = {
     shareTopic: shareOrCopyCommunityTopic,
     writeCommunityCache,
     readCommunityCache,
+    cacheKey: communityCacheKey,
+    setUser(user) { communityUser = user; },
+    publish: publishCommunityTopic,
     filter(topics, query, category, state = "", sort = "updated") {
         cachedCommunityTopics = topics;
         communitySearch = query;
@@ -164,9 +170,44 @@ assert.equal(merged.length, 3);
 assert.equal(merged.find((topic) => topic.number === 41).comments, 9);
 
 client.writeCommunityCache(normalized, 2);
-assert.ok(deviceStorage.has("infernux-community-feed-v2"), "the feed cache must be shared by tabs on one device");
-assert.equal(tabStorage.has("infernux-community-feed-v2"), false, "the feed cache must not spend one API request per tab");
+assert.ok(deviceStorage.has("infernux-community-feed-v2:anonymous"), "the anonymous feed cache must be shared by tabs on one device");
+assert.equal(tabStorage.has("infernux-community-feed-v2:anonymous"), false, "the feed cache must not spend one API request per tab");
 assert.equal(client.readCommunityCache().topics.length, 3);
+
+client.setUser({ login: "Real-Author" });
+assert.equal(client.cacheKey(), "infernux-community-feed-v2:user:real-author");
+client.writeCommunityCache(normalized.slice(0, 1), null);
+assert.equal(client.readCommunityCache().topics.length, 1, "signed-in users must not reuse the anonymous device cache");
+
+for (const [id, value = ""] of [
+    ["community-compose-topic", "测试话题"],
+    ["community-compose-category", "general"],
+    ["community-compose-body", ""],
+    ["community-compose-images"],
+    ["community-compose-publish"],
+    ["community-compose-status"]
+]) {
+    elements.set(id, { value, disabled: false, textContent: "", focused: false, focus() { this.focused = true; } });
+}
+const publishedRequests = [];
+sandbox.InfernuxCommunityApi.request = async (requestPath, options) => {
+    publishedRequests.push({ requestPath, options });
+    return { discussion: { number: 42, author: { login: "Real-Author" } } };
+};
+assert.equal(await client.publish(), false, "a title alone must never publish a topic");
+assert.equal(publishedRequests.length, 0);
+assert.equal(elements.get("community-compose-body").focused, true);
+elements.get("community-compose-body").value = "测试";
+assert.equal(await client.publish(), true);
+assert.equal(publishedRequests.length, 1, "one submit must create exactly one discussion");
+assert.equal(publishedRequests[0].requestPath, "/api/discussions");
+assert.equal(publishedRequests[0].options.method, "POST");
+assert.deepEqual(JSON.parse(publishedRequests[0].options.body), {
+    title: "测试话题",
+    body: "测试",
+    categoryId: "DIC_kwDOO_wV3M4C5oaC"
+});
+assert.equal(assignedUrl, "community-topic.html?topic=42");
 
 assert.equal(JSON.stringify(client.readUrl("?q=scene&category=q-a&state=unanswered&sort=replies")), JSON.stringify({ search: "scene", category: "q-a", state: "unanswered", sort: "replies" }));
 assert.equal(client.writeUrl(), "/community.html", "default forum view should keep a clean canonical URL");
@@ -184,9 +225,9 @@ for (const contract of [
     'id="community-compose-body"',
     'id="community-compose-images"',
     'id="community-compose-publish"',
-    'js/community-api.js?v=1',
-    'js/community.js?v=12',
-    'https://community-api.infernux-engine.com'
+    'js/community-api.js?v=3',
+    'js/community.js?v=13',
+    'https://infernux-community.chenlizheme.workers.dev'
 ]) assert.ok(communityHtml.includes(contract), `community.html must retain '${contract}'`);
 for (const forbidden of ['id="giscus-thread"', 'id="community-compose-open"', 'id="community-body-editor"', 'data-mapping="specific"']) {
     assert.equal(communityHtml.includes(forbidden), false, `the topic composer must not retain Giscus creation contract '${forbidden}'`);
@@ -201,7 +242,8 @@ for (const contract of [
     'request("/api/uploads"',
     "insertCommunityMarkdown",
     "COMMUNITY_CACHE_TTL_MS = 15 * 60 * 1000",
-    "localStorage.setItem(COMMUNITY_CACHE_KEY",
+    "localStorage.setItem(communityCacheKey()",
+    "authenticated_gateway_unavailable",
     "anonymous_rate_limited",
     "X-RateLimit-Reset"
 ]) assert.ok(source.includes(contract), `community.js must retain '${contract}'`);
@@ -210,18 +252,20 @@ for (const forbidden of ["openCommunityEditor", "ensureGiscusController", "GISCU
 }
 
 for (const contract of [
-    'API_ORIGIN = "https://community-api.infernux-engine.com"',
+    'API_ORIGIN = "https://infernux-community.chenlizheme.workers.dev"',
     "forum_session",
-    "sessionStorage.setItem(SESSION_KEY",
+    "localStorage.setItem(SESSION_KEY",
+    "sessionStorage.removeItem(SESSION_KEY)",
+    'fetch(`${API_ORIGIN}/health`',
     "/api/session/refresh",
     "window.location.assign(`${API_ORIGIN}/oauth/start`)"
 ]) assert.ok(apiSource.includes(contract), `community-api.js must retain '${contract}'`);
 assert.doesNotMatch(apiSource, /client_secret|GITHUB_CLIENT_SECRET|public_repo/, "the browser bundle must not contain OAuth secrets or broad repository scopes");
 
-for (const contract of ['id="community-topic"', 'id="topic-body"', 'id="topic-replies"', 'data-mapping="number"', 'js/community-api.js?v=1', 'js/community-topic.js?v=4']) {
+for (const contract of ['id="community-topic"', 'id="topic-body"', 'id="topic-replies"', 'data-mapping="number"', 'js/community-api.js?v=3', 'js/community-topic.js?v=5']) {
     assert.ok(topicHtml.includes(contract), `community-topic.html must retain '${contract}'`);
 }
-for (const contract of ["normalizeCommunityTopicDetail", "DOMParser", "appendSafeCommunityNode", "COMMUNITY_TOPIC_TAGS", "requestCommunityTopic", 'mapping: "number"', 'hostname === "community-api.infernux-engine.com"']) {
+for (const contract of ["normalizeCommunityTopicDetail", "DOMParser", "appendSafeCommunityNode", "COMMUNITY_TOPIC_TAGS", "requestCommunityTopic", "gateway.token?.()", 'mapping: "number"', 'hostname === "infernux-community.chenlizheme.workers.dev"']) {
     assert.ok(topicSource.includes(contract), `community-topic.js must retain '${contract}'`);
 }
 assert.doesNotMatch(`${source}\n${topicSource}`, /\.innerHTML\s*=|\.style(?:\.|\[|\s*=)/, "forum UI and remote bodies must remain DOM-safe and class-driven");

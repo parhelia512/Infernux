@@ -14,7 +14,7 @@ Giscus remains responsible only for replies on an existing Discussion. It must n
 Create a GitHub App owned by `ChenlizheMe` with:
 
 - Homepage URL: `https://infernux-engine.com/community.html`
-- Callback URL: `https://community-api.infernux-engine.com/oauth/callback`
+- Callback URL: `https://infernux-community.chenlizheme.workers.dev/oauth/callback`
 - Repository permission `Discussions`: read and write
 - Repository permission `Metadata`: read-only
 - Installation scope: only `ChenlizheMe/Infernux`
@@ -40,7 +40,7 @@ npx wrangler deploy
 
 Generate `SESSION_ENCRYPTION_KEY` as 32 random bytes encoded with base64. Never commit secrets or `.dev.vars`.
 
-Route `community-api.infernux-engine.com` to the Worker before enabling the website client. The Worker only accepts API requests whose `Origin` exactly matches `SITE_ORIGIN`.
+The website client uses the Worker's stable `workers.dev` route. The Worker only accepts API requests whose `Origin` exactly matches `SITE_ORIGIN`.
 
 ## Verification
 

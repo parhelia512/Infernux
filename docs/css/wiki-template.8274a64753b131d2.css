@@ -154,7 +154,7 @@
 
         /* H1 — class name */
         .api-main h1 {
-            font-size: 1.85rem;
+            font-size: 1.55rem;
             font-weight: 700;
             margin: 0 0 4px;
             padding: 0;
@@ -398,14 +398,13 @@
         }
 
         /* ---- Footer ---- */
-        .api-ft { margin-left: 280px; }
+        .api-ft { margin-left: 0; }
         .api-ft .footer-bottom p { font-size: 0.8rem; }
 
         /* ---- Responsive ---- */
         @media (max-width: 1024px) {
             .api-sidebar { width: 240px; }
             .api-main { padding: 28px 32px 60px; }
-            .api-ft { margin-left: 240px; }
         }
         @media (max-width: 768px) {
             .api-layout { flex-direction: column; }
@@ -421,5 +420,4 @@
                 width: auto;
                 min-width: 7rem;
             }
-            .api-ft { margin-left: 0; }
         }

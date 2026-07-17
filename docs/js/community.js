@@ -26,6 +26,7 @@ let activeCommunityRequest = null;
 let communityUser = null;
 let communityPublishing = false;
 let communityLastError = null;
+let communitySessionUnavailable = false;
 
 function communityLanguage() {
     return document.documentElement.lang?.toLowerCase().startsWith("zh") ? "zh" : "en";
@@ -83,6 +84,7 @@ function communityCopy(key) {
             uploadInvalid: "Use a PNG, JPEG, GIF, or WebP image no larger than 5 MiB.",
             signedOut: "Sign in to publish topics with your own GitHub account.",
             sessionUnavailable: "The forum sign-in service is unavailable.",
+            authenticatedGatewayUnavailable: "Your sign-in is preserved, but the forum service cannot be reached. No anonymous quota was used.",
             closeEditor: "Close editor",
             refreshTopics: "Refresh topics",
         },
@@ -136,6 +138,7 @@ function communityCopy(key) {
             uploadInvalid: "请选择不超过 5 MiB 的 PNG、JPEG、GIF 或 WebP 图片。",
             signedOut: "登录后将以你自己的 GitHub 账号发布话题。",
             sessionUnavailable: "论坛登录服务暂时不可用。",
+            authenticatedGatewayUnavailable: "登录状态已保留，但论坛服务暂时无法连接；本次没有使用匿名请求额度。",
             closeEditor: "关闭编辑器",
             refreshTopics: "刷新话题",
         }
@@ -345,9 +348,15 @@ function sortCommunityTopics(topics, sort = communitySort) {
     return [...topics].sort(compare);
 }
 
+function communityCacheKey() {
+    const login = typeof communityUser?.login === "string" ? communityUser.login.trim().toLowerCase() : "";
+    if (login) return `${COMMUNITY_CACHE_KEY}:user:${login}`;
+    return `${COMMUNITY_CACHE_KEY}:${globalThis.InfernuxCommunityApi?.token?.() ? "session" : "anonymous"}`;
+}
+
 function readCommunityCache() {
     try {
-        const record = JSON.parse(localStorage.getItem(COMMUNITY_CACHE_KEY) || "null");
+        const record = JSON.parse(localStorage.getItem(communityCacheKey()) || "null");
         if (record?.version !== COMMUNITY_CACHE_VERSION || !Number.isFinite(record.storedAt)) return null;
         const topics = normalizeCommunityTopics(record.topics);
         if (!Array.isArray(record.topics) || topics.length !== record.topics.length) return null;
@@ -361,7 +370,7 @@ function readCommunityCache() {
 
 function writeCommunityCache(topics, nextPage = communityNextPage) {
     try {
-        localStorage.setItem(COMMUNITY_CACHE_KEY, JSON.stringify({
+        localStorage.setItem(communityCacheKey(), JSON.stringify({
             version: COMMUNITY_CACHE_VERSION,
             storedAt: Date.now(),
             topics,
@@ -521,7 +530,7 @@ function syncCommunityAccount() {
     if (login) login.textContent = communityUser ? `@${communityUser.login}` : "";
     if (status) {
         status.hidden = Boolean(communityUser);
-        if (!communityUser) status.textContent = communityCopy("signedOut");
+        if (!communityUser) status.textContent = communityCopy(communitySessionUnavailable ? "sessionUnavailable" : "signedOut");
     }
     if (signIn) signIn.hidden = Boolean(communityUser);
     if (signOut) signOut.hidden = !communityUser;
@@ -531,14 +540,28 @@ function syncCommunityAccount() {
 async function loadCommunityAccount() {
     const api = globalThis.InfernuxCommunityApi;
     if (!api) return syncCommunityAccount();
-    const session = await api.session();
-    communityUser = session?.authenticated ? session.user : null;
+    try {
+        const session = await api.session();
+        communityUser = session?.authenticated ? session.user : null;
+        communitySessionUnavailable = false;
+    } catch (error) {
+        console.warn("Forum session validation is temporarily unavailable.", error);
+        communityUser = null;
+        communitySessionUnavailable = Boolean(api.token?.());
+    }
     syncCommunityAccount();
 }
 
-function beginCommunitySignIn() {
+async function beginCommunitySignIn() {
     storeCommunityDraft();
-    globalThis.InfernuxCommunityApi?.signIn();
+    try {
+        await globalThis.InfernuxCommunityApi?.signIn();
+    } catch (error) {
+        console.warn("Forum sign-in service is unavailable.", error);
+        communitySessionUnavailable = true;
+        syncCommunityAccount();
+        setCommunityComposerStatus("sessionUnavailable");
+    }
 }
 
 function startCommunityTopic() {
@@ -838,7 +861,9 @@ function renderCommunityError() {
     renderCommunityPagination();
     const status = document.createElement("div");
     status.className = "topic-status";
-    let message = communityCopy("error");
+    let message = communityLastError?.code === "authenticated_gateway_unavailable"
+        ? communityCopy("authenticatedGatewayUnavailable")
+        : communityCopy("error");
     if (communityLastError?.code === "anonymous_rate_limited" && communityLastError.reset) {
         const reset = new Intl.DateTimeFormat(communityLanguage() === "zh" ? "zh-CN" : "en", {
             hour: "2-digit",
@@ -878,6 +903,10 @@ async function requestCommunityPage(page, signal) {
             if (!Array.isArray(payload?.items)) throw new Error("Forum gateway returned an unexpected payload");
             return { items: payload.items, source: communityUser ? "live" : "public" };
         } catch (error) {
+            if (gateway.token?.()) {
+                error.code ||= "authenticated_gateway_unavailable";
+                throw error;
+            }
             console.warn("Forum gateway unavailable; trying the public GitHub fallback.", error);
         }
     }
@@ -1029,6 +1058,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("community-compose-form")?.addEventListener("submit", (event) => {
         event.preventDefault();
         publishCommunityTopic();
+    });
+    document.getElementById("community-compose-topic")?.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" || event.isComposing) return;
+        event.preventDefault();
+        document.getElementById("community-compose-body")?.focus();
     });
     document.getElementById("community-compose-images")?.addEventListener("change", async (event) => {
         for (const file of [...(event.currentTarget.files || [])]) await uploadCommunityImage(file);

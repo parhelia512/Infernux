@@ -21,6 +21,7 @@ const shellPages = [
     "/404.html",
     "/index.html",
     "/start.html",
+    "/learn.html",
     "/roadmap.html",
     "/community.html",
     "/download.html",

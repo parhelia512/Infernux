@@ -436,7 +436,13 @@ export const internals = Object.freeze({ discussionCacheRequest, imageType, norm
 export default {
     async fetch(request, env, context) {
         const url = new URL(request.url);
-        if (url.pathname === "/health") return new Response("ok", { headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
+        if (url.pathname === "/health") {
+            const origin = requestOrigin(request, env);
+            const headers = origin
+                ? { ...corsHeaders(origin), "Content-Type": "text/plain; charset=utf-8" }
+                : { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" };
+            return new Response("ok", { headers });
+        }
         if (url.pathname === "/oauth/start" && request.method === "GET") return oauthStart(request, env);
         if (url.pathname === "/oauth/callback" && request.method === "GET") return oauthCallback(request, env);
         if (url.pathname.startsWith("/api/")) return apiRequest(request, env, context);

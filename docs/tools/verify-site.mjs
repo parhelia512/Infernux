@@ -12,7 +12,7 @@ async function exists(relative) {
     return stat(path.join(docsRoot, relative)).then(() => true).catch(() => false);
 }
 
-const rootPages = ["index.html", "start.html", "roadmap.html", "community.html", "community-topic.html", "download.html", "404.html"];
+const rootPages = ["index.html", "start.html", "learn.html", "learn/placeholder.html", "roadmap.html", "community.html", "community-topic.html", "download.html", "404.html"];
 for (const page of rootPages) {
     const html = await readFile(path.join(docsRoot, page), "utf8");
     if (!html.includes("start.html")) fail(`${page}: missing the hand-maintained Start route`);
@@ -32,13 +32,23 @@ for (const contract of [
 }
 if (/since|last_verified|始于|验证于|zh\/manual\//i.test(start)) fail("start.html: generated-document metadata or source paths leaked into the simple guide");
 
+const learn = await readFile(path.join(docsRoot, "learn.html"), "utf8");
+for (const contract of ["data-learn-search", "data-learn-tag", "data-learn-entry", "learn/placeholder.html", "js/learn.js?v=1"]) {
+    if (!learn.includes(contract)) fail(`learn.html: missing '${contract}'`);
+}
+const placeholder = await readFile(path.join(docsRoot, "learn", "placeholder.md"), "utf8");
+if (!placeholder.includes("API reference is generated automatically") || !placeholder.includes("正在人工编写")) {
+    fail("learn/placeholder.md: missing the reviewed documentation status copy");
+}
+
 const download = await readFile(path.join(docsRoot, "download.html"), "utf8");
-for (const contract of ["InfernuxHub", "data-version-select", "0.2.9", "0.2.1", "0.2.0", "js/download.js?v=3"]) {
+for (const contract of ["InfernuxHub", "<details class=\"advanced-download\">", "data-version-select", ".whl", "0.2.9", "0.2.1", "0.2.0", "js/download.js?v=3"]) {
     if (!download.includes(contract)) fail(`download.html: missing '${contract}'`);
 }
 if (/SHA-?256|checksum|校验码|publisher signature|data-pwa-install|pwa-install\.js/i.test(download)) {
     fail("download.html: verification or documentation-app installation clutter was restored");
 }
+if (/<details class="advanced-download"\s+open/i.test(download)) fail("download.html: advanced WHL downloads must remain collapsed by default");
 
 for (const language of ["en", "zh"]) {
     for (const section of ["learn", "manual", "architecture"]) {

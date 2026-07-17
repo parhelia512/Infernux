@@ -29,7 +29,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="assets/infernux-apple-touch-icon.png">
     <link rel="manifest" href="site.webmanifest">
     <link rel="stylesheet" href="css/fonts.css?v=1">
-    <link rel="stylesheet" href="css/style.css?v=18">
+    <link rel="stylesheet" href="css/style.css?v=20">
     <link rel="stylesheet" href="css/docs-search.css?v=3">
     <link rel="stylesheet" href="css/mission.css?v=2">
     <link rel="stylesheet" href="css/roadmap.css?v=3">
@@ -53,7 +53,7 @@
                 </a>
                 <div class="nav-links" id="primary-navigation">
                     <a href="start.html" class="nav-priority" data-i18n="nav.start">Start</a>
-                    <a href="start.html#first-script" data-i18n="nav.learn">Learn</a>
+                    <a href="learn.html" data-i18n="nav.learn">Learn</a>
                     <a href="wiki/site/en/api/index.html" data-href-en="wiki/site/en/api/index.html" data-href-zh="wiki/site/zh/api/index.html" data-i18n="nav.api">API</a>
                     <a href="roadmap.html" class="active" aria-current="page" data-i18n="nav.roadmap">Roadmap</a>
                     <a href="community.html" class="nav-priority" data-i18n="nav.community">Community</a>
@@ -81,11 +81,11 @@
         <div class="container">
             <section class="subpage-hero roadmap-hero">
                 <div class="hero-codename">
-                    <span class="badge" data-i18n="roadmap.hero.badge">TRANSIT PLAN · 0.2.1 → 1.0</span>
+                    <span class="badge" data-i18n="roadmap.hero.badge">TRANSIT PLAN · 0.2.9 → 1.0</span>
                     <span data-i18n="roadmap.hero.kicker">Release roadmap</span>
                 </div>
-                <h1 data-i18n="roadmap.hero.title">A roadmap that reads like engineering work, not decorative ambition.</h1>
-                <p data-i18n="roadmap.hero.description">熔炉 is moving from technical preview toward a more complete production pipeline. The priorities below group work by release leverage and workflow impact, not by vague marketing buckets.</p>
+                <h1 data-i18n="roadmap.hero.title">Infernux roadmap</h1>
+                <p data-i18n="roadmap.hero.description">Current releases, planned systems, and the work leading toward 1.0.</p>
                 <div class="hub-actions">
                     <a href="https://github.com/ChenlizheMe/Infernux/issues" class="btn btn-primary" target="_blank" rel="noopener" data-i18n="roadmap.hero.primary">Track issues</a>
                     <a href="start.html" class="btn btn-secondary" data-i18n="roadmap.hero.secondary">Get started</a>
@@ -96,19 +96,19 @@
                 <article class="release-card">
                     <div class="mini-tag" data-i18n="roadmap.release.current.tag">CHECKPOINT · ONLINE</div>
                     <strong>v0.2.9</strong>
-                    <h3 data-i18n="roadmap.release.current.title">Runtime, editor, and animation foundation</h3>
+                    <h3 data-i18n="roadmap.release.current.title">Performance and architecture overhaul</h3>
                     <ul>
-                        <li data-i18n="roadmap.release.current.item1">Vulkan renderer, Python scripting, 12-panel editor, audio, Jolt physics, prefabs, game UI, 2D/3D animation previews, skinned meshes, asset previews, and standalone build.</li>
-                        <li data-i18n="roadmap.release.current.item2">Usable for serious technical preview work today: scripting, physics, audio, rendering, UI, animation previews, and editor tooling all running in a single stack.</li>
+                        <li data-i18n="roadmap.release.current.item1">A large-scale refactor across memory, serialization, editor interaction, physics and runtime ownership, and the Python/C++ boundary, with broad performance work throughout the engine.</li>
+                        <li data-i18n="roadmap.release.current.item2">Introduces the MCP Harness, expands Timeline and animation workflows, improves rendering throughput, and reduces release package size.</li>
                     </ul>
                 </article>
                 <article class="release-card">
                     <div class="mini-tag" data-i18n="roadmap.release.next.tag">NEXT · TRANSIT</div>
                     <strong>v0.3</strong>
-                    <h3 data-i18n="roadmap.release.next.title">Advanced UI and content scale</h3>
+                    <h3 data-i18n="roadmap.release.next.title">MCP and visual effects authoring</h3>
                     <ul>
-                        <li data-i18n="roadmap.release.next.item1">Advanced UI controls, GPU particles, terrain, and stronger content production paths.</li>
-                        <li data-i18n="roadmap.release.next.item2">Support larger projects with richer runtime UI, scene content, and production workflows.</li>
+                        <li data-i18n="roadmap.release.next.item1">Complete more of the MCP workflow for deterministic project editing, testing, and structured engine feedback.</li>
+                        <li data-i18n="roadmap.release.next.item2">Develop a Niagara-style particle system together with Shader Graph and Particle Graph authoring.</li>
                     </ul>
                 </article>
                 <article class="release-card">
@@ -188,19 +188,19 @@
                 </div>
                 <div class="priority-grid">
                     <article class="priority-card">
+                        <div class="card-mark"><i class="fas fa-link"></i></div>
+                        <h3 data-i18n="roadmap.priorities.card1.title">MCP workflow completion</h3>
+                        <p data-i18n="roadmap.priorities.card1.body">Extend deterministic, frame-stepped project control, scene and asset editing, and structured feedback so the MCP Harness can cover more real development workflows.</p>
+                    </article>
+                    <article class="priority-card">
                         <div class="card-mark"><i class="fas fa-cubes"></i></div>
-                        <h3 data-i18n="roadmap.priorities.card1.title">Animation system maturation</h3>
-                        <p data-i18n="roadmap.priorities.card1.body">2D / 3D animation previews, Timeline, animation FSMs, and skinned meshes shipped in 0.2.1. The next focus is hardening retargeting, blend trees, and runtime control surfaces.</p>
+                        <h3 data-i18n="roadmap.priorities.card2.title">Niagara-style particle system</h3>
+                        <p data-i18n="roadmap.priorities.card2.body">Build a Niagara-style particle system with reusable emitters, modules, rendering paths, and practical debugging tools.</p>
                     </article>
                     <article class="priority-card">
                         <div class="card-mark"><i class="fas fa-vector-square"></i></div>
-                        <h3 data-i18n="roadmap.priorities.card2.title">Advanced UI controls</h3>
-                        <p data-i18n="roadmap.priorities.card2.body">The base UI system (Canvas, Text, Image, Button) is stable. ScrollView, Slider, layout groups, and editor-level UI tools come next.</p>
-                    </article>
-                    <article class="priority-card">
-                        <div class="card-mark"><i class="fas fa-link"></i></div>
-                        <h3 data-i18n="roadmap.priorities.card3.title">Documentation & onboarding</h3>
-                        <p data-i18n="roadmap.priorities.card3.body">The API reference is auto-generated. Getting-started guides, architecture notes, and example projects are needed to lower the onboarding barrier.</p>
+                        <h3 data-i18n="roadmap.priorities.card3.title">Shader Graph &amp; Particle Graph</h3>
+                        <p data-i18n="roadmap.priorities.card3.body">Add visual shader and particle authoring on the shared graph foundation, with consistent editing, serialization, compilation, and preview behavior.</p>
                     </article>
                 </div>
             </section>
@@ -220,7 +220,8 @@
                 <div class="footer-links">
                     <div class="footer-column">
                         <h4 data-i18n="footer.resources">Resources</h4>
-                        <a href="start.html" data-i18n="nav.learn">Learn</a>
+                        <a href="start.html" data-i18n="nav.start">Start</a>
+                        <a href="learn.html" data-i18n="nav.learn">Learn</a>
                         <a href="https://github.com/ChenlizheMe/Infernux#readme" target="_blank" rel="noopener">README</a>
                     </div>
                     <div class="footer-column">
@@ -235,7 +236,7 @@
     </footer>
 
     <script src="js/i18n-roadmap.js?v=1"></script>
-    <script src="js/i18n.js?v=18"></script>
+    <script src="js/i18n.js?v=19"></script>
     <script src="js/main.js?v=14"></script>
     <script src="js/docs-search.js?v=5"></script>
     <script type="application/ld+json">

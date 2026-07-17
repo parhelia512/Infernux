@@ -251,7 +251,7 @@ if (manifest) {
   }
 }
 
-const rootPages = ["index.html", "start.html", "roadmap.html", "community.html", "download.html", "offline.html"];
+const rootPages = ["index.html", "start.html", "learn.html", "roadmap.html", "community.html", "download.html", "offline.html"];
 for (const page of rootPages) {
   try {
     const html = await readFile(path.join(docsRoot, page), "utf8");

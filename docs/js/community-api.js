@@ -1,15 +1,22 @@
 (() => {
     "use strict";
 
-    const API_ORIGIN = "https://community-api.infernux-engine.com";
+    const API_ORIGIN = "https://infernux-community.chenlizheme.workers.dev";
     const SESSION_KEY = "infernux-community-session-v1";
     const SESSION_PATTERN = /^v1\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{32,}$/;
     let currentSession = null;
 
     function readStoredSession() {
         try {
-            const value = sessionStorage.getItem(SESSION_KEY) || "";
-            return SESSION_PATTERN.test(value) ? value : "";
+            const persistent = localStorage.getItem(SESSION_KEY) || "";
+            if (SESSION_PATTERN.test(persistent)) return persistent;
+            const legacy = sessionStorage.getItem(SESSION_KEY) || "";
+            if (SESSION_PATTERN.test(legacy)) {
+                localStorage.setItem(SESSION_KEY, legacy);
+                sessionStorage.removeItem(SESSION_KEY);
+                return legacy;
+            }
+            return "";
         } catch {
             return "";
         }
@@ -18,8 +25,9 @@
     function storeSession(value) {
         currentSession = SESSION_PATTERN.test(value || "") ? value : "";
         try {
-            if (currentSession) sessionStorage.setItem(SESSION_KEY, currentSession);
-            else sessionStorage.removeItem(SESSION_KEY);
+            if (currentSession) localStorage.setItem(SESSION_KEY, currentSession);
+            else localStorage.removeItem(SESSION_KEY);
+            sessionStorage.removeItem(SESSION_KEY);
         } catch {}
     }
 
@@ -83,13 +91,22 @@
         if (!currentSession) return { authenticated: false, user: null };
         try {
             return await request("/api/session");
-        } catch {
-            storeSession("");
-            return { authenticated: false, user: null };
+        } catch (error) {
+            if (error?.status === 401) {
+                storeSession("");
+                return { authenticated: false, user: null };
+            }
+            throw error;
         }
     }
 
-    function signIn() {
+    async function signIn() {
+        const health = await fetch(`${API_ORIGIN}/health`, {
+            mode: "cors",
+            cache: "no-store",
+            signal: AbortSignal.timeout(4000)
+        });
+        if (!health.ok) throw new Error(`Community sign-in service ${health.status}`);
         window.location.assign(`${API_ORIGIN}/oauth/start`);
     }
 

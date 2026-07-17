@@ -16,17 +16,19 @@ let deployedManifest = null;
 const checks = [
     { route: "/", tokens: ["<h1", "start.html", "community.html"] },
     { route: "/start.html", tokens: ["data-page-language=\"en\"", "data-page-language=\"zh\"", "id=\"first-script\""], forbid: ["始于", "验证于", "nav.manual"] },
-    { route: "/download.html", tokens: ["InfernuxHub", "data-version-select", "0.2.9", "0.2.1"], forbid: ["SHA-256", "checksum", "校验码", "pwa-install.js"] },
+    { route: "/learn.html", tokens: ["data-learn-search", "data-learn-tag", "learn/placeholder.html"] },
+    { route: "/learn/placeholder.html", tokens: ["API reference is generated automatically", "placeholder.md"] },
+    { route: "/download.html", tokens: ["InfernuxHub", "advanced-download", "data-version-select", ".whl", "0.2.9", "0.2.1"], forbid: ["SHA-256", "checksum", "校验码", "pwa-install.js", "advanced-download\" open"] },
     { route: "/community.html", tokens: ["community-state", "forum-compose", "community-api.js"] },
     { route: "/community-topic.html?topic=11", tokens: ["community-topic", "topic-replies", "community-topic.js"] },
     { route: "/roadmap.html", tokens: ["<h1", "start.html"] },
-    { route: "/wiki/site/en/api/index.html", tokens: ["API", "/start.html", "/start.html#first-script"], forbid: [">Manual</a>", "/learn/", "/manual/"] },
-    { route: "/wiki/site/zh/api/index.html", tokens: ["API", "/start.html", "/start.html#first-script"], forbid: [">手册</a>", "/learn/", "/manual/"] },
+    { route: "/wiki/site/en/api/index.html", tokens: ["API", "/start.html", "/learn.html"], forbid: [">Manual</a>", "/manual/"] },
+    { route: "/wiki/site/zh/api/index.html", tokens: ["API", "/start.html", "/learn.html"], forbid: [">手册</a>", "/manual/"] },
     { route: "/api-index.json", jsonKey: "symbols" },
     { route: "/docs-manifest.json", jsonKey: "build" },
     { route: "/site.webmanifest", tokens: ["\"short_name\": \"Start\"", "\"short_name\": \"API\"", "/start.html"] },
     { route: "/sw.js", tokens: ["networkFirst(request, true)"] },
-    { route: "/sitemap.xml", tokens: ["/start.html", "/wiki/site/en/api/index.html"] },
+    { route: "/sitemap.xml", tokens: ["/start.html", "/learn.html", "/wiki/site/en/api/index.html"] },
 ];
 
 function record(id, target, status, started, detail = null) {

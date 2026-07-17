@@ -18,6 +18,7 @@ const limits = {
 const rootRouteBudgets = new Map([
   ["index.html", 500 * 1024],
   ["start.html", 320 * 1024],
+  ["learn.html", 320 * 1024],
   ["roadmap.html", 300 * 1024],
   ["community.html", 360 * 1024],
   ["download.html", 320 * 1024],

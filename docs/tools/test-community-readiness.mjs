@@ -18,7 +18,7 @@ const config = parseCommunityReadinessConfig(communityHtml, topicHtml, apiSource
 assert.deepEqual(config.administrators, ["ChenlizheMe"]);
 assert.equal(config.repo, "ChenlizheMe/Infernux");
 assert.equal(config.mapping, "number");
-assert.equal(config.gatewayOrigin, "https://community-api.infernux-engine.com");
+assert.equal(config.gatewayOrigin, "https://infernux-community.chenlizheme.workers.dev");
 
 validateCommunityRepository({
     node_id: config.repoId,

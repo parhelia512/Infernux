@@ -51,7 +51,7 @@ function safeCommunityUrl(value, { image = false } = {}) {
         if (url.protocol !== "https:") return null;
         if (!image) return url;
         const hostname = url.hostname.toLowerCase();
-        if (hostname === "github.com" || hostname.endsWith(".githubusercontent.com") || hostname === "community-api.infernux-engine.com") return url;
+        if (hostname === "github.com" || hostname.endsWith(".githubusercontent.com") || hostname === "infernux-community.chenlizheme.workers.dev") return url;
     } catch {}
     return null;
 }
@@ -234,12 +234,14 @@ async function loadCommunityTopicReplies(topic) {
 }
 
 async function requestCommunityTopic(number, signal) {
-    if (globalThis.InfernuxCommunityApi) {
+    const gateway = globalThis.InfernuxCommunityApi;
+    if (gateway) {
         try {
-            const payload = await globalThis.InfernuxCommunityApi.request(`/api/discussions/${number}`, { signal });
+            const payload = await gateway.request(`/api/discussions/${number}`, { signal });
             if (payload?.discussion) return payload.discussion;
             throw new Error("Forum gateway returned an unexpected topic payload");
         } catch (error) {
+            if (gateway.token?.()) throw error;
             console.warn("Forum gateway unavailable; trying the public GitHub fallback.", error);
         }
     }
@@ -248,6 +250,7 @@ async function requestCommunityTopic(number, signal) {
             Accept: "application/vnd.github.html+json",
             "X-GitHub-Api-Version": "2022-11-28"
         },
+        cache: "no-store",
         signal
     });
     if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);

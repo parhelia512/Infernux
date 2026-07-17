@@ -161,10 +161,10 @@
     <link rel="icon" type="image/png" href="/assets/logo.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/infernux-apple-touch-icon.png">
     <link rel="stylesheet" href="/css/fonts.css?v=1">
-    <link rel="stylesheet" href="/css/style.css?v=18">
+    <link rel="stylesheet" href="/css/style.css?v=20">
     <link rel="stylesheet" href="/css/fontawesome-subset.css?v=6.4.0">
     <link rel="stylesheet" href="/css/docs-search.css?v=3">
-    <link rel="stylesheet" href="/css/wiki-generated.css?v=8">
+    <link rel="stylesheet" href="/css/wiki-generated.css?v=9">
     <style>
         /* ======================================================
            Infernux API Reference — Unity-Inspired Dark Theme
@@ -322,7 +322,7 @@
 
         /* H1 — class name */
         .api-main h1 {
-            font-size: 1.85rem;
+            font-size: 1.55rem;
             font-weight: 700;
             margin: 0 0 4px;
             padding: 0;
@@ -566,14 +566,13 @@
         }
 
         /* ---- Footer ---- */
-        .api-ft { margin-left: 280px; }
+        .api-ft { margin-left: 0; }
         .api-ft .footer-bottom p { font-size: 0.8rem; }
 
         /* ---- Responsive ---- */
         @media (max-width: 1024px) {
             .api-sidebar { width: 240px; }
             .api-main { padding: 28px 32px 60px; }
-            .api-ft { margin-left: 240px; }
         }
         @media (max-width: 768px) {
             .api-layout { flex-direction: column; }
@@ -589,7 +588,6 @@
                 width: auto;
                 min-width: 7rem;
             }
-            .api-ft { margin-left: 0; }
         }
     </style>
 </head>
@@ -643,7 +641,7 @@
             </a>
             <div class="nav-links" id="primary-navigation">
                 <a href="/start.html" class="nav-priority">{% if is_zh %}开始使用{% else %}Start{% endif %}</a>
-                <a href="/start.html#first-script">{% if is_zh %}学习{% else %}Learn{% endif %}</a>
+                <a href="/learn.html">{% if is_zh %}学习{% else %}Learn{% endif %}</a>
                 <a href="/wiki/site/{% if is_zh %}zh{% else %}en{% endif %}/api/index.html"{% if is_api %} class="active" aria-current="page"{% endif %}>API</a>
                 <a href="/roadmap.html">{% if page.url and 'zh/' in page.url %}路线图{% else %}Roadmap{% endif %}</a>
                 <a href="/community.html" class="nav-priority">{% if is_zh %}社区{% else %}Community{% endif %}</a>

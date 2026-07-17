@@ -28,7 +28,7 @@ function workerContext() {
 function gatewayRequest(path, options = {}) {
     const headers = new Headers(options.headers || {});
     headers.set("Origin", SITE_ORIGIN);
-    return new Request(`https://community-api.infernux-engine.com${path}`, { ...options, headers });
+    return new Request(`https://infernux-community.chenlizheme.workers.dev${path}`, { ...options, headers });
 }
 
 test("discussion input keeps title and body as one real topic", () => {
@@ -42,6 +42,13 @@ test("discussion input keeps title and body as one real topic", () => {
         categoryId: "DIC_kwDOO_wV3M4C5oaC"
     });
     assert.equal(internals.normalizeDiscussionInput({ title: "only title", body: "", categoryId: "DIC_kwDOO_wV3M4C5oaC" }), null);
+});
+
+test("health endpoint is readable by the static forum before OAuth navigation", async () => {
+    const response = await worker.fetch(gatewayRequest("/health"), { SITE_ORIGIN }, workerContext());
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), "ok");
+    assert.equal(response.headers.get("Access-Control-Allow-Origin"), SITE_ORIGIN);
 });
 
 test("anonymous feed cache is shared only by page shape", () => {
@@ -123,7 +130,8 @@ test("gateway uses cached anonymous reads and the signed-in author token for one
                                 number: 42,
                                 title: "测试话题",
                                 url: "https://github.com/ChenlizheMe/Infernux/discussions/42",
-                                body: "测试"
+                                body: "测试",
+                                author: { login: "real-author" }
                             }
                         }
                     }
@@ -158,7 +166,10 @@ test("gateway uses cached anonymous reads and the signed-in author token for one
             body: JSON.stringify({ title: "测试话题", body: "测试", categoryId: "DIC_kwDOO_wV3M4C5oaC" })
         }), env, workerContext());
         assert.equal(created.status, 201);
-        assert.equal((await created.json()).discussion.number, 42);
+        const createdTopic = (await created.json()).discussion;
+        assert.equal(createdTopic.number, 42);
+        assert.equal(createdTopic.body, "测试", "the written body must remain the discussion body, not a reply");
+        assert.equal(createdTopic.author.login, "real-author", "the GitHub user token must remain the discussion author");
         assert.equal(mutation.authorization, "Bearer signed-in-user-token");
         assert.deepEqual(mutation.payload.variables.input, {
             repositoryId: "R_kgDOO_wV3A",

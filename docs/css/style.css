@@ -603,7 +603,7 @@ table { max-width: 100%; }
 .hub-hero h1 {
     max-width: 32ch;
     font-family: var(--font-display);
-    font-size: 2.15rem;
+    font-size: 1.55rem;
     line-height: 1.15;
     letter-spacing: 0;
     font-weight: 700;
@@ -1390,7 +1390,7 @@ table { max-width: 100%; }
 .release-card strong {
     display: block;
     font-family: var(--font-display);
-    font-size: 1.9rem;
+    font-size: 1.5rem;
     letter-spacing: -0.02em;
     color: var(--accent);
     margin: 8px 0 12px;
@@ -1741,7 +1741,7 @@ table { max-width: 100%; }
 
     .subpage-hero h1,
     .hub-hero h1 {
-        font-size: 1.9rem;
+        font-size: 1.5rem;
     }
 
     .footer-content,
@@ -1778,7 +1778,7 @@ table { max-width: 100%; }
 
     .subpage-hero h1,
     .hub-hero h1 {
-        font-size: 1.7rem;
+        font-size: 1.45rem;
     }
 
     .hero-actions,
