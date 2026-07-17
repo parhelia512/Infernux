@@ -6,6 +6,7 @@ preview_urls = false
 
 [vars]
 SITE_ORIGIN = "https://infernux-engine.com"
+SITE_ORIGINS = "https://infernux-engine.com,https://www.infernux-engine.com"
 GITHUB_OWNER = "ChenlizheMe"
 GITHUB_REPO = "Infernux"
 GITHUB_REPOSITORY_ID = "R_kgDOO_wV3A"

@@ -4,6 +4,7 @@ import test from "node:test";
 import worker, { internals } from "../src/index.js";
 
 const SITE_ORIGIN = "https://infernux-engine.com";
+const SITE_ORIGINS = `${SITE_ORIGIN},https://www.infernux-engine.com`;
 
 function memoryCache() {
     const entries = new Map();
@@ -45,10 +46,25 @@ test("discussion input keeps title and body as one real topic", () => {
 });
 
 test("health endpoint is readable by the static forum before OAuth navigation", async () => {
-    const response = await worker.fetch(gatewayRequest("/health"), { SITE_ORIGIN }, workerContext());
+    const response = await worker.fetch(gatewayRequest("/health"), { SITE_ORIGIN, SITE_ORIGINS }, workerContext());
     assert.equal(response.status, 200);
     assert.equal(await response.text(), "ok");
     assert.equal(response.headers.get("Access-Control-Allow-Origin"), SITE_ORIGIN);
+});
+
+test("production apex and www origins receive CORS without opening the gateway to arbitrary sites", async () => {
+    for (const origin of [SITE_ORIGIN, "https://www.infernux-engine.com"]) {
+        const response = await worker.fetch(new Request("https://gateway.test/health", {
+            headers: { Origin: origin }
+        }), { SITE_ORIGIN, SITE_ORIGINS }, workerContext());
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get("Access-Control-Allow-Origin"), origin);
+    }
+
+    const rejected = await worker.fetch(new Request("https://gateway.test/api/session", {
+        headers: { Origin: "https://example.com" }
+    }), { SITE_ORIGIN, SITE_ORIGINS }, workerContext());
+    assert.equal(rejected.status, 403);
 });
 
 test("anonymous feed cache is shared only by page shape", () => {

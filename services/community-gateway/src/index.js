@@ -91,7 +91,12 @@ function errorResponse(code, message, status, origin, details = undefined) {
 
 function requestOrigin(request, env) {
     const origin = request.headers.get("Origin");
-    return origin === env.SITE_ORIGIN ? origin : null;
+    if (!origin) return null;
+    const configured = String(env.SITE_ORIGINS || env.SITE_ORIGIN || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+    return configured.includes(origin) ? origin : null;
 }
 
 function readCookie(request, name) {
